@@ -334,7 +334,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 // FIXME: Why 6?!
                                 self.m.push_tiloc(yksmp::Location::Direct(
                                     6,
-                                    i32::try_from(ti_off).unwrap(),
+                                    -i32::try_from(ti_off).unwrap(),
                                     size,
                                 ));
                                 ti_off += u32::from(size);
