@@ -1,30 +1,35 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     jitstate: start-tracing
-//     3: 5
-//     jitstate: stop-tracing
+//     yk-jit-event: start-tracing
+//     4:21
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{res}} = add nsw i32...
-//     ...
 //     --- End jit-pre-opt ---
-//     2: 5
-//     jitstate: enter-jit-code
-//     1: 5
-//     jitstate: deoptimise
+//     3:21
+//     yk-jit-event: enter-jit-code
+//     2:21
+//     1:21
+//     yk-jit-event: deoptimise
 //     ...
-
-// Check that function calls with arguments do the right thing
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int f(int a, int b) {
+__attribute__((noinline)) int fib(int num) {
+  if (num == 0)
+    return 0;
+  if (num == 1)
+    return 1;
+  if (num == 2)
+    return 1;
+  int a = fib(num - 2);
+  int b = fib(num - 1);
   int c = a + b;
   return c;
 }
@@ -34,13 +39,12 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int i = 3, two = 2, three = 3;
+  int i = 4;
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    NOOPT_VAL(two);
-    NOOPT_VAL(three);
-    fprintf(stderr, "%d: %d\n", i, f(two, three));
+    NOOPT_VAL(argc);
+    fprintf(stderr, "%d:%d\n", i, fib(argc * 8));
     i--;
   }
 

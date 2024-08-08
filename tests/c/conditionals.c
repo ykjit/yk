@@ -1,22 +1,17 @@
-// Compiler:
 // Run-time:
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
+//   env-var: YK_LOG=255
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     ...call i32 @putc...
+//     yk-jit-event: enter-jit-code
+//     res=2
 //     ...
-//     declare i32 @putc...
-//     ...
-//   stdout:
-//     12
 
-// Check that calling an external function works.
+// Check that conditional checks work.
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
@@ -25,13 +20,20 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int ch = '1';
-  NOOPT_VAL(ch);
-  while (ch != '3') {
+  int cond = 1, i = 4;
+  NOOPT_VAL(i);
+  while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    // Note that sometimes the compiler will make this a call to putc(3).
-    putchar(ch);
-    ch++;
+    int res = 0;
+    NOOPT_VAL(cond);
+    if (cond) {
+      res = 2;
+    } else {
+      res = 4;
+    }
+    assert(res == 2);
+    fprintf(stderr, "res=%d\n", res);
+    i--;
   }
 
   yk_location_drop(loc);

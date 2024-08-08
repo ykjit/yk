@@ -1,53 +1,47 @@
-// Compiler:
 // Run-time:
-//   env-var: YKD_LOG_JITSTATE=-
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YK_LOG=255
 //   stderr:
-//     ...
-//     jitstate: start-tracing
-//     3: 47
-//     jitstate: stop-tracing
+//     yk-jit-event: start-tracing
+//     3:5
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
-//     2: 47
-//     jitstate: enter-jit-code
-//     1: 47
-//     jitstate: deoptimise
+//     2:5
+//     yk-jit-event: enter-jit-code
+//     1:5
+//     yk-jit-event: deoptimise
 //     ...
 
-// Check that tracing a cascading "if...else if...else" works.
+// Check that using an argument (of a non-main() function) in a trace works.
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int f(int x) {
-  if (x == 0)
-    return 30;
-  else if (x == 1)
-    return 47;
-  else
-    return 52;
-}
-
-int main(int argc, char **argv) {
+int f(int x) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int i = 3, x = 1;
+  int i = 3;
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    NOOPT_VAL(x);
-    fprintf(stderr, "%d: %d\n", i, f(x));
+    fprintf(stderr, "%d:%d\n", i, x);
     i--;
   }
 
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  f(5);
   return (EXIT_SUCCESS);
 }

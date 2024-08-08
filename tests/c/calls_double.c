@@ -1,27 +1,21 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YK_LOG=255
 //   stderr:
 //     ...
-//     --- Begin aot ---
-//     ...
-//     define dso_local i32 @main(...
-//       ...
-//       call void @llvm.lifetime.start...
-//       ...
-//     }
-//     ...
-//     --- End aot ---
+//     yk-jit-event: enter-jit-code
+//     res=3
 //     ...
 
-// Check that we can handle llvm.lifetime.start/stop.
+// Check that calling the same function in sequence (but with different
+// arguments) works.
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
+
+__attribute__((noinline)) int f(int a) { return a; }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
@@ -29,14 +23,13 @@ int main(int argc, char **argv) {
   YkLocation loc = yk_location_new();
 
   int i = 4;
-  NOOPT_VAL(loc);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    // Variable definition in an inner scope causes lifetime annotations.
-    int j = 5;
-    NOOPT_VAL(j);
-    fprintf(stderr, "%d:%d\n", i, j);
+    int a = f(1);
+    int b = f(2);
+    int res = a + b;
+    fprintf(stderr, "res=%d\n", res);
     i--;
   }
 

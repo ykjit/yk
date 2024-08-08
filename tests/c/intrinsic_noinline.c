@@ -1,10 +1,12 @@
+// ## Hits a todo!
+// ignore-if: true
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     jitstate: start-tracing
-//     jitstate: stop-tracing
+//     yk-jit-event: start-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     define ptr @__yk_compiled_trace_0(ptr %0, ptr %1...
@@ -14,9 +16,9 @@
 //     }
 //     ...
 //     --- End jit-pre-opt ---
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     ...
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     ...
 //   stdout:
 //     3

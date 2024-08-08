@@ -1,44 +1,37 @@
+// Compiler:
 // Run-time:
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jitstate: enter-jit-code
-//     z=4
+//     func_decl putchar (i32) -> i32
 //     ...
+//     %{{6}}: i32 = call @putc...
+//     ...
+//   stdout:
+//     12
 
-// Test indirect calls where we have IR for the callee.
+// Check that calling an external function works.
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
-
-__attribute__((noinline)) int foo(int a) {
-  NOOPT_VAL(a);
-  return a + 1;
-}
-
-int bar(int (*func)(int)) {
-  int a = func(3);
-  return a;
-}
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int z = 0, i = 4;
-  NOOPT_VAL(i);
-  NOOPT_VAL(z);
-  while (i > 0) {
+  int ch = '1';
+  NOOPT_VAL(ch);
+  while (ch != '3') {
     yk_mt_control_point(mt, &loc);
-    z = bar(foo);
-    assert(z == 4);
-    fprintf(stderr, "z=%d\n", z);
-    i--;
+    // Note that sometimes the compiler will make this a call to putc(3).
+    putchar(ch);
+    ch++;
   }
 
   yk_location_drop(loc);

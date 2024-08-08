@@ -1,38 +1,39 @@
 // Run-time:
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YK_LOG=255
 //   stderr:
+//     yk-jit-event: start-tracing
+//     4
+//     yk-jit-event: stop-tracing
+//     --- Begin jit-pre-opt ---
 //     ...
-//     jitstate: enter-jit-code
-//     res=2
+//     --- End jit-pre-opt ---
+//     3
+//     yk-jit-event: enter-jit-code
+//     2
+//     yk-jit-event: deoptimise
 //     ...
 
-// Check that conditional checks work.
+// Check that we can call a function without IR from another object (.o) file.
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <yk.h>
 #include <yk_testing.h>
+
+extern int call_me_add(int);
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int cond = 1, i = 4;
+  int i = 3;
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    int res = 0;
-    NOOPT_VAL(cond);
-    if (cond) {
-      res = 2;
-    } else {
-      res = 4;
-    }
-    assert(res == 2);
-    fprintf(stderr, "res=%d\n", res);
+    fprintf(stderr, "%d\n", call_me_add(i));
     i--;
   }
 
