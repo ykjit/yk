@@ -1,6 +1,6 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
@@ -18,8 +18,8 @@
 //     1:97
 //     ...
 
-// Check that global variables inside constant expressions are copied and
-// remapped.
+// Check that global variables inside constant expressions are handled.
+// FIXME: needs porting to Yk IR once we find out how to get a constexpr gep.
 
 #include <assert.h>
 #include <stdio.h>

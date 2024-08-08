@@ -1,11 +1,11 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
 //     ...
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     ...
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     ...
 //   stdout:
 //     Hello World!

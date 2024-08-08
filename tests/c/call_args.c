@@ -1,53 +1,50 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     jitstate: start-tracing
-//     jitstate: stop-tracing
+//     yk-jit-event: start-tracing
+//     3: 5
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     define ptr @__yk_compiled_trace_0(ptr %0, ptr %1...
-//        ...
-//     }
+//     %{{20}}: i32 = add %{{13}}, %{{14}}
 //     ...
 //     --- End jit-pre-opt ---
-//     jitstate: enter-jit-code
+//     2: 5
+//     yk-jit-event: enter-jit-code
+//     1: 5
+//     yk-jit-event: deoptimise
 //     ...
-//     jitstate: deoptimise
-//     ...
-//   stdout:
-//     998
 
-// Check that inlined intrinsics are handled correctly.
+// Check that function calls with arguments do the right thing
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
+__attribute__((noinline)) int f(int a, int b) {
+  int c = a + b;
+  return c;
+}
+
 int main(int argc, char **argv) {
-  int res = 0;
-  int src = 1000;
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
-  int i = 3;
-  NOOPT_VAL(res);
+
+  int i = 3, two = 2, three = 3;
   NOOPT_VAL(i);
-  NOOPT_VAL(src);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    memcpy(&res, &src, 4);
-    src--;
+    NOOPT_VAL(two);
+    NOOPT_VAL(three);
+    fprintf(stderr, "%d: %d\n", i, f(two, three));
     i--;
   }
-  NOOPT_VAL(res);
-  printf("%d", res);
+
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
-
   return (EXIT_SUCCESS);
 }

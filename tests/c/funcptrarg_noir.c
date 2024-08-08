@@ -1,15 +1,20 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     ...
+//     yk-jit-event: start-tracing
+//     z=3
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{44}} = call i64 %{{43}}(ptr noundef nonnull @.str)...
+//     %{{17}}: i64 = icall %{{8}}(%{{16}})
 //     ...
 //     --- End jit-pre-opt ---
-//     ...
+//     z=3
+//     yk-jit-event: enter-jit-code
+//     z=3
+//     yk-jit-event: deoptimise
 
 // Test indirect calls where we don't have IR for the callee.
 
@@ -30,7 +35,7 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int z = 0, i = 2;
+  int z = 0, i = 3;
   size_t (*f)(const char *) = strlen;
   NOOPT_VAL(i);
   NOOPT_VAL(z);
@@ -38,6 +43,7 @@ int main(int argc, char **argv) {
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     z = bar(f);
+    fprintf(stderr, "z=%d\n", z);
     i--;
   }
   NOOPT_VAL(z);

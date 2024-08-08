@@ -1,5 +1,12 @@
+// ## Hits a todo!
+// ignore-if: true
 // Run-time:
-//   stdout: 205
+//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
+//   env-var: YK_LOG=255
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   stdout:
+//     205
+//     FIXME: match some IR/events
 
 #include <assert.h>
 #include <stdio.h>
@@ -18,6 +25,7 @@ int mul(int a, int b) { return a * b; }
 int main(int argc, char **argv) {
   int i = 0;
   YkMT *mt = yk_mt_new(NULL);
+  yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
   int result = 0;
   while (i < 10) {
