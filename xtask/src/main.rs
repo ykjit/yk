@@ -1,24 +1,13 @@
 use std::env;
 use std::process::{exit, Command};
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 use ykbuild::ykllvm_bin;
-
-fn ignore_dir(entry: &DirEntry) -> bool {
-    if entry.path().starts_with("./target")
-        || entry.path().starts_with("./.cargo")
-        || entry.path().starts_with("./.git")
-        || entry.path().starts_with("./ykllvm")
-    {
-        return false;
-    }
-    true
-}
 
 fn clang_format(check_only: bool) {
     let mut failed = false;
     for entry in WalkDir::new(".")
         .into_iter()
-        .filter_entry(ignore_dir)
+        .filter_entry(|x| !(x.path().starts_with("./.") || x.path().starts_with("./ykllvm")))
         .filter_map(|e| e.ok())
     {
         if !entry.file_type().is_file() {
