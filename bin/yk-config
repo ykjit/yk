@@ -14,9 +14,6 @@ fi
 # only the instcombine pass in the below configuration (copied over from the
 # default pipeline). Using `instcombine` on its own breaks, possibly due to the
 # missing `no-verify-fixpoint`.
-#
-# FIXME: Once we know what breaks us, allow the user to use the regular -O0,
-# -O1, -O2, etc. clang flags like normal.
 POSTLINK_PASSES_STR="instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>"
 
 OUTPUT=""
@@ -66,6 +63,8 @@ handle_arg() {
             fi
             ;;
         --cflags)
+            # FIXME: we can only do -O0 for now.
+            OUTPUT="${OUTPUT} -O0"
             # Enable LTO.
             OUTPUT="${OUTPUT} -flto"
             # Outline functions containing loops during AOT compilation. Needed

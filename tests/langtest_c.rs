@@ -12,8 +12,8 @@ use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 const COMMENT: &str = "//";
 
-fn run_suite(opt: &'static str) {
-    println!("Running C tests with opt level {}...", opt);
+fn main() {
+    println!("Running C tests...");
 
     let tempdir = TempDir::new().unwrap();
 
@@ -43,8 +43,6 @@ fn run_suite(opt: &'static str) {
                 && !p.file_name().unwrap().to_str().unwrap().contains(".old")
         })
         .test_extract(move |p| {
-            let altp = p.with_extension(format!("c.{}", opt.strip_prefix('-').unwrap()));
-            let p = if altp.exists() { altp.as_path() } else { p };
             read_to_string(p)
                 .unwrap()
                 .lines()
@@ -68,7 +66,7 @@ fn run_suite(opt: &'static str) {
                 .map(|l| l.generate_obj(tempdir.path()))
                 .collect::<Vec<PathBuf>>();
 
-            let mut compiler = mk_compiler(wrapper_path.as_path(), &exe, p, opt, &extra_objs, true);
+            let mut compiler = mk_compiler(wrapper_path.as_path(), &exe, p, &extra_objs, true);
             compiler.env("YK_COMPILER_PATH", ykllvm_bin("clang"));
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]
@@ -84,13 +82,4 @@ fn run_suite(opt: &'static str) {
         })
         .run();
     ccg.generate();
-}
-
-fn main() {
-    // For now we can only compile with -O0 since higher optimisation levels introduce machine code
-    // we currently don't know how to deal with, e.g. temporaries which break stackmap
-    // reconstruction. This isn't a huge problem as in the future we will keep two versions of the
-    // interpreter around and only swap to -O0 when tracing and run on higher optimisation levels
-    // otherwise.
-    run_suite("-O0");
 }
