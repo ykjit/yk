@@ -1,4 +1,4 @@
-// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
+// ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YK_LOG=4
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
