@@ -9,7 +9,6 @@
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("The stackmap parser currently only supports x64.");
 
-use std::collections::HashMap;
 use std::error;
 
 struct Function {
@@ -127,29 +126,16 @@ pub struct StackMapParser<'a> {
 }
 
 impl StackMapParser<'_> {
-    /// Parse LLVM stackmaps and return a mapping from stackmap id to live variables vector.
-    /// Previoulsy used by traces compiled via the LLVM backend, but seems to be no longer in use.
-    pub fn parse(data: &[u8]) -> Result<HashMap<u64, Vec<LiveVar>>, Box<dyn error::Error>> {
-        let mut smp = StackMapParser { data, offset: 0 };
-        let (entries, _) = smp.read()?;
-        let mut map = HashMap::new();
-        for sme in entries {
-            for r in sme.records {
-                map.insert(r.offset, r.live_vars);
-            }
-        }
-        Ok(map)
-    }
-
     /// Parse LLVM stackmaps and return them as a list of `SMEntry`s, each of which describes a
     /// single function, i.e. it's prologue and all records contained in it.
-    pub fn get_entries(data: &[u8]) -> (Vec<SMEntry>, u32) {
+    pub fn parse(data: &[u8]) -> (Vec<PrologueInfo>, Vec<(Record, usize)>) {
         let mut smp = StackMapParser { data, offset: 0 };
         smp.read().unwrap()
     }
 
     /// Parse LLVM's stackmap format.
-    fn read(&mut self) -> Result<(Vec<SMEntry>, u32), Box<dyn error::Error>> {
+    #[allow(clippy::type_complexity)]
+    fn read(&mut self) -> Result<(Vec<PrologueInfo>, Vec<(Record, usize)>), Box<dyn error::Error>> {
         // Read version number.
         if self.read_u8() != 3 {
             return Err("Only stackmap format version 3 is supported.".into());
@@ -172,28 +158,28 @@ impl StackMapParser<'_> {
             u64::from(num_recs)
         );
 
-        let mut recs = Vec::new();
+        // Since records ids are used for indexing we need to prepare the vector first so we can
+        // insert records at their right index.
+        let totalsize: u64 = funcs.iter().map(|f| f.record_count).sum();
+        let mut all_records = Vec::new();
+        all_records.resize_with(usize::try_from(totalsize).unwrap(), || (Record::empty(), 0));
 
-        // Parse records.
-        for f in &funcs {
+        // Parse and collect records.
+        for (i, f) in funcs.iter().enumerate() {
             let mut records = self.read_records(f.record_count, &consts);
-            for r in &mut records {
+            for mut r in records.drain(..) {
+                // Calculate the absolute offset for this record in the binary.
                 r.offset += f.addr;
                 r.size = f.stack_size;
+                let idx = usize::try_from(r.id).unwrap();
+                all_records[idx] = (r, i);
             }
-            recs.push(records);
         }
 
         // Read prologue info.
-        let mut ps = self.read_prologue(num_funcs);
+        let prologue_info = self.read_prologue(num_funcs);
 
-        // Collect all the information into `SMEntry`s.
-        let mut smentries = Vec::new();
-        for records in recs.into_iter().rev() {
-            let pinfo = ps.pop().unwrap();
-            smentries.push(SMEntry { pinfo, records });
-        }
-        Ok((smentries, num_recs))
+        Ok((prologue_info, all_records))
     }
 
     fn read_functions(&mut self, num: u32) -> Vec<Function> {
