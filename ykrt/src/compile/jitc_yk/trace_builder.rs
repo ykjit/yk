@@ -3,8 +3,11 @@
 //! This takes in an (AOT IR, execution trace) pair and constructs a JIT IR trace from it.
 
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
-use super::jit_ir::{self, Const};
 use super::YkSideTraceInfo;
+use super::{
+    jit_ir::{self, Const},
+    AOT_MOD,
+};
 use crate::aotsmp::AOT_STACKMAPS;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
@@ -693,7 +696,13 @@ impl TraceBuilder {
         if inst.is_debug_call(self.aot_mod) {
             return Ok(());
         }
-
+        // Ignore software tracer calls. Software tracer inserts
+        // `yk_trace_basicblock` instruction calls into the beginning of
+        // every basic block. These calls can be ignored as they are
+        // only used to collect runtime information for the tracer itself.
+        if AOT_MOD.func(*callee).name() == "yk_trace_basicblock" {
+            return Ok(());
+        }
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
         for arg in args {
