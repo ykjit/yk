@@ -59,7 +59,6 @@ fn main() {
         ykllvm_bin("clang").as_path(),
         &binpath,
         &test_path,
-        "-O0",
         &extra_objs,
         true,
     );
