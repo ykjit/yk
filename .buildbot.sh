@@ -2,8 +2,7 @@
 
 set -eu
 
-# FIXME: Reenable swt once jitc_llvm is fully removed.
-TRACERS="hwt"
+TRACERS="hwt swt"
 
 # Build yklua and run the test suite.
 #

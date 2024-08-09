@@ -1,4 +1,3 @@
-// ## FIXME: crashes under SWT
 // ignore-if: test $YK_CARGO_PROFILE != "debug" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot
