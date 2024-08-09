@@ -11,7 +11,7 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
-//   env-var: YK_LOG=255
+//   env-var: YK_LOG=4
 
 // Check that we can reliably deal with "foreign" (not compiled with ykllvm)
 // code that calls back into "native code".
