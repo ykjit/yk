@@ -5,8 +5,12 @@ use std::thread;
 use ykaddr::obj::SELF_BIN_MMAP;
 use yksmp::{PrologueInfo, Record, StackMapParser};
 
+/// Parsed stackmap information of the AOT module.
 pub(crate) struct AOTStackmapInfo {
+    /// Prologue information for each function.
     pinfos: Vec<PrologueInfo>,
+    /// All stackmap records of the module, and the index of the prologue info relevant for each
+    /// record.
     records: Vec<(Record, usize)>,
 }
 
@@ -33,18 +37,7 @@ pub(crate) static AOT_STACKMAPS: LazyLock<Result<AOTStackmapInfo, String>> = Laz
 
         // Parse the stackmap.
         let data = sec.data().map_err(|e| errstr(&e.to_string()))?;
-        let (entries, numrecs) = StackMapParser::get_entries(data);
-        let mut pinfos = Vec::new();
-        let mut records = Vec::new();
-        let numrecs_usize = usize::try_from(numrecs).map_err(|e| errstr(&e.to_string()))?;
-        records.resize_with(numrecs_usize, || (Record::empty(), 0));
-        for entry in entries {
-            pinfos.push(entry.pinfo);
-            for r in entry.records {
-                let idx = usize::try_from(r.id).map_err(|e| errstr(&e.to_string()))?;
-                records[idx] = (r, pinfos.len() - 1);
-            }
-        }
+        let (pinfos, records) = StackMapParser::parse(data);
         Ok(AOTStackmapInfo { pinfos, records })
     }
 
