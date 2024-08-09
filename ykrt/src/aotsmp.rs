@@ -5,8 +5,12 @@ use std::thread;
 use ykaddr::obj::SELF_BIN_MMAP;
 use yksmp::{PrologueInfo, Record, StackMapParser};
 
+/// Parsed stackmap information of the AOT module.
 pub(crate) struct AOTStackmapInfo {
+    /// Prologue information for each function.
     pinfos: Vec<PrologueInfo>,
+    /// All stackmap records of the module, and the index of the prologue info relevant for each
+    /// record.
     records: Vec<(Record, usize)>,
 }
 
@@ -32,6 +36,8 @@ pub(crate) static AOT_STACKMAPS: LazyLock<Result<AOTStackmapInfo, String>> = Laz
             .ok_or_else(|| errstr("can't find section"))?;
 
         // Parse the stackmap.
+        // FIXME: Since this is the only place stackmaps are parsed, we should change the stackmap
+        // parser to return things in the format we need, instead of doing extra work here.
         let data = sec.data().map_err(|e| errstr(&e.to_string()))?;
         let (entries, numrecs) = StackMapParser::get_entries(data);
         let mut pinfos = Vec::new();
