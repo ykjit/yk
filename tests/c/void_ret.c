@@ -1,36 +1,43 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_STATS=-
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
+//   env-var: YK_LOG=255
 //   stderr:
-//     {
-//       ...
-//       "trace_executions": 0,
-//       "traces_compiled_err": 1,
-//       "traces_compiled_ok": 0,
-//       "traces_recorded_err": 0,
-//       "traces_recorded_ok": 1
-//       ...
-//     }
+//     ...
+//     yk-jit-event: enter-jit-code
+//     inside f
+//     inside f
+//     yk-jit-event: deoptimise
+//     ...
+
+// Check that inlining a function with a void return type works.
 
 #include <assert.h>
-#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
+void __attribute__((noinline)) f() {
+  fputs("inside f\n", stderr);
+  return;
+}
+
 int main(int argc, char **argv) {
+
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  for (int i = 0; i < 2; i += 1) {
+  int i = 4;
+  NOOPT_VAL(i);
+  while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    jmp_buf env;
-    setjmp(env);
+    f();
+    i--;
   }
 
+  NOOPT_VAL(i);
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

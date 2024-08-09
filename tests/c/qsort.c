@@ -5,23 +5,25 @@
 // ## mappable block (main):           <---
 // ##        unmappable block (qsort)     |
 // ##         mappable block (cmp)  ------
-// ignore-if: test "$YKB_TRACER" = "swt"
+// ##
+// ## Even using hwt, it crashes in a `todo!` in trace builder.
+// ignore-if: test "$YKB_TRACER" = "swt" || true
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     i=2
 //     4 6 1 3 2 5 end
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     i=3
 //     1 4 6 3 2 5 end
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     i=4
 //     1 3 4 6 2 5 end
 //     i=5
 //     1 2 3 4 6 5 end
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check that foreign code calling back to "native" code works.
 

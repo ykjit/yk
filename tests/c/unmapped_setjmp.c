@@ -1,16 +1,16 @@
-// ignore-if: test ${YK_ARCH} != "x86_64"
+// ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
+//     yk-jit-event: start-tracing
+//     set jump point
+//     jumped!
+//     yk-jit-event: stop-tracing
+//     yk-warning: trace-compilation-aborted: longjmp encountered
 //     ...
-//     jitstate: enter-jit-code
-//     ...
-//  stdout:
-//     exit
 
-// Check that disassembly-based PT decoding does the right thing with
-// zero-length calls.
+// Check that we bork on a call to setjmp in unmapped code.
 
 #include <assert.h>
 #include <stdio.h>
@@ -19,25 +19,22 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-extern uintptr_t zero_len_call(void);
+void unmapped_setjmp(void);
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int sum = 0;
-  int i = 20;
+  int i = 4;
   NOOPT_VAL(loc);
-  NOOPT_VAL(sum);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    sum += zero_len_call();
+    unmapped_setjmp();
     i--;
   }
-  printf("exit");
-  NOOPT_VAL(sum);
+
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

@@ -1,38 +1,29 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
-//   env-var: YKD_LOG_IR=-:jit-post-opt
+//   env-var: YK_LOG=255
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     y=50
-//     jitstate: stop-tracing
-//     --- Begin jit-post-opt ---
+//     yk-jit-event: stop-tracing
+//     --- Begin jit-pre-opt ---
 //     ...
-//     define ptr @__yk_compiled_trace_0(...
-//       ...
-//       %{{cond}} = icmp eq i64 %{{x}}, 50
-//       br i1 %{{cond}}, label %{{succbb}}, label %{{failbb}}
-//
-//     {{failbb}}:...
-//       ...
-//       %{{deopt}} = call ptr (...) @llvm.experimental.deoptimize...
-//       ret ...
-//
-//     {{succbb}}:...
-//       ...
-//       %{{res}} = add {{size_t}} %{{arg1}}, 50...
-//       ...
-//     }
+//     %{{16}}: i1 = eq %{{_}}, 50i64
+//     guard true, %{{16}}, ...
 //     ...
-//     --- End jit-post-opt ---
+//     --- End jit-pre-opt ---
 //     y=100
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     y=150
 //     y=200
 //     y=250
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check that expression promotion works in traces.
+//
+// FIXME: at the time of writing, there's a guard for the promoted value, but
+// the promoted value sadly isn't forwarded to printf. Looks like the shadow
+// stack is in the way?
 
 #include <assert.h>
 #include <inttypes.h>

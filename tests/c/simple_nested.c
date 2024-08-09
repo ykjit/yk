@@ -1,15 +1,18 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     ...
-//     jitstate: enter-jit-code
-//     x=2
+//     yk-jit-event: start-tracing
+//     i=5
+//     yk-jit-event: stop-tracing
+//     i=4
+//     yk-jit-event: enter-jit-code
+//     i=3
+//     i=2
+//     yk-jit-event: deoptimise
 //     ...
 
-// Check that a call followed immediately by an unconditional branch doesn't
-// confuse the block mapping due to fallthrough optimisations.
+// Check that basic trace compilation works with nested calls.
 
 #include <assert.h>
 #include <stdio.h>
@@ -18,27 +21,30 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) void f(int x) { fprintf(stderr, "x=%d\n", x); }
+int foo(int arg) {
+  if (arg < 3) {
+    arg = 0;
+  } else {
+    arg--;
+  }
+  return arg;
+}
+
+int bar(int arg) { return foo(arg); }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int x = 0;
-  int i = 4;
+  int i = 5;
   NOOPT_VAL(loc);
-  NOOPT_VAL(x);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    f(i);
-    goto more;
-
-  more:
-    i--;
+    fprintf(stderr, "i=%d\n", i);
+    i = bar(i);
   }
-
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

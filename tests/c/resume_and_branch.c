@@ -1,46 +1,44 @@
 // Run-time:
-//   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=-:aot
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YK_LOG=255
 //   stderr:
 //     ...
-//     --- Begin aot ---
-//     ...
-//     call void @never_aot_inline(i32 noundef ...
-//     ...
-//     --- End aot ---
+//     yk-jit-event: enter-jit-code
+//     x=2
 //     ...
 
-// Check that `yk_unroll_safe` implies `noinline` (thus blocking AOT inlining).
+// Check that a call followed immediately by an unconditional branch doesn't
+// confuse the block mapping due to fallthrough optimisations.
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-int call_me(int x); // from extra_linkage/call_me.c
-
-// A function containing a loop and marked `yk_unroll_safe`.
-__attribute__((yk_unroll_safe)) void never_aot_inline(int x) {
-  while (x--)
-    call_me(x);
-}
+__attribute__((noinline)) void f(int x) { fprintf(stderr, "x=%d\n", x); }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
+  int x = 0;
   int i = 4;
   NOOPT_VAL(loc);
+  NOOPT_VAL(x);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    never_aot_inline(i);
+    f(i);
+    goto more;
+
+  more:
     i--;
   }
+
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

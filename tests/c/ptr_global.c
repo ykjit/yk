@@ -1,11 +1,13 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
+//   env-var: YK_LOG_IR=255
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
 //     ...
-//     i=25
-//     jitstate: deoptimise
+//     i=12
+//     i=13
+//     i=14
+//     yk-jit-event: deoptimise
 //     ...
 
 // Check that tracing mutation of a global pointer works.
@@ -17,15 +19,15 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-char *p = NULL;
+char *p = "constant string";
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   int i = 0;
   YkLocation loc = yk_location_new();
-  p = argv[0];
   NOOPT_VAL(i);
+  NOOPT_VAL(p);
   while (*p != '\0') {
     yk_mt_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);

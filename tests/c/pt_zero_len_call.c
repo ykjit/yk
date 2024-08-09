@@ -1,16 +1,16 @@
+// ignore-if: test ${YK_ARCH} != "x86_64"
 // Run-time:
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=255
 //   stderr:
 //     ...
-//     yk-jit-event: execute-side-trace
+//     yk-jit-event: enter-jit-code
 //     ...
-//     500
-//   stdout:
+//  stdout:
 //     exit
 
-// Test side tracing inside an unrolled while loop.
+// Check that disassembly-based PT decoding does the right thing with
+// zero-length calls.
 
 #include <assert.h>
 #include <stdio.h>
@@ -19,39 +19,25 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((yk_unroll_safe)) int foo(int i) {
-  int z = 10;
-  int res = 0;
-  while (z > 0) {
-    z--;
-    if (i > 20) {
-      res++;
-    } else {
-      res += 2;
-    }
-  }
-  return res;
-}
+extern uintptr_t zero_len_call(void);
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  yk_mt_sidetrace_threshold_set(mt, 5);
   YkLocation loc = yk_location_new();
 
-  int res = 0;
-  int i = 30;
+  int sum = 0;
+  int i = 20;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
+  NOOPT_VAL(sum);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    res += foo(i);
-    fprintf(stderr, "%d\n", res);
+    sum += zero_len_call();
     i--;
   }
   printf("exit");
-  NOOPT_VAL(res);
+  NOOPT_VAL(sum);
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

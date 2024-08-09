@@ -3,14 +3,24 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=255
 //   stderr:
+//     yk-jit-event: start-tracing
+//     i=4, g=1000
+//     yk-jit-event: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ..~
+//     %{{14}}: ptr = lookup_global @g
+//     %{{15}}: i32 = load %{{14}}
+//     %{{16}}: i32 = add %{{15}}, 5i32
 //     ...
-//     yk-jit-event: execute-side-trace
+//     --- End jit-pre-opt ---
+//     i=3, g=1005
+//     yk-jit-event: enter-jit-code
+//     i=2, g=1010
+//     i=1, g=1015
+//     yk-jit-event: deoptimise
 //     ...
-//     500
-//   stdout:
-//     exit
 
-// Test side tracing inside an unrolled while loop.
+// Check that mutating a global works.
 
 #include <assert.h>
 #include <stdio.h>
@@ -19,40 +29,23 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((yk_unroll_safe)) int foo(int i) {
-  int z = 10;
-  int res = 0;
-  while (z > 0) {
-    z--;
-    if (i > 20) {
-      res++;
-    } else {
-      res += 2;
-    }
-  }
-  return res;
-}
+int g = 1000;
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  yk_mt_sidetrace_threshold_set(mt, 5);
   YkLocation loc = yk_location_new();
-
-  int res = 0;
-  int i = 30;
-  NOOPT_VAL(loc);
-  NOOPT_VAL(res);
+  int i = 4;
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    res += foo(i);
-    fprintf(stderr, "%d\n", res);
+    NOOPT_VAL(g);
+    fprintf(stderr, "i=%d, g=%d\n", i, g);
+    g += 5;
     i--;
   }
-  printf("exit");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
+
   return (EXIT_SUCCESS);
 }

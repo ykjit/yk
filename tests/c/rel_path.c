@@ -1,11 +1,11 @@
 // Compiler:
 // Run-time:
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     ...
 
 // Check that running a traced binary via a relative path works.
