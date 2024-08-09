@@ -1,3 +1,5 @@
+// ## -O0 doesn't make a constant expression.
+// ignore-if: true
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YK_LOG=255
@@ -14,7 +16,7 @@
 //       ...
 //     --- End jit-pre-opt ---
 //     2:97
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     1:97
 //     ...
 

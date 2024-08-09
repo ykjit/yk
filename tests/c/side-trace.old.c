@@ -1,17 +1,17 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   env-var: YKD_LOG_STATS=-
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     1
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     2
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     3
 //     4
 //     5
@@ -20,35 +20,35 @@
 //     8
 //     9
 //     10
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     12
-//     jitstate: enter-jit-code
-//     jitstate: deoptimise
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: deoptimise
 //     14
-//     jitstate: enter-jit-code
-//     jitstate: deoptimise
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: deoptimise
 //     16
-//     jitstate: enter-jit-code
-//     jitstate: deoptimise
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: deoptimise
 //     18
-//     jitstate: enter-jit-code
-//     jitstate: deoptimise
-//     jitstate: start-side-tracing
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: deoptimise
+//     yk-jit-event: start-side-tracing
 //     20
-//     jitstate: stop-side-tracing
+//     yk-jit-event: stop-side-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     22
-//     jitstate: enter-jit-code
-//     jitstate: execute-side-trace
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: execute-side-trace
 //     24
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     26
-//     jitstate: enter-jit-code
-//     jitstate: execute-side-trace
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: execute-side-trace
 //     28
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     30
 //     {
 //         ...

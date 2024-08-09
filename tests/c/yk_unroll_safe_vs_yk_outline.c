@@ -5,18 +5,14 @@
 //     ...
 //     --- Begin jit-pre-opt ---
 //     ...
-//     define i8 @__yk_compiled_trace_0(ptr %0, ptr %1) {
-//       ...
-//       %{{12}} = tail call i32 @call_me(i32...
-//       ...
-//     }
+//     call @never_inline_into_trace(...
 //     ...
 //     --- End jit-pre-opt ---
 
-// Check that functions containing no loops get inlined into the trace.
+// Check that `yk_outline` wins over `yk_unroll_safe`.
 //
-// We can only see a call to `call_me()` in the trace if `inline_into_trace()`
-// itself was also inlined into the trace.
+// Although it is tempting to have clang emit an error when these conflicting attributes are used
+// together, the idiomatic "clang way" is to have one attribute win out over the other.
 
 #include <assert.h>
 #include <stdio.h>
@@ -28,8 +24,12 @@
 
 int call_me(int x); // from extra_linkage/call_me.c
 
-// A function with no loops.
-__attribute__((noinline)) void inline_into_trace(int x) { call_me(x); }
+// Both `yk_outline` and `yk_unroll_safe`!
+__attribute__((yk_outline, yk_unroll_safe)) void
+never_inline_into_trace(int x) {
+  while (x--)
+    call_me(x);
+}
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    inline_into_trace(i);
+    never_inline_into_trace(i);
     i--;
   }
   yk_location_drop(loc);

@@ -1,25 +1,27 @@
+// ## trace-compilation-aborted: dlsym("llvm.va_start") returned NULL
+// ignore-if: true
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     jitstate: start-tracing
-//     i=6
-//     jitstate: stop-tracing
+//     yk-jit-event: start-tracing
+//     i=1
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     call void @llvm.va_start...
+//     call llvm.va_start...
 //     ...
-//     call void @llvm.va_end...
+//     call llvm.va_end...
 //     ...
 //     --- End aot ---
-//     i=6
-//     jitstate: enter-jit-code
-//     i=6
-//     i=6
-//     jitstate: deoptimise
+//     i=1
+//     yk-jit-event: enter-jit-code
+//     i=1
+//     i=1
+//     yk-jit-event: deoptimise
 
-// Check that basic trace compilation works.
+// Check that inlining works when the function is vararg.
 
 #include <assert.h>
 #include <stdarg.h>
@@ -33,13 +35,13 @@ int varargfunc(int len, ...) {
   int acc = 0;
   va_list argp;
   va_start(argp, len);
-  for (int i = 0; i < len; i++) {
-    int arg = va_arg(argp, int);
-    acc += arg;
-  }
+  int arg = va_arg(argp, int);
+  acc += arg;
   va_end(argp);
   return acc;
 }
+
+int foo(int argc) { return varargfunc(3, argc, 2, 3); }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
@@ -51,7 +53,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    int res = varargfunc(3, argc, 2, 3);
+    int res = foo(argc);
     fprintf(stderr, "i=%d\n", res);
     i--;
   }

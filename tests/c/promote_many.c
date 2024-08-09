@@ -1,8 +1,10 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   stderr:
+//     yk-jit-event: start-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     %{{_}}: i64 = promote %{{_}} [safepoint: ...
@@ -29,6 +31,8 @@
 //     guard true, %{{5}}, ...
 //     ...
 //     --- End jit-pre-opt ---
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: deoptimise
 
 // Check that promotion works in traces.
 

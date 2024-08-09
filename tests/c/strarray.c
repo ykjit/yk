@@ -1,23 +1,23 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     pepper
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     @.str.2 = private unnamed_addr constant [6 x i8] c"apple\00", align 1...
-//     @.str.3 = private unnamed_addr constant [7 x i8] c"banana\00", align 1...
-//     @.str.4 = private unnamed_addr constant [7 x i8] c"tomato\00", align 1...
+//     global_decl @fruits
+//     global_decl @.str
+//     global_decl @.str.1
 //     ...
 //     --- End aot ---
 //     cucumber
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     tomato
 //     banana
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //   stdout:
 //     exit
 

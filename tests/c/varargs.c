@@ -1,25 +1,25 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=255
 //   stderr:
-//     jitstate: start-tracing
-//     i=1
-//     jitstate: stop-tracing
+//     yk-jit-event: start-tracing
+//     i=6
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     call void @llvm.va_start...
+//     call llvm.va_start...
 //     ...
-//     call void @llvm.va_end...
+//     call llvm.va_end...
 //     ...
 //     --- End aot ---
-//     i=1
-//     jitstate: enter-jit-code
-//     i=1
-//     i=1
-//     jitstate: deoptimise
+//     i=6
+//     yk-jit-event: enter-jit-code
+//     i=6
+//     i=6
+//     yk-jit-event: deoptimise
 
-// Check that basic trace compilation works.
+// Check varargs calls work.
 
 #include <assert.h>
 #include <stdarg.h>
@@ -33,13 +33,13 @@ int varargfunc(int len, ...) {
   int acc = 0;
   va_list argp;
   va_start(argp, len);
-  int arg = va_arg(argp, int);
-  acc += arg;
+  for (int i = 0; i < len; i++) {
+    int arg = va_arg(argp, int);
+    acc += arg;
+  }
   va_end(argp);
   return acc;
 }
-
-int foo(int argc) { return varargfunc(3, argc, 2, 3); }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    int res = foo(argc);
+    int res = varargfunc(3, argc, 2, 3);
     fprintf(stderr, "i=%d\n", res);
     i--;
   }
