@@ -3,7 +3,7 @@
 //! Note that some of these features are only meaningfully available when the `ykd` feature is
 //! available: otherwise we expose no-op functions.
 
-use std::{cmp, env, error::Error, fs::File, io::Write, path::PathBuf};
+use std::{env, error::Error, fs::File, io::Write, path::PathBuf};
 use strum::{EnumCount, FromRepr};
 
 pub(crate) mod stats;
@@ -53,11 +53,12 @@ impl Log {
                 };
                 let level = level
                     .parse::<u8>()
-                    .map_err(|e| format!("Invalid verbosity level '{s}': {e}"))?;
-                // These unwraps can only fail dynamically if we've got the types wrong statically
-                // (i.e. they'll fail as soon as this code is executed for the first time).
+                    .map_err(|e| format!("Invalid YK_LOG level '{s}': {e}"))?;
+                // This unwrap can only fail dynamically if we've got the types wrong statically
+                // (i.e. it'll fail as soon as this code is executed for the first time).
                 let max_level = u8::try_from(Verbosity::COUNT).unwrap() - 1;
-                let level = Verbosity::from_repr(cmp::min(level, max_level)).unwrap();
+                let level = Verbosity::from_repr(level)
+                    .ok_or_else(|| format!("YK_LOG level {level} exceeds maximum {max_level}"))?;
                 Ok(Self { path, level })
             }
             Err(_) => Ok(Self {

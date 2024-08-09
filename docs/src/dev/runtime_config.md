@@ -17,10 +17,13 @@ The following environment variables are available:
   to that path. The special value `-` (i.e. a single dash) can be used for
   `<path>` to indicate stderr. If not specified, logs to stderr.
 
-  `<level>` specifies the level of logging: level 0 turns off all yk logging;
-  level 1 shows major errors only; level 2 warnings; and level 3 and above
-  being increasingly granular information about transitions within yk. Some
-  information may or may not be displayed based on compile-time options.
+  `<level>` specifies the level of logging, each adding to the previous: level
+  0 turns off all yk logging; level 1 shows major errors only; and level 2
+  warnings. Levels above 3 are used for internal yk debugging, and their
+  precise output, and indeed the maximum level may change without warning.
+  Currently: level 3 logs transitions of a `Location` transition; and level 4
+  JIT events such as starting/stopping tracing. Note that some information, at
+  all levels, may or may not be displayed based on compile-time options.
   Defaults to 1.
 
 * `YK_HOT_THRESHOLD`: an integer from 0..4294967295 (both inclusive) that
