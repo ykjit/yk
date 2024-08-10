@@ -1,10 +1,10 @@
-// ignore-if: test $YK_CARGO_PROFILE != "debug" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
 //     # aot_debuginfo.c:{{_}}: YkMT *mt = yk_mt_new(NULL);
+//     ...
 //     %{{_}}: ptr = call yk_mt_new(0x0)
 //     ...
 //     # aot_debuginfo.c:{{_}}: yk_mt_hot_threshold_set(mt, 0);
