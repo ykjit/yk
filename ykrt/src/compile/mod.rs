@@ -1,13 +1,14 @@
-use crate::{location::HotLocation, mt::MT, trace::AOTTraceIterator};
+use crate::{
+    location::HotLocation,
+    mt::{HotThreshold, MT},
+    trace::AOTTraceIterator,
+};
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
     error::Error,
     fmt,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc, Weak,
-    },
+    sync::{Arc, Weak},
 };
 
 #[cfg(jitc_yk)]
@@ -68,35 +69,59 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
 /// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores
 /// the side-trace once its compiled.
 #[derive(Debug)]
-pub(crate) struct Guard {
-    /// How often has this guard failed?
-    failed: AtomicU32,
-    ct: Mutex<Option<Arc<dyn CompiledTrace>>>,
+pub(crate) struct Guard(Mutex<GuardState>);
+
+#[derive(Debug)]
+enum GuardState {
+    Counting(HotThreshold),
+    SideTracing,
+    Compiled(Arc<dyn CompiledTrace>),
 }
 
 impl Guard {
     fn new() -> Self {
-        Self {
-            failed: 0.into(),
-            ct: None.into(),
-        }
+        Self(Mutex::new(GuardState::Counting(0)))
     }
 
     /// This guard has failed (i.e. evaluated to true/false when false/true was expected). Returns
     /// `true` if this guard has failed often enough to be worth side-tracing.
     pub fn inc_failed(&self, mt: &Arc<MT>) -> bool {
-        // FIXME: temporarily disable side-tracing by not ever adding to the `failed` count.
-        self.failed.fetch_add(0, Ordering::Relaxed) + 1 >= mt.sidetrace_threshold()
+        let mut lk = self.0.lock();
+        match &*lk {
+            GuardState::Counting(x) => {
+                if x + 1 >= mt.sidetrace_threshold() {
+                    *lk = GuardState::SideTracing;
+                    true
+                } else {
+                    // FIXME: temporarily disable side-tracing by not ever adding to the `failed` count.
+                    #[allow(clippy::identity_op)]
+                    {
+                        *lk = GuardState::Counting(x + 0);
+                    }
+                    false
+                }
+            }
+            GuardState::SideTracing => false,
+            GuardState::Compiled(_) => false,
+        }
     }
 
     /// Stores a compiled side-trace inside this guard.
-    pub fn set_ctr(&self, ct: Arc<dyn CompiledTrace>) {
-        let _ = self.ct.lock().insert(ct);
+    pub fn set_ctr(&self, ctr: Arc<dyn CompiledTrace>) {
+        let mut lk = self.0.lock();
+        match &*lk {
+            GuardState::SideTracing => *lk = GuardState::Compiled(ctr),
+            _ => panic!(),
+        }
     }
 
     /// Return the compiled side-trace or None if no side-trace has been compiled.
     pub fn ctr(&self) -> Option<Arc<dyn CompiledTrace>> {
-        self.ct.lock().as_ref().map(Arc::clone)
+        let lk = self.0.lock();
+        match &*lk {
+            GuardState::Compiled(ctr) => Some(Arc::clone(ctr)),
+            _ => None,
+        }
     }
 }
 
