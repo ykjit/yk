@@ -73,6 +73,13 @@ pub(crate) struct Guard {
 }
 
 impl Guard {
+    fn new() -> Self {
+        Self {
+            failed: 0.into(),
+            ct: None.into(),
+        }
+    }
+
     /// This guard has failed (i.e. evaluated to true/false when false/true was expected). Returns
     /// `true` if this guard has failed often enough to be worth side-tracing.
     pub fn inc_failed(&self, _mt: &Arc<MT>) -> bool {

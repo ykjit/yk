@@ -1465,10 +1465,7 @@ impl<'a> Assemble<'a> {
             lives: locs,
             aotlives: gi.aotlives().to_vec(),
             callframes: gi.callframes.clone(),
-            guard: Guard {
-                failed: 0.into(),
-                ct: None.into(),
-            },
+            guard: Guard::new(),
         };
         self.deoptinfo.push(deoptinfo);
 
