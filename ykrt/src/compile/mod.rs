@@ -1,8 +1,4 @@
-use crate::{
-    location::HotLocation,
-    mt::{HotThreshold, MT},
-    trace::AOTTraceIterator,
-};
+use crate::{location::HotLocation, mt::MT, trace::AOTTraceIterator};
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
@@ -11,6 +7,8 @@ use std::{
     sync::{Arc, Weak},
 };
 
+pub(crate) mod guard;
+pub(crate) use guard::{Guard, GuardIdx};
 #[cfg(jitc_yk)]
 pub mod jitc_yk;
 
@@ -65,66 +63,6 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
     }
 }
 
-/// Responsible for tracking how often a guard in a `CompiledTrace` fails. A hotness counter is
-/// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores
-/// the side-trace once its compiled.
-#[derive(Debug)]
-pub(crate) struct Guard(Mutex<GuardState>);
-
-#[derive(Debug)]
-enum GuardState {
-    Counting(HotThreshold),
-    SideTracing,
-    Compiled(Arc<dyn CompiledTrace>),
-}
-
-impl Guard {
-    fn new() -> Self {
-        Self(Mutex::new(GuardState::Counting(0)))
-    }
-
-    /// This guard has failed (i.e. evaluated to true/false when false/true was expected). Returns
-    /// `true` if this guard has failed often enough to be worth side-tracing.
-    pub fn inc_failed(&self, mt: &Arc<MT>) -> bool {
-        let mut lk = self.0.lock();
-        match &*lk {
-            GuardState::Counting(x) => {
-                if x + 1 >= mt.sidetrace_threshold() {
-                    *lk = GuardState::SideTracing;
-                    true
-                } else {
-                    // FIXME: temporarily disable side-tracing by not ever adding to the `failed` count.
-                    #[allow(clippy::identity_op)]
-                    {
-                        *lk = GuardState::Counting(x + 0);
-                    }
-                    false
-                }
-            }
-            GuardState::SideTracing => false,
-            GuardState::Compiled(_) => false,
-        }
-    }
-
-    /// Stores a compiled side-trace inside this guard.
-    pub fn set_ctr(&self, ctr: Arc<dyn CompiledTrace>) {
-        let mut lk = self.0.lock();
-        match &*lk {
-            GuardState::SideTracing => *lk = GuardState::Compiled(ctr),
-            _ => panic!(),
-        }
-    }
-
-    /// Return the compiled side-trace or None if no side-trace has been compiled.
-    pub fn ctr(&self) -> Option<Arc<dyn CompiledTrace>> {
-        let lk = self.0.lock();
-        match &*lk {
-            GuardState::Compiled(ctr) => Some(Arc::clone(ctr)),
-            _ => None,
-        }
-    }
-}
-
 pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
     /// upcasting in Rust is incomplete.
@@ -152,24 +90,6 @@ pub(crate) trait SideTraceInfo {
     /// Upcast this [SideTraceInfo] to `Any`. This method is a hack that's only needed since trait
     /// upcasting in Rust is incomplete.
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
-}
-
-/// Identify a [Guard] within a trace.
-///
-/// This is guaranteed to be an index into an array that is freely convertible to/from [usize].
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct GuardIdx(usize);
-
-impl From<usize> for GuardIdx {
-    fn from(v: usize) -> Self {
-        Self(v)
-    }
-}
-
-impl From<GuardIdx> for usize {
-    fn from(v: GuardIdx) -> Self {
-        v.0
-    }
 }
 
 #[cfg(test)]
