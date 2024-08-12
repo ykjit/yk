@@ -285,13 +285,9 @@ pub(crate) extern "C" fn __yk_deopt(
         newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
     }
 
-    if info.guard.inc_failed(&ctr.mt) {
-        // Start side-tracing.
-        // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
-        // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
-        // and a trace compiled for case A won't work for case B.
-        ctr.mt.guard_failure(gidx, ctr.clone());
-    }
+    // The `clone` should really be `Arc::clone(&ctr)` but that doesn't play well with type
+    // inference in this (unusual) case.
+    ctr.mt.guard_failure(ctr.clone(), gidx);
 
     // Since we won't return from this function, drop `ctr` manually.
     drop(ctr);

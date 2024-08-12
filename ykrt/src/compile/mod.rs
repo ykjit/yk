@@ -179,15 +179,15 @@ mod compiled_trace_testing {
     /// A [CompiledTrace] implementation suitable only for testing: when any of its methods are
     /// called it will `panic`.
     #[derive(Debug)]
-    pub(crate) struct CompiledTraceTesting;
+    pub(crate) struct CompiledTraceTestingMinimal;
 
-    impl CompiledTraceTesting {
+    impl CompiledTraceTestingMinimal {
         pub(crate) fn new() -> Self {
             Self
         }
     }
 
-    impl CompiledTrace for CompiledTraceTesting {
+    impl CompiledTrace for CompiledTraceTestingMinimal {
         fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
             panic!();
         }
@@ -213,18 +213,24 @@ mod compiled_trace_testing {
         }
     }
 
-    /// A [CompiledTrace] implementation suitable only for testing. The `hl` method will return a
+    /// A [CompiledTrace] implementation suitable only for testing basic transitions. The `hl` method will return a
     /// [HotLocation] but all other methods will `panic` if called.
     #[derive(Debug)]
-    pub(crate) struct CompiledTraceTestingWithHl(Weak<Mutex<HotLocation>>);
+    pub(crate) struct CompiledTraceTestingBasicTransitions {
+        guard: Guard,
+        hl: Weak<Mutex<HotLocation>>,
+    }
 
-    impl CompiledTraceTestingWithHl {
+    impl CompiledTraceTestingBasicTransitions {
         pub(crate) fn new(hl: Weak<Mutex<HotLocation>>) -> Self {
-            Self(hl)
+            Self {
+                guard: Guard::new(),
+                hl,
+            }
         }
     }
 
-    impl CompiledTrace for CompiledTraceTestingWithHl {
+    impl CompiledTrace for CompiledTraceTestingBasicTransitions {
         fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
             panic!();
         }
@@ -233,8 +239,9 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn guard(&self, _gidx: GuardIdx) -> &Guard {
-            panic!();
+        fn guard(&self, gidx: GuardIdx) -> &Guard {
+            assert_eq!(usize::from(gidx), 0);
+            &self.guard
         }
 
         fn entry(&self) -> *const c_void {
@@ -242,7 +249,7 @@ mod compiled_trace_testing {
         }
 
         fn hl(&self) -> &Weak<Mutex<HotLocation>> {
-            &self.0
+            &self.hl
         }
 
         fn disassemble(&self) -> Result<String, Box<dyn Error>> {
