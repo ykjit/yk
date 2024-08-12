@@ -21,7 +21,7 @@ const STATE_NUM_BITS: usize = 1;
 
 /// Because hot locations will be most common, we save ourselves the effort of ANDing bits away by
 /// having `STATE_HOT` be 0, expecting that `ptr & !0` will be optimised to just `ptr`.
-const STATE_HOT: usize = 0;
+const STATE_HOT: usize = 0b0;
 /// In the not hot state, we have to do `(inner & !1) >> STATE_NUM_BITS` to derive the count.
 const STATE_NOT_HOT: usize = 0b1;
 
@@ -39,53 +39,55 @@ const STATE_NOT_HOT: usize = 0b1;
 #[repr(C)]
 #[derive(Debug)]
 pub struct Location {
-    // A Location is a state machine which operates as follows (where Counting is the start state):
-    //
-    //              ┌──────────────┐
-    //              │              │─────────────┐
-    //   reprofile  │   Counting   │             │
-    //  ┌──────────▶│              │◀────────────┘
-    //  │           └──────────────┘    increment
-    //  │             │                 count
-    //  │             │ start tracing
-    //  │             ▼
-    //  │           ┌──────────────┐
-    //  │           │              │ incomplete  ┌─────────────┐
-    //  │           │   Tracing    │────────────▶│  DontTrace  │
-    //  │           │              │             └─────────────┘
-    //  │           └──────────────┘
-    //  │             │ start compiling trace
-    //  │             │ in thread
-    //  │             ▼
-    //  │           ┌──────────────┐             ┌───────────┐
-    //  │           │  Compiling   │────────────▶│  Dropped  │
-    //  │           └──────────────┘             └───────────┘
-    //  │             │
-    //  │             │ trace compiled
-    //  │             ▼
-    //  │           ┌──────────────┐
-    //  └───────────│   Compiled   │◀────────────┐
-    //              └──────────────┘             │
-    //                │                          │
-    //                │ guard failed             │
-    //                ▼                          │
-    //              ┌──────────────┐             │
-    //              │  SideTracing │─────────────┘
-    //              └──────────────┘
-    //
-    // We hope that a Location soon reaches the `Compiled` state (aka "the happy state") and stays
-    // there. However, many Locations will not be used frequently enough to reach such a state, so
-    // we don't want to waste resources on them.
-    //
-    // We therefore encode a Location as a tagged integer: in the initial (Counting) state, no
-    // memory is allocated; if the location is used frequently enough it becomes hot, memory
-    // is allocated for it, and a pointer stored instead of an integer. Note that once memory for a
-    // hot location is allocated, it can only be (scheduled for) deallocation when a Location
-    // is dropped, as the Location may have handed out `&` references to that allocated memory.
-    //
-    // The layout of a Location is as follows: bit 0 = <STATE_NOT_HOT|STATE_HOT>; bits 1..<machine
-    // width> = payload. In the `STATE_NOT_HOT` state, the payload is an integer; in a `STATE_HOT`
-    // state, the payload is a pointer from `Arc::into_raw::<Mutex<HotLocation>>()`.
+    /// A Location is a state machine which operates as follows (where Counting is the start state):
+    ///
+    /// ```text
+    ///              ┌──────────────┐
+    ///              │              │─────────────┐
+    ///   reprofile  │   Counting   │             │
+    ///  ┌──────────▶│              │◀────────────┘
+    ///  │           └──────────────┘    increment
+    ///  │             │                 count
+    ///  │             │ start tracing
+    ///  │             ▼
+    ///  │           ┌──────────────┐
+    ///  │           │              │ incomplete  ┌─────────────┐
+    ///  │           │   Tracing    │────────────▶│  DontTrace  │
+    ///  │           │              │             └─────────────┘
+    ///  │           └──────────────┘
+    ///  │             │ start compiling trace
+    ///  │             │ in thread
+    ///  │             ▼
+    ///  │           ┌──────────────┐             ┌───────────┐
+    ///  │           │  Compiling   │────────────▶│  Dropped  │
+    ///  │           └──────────────┘             └───────────┘
+    ///  │             │
+    ///  │             │ trace compiled
+    ///  │             ▼
+    ///  │           ┌──────────────┐
+    ///  └───────────│   Compiled   │◀────────────┐
+    ///              └──────────────┘             │
+    ///                │                          │
+    ///                │ guard failed             │
+    ///                ▼                          │
+    ///              ┌──────────────┐             │
+    ///              │  SideTracing │─────────────┘
+    ///              └──────────────┘
+    /// ```
+    ///
+    /// We hope that a Location soon reaches the `Compiled` state (aka "the happy state") and stays
+    /// there. However, many Locations will not be used frequently enough to reach such a state, so
+    /// we don't want to waste resources on them.
+    ///
+    /// We therefore encode a Location as a tagged integer: in the initial (Counting) state, no
+    /// memory is allocated; if the location is used frequently enough it becomes hot, memory
+    /// is allocated for it, and a pointer stored instead of an integer. Note that once memory for a
+    /// hot location is allocated, it can only be (scheduled for) deallocation when a Location
+    /// is dropped, as the Location may have handed out `&` references to that allocated memory.
+    ///
+    /// The layout of a Location is as follows: bit 0 = <STATE_NOT_HOT|STATE_HOT>; bits 1..<machine
+    /// width> = payload. In the `STATE_NOT_HOT` state, the payload is an integer; in a `STATE_HOT`
+    /// state, the payload is a pointer from `Arc::into_raw::<Mutex<HotLocation>>()`.
     inner: AtomicUsize,
 }
 
@@ -249,7 +251,7 @@ pub(crate) enum HotLocationKind {
     /// This HotLocation started a trace which is ongoing.
     Tracing,
     /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
-    /// side trace for this HotLocation.
+    /// side trace starting at this HotLocation.
     SideTracing {
         /// The root [CompiledTrace]: while one thread is side tracing a (possibly many levels
         /// deep) side trace that ultimately relates to this [CompiledTrace], other threads can
