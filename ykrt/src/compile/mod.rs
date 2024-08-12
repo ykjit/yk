@@ -1,10 +1,14 @@
-use crate::{location::HotLocation, mt::MT, trace::AOTTraceIterator};
+use crate::{
+    location::HotLocation,
+    mt::{HotThreshold, MT},
+    trace::AOTTraceIterator,
+};
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
     error::Error,
     fmt,
-    sync::{atomic::AtomicU32, Arc, Weak},
+    sync::{Arc, Weak},
 };
 
 #[cfg(jitc_yk)]
@@ -65,30 +69,59 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
 /// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores
 /// the side-trace once its compiled.
 #[derive(Debug)]
-pub(crate) struct Guard {
-    /// How often has this guard failed?
-    #[allow(dead_code)]
-    failed: AtomicU32,
-    ct: Mutex<Option<Arc<dyn CompiledTrace>>>,
+pub(crate) struct Guard(Mutex<GuardState>);
+
+#[derive(Debug)]
+enum GuardState {
+    Counting(HotThreshold),
+    SideTracing,
+    Compiled(Arc<dyn CompiledTrace>),
 }
 
 impl Guard {
+    fn new() -> Self {
+        Self(Mutex::new(GuardState::Counting(0)))
+    }
+
     /// This guard has failed (i.e. evaluated to true/false when false/true was expected). Returns
     /// `true` if this guard has failed often enough to be worth side-tracing.
-    pub fn inc_failed(&self, _mt: &Arc<MT>) -> bool {
-        // FIXME: for now we forcibly disable side-tracing, as it's broken.
-        //self.failed.fetch_add(1, Ordering::Relaxed) + 1 >= mt.sidetrace_threshold()
-        false
+    pub fn inc_failed(&self, mt: &Arc<MT>) -> bool {
+        let mut lk = self.0.lock();
+        match &*lk {
+            GuardState::Counting(x) => {
+                if x + 1 >= mt.sidetrace_threshold() {
+                    *lk = GuardState::SideTracing;
+                    true
+                } else {
+                    // FIXME: temporarily disable side-tracing by not ever adding to the `failed` count.
+                    #[allow(clippy::identity_op)]
+                    {
+                        *lk = GuardState::Counting(x + 0);
+                    }
+                    false
+                }
+            }
+            GuardState::SideTracing => false,
+            GuardState::Compiled(_) => false,
+        }
     }
 
     /// Stores a compiled side-trace inside this guard.
-    pub fn set_ctr(&self, ct: Arc<dyn CompiledTrace>) {
-        let _ = self.ct.lock().insert(ct);
+    pub fn set_ctr(&self, ctr: Arc<dyn CompiledTrace>) {
+        let mut lk = self.0.lock();
+        match &*lk {
+            GuardState::SideTracing => *lk = GuardState::Compiled(ctr),
+            _ => panic!(),
+        }
     }
 
     /// Return the compiled side-trace or None if no side-trace has been compiled.
     pub fn ctr(&self) -> Option<Arc<dyn CompiledTrace>> {
-        self.ct.lock().as_ref().map(Arc::clone)
+        let lk = self.0.lock();
+        match &*lk {
+            GuardState::Compiled(ctr) => Some(Arc::clone(ctr)),
+            _ => None,
+        }
     }
 }
 
@@ -146,15 +179,15 @@ mod compiled_trace_testing {
     /// A [CompiledTrace] implementation suitable only for testing: when any of its methods are
     /// called it will `panic`.
     #[derive(Debug)]
-    pub(crate) struct CompiledTraceTesting;
+    pub(crate) struct CompiledTraceTestingMinimal;
 
-    impl CompiledTraceTesting {
+    impl CompiledTraceTestingMinimal {
         pub(crate) fn new() -> Self {
             Self
         }
     }
 
-    impl CompiledTrace for CompiledTraceTesting {
+    impl CompiledTrace for CompiledTraceTestingMinimal {
         fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
             panic!();
         }
@@ -180,18 +213,24 @@ mod compiled_trace_testing {
         }
     }
 
-    /// A [CompiledTrace] implementation suitable only for testing. The `hl` method will return a
+    /// A [CompiledTrace] implementation suitable only for testing basic transitions. The `hl` method will return a
     /// [HotLocation] but all other methods will `panic` if called.
     #[derive(Debug)]
-    pub(crate) struct CompiledTraceTestingWithHl(Weak<Mutex<HotLocation>>);
+    pub(crate) struct CompiledTraceTestingBasicTransitions {
+        guard: Guard,
+        hl: Weak<Mutex<HotLocation>>,
+    }
 
-    impl CompiledTraceTestingWithHl {
+    impl CompiledTraceTestingBasicTransitions {
         pub(crate) fn new(hl: Weak<Mutex<HotLocation>>) -> Self {
-            Self(hl)
+            Self {
+                guard: Guard::new(),
+                hl,
+            }
         }
     }
 
-    impl CompiledTrace for CompiledTraceTestingWithHl {
+    impl CompiledTrace for CompiledTraceTestingBasicTransitions {
         fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
             panic!();
         }
@@ -200,8 +239,9 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn guard(&self, _gidx: GuardIdx) -> &Guard {
-            panic!();
+        fn guard(&self, gidx: GuardIdx) -> &Guard {
+            assert_eq!(usize::from(gidx), 0);
+            &self.guard
         }
 
         fn entry(&self) -> *const c_void {
@@ -209,7 +249,7 @@ mod compiled_trace_testing {
         }
 
         fn hl(&self) -> &Weak<Mutex<HotLocation>> {
-            &self.0
+            &self.hl
         }
 
         fn disassemble(&self) -> Result<String, Box<dyn Error>> {

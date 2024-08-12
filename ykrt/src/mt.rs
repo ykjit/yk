@@ -620,42 +620,51 @@ impl MT {
         })
     }
 
-    /// Perform the next step to `loc` in the `Location` state-machine for a guard failure.
+    /// Perform the next step in the guard failure statemachine.
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
-        gidx: GuardIdx,
         parent_ctr: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
     ) -> TransitionGuardFailure {
-        if let Some(hl) = parent_ctr.hl().upgrade() {
-            MTThread::with(|mtt| {
-                // This thread should not be tracing anything.
-                debug_assert!(!mtt.is_tracing());
-                let mut lk = hl.lock();
-                if let HotLocationKind::Compiled(ref root_ctr) = lk.kind {
-                    lk.kind = HotLocationKind::SideTracing {
-                        root_ctr: Arc::clone(root_ctr),
-                        gidx,
-                        parent_ctr,
-                    };
-                    drop(lk);
-                    TransitionGuardFailure::StartSideTracing(hl)
-                } else {
-                    // The top-level trace's [HotLocation] might have changed to another state while
-                    // the associated trace was executing; or we raced with another thread (which is
-                    // most likely to have started side tracing itself).
-                    TransitionGuardFailure::NoAction
-                }
-            })
+        if parent_ctr.guard(gidx).inc_failed(self) {
+            if let Some(hl) = parent_ctr.hl().upgrade() {
+                MTThread::with(|mtt| {
+                    // This thread should not be tracing anything.
+                    debug_assert!(!mtt.is_tracing());
+                    let mut lk = hl.lock();
+                    if let HotLocationKind::Compiled(ref root_ctr) = lk.kind {
+                        lk.kind = HotLocationKind::SideTracing {
+                            root_ctr: Arc::clone(root_ctr),
+                            gidx,
+                            parent_ctr,
+                        };
+                        drop(lk);
+                        TransitionGuardFailure::StartSideTracing(hl)
+                    } else {
+                        // The top-level trace's [HotLocation] might have changed to another state while
+                        // the associated trace was executing; or we raced with another thread (which is
+                        // most likely to have started side tracing itself).
+                        TransitionGuardFailure::NoAction
+                    }
+                })
+            } else {
+                // The parent [HotLocation] has been garbage collected.
+                TransitionGuardFailure::NoAction
+            }
         } else {
-            // The parent [HotLocation] has been garbage collected.
+            // We're side-tracing
             TransitionGuardFailure::NoAction
         }
     }
 
-    /// Start recording a side trace for a guard that failed in `ctr`.
-    pub(crate) fn side_trace(self: &Arc<Self>, gidx: GuardIdx, parent: Arc<dyn CompiledTrace>) {
-        match self.transition_guard_failure(gidx, parent) {
-            TransitionGuardFailure::NoAction => todo!(),
+    /// Inform this meta-tracer that guard `gidx` has failed.
+    ///
+    // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
+    // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
+    // and a trace compiled for case A won't work for case B.
+    pub(crate) fn guard_failure(self: &Arc<Self>, parent: Arc<dyn CompiledTrace>, gidx: GuardIdx) {
+        match self.transition_guard_failure(parent, gidx) {
+            TransitionGuardFailure::NoAction => (),
             TransitionGuardFailure::StartSideTracing(hl) => {
                 self.log.log(Verbosity::JITEvent, "start-side-tracing");
                 let tracer = {
@@ -831,7 +840,7 @@ mod tests {
     extern crate test;
     use super::*;
     use crate::{
-        compile::{CompiledTraceTesting, CompiledTraceTestingWithHl},
+        compile::{CompiledTraceTestingBasicTransitions, CompiledTraceTestingMinimal},
         trace::TraceRecorderError,
     };
     use std::hint::black_box;
@@ -884,13 +893,10 @@ mod tests {
         });
     }
 
-    fn expect_start_side_tracing(mt: &Arc<MT>, loc: &Location) {
-        let TransitionGuardFailure::StartSideTracing(hl) = mt.transition_guard_failure(
-            GuardIdx::from(0),
-            Arc::new(CompiledTraceTestingWithHl::new(Arc::downgrade(
-                &loc.hot_location_arc_clone().unwrap(),
-            ))),
-        ) else {
+    fn expect_start_side_tracing(mt: &Arc<MT>, ctr: Arc<dyn CompiledTrace>) {
+        let TransitionGuardFailure::StartSideTracing(hl) =
+            mt.transition_guard_failure(ctr, GuardIdx::from(0))
+        else {
             panic!()
         };
         MTThread::with(|mtt| {
@@ -907,6 +913,7 @@ mod tests {
         let hot_thrsh = 5;
         let mt = MT::new().unwrap();
         mt.set_hot_threshold(hot_thrsh);
+        mt.set_sidetrace_threshold(1);
         let loc = Location::new();
         for i in 0..mt.hot_threshold() {
             assert_eq!(
@@ -925,13 +932,15 @@ mod tests {
             loc.hot_location().unwrap().lock().kind,
             HotLocationKind::Compiling
         ));
-        loc.hot_location().unwrap().lock().kind =
-            HotLocationKind::Compiled(Arc::new(CompiledTraceTesting::new()));
+        let ctr = Arc::new(CompiledTraceTestingBasicTransitions::new(Arc::downgrade(
+            &loc.hot_location_arc_clone().unwrap(),
+        )));
+        loc.hot_location().unwrap().lock().kind = HotLocationKind::Compiled(ctr.clone());
         assert!(matches!(
-            dbg!(mt.transition_control_point(&loc)),
+            mt.transition_control_point(&loc),
             TransitionControlPoint::Execute(_)
         ));
-        expect_start_side_tracing(&mt, &loc);
+        expect_start_side_tracing(&mt, ctr);
 
         match mt.transition_control_point(&loc) {
             TransitionControlPoint::StopSideTracing { .. } => {
@@ -1227,8 +1236,9 @@ mod tests {
                                 loc.hot_location().unwrap().lock().kind,
                                 HotLocationKind::Compiling
                             ));
-                            loc.hot_location().unwrap().lock().kind =
-                                HotLocationKind::Compiled(Arc::new(CompiledTraceTesting::new()));
+                            loc.hot_location().unwrap().lock().kind = HotLocationKind::Compiled(
+                                Arc::new(CompiledTraceTestingMinimal::new()),
+                            );
                             loop {
                                 if let TransitionControlPoint::Execute(_) =
                                     mt.transition_control_point(&loc)
@@ -1300,10 +1310,11 @@ mod tests {
         const THRESHOLD: HotThreshold = 5;
         let mt = MT::new().unwrap();
         mt.set_hot_threshold(THRESHOLD);
+        mt.set_sidetrace_threshold(1);
         let loc1 = Arc::new(Location::new());
         let loc2 = Location::new();
 
-        fn to_compiled(mt: &Arc<MT>, loc: &Location) {
+        fn to_compiled(mt: &Arc<MT>, loc: &Location) -> Arc<dyn CompiledTrace> {
             for _ in 0..THRESHOLD {
                 assert_eq!(
                     mt.transition_control_point(loc),
@@ -1321,22 +1332,24 @@ mod tests {
                 loc.hot_location().unwrap().lock().kind,
                 HotLocationKind::Compiling
             ));
-            loc.hot_location().unwrap().lock().kind =
-                HotLocationKind::Compiled(Arc::new(CompiledTraceTesting::new()));
+            let ctr = Arc::new(CompiledTraceTestingBasicTransitions::new(Arc::downgrade(
+                &loc.hot_location_arc_clone().unwrap(),
+            )));
+            loc.hot_location().unwrap().lock().kind = HotLocationKind::Compiled(ctr.clone());
+            ctr
         }
 
-        to_compiled(&mt, &loc1);
-        to_compiled(&mt, &loc2);
+        let ctr1 = to_compiled(&mt, &loc1);
+        let ctr2 = to_compiled(&mt, &loc2);
 
         {
             let mt = Arc::clone(&mt);
-            let loc1 = Arc::clone(&loc1);
-            thread::spawn(move || expect_start_side_tracing(&mt, &loc1))
+            thread::spawn(move || expect_start_side_tracing(&mt, ctr1))
                 .join()
                 .unwrap();
         }
 
-        expect_start_side_tracing(&mt, &loc2);
+        expect_start_side_tracing(&mt, ctr2);
         assert!(matches!(
             dbg!(mt.transition_control_point(&loc1)),
             TransitionControlPoint::Execute(_)
@@ -1390,7 +1403,7 @@ mod tests {
         expect_start_tracing(&mt, &loc1);
         expect_stop_tracing(&mt, &loc1);
         loc1.hot_location().unwrap().lock().kind =
-            HotLocationKind::Compiled(Arc::new(CompiledTraceTesting::new()));
+            HotLocationKind::Compiled(Arc::new(CompiledTraceTestingMinimal::new()));
 
         // If we transition `loc2` into `StartTracing`, then (for now) we should not execute the
         // trace for `loc1`, as another location is being traced and we don't want to trace the
