@@ -101,7 +101,8 @@ impl<'a> ExtraLinkage<'a> {
     }
 }
 
-/// Make a compiler command that compiles `src` to `exe` using the optimisation flag `opt`.
+/// Make a compiler command that compiles `src` to `exe`.
+///
 /// `extra_objs` is a collection of other object files to link.
 ///
 /// If `patch_cp` is `false` then the argument to patch the control point is omitted.
@@ -109,7 +110,6 @@ pub fn mk_compiler(
     compiler: &Path,
     exe: &Path,
     src: &Path,
-    opt: &str,
     extra_objs: &[PathBuf],
     patch_cp: bool,
 ) -> Command {
@@ -169,7 +169,6 @@ pub fn mk_compiler(
 
     compiler.args(extra_objs);
     compiler.args([
-        opt,
         // If this is a debug build, include debug info in the test binary.
         #[cfg(debug_assertions)]
         "-g",
