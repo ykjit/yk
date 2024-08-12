@@ -290,7 +290,7 @@ pub(crate) extern "C" fn __yk_deopt(
         // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
         // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
         // and a trace compiled for case A won't work for case B.
-        ctr.mt.side_trace(gidx, ctr.clone());
+        ctr.mt.guard_failure(gidx, ctr.clone());
     }
 
     // Since we won't return from this function, drop `ctr` manually.

@@ -652,8 +652,8 @@ impl MT {
         }
     }
 
-    /// Start recording a side trace for a guard that failed in `ctr`.
-    pub(crate) fn side_trace(self: &Arc<Self>, gidx: GuardIdx, parent: Arc<dyn CompiledTrace>) {
+    /// Inform this meta-tracer that guard `gidx` has failed.
+    pub(crate) fn guard_failure(self: &Arc<Self>, gidx: GuardIdx, parent: Arc<dyn CompiledTrace>) {
         match self.transition_guard_failure(gidx, parent) {
             TransitionGuardFailure::NoAction => todo!(),
             TransitionGuardFailure::StartSideTracing(hl) => {
