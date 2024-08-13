@@ -69,6 +69,7 @@ fn main() {
     // Now we have a test binary in a temporary directory, prepare an invocation of gdb, setting
     // environment variables as necessary.
     let mut gdb = Command::new("gdb");
+    gdb.arg(&binpath);
 
     if args.serialise_compilation {
         gdb.env("YKD_SERIALISE_COMPILATION", "1");
