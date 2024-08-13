@@ -131,8 +131,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         // as yksmp currently doesn't seem able to differentiate general purpose from floating
         // point.
         #[cfg(target_arch = "x86_64")]
-        let mut reg_off: u16 = 3; // FIXME: Why do need to start from register 3? I have no idea.
-        let mut ti_off: u32 = 0;
+        let mut gp_reg_off: u16 = 3; // FIXME: Why do need to start from register 3? I have no idea.
+        #[cfg(target_arch = "x86_64")]
+        let mut fp_reg_off: u16 = 17; // In DWARF, xmm registers are 17..32.
 
         for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
@@ -322,26 +323,24 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             Ty::Void => unreachable!(),
                             Ty::Integer(_) | Ty::Ptr | Ty::Func(_) => {
                                 self.m.push_tiloc(yksmp::Location::Register(
-                                    reg_off,
+                                    gp_reg_off,
                                     u16::try_from(size).unwrap(),
                                     0,
                                     0,
                                 ));
+                                gp_reg_off += 1;
                             }
                             Ty::Float(_) => {
-                                let size = u16::try_from(size).unwrap();
-                                ti_off = ti_off.next_multiple_of(u32::from(size));
-                                // FIXME: Why 6?!
-                                self.m.push_tiloc(yksmp::Location::Direct(
-                                    6,
-                                    -i32::try_from(ti_off).unwrap(),
-                                    size,
+                                self.m.push_tiloc(yksmp::Location::Register(
+                                    fp_reg_off,
+                                    u16::try_from(size).unwrap(),
+                                    0,
+                                    0,
                                 ));
-                                ti_off += u32::from(size);
+                                fp_reg_off += 1;
                             }
                             Ty::Unimplemented(_) => todo!(),
                         }
-                        reg_off += 1;
                         let inst = LoadTraceInputInst::new(off, type_);
                         self.push_assign(inst.into(), assign)?;
                     }

@@ -61,7 +61,7 @@ pub enum Location {
     Register(u16, u16, i32, u16),
     /// The live variable is a pointer into the stack. To avoid unnecessary spilling and
     /// dereferencing LLVM just records the value as an (offset, register) pair where the register
-    /// is typically the base pointer.
+    /// is typically the base pointer:
     /// * `u16`: Dwarf register number
     /// * `i32`: offset
     /// * `u16`: size of the value

@@ -72,7 +72,7 @@ const GP_REGS_LEN: usize = 16;
 /// The complete set of floating point x64 registers, in the order that dynasmrt defines them.
 /// Note that large portions of the code rely on these registers mapping to the integers 0..15
 /// (both inc.) in order.
-static FP_REGS: [Rx; 16] = [
+pub(crate) static FP_REGS: [Rx; 16] = [
     Rx::XMM0,
     Rx::XMM1,
     Rx::XMM2,
@@ -238,10 +238,30 @@ impl<'a> LSRegAlloc<'a> {
 impl<'a> LSRegAlloc<'a> {
     /// Forcibly assign the machine register `reg`, which must be in the [RegState::Empty] state,
     /// to the value produced by instruction `iidx`.
-    pub(crate) fn assign_gp_reg_to_inst(&mut self, reg: Rq, iidx: InstIdx) {
+    pub(crate) fn force_assign_inst_gp_reg(&mut self, iidx: InstIdx, reg: Rq) {
         debug_assert!(!self.gp_regset.is_set(reg));
         self.gp_regset.set(reg);
         self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+    }
+
+    /// Forcibly assign the floating point register `reg`, which must be in the [RegState::Empty] state,
+    /// to the value produced by instruction `iidx`.
+    pub(crate) fn force_assign_inst_fp_reg(&mut self, iidx: InstIdx, reg: Rx) {
+        debug_assert!(!self.fp_regset.is_set(reg));
+        self.fp_regset.set(reg);
+        self.fp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+    }
+
+    /// Forcibly assign the value produced by instruction `iidx` to `Direct` `frame_off`.
+    pub(crate) fn force_assign_inst_direct(&mut self, iidx: InstIdx, frame_off: i32) {
+        debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
+        self.spills[usize::from(iidx)] = SpillState::Direct(frame_off);
+    }
+
+    /// Forcibly assign the value produced by instruction `iidx` to `Indirect` `frame_off`.
+    pub(crate) fn force_assign_inst_indirect(&mut self, iidx: InstIdx, frame_off: i32) {
+        debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
+        self.spills[usize::from(iidx)] = SpillState::Indirect(frame_off);
     }
 
     /// Allocate registers for the instruction at position `iidx`.
@@ -520,6 +540,21 @@ impl<'a> LSRegAlloc<'a> {
                 }
                 self.gp_regset.set(reg);
             }
+            SpillState::Direct(off) => match size {
+                8 => dynasm!(asm
+                    ; mov Rq(reg.code()), [rbp]
+                    ; lea Rq(reg.code()), [Rq(reg.code()) + off]
+                ),
+                x => todo!("{x}"),
+            },
+            SpillState::Indirect(off) => {
+                assert_eq!(size, 8);
+                dynasm!(asm
+                    ; mov Rq(reg.code()), [rbp]
+                    ; mov Rq(reg.code()), [Rq(reg.code()) + off]
+                );
+                self.gp_regset.set(reg);
+            }
         }
     }
 
@@ -648,15 +683,21 @@ impl<'a> LSRegAlloc<'a> {
         }) {
             VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
         } else {
+            let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
             match self.spills[usize::from(iidx)] {
                 SpillState::Empty => panic!(),
-                SpillState::Stack(off) => {
-                    let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
-                    VarLocation::Stack {
-                        frame_off: u32::try_from(off).unwrap(),
-                        size,
-                    }
-                }
+                SpillState::Stack(off) => VarLocation::Stack {
+                    frame_off: u32::try_from(off).unwrap(),
+                    size,
+                },
+                SpillState::Direct(off) => VarLocation::Direct {
+                    frame_off: off,
+                    size,
+                },
+                SpillState::Indirect(off) => VarLocation::Indirect {
+                    frame_off: off,
+                    size,
+                },
             }
         }
     }
@@ -912,6 +953,8 @@ impl<'a> LSRegAlloc<'a> {
                 };
                 self.fp_regset.set(reg);
             }
+            SpillState::Direct(_off) => todo!(),
+            SpillState::Indirect(_off) => todo!(),
         }
     }
 
@@ -1171,6 +1214,10 @@ enum SpillState {
     Empty,
     /// This variable is spilt to the stack with the same semantics as [VarLocation::Stack].
     Stack(i32),
+    /// This variable is spilt to the stack with the same semantics as [VarLocation::Direct].
+    Direct(i32),
+    /// This variable is spilt to the stack with the same semantics as [VarLocation::Indirect].
+    Indirect(i32),
 }
 
 #[cfg(test)]
