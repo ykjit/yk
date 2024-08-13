@@ -543,8 +543,10 @@ impl TraceBuilder {
                     }
                     jit_ir::Operand::Const(_) => {
                         // Since we are forcing constants into `ProxyConst`s during inlining, this
-                        // case should never happen.
-                        panic!()
+                        // case should never happen. If you see this panic, then look for a
+                        // safepoint live variable that maps to a constant and make the builder
+                        // insert a `ProxyConst` for it instead.
+                        panic!("constant encountered while building guardinfo!")
                     }
                 }
             }
@@ -983,7 +985,17 @@ impl TraceBuilder {
             bid.bbidx(),
             aot_ir::InstIdx::new(aot_inst_idx),
         );
-        let op = self.handle_operand(chosen_val)?;
+        let op = match self.handle_operand(chosen_val)? {
+            jit_ir::Operand::Const(c) => {
+                // We don't want to do constant propagation here as it makes our life harder
+                // creating guards. Instead we simply create a proxy instruction here and
+                // reference that.
+                let inst = jit_ir::Inst::ProxyConst(c);
+                self.jit_mod.push(inst)?;
+                jit_ir::Operand::Local(self.jit_mod.last_inst_idx())
+            }
+            op => op,
+        };
         self.local_map.insert(aot_iit, op);
         Ok(())
     }
