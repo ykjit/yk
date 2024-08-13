@@ -149,10 +149,6 @@ impl Module {
         self.funcs[bid.funcidx].bblock(bid.bbidx)
     }
 
-    pub(crate) fn const_type(&self, c: &Const) -> &Ty {
-        &self.types[c.tyidx()]
-    }
-
     /// Lookup a constant by its index.
     ///
     /// # Panics
@@ -725,7 +721,7 @@ impl fmt::Display for DisplayableOperand<'_> {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct DeoptSafepoint {
-    pub(crate) id: Operand,
+    pub(crate) id: u64,
     #[deku(temp)]
     num_lives: u32,
     #[deku(count = "num_lives")]
@@ -752,12 +748,7 @@ impl fmt::Display for DisplayableDeoptSafepoint<'_> {
             .map(|a| a.display(self.m).to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        write!(
-            f,
-            "[safepoint: {}, ({})]",
-            self.safepoint.id.display(self.m),
-            lives_s
-        )
+        write!(f, "[safepoint: {}i64, ({})]", self.safepoint.id, lives_s)
     }
 }
 

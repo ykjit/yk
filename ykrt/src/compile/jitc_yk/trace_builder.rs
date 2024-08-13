@@ -130,19 +130,10 @@ impl TraceBuilder {
             if inst.is_control_point(self.aot_mod) {
                 // FIXME Safepoint id should be an integer not Operand.
                 let safepoint = inst.safepoint().unwrap();
-                let aot_ir::Operand::Const(cidx) = safepoint.id else {
-                    panic!();
-                };
-                let c = self.aot_mod.const_(cidx);
-                let aot_ir::Ty::Integer(ity) = self.aot_mod.const_type(c) else {
-                    panic!();
-                };
-                assert!(ity.num_bits() == u64::BITS);
-                let id = u64::from_ne_bytes(c.unwrap_val().bytes()[0..8].try_into().unwrap());
                 let (rec, _) = AOT_STACKMAPS
                     .as_ref()
                     .unwrap()
-                    .get(usize::try_from(id).unwrap());
+                    .get(usize::try_from(safepoint.id).unwrap());
 
                 debug_assert!(safepoint.lives.len() == rec.live_vars.len());
                 for idx in 0..safepoint.lives.len() {
@@ -517,16 +508,7 @@ impl TraceBuilder {
                 // instructions which we won't see at the beginning of a sidetrace.
                 Vec::new(),
             ));
-            let aot_ir::Operand::Const(cidx) = safepoint.id else {
-                panic!();
-            };
-            let c = self.aot_mod.const_(cidx);
-            let aot_ir::Ty::Integer(ity) = self.aot_mod.const_type(c) else {
-                panic!();
-            };
-            assert!(ity.num_bits() == u64::BITS);
-            let id = u64::from_ne_bytes(c.unwrap_val().bytes()[0..8].try_into().unwrap());
-            smids.push(id);
+            smids.push(safepoint.id);
 
             // Collect live variables.
             for op in safepoint.lives.iter() {
