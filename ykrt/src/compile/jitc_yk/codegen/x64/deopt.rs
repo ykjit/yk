@@ -306,11 +306,14 @@ unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size:
         "mov rsp, rdi",
         // Move rsp to the end of the new stack.
         "sub rsp, rdx",
+        // Save src ptr into a callee-save reg so we can free it later.
+        "mov r12, rsi",
         // Copy the new stack over the old stack.
         "mov rdi, rsp",
         "call memcpy",
+        // Restore src ptr.
+        "mov rdi, r12",
         // Free the source which is no longer needed.
-        "mov rdi, rsi",
         "call free",
         // Recover live registers.
         "pop r15",
