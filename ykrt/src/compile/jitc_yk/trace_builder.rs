@@ -1033,11 +1033,19 @@ impl TraceBuilder {
             jit_ir::Ty::Void => unreachable!(),
             jit_ir::Ty::Integer(width_bits) => {
                 let width_bytes = usize::try_from(*width_bits).unwrap() / 8;
-                let v = u64::from_ne_bytes(
-                    self.promotions[self.promote_idx..self.promote_idx + width_bytes]
-                        .try_into()
-                        .unwrap(),
-                );
+                let v = match width_bits {
+                    64 => u64::from_ne_bytes(
+                        self.promotions[self.promote_idx..self.promote_idx + width_bytes]
+                            .try_into()
+                            .unwrap(),
+                    ),
+                    32 => u64::from(u32::from_ne_bytes(
+                        self.promotions[self.promote_idx..self.promote_idx + width_bytes]
+                            .try_into()
+                            .unwrap(),
+                    )),
+                    x => todo!("{x}"),
+                };
                 self.promote_idx += width_bytes;
                 v
             }
@@ -1046,7 +1054,7 @@ impl TraceBuilder {
             jit_ir::Ty::Float(_) => todo!(),
             jit_ir::Ty::Unimplemented(_) => todo!(),
         };
-        let c = Const::Int(ty, u64::try_from(pval).unwrap());
+        let c = Const::Int(ty, pval);
         let cidx = self.jit_mod.insert_const(c)?;
         self.jit_mod.push(jit_ir::Inst::ProxyConst(cidx))?;
         self.link_iid_to_last_inst(bid, aot_inst_idx);

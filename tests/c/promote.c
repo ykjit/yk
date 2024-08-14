@@ -6,25 +6,26 @@
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   stderr:
 //     yk-jit-event: start-tracing
-//     y=100
+//     a=99 y=100
 //     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{_}}: i64 = promote %{{_}} [safepoint: 0i64, (%{{0_0}}, %{{0_1}})]
+//     %{{_}}: i64 = promote %{{_}} ...
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{1}}: i1 = eq %{{_}}, 100i64
 //     guard true, %{{1}}, ...
-//     %{{_}}: i64 = add 100i64, %{{_}}
+//     ...
+//     %{{_}}: i64 = add %{{_}}, 100i64
 //     ...
 //     --- End jit-pre-opt ---
-//     y=200
+//     a=99 y=200
 //     yk-jit-event: enter-jit-code
-//     y=300
-//     y=400
-//     y=500
+//     a=99 y=300
+//     a=99 y=400
+//     a=99 y=500
 //     yk-jit-event: deoptimise
 
 // Check that promotion works in traces.
@@ -36,25 +37,24 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-size_t inner(size_t x, size_t y) {
-  x = yk_promote(x);
-  y += x;
-  return y;
-}
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
+  int a = 99;
   size_t x = 100;
   size_t y = 0;
+  NOOPT_VAL(a);
   NOOPT_VAL(x);
+  NOOPT_VAL(y);
 
   for (int i = 0; i < 5; i++) {
     yk_mt_control_point(mt, &loc);
-    y = inner(x, y);
-    fprintf(stderr, "y=%" PRIu64 "\n", y);
+    a = yk_promote(a);
+    x = yk_promote(x);
+    y += x;
+    fprintf(stderr, "a=%d y=%" PRIu64 "\n", a, y);
   }
 
   NOOPT_VAL(y);
