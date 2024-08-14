@@ -259,7 +259,7 @@ impl MT {
     ///     in the `hl_arc`.
     fn queue_compile_job(
         self: &Arc<Self>,
-        trace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
+        trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>),
         hl_arc: Arc<Mutex<HotLocation>>,
         sidetrace: Option<(GuardIdx, Arc<dyn CompiledTrace>)>,
     ) {
@@ -731,7 +731,7 @@ enum MTThreadState {
         /// What tracer is being used to record this trace? Needed for trace mapping.
         thread_tracer: Box<dyn TraceRecorder>,
         /// Records the content of data recorded via `yk_promote`.
-        promotions: Vec<usize>,
+        promotions: Vec<u8>,
     },
     /// This thread is executing a trace. Note that the `dyn CompiledTrace` serves two different purposes:
     ///
@@ -809,7 +809,7 @@ impl MTThread {
             ref mut promotions, ..
         } = *self.tstate.borrow_mut()
         {
-            promotions.push(val);
+            promotions.extend_from_slice(&val.to_ne_bytes());
         }
         true
     }

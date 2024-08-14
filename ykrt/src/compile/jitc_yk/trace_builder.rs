@@ -65,9 +65,11 @@ pub(crate) struct TraceBuilder {
     // Current count of recursive calls to the function in which outlining was started. Will be 0
     // if `outline_target_blk` is None.
     recursion_count: usize,
-    // Values promoted to constants during runtime. This is only needed during trace building and
-    // can be thrown away after.
-    promotions: Box<[usize]>,
+    /// Values promoted to trace-level constants. Values are stored as native-endian sequences of
+    /// bytes: the AOT code must be examined to determine the size of a given a value at a given
+    /// point. Currently (and probably forever) only values that are a multiple of 8 bits are
+    /// supported.
+    promotions: Box<[u8]>,
     // The trace's current position in the promotions array.
     promote_idx: usize,
 }
@@ -82,7 +84,7 @@ impl TraceBuilder {
     fn new(
         ctr_id: u64,
         aot_mod: &'static Module,
-        promotions: Box<[usize]>,
+        promotions: Box<[u8]>,
     ) -> Result<Self, CompilationError> {
         Ok(Self {
             aot_mod,
@@ -1025,13 +1027,26 @@ impl TraceBuilder {
             }
             _ => panic!(),
         }
+        let ty = self.handle_type(self.aot_mod.type_(*tyidx))?;
         // Create the constant from the runtime value.
-        let pval = self.promotions[self.promote_idx];
-        self.promote_idx += 1;
-        let c = Const::Int(
-            self.handle_type(self.aot_mod.type_(*tyidx))?,
-            u64::try_from(pval).unwrap(),
-        );
+        let pval = match self.jit_mod.type_(ty) {
+            jit_ir::Ty::Void => unreachable!(),
+            jit_ir::Ty::Integer(width_bits) => {
+                let width_bytes = usize::try_from(*width_bits).unwrap() / 8;
+                let v = u64::from_ne_bytes(
+                    self.promotions[self.promote_idx..self.promote_idx + width_bytes]
+                        .try_into()
+                        .unwrap(),
+                );
+                self.promote_idx += width_bytes;
+                v
+            }
+            jit_ir::Ty::Ptr => todo!(),
+            jit_ir::Ty::Func(_) => todo!(),
+            jit_ir::Ty::Float(_) => todo!(),
+            jit_ir::Ty::Unimplemented(_) => todo!(),
+        };
+        let c = Const::Int(ty, u64::try_from(pval).unwrap());
         let cidx = self.jit_mod.insert_const(c)?;
         self.jit_mod.push(jit_ir::Inst::ProxyConst(cidx))?;
         self.link_iid_to_last_inst(bid, aot_inst_idx);
@@ -1241,7 +1256,7 @@ pub(super) fn build(
     aot_mod: &'static Module,
     ta_iter: Box<dyn AOTTraceIterator>,
     sti: Option<Arc<YkSideTraceInfo>>,
-    promotions: Box<[usize]>,
+    promotions: Box<[u8]>,
 ) -> Result<jit_ir::Module, CompilationError> {
     TraceBuilder::new(ctr_id, aot_mod, promotions)?.build(ta_iter, sti)
 }

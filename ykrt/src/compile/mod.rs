@@ -49,7 +49,7 @@ pub(crate) trait Compiler: Send + Sync {
         aottrace_iter: Box<dyn AOTTraceIterator>,
         sti: Option<Arc<dyn SideTraceInfo>>,
         hl: Arc<Mutex<HotLocation>>,
-        promotions: Box<[usize]>,
+        promotions: Box<[u8]>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
