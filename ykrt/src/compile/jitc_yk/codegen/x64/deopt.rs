@@ -179,8 +179,20 @@ pub(crate) extern "C" fn __yk_deopt(
                 },
                 VarLocation::ConstInt { bits: _, v } => v,
                 VarLocation::ConstFloat(f) => f.to_bits(),
-                VarLocation::Direct { .. } => panic!(),
-                VarLocation::Indirect { .. } => panic!(),
+                VarLocation::Direct { .. } => {
+                    // See comment below: this case never needs to do anything.
+                    varidx += 1;
+                    continue;
+                }
+                VarLocation::Indirect { frame_off, size } => {
+                    assert_eq!(size, 8);
+                    unsafe {
+                        (jitrbp as *const *const u64)
+                            .read()
+                            .byte_offset(isize::try_from(frame_off).unwrap())
+                            .read()
+                    }
+                }
             };
             varidx += 1;
 
