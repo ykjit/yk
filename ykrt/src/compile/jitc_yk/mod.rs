@@ -85,7 +85,7 @@ impl Compiler for JITCYk {
         aottrace_iter: Box<dyn AOTTraceIterator>,
         sti: Option<Arc<dyn SideTraceInfo>>,
         hl: Arc<Mutex<HotLocation>>,
-        promotions: Box<[usize]>,
+        promotions: Box<[u8]>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         // If either `unwrap` fails, there is no chance of the system working correctly.
         let aot_mod = &*AOT_MOD;

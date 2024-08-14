@@ -70,7 +70,11 @@ void yk_location_drop(YkLocation);
 // Promote a value to a constant. This is a generic macro that will
 // automatically select the right `yk_promote` function to call based on the
 // type of the value passed.
-#define yk_promote(X) _Generic((X), uintptr_t: __yk_promote_usize)(X)
+#define yk_promote(X) _Generic((X), \
+                               int: __yk_promote_c_int, \
+                               uintptr_t: __yk_promote_usize \
+                              )(X)
+int __yk_promote_c_int(int);
 // Rust defines `usize` to be layout compatible with `uintptr_t`.
 uintptr_t __yk_promote_usize(uintptr_t);
 

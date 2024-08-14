@@ -259,7 +259,7 @@ impl MT {
     ///     in the `hl_arc`.
     fn queue_compile_job(
         self: &Arc<Self>,
-        trace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
+        trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>),
         hl_arc: Arc<Mutex<HotLocation>>,
         sidetrace: Option<(GuardIdx, Arc<dyn CompiledTrace>)>,
     ) {
@@ -731,7 +731,7 @@ enum MTThreadState {
         /// What tracer is being used to record this trace? Needed for trace mapping.
         thread_tracer: Box<dyn TraceRecorder>,
         /// Records the content of data recorded via `yk_promote`.
-        promotions: Vec<usize>,
+        promotions: Vec<u8>,
     },
     /// This thread is executing a trace. Note that the `dyn CompiledTrace` serves two different purposes:
     ///
@@ -804,12 +804,28 @@ impl MTThread {
     /// If `false` is returned, the current trace is unable to record the promotion successfully
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
+    pub(crate) fn promote_i32(&self, val: i32) -> bool {
+        if let MTThreadState::Tracing {
+            ref mut promotions, ..
+        } = *self.tstate.borrow_mut()
+        {
+            promotions.extend_from_slice(&val.to_ne_bytes());
+        }
+        true
+    }
+
+    /// Records `val` as a value to be promoted. Returns `true` if either: no trace is being
+    /// recorded; or recording the promotion succeeded.
+    ///
+    /// If `false` is returned, the current trace is unable to record the promotion successfully
+    /// and further calls are probably pointless, though they will not cause the tracer to enter
+    /// undefined behaviour territory.
     pub(crate) fn promote_usize(&self, val: usize) -> bool {
         if let MTThreadState::Tracing {
             ref mut promotions, ..
         } = *self.tstate.borrow_mut()
         {
-            promotions.push(val);
+            promotions.extend_from_slice(&val.to_ne_bytes());
         }
         true
     }
