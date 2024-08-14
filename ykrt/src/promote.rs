@@ -9,7 +9,6 @@ use std::ffi::c_int;
 /// Promote a `usize` during trace recording.
 #[no_mangle]
 pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
-    println!("promote_c");
     MTThread::with(|mtt| {
         // We ignore the return value for `promote_usize` as we can't really cancel tracing from
         // this function.
