@@ -54,23 +54,23 @@ pub(crate) struct TraceBuilder {
     jit_mod: jit_ir::Module,
     /// Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstID, jit_ir::Operand>,
-    // BBlock containing the current control point (i.e. the control point that started this trace).
+    /// BBlock containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BBlockId>,
-    // Index of the first traceinput instruction.
+    /// Index of the first traceinput instruction.
     first_ti_idx: usize,
-    // Inlined calls.
+    /// Inlined calls.
     frames: Vec<Frame>,
-    // The block at which to stop outlining.
+    /// The block at which to stop outlining.
     outline_target_blk: Option<BBlockId>,
-    // Current count of recursive calls to the function in which outlining was started. Will be 0
-    // if `outline_target_blk` is None.
+    /// Current count of recursive calls to the function in which outlining was started. Will be 0
+    /// if `outline_target_blk` is None.
     recursion_count: usize,
     /// Values promoted to trace-level constants. Values are stored as native-endian sequences of
     /// bytes: the AOT code must be examined to determine the size of a given a value at a given
     /// point. Currently (and probably forever) only values that are a multiple of 8 bits are
     /// supported.
     promotions: Box<[u8]>,
-    // The trace's current position in the promotions array.
+    /// The trace's current position in the promotions array.
     promote_idx: usize,
 }
 
