@@ -1374,7 +1374,7 @@ impl<'a> Assemble<'a> {
         // Convert the guard info into deopt info and store it on the heap.
         let mut locs: Vec<VarLocation> = Vec::new();
         let gi = inst.guard_info(self.m);
-        for lidx in gi.lives() {
+        for (_, lidx) in gi.live_vars() {
             if let jit_ir::Inst::ProxyConst(c) = self.m.inst_all(*lidx) {
                 // The live variable is a constant (e.g. this can happen during inlining), so
                 // it doesn't have an allocation. We can just push the actual value instead
@@ -1399,7 +1399,7 @@ impl<'a> Assemble<'a> {
             fail_label,
             frames: gi.frames().to_vec(),
             lives: locs,
-            aotlives: gi.aotlives().to_vec(),
+            aotlives: gi.live_vars().iter().map(|(x, _)| x.clone()).collect(),
             callframes: gi.callframes().to_vec(),
             guard: Guard::new(),
         };
