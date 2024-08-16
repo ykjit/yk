@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const},
+    jit_ir::{self, Const, PackedOperand},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -497,8 +497,7 @@ impl TraceBuilder {
         // previous frames to store inside the guard.
         // Unwrap-safe as each frame at this point must have a safepoint associated with it.
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
-        let mut live_args = Vec::new(); // List of live JIT variables.
-        let mut live_aot = Vec::new();
+        let mut live_vars = Vec::new(); // (AOT var, JIT var) pairs
         let mut callframes = Vec::new();
         for frame in &self.frames {
             let safepoint = frame.safepoint.unwrap();
@@ -514,29 +513,28 @@ impl TraceBuilder {
 
             // Collect live variables.
             for op in safepoint.lives.iter() {
-                let op = match op {
+                match op {
                     aot_ir::Operand::LocalVariable(iid) => {
-                        live_aot.push(iid.clone());
-                        &self.local_map[iid]
+                        match self.local_map[iid] {
+                            jit_ir::Operand::Local(liidx) => live_vars.push((
+                                iid.clone(),
+                                PackedOperand::new(&jit_ir::Operand::Local(liidx)),
+                            )),
+                            jit_ir::Operand::Const(_) => {
+                                // Since we are forcing constants into `ProxyConst`s during inlining, this
+                                // case should never happen. If you see this panic, then look for a
+                                // safepoint live variable that maps to a constant and make the builder
+                                // insert a `ProxyConst` for it instead.
+                                panic!("constant encountered while building guardinfo!")
+                            }
+                        }
                     }
                     _ => panic!(), // IR malformed.
-                };
-                match op {
-                    jit_ir::Operand::Local(lidx) => {
-                        live_args.push(*lidx);
-                    }
-                    jit_ir::Operand::Const(_) => {
-                        // Since we are forcing constants into `ProxyConst`s during inlining, this
-                        // case should never happen. If you see this panic, then look for a
-                        // safepoint live variable that maps to a constant and make the builder
-                        // insert a `ProxyConst` for it instead.
-                        panic!("constant encountered while building guardinfo!")
-                    }
                 }
             }
         }
 
-        let gi = jit_ir::GuardInfo::new(smids, live_args, live_aot, callframes);
+        let gi = jit_ir::GuardInfo::new(smids, live_vars, callframes);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
 
         Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))

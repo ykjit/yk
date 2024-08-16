@@ -1202,43 +1202,39 @@ impl fmt::Display for DisplayableConst<'_> {
 pub(crate) struct GuardInfo {
     /// Stackmap IDs for the active call frames.
     frames: Vec<u64>,
-    /// Indices of live JIT variables.
-    lives: Vec<InstIdx>,
-    /// Live AOT values. Required for side-tracing.
-    aotlives: Vec<aot_ir::InstID>,
+    /// Live variables, mapping AOT vars to JIT [Operand]s.
+    live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
     // Inlined frames info.
     // FIXME With callframes, the frames and aotlives fields are redunant.
-    pub callframes: Vec<Frame>,
+    callframes: Vec<Frame>,
 }
 
 impl GuardInfo {
     pub(crate) fn new(
         frames: Vec<u64>,
-        lives: Vec<InstIdx>,
-        aotlives: Vec<aot_ir::InstID>,
+        live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
         callframes: Vec<Frame>,
     ) -> Self {
         Self {
             frames,
-            lives,
-            aotlives,
+            live_vars,
             callframes,
         }
     }
 
     /// Return the stackmap ids for the currently active call frames.
-    pub(crate) fn frames(&self) -> &Vec<u64> {
+    pub(crate) fn frames(&self) -> &[u64] {
         &self.frames
     }
 
-    /// Return the live JIT variables for this guard. Used to read live values from during deopt.
-    pub(crate) fn lives(&self) -> &Vec<InstIdx> {
-        &self.lives
+    /// Return the live variables for this guard.
+    pub(crate) fn live_vars(&self) -> &[(aot_ir::InstID, PackedOperand)] {
+        &self.live_vars
     }
 
-    /// Return the live AOT variables for this guard. Used to write live values to during deopt.
-    pub(crate) fn aotlives(&self) -> &Vec<aot_ir::InstID> {
-        &self.aotlives
+    /// Return the call frames.
+    pub(crate) fn callframes(&self) -> &[Frame] {
+        &self.callframes
     }
 }
 
@@ -1432,8 +1428,8 @@ impl Inst {
             }
             Inst::Guard(x @ GuardInst { cond, .. }) => {
                 cond.map_iidx(f);
-                for y in x.guard_info(m).lives() {
-                    f(*y);
+                for (_, pop) in x.guard_info(m).live_vars() {
+                    pop.map_iidx(f);
                 }
             }
             Inst::TraceLoopStart => (),
@@ -1577,9 +1573,9 @@ impl fmt::Display for DisplayableInst<'_> {
             ) => {
                 let live_vars = x
                     .guard_info(self.m)
-                    .lives()
+                    .live_vars()
                     .iter()
-                    .map(|y| format!("%{}", usize::from(*y)))
+                    .map(|(_, x)| x.unpack(self.m).display(self.m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(

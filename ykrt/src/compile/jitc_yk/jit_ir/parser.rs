@@ -5,12 +5,12 @@
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
 
 use super::super::{
-    aot_ir::{BinOp, FloatPredicate, Predicate},
+    aot_ir::{BinOp, FloatPredicate, InstID, Predicate},
     jit_ir::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst, FPExtInst,
         FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst,
-        Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst,
-        SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
+        Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PackedOperand, PtrAddInst,
+        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -191,16 +191,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                     &format!("No such local variable %{iidx}"),
                                 ));
                             }
-                            mlive_vars.push(iidx);
+                            mlive_vars.push((
+                                InstID::new(0.into(), 0.into(), 0.into()),
+                                PackedOperand::new(&Operand::Local(iidx)),
+                            ));
                         }
                         let gidx = self
                             .m
-                            .push_guardinfo(GuardInfo::new(
-                                Vec::new(),
-                                mlive_vars,
-                                Vec::new(),
-                                Vec::new(),
-                            ))
+                            .push_guardinfo(GuardInfo::new(Vec::new(), mlive_vars, Vec::new()))
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();
