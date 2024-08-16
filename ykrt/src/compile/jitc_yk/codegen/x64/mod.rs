@@ -1397,7 +1397,7 @@ impl<'a> Assemble<'a> {
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let deoptinfo = DeoptInfo {
             fail_label,
-            frames: gi.frames().clone(),
+            frames: gi.frames().to_vec(),
             lives: locs,
             aotlives: gi.aotlives().to_vec(),
             callframes: gi.callframes.clone(),

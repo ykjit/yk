@@ -1227,17 +1227,17 @@ impl GuardInfo {
     }
 
     /// Return the stackmap ids for the currently active call frames.
-    pub(crate) fn frames(&self) -> &Vec<u64> {
+    pub(crate) fn frames(&self) -> &[u64] {
         &self.frames
     }
 
     /// Return the live JIT variables for this guard. Used to read live values from during deopt.
-    pub(crate) fn lives(&self) -> &Vec<InstIdx> {
+    pub(crate) fn lives(&self) -> &[InstIdx] {
         &self.lives
     }
 
     /// Return the live AOT variables for this guard. Used to write live values to during deopt.
-    pub(crate) fn aotlives(&self) -> &Vec<aot_ir::InstID> {
+    pub(crate) fn aotlives(&self) -> &[aot_ir::InstID] {
         &self.aotlives
     }
 }
