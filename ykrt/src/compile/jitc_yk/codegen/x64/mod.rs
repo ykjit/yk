@@ -1400,7 +1400,7 @@ impl<'a> Assemble<'a> {
             frames: gi.frames().to_vec(),
             lives: locs,
             aotlives: gi.aotlives().to_vec(),
-            callframes: gi.callframes.clone(),
+            callframes: gi.callframes().to_vec(),
             guard: Guard::new(),
         };
         self.deoptinfo.push(deoptinfo);

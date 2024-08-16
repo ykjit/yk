@@ -1208,7 +1208,7 @@ pub(crate) struct GuardInfo {
     aotlives: Vec<aot_ir::InstID>,
     // Inlined frames info.
     // FIXME With callframes, the frames and aotlives fields are redunant.
-    pub callframes: Vec<Frame>,
+    callframes: Vec<Frame>,
 }
 
 impl GuardInfo {
@@ -1239,6 +1239,11 @@ impl GuardInfo {
     /// Return the live AOT variables for this guard. Used to write live values to during deopt.
     pub(crate) fn aotlives(&self) -> &[aot_ir::InstID] {
         &self.aotlives
+    }
+
+    /// Return the call frames.
+    pub(crate) fn callframes(&self) -> &[Frame] {
+        &self.callframes
     }
 }
 
