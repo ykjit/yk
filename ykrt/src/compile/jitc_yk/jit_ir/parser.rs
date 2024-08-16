@@ -9,8 +9,8 @@ use super::super::{
     jit_ir::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst, FPExtInst,
         FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst,
-        Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst,
-        SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
+        Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PackedOperand, PtrAddInst,
+        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -191,7 +191,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                     &format!("No such local variable %{iidx}"),
                                 ));
                             }
-                            mlive_vars.push((InstID::new(0.into(), 0.into(), 0.into()), iidx));
+                            mlive_vars.push((
+                                InstID::new(0.into(), 0.into(), 0.into()),
+                                PackedOperand::new(&Operand::Local(iidx)),
+                            ));
                         }
                         let gidx = self
                             .m

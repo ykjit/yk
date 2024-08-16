@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const},
+    jit_ir::{self, Const, PackedOperand},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -516,7 +516,10 @@ impl TraceBuilder {
                 match op {
                     aot_ir::Operand::LocalVariable(iid) => {
                         match self.local_map[iid] {
-                            jit_ir::Operand::Local(lidx) => live_vars.push((iid.clone(), lidx)),
+                            jit_ir::Operand::Local(liidx) => live_vars.push((
+                                iid.clone(),
+                                PackedOperand::new(&jit_ir::Operand::Local(liidx)),
+                            )),
                             jit_ir::Operand::Const(_) => {
                                 // Since we are forcing constants into `ProxyConst`s during inlining, this
                                 // case should never happen. If you see this panic, then look for a

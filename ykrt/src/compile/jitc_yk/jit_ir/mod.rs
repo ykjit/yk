@@ -1202,8 +1202,8 @@ impl fmt::Display for DisplayableConst<'_> {
 pub(crate) struct GuardInfo {
     /// Stackmap IDs for the active call frames.
     frames: Vec<u64>,
-    /// Live variables, mapping AOT vars to JIT vars.
-    live_vars: Vec<(aot_ir::InstID, InstIdx)>,
+    /// Live variables, mapping AOT vars to JIT [Operand]s.
+    live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
     // Inlined frames info.
     // FIXME With callframes, the frames and aotlives fields are redunant.
     callframes: Vec<Frame>,
@@ -1212,7 +1212,7 @@ pub(crate) struct GuardInfo {
 impl GuardInfo {
     pub(crate) fn new(
         frames: Vec<u64>,
-        live_vars: Vec<(aot_ir::InstID, InstIdx)>,
+        live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
         callframes: Vec<Frame>,
     ) -> Self {
         Self {
@@ -1228,7 +1228,7 @@ impl GuardInfo {
     }
 
     /// Return the live variables for this guard.
-    pub(crate) fn live_vars(&self) -> &[(aot_ir::InstID, InstIdx)] {
+    pub(crate) fn live_vars(&self) -> &[(aot_ir::InstID, PackedOperand)] {
         &self.live_vars
     }
 
@@ -1428,9 +1428,8 @@ impl Inst {
             }
             Inst::Guard(x @ GuardInst { cond, .. }) => {
                 cond.map_iidx(f);
-                // FIXME: This is mapping over unpacked operands!
-                for (_, iidx) in x.guard_info(m).live_vars() {
-                    f(*iidx);
+                for (_, pop) in x.guard_info(m).live_vars() {
+                    pop.map_iidx(f);
                 }
             }
             Inst::TraceLoopStart => (),
@@ -1576,7 +1575,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     .guard_info(self.m)
                     .live_vars()
                     .iter()
-                    .map(|(_, x)| format!("%{}", usize::from(*x)))
+                    .map(|(_, x)| x.unpack(self.m).display(self.m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(

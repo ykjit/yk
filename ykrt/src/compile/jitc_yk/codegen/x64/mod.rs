@@ -1374,22 +1374,25 @@ impl<'a> Assemble<'a> {
         // Convert the guard info into deopt info and store it on the heap.
         let mut locs: Vec<VarLocation> = Vec::new();
         let gi = inst.guard_info(self.m);
-        for (_, lidx) in gi.live_vars() {
-            if let jit_ir::Inst::ProxyConst(c) = self.m.inst_all(*lidx) {
-                // The live variable is a constant (e.g. this can happen during inlining), so
-                // it doesn't have an allocation. We can just push the actual value instead
-                // which will be written as is during deoptimisation.
-                match self.m.const_(*c) {
-                    Const::Int(tyidx, c) => {
-                        let Ty::Integer(bits) = self.m.type_(*tyidx) else {
-                            panic!()
-                        };
-                        locs.push(VarLocation::ConstInt { bits: *bits, v: *c })
-                    }
-                    _ => todo!(),
+        for (_, pop) in gi.live_vars() {
+            match pop.unpack(self.m) {
+                Operand::Local(x) => {
+                    locs.push(self.ra.var_location(x));
                 }
-            } else {
-                locs.push(self.ra.var_location(*lidx));
+                Operand::Const(x) => {
+                    // The live variable is a constant (e.g. this can happen during inlining), so
+                    // it doesn't have an allocation. We can just push the actual value instead
+                    // which will be written as is during deoptimisation.
+                    match self.m.const_(x) {
+                        Const::Int(tyidx, c) => {
+                            let Ty::Integer(bits) = self.m.type_(*tyidx) else {
+                                panic!()
+                            };
+                            locs.push(VarLocation::ConstInt { bits: *bits, v: *c })
+                        }
+                        _ => todo!(),
+                    }
+                }
             }
         }
 
