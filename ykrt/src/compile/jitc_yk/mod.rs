@@ -28,12 +28,12 @@ pub mod jit_ir;
 mod opt;
 mod trace_builder;
 
-/// Should we turn trace optimisations on or off? Currently defaults to "off".
+/// Should we turn trace optimisations on or off? Defaults to "on".
 static YKD_OPT: LazyLock<bool> = LazyLock::new(|| {
     let x = env::var("YKD_OPT");
     match x.as_ref().map(|x| x.as_str()) {
-        Ok("1" | "2" | "3") => true,
-        Ok(_) | Err(_) => false,
+        Ok("0") => false,
+        Ok(_) | Err(_) => true,
     }
 });
 
