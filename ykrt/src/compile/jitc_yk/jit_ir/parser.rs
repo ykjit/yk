@@ -410,6 +410,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::TraceLoopStart => {
                         self.m.push(Inst::TraceLoopStart).unwrap();
                     }
+                    ASTInst::TraceLoopJump => {
+                        self.m.push(Inst::TraceLoopJump).unwrap();
+                    }
                     ASTInst::Trunc {
                         assign,
                         type_,
@@ -779,6 +782,7 @@ enum ASTInst {
     },
     BlackBox(ASTOperand),
     TraceLoopStart,
+    TraceLoopJump,
     Trunc {
         assign: Span,
         type_: ASTType,

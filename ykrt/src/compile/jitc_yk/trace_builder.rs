@@ -121,6 +121,9 @@ impl TraceBuilder {
         blk: &'static aot_ir::BBlock,
         is_sidetrace: bool,
     ) -> Result<(), CompilationError> {
+        if is_sidetrace {
+            todo!();
+        }
         // Find the control point call and extract the trace inputs struct from its operands.
         //
         // FIXME: Stash the location at IR lowering time, instead of searching at runtime.
@@ -130,7 +133,6 @@ impl TraceBuilder {
             // directly reference registers or stack slots in the parent frame and thus don't
             // necessarily result in machine code during codegen.
             if inst.is_control_point(self.aot_mod) {
-                // FIXME Safepoint id should be an integer not Operand.
                 let safepoint = inst.safepoint().unwrap();
                 let (rec, _) = AOT_STACKMAPS
                     .as_ref()
@@ -156,16 +158,13 @@ impl TraceBuilder {
                         aot_op.to_inst_id(),
                         jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
                     );
+                    self.jit_mod
+                        .push_loop_start_var(jit_ir::Operand::Local(self.jit_mod.last_inst_idx()));
                 }
                 break;
             }
         }
-
-        // Mark this location as the start of the trace loop.
-        if !is_sidetrace {
-            self.jit_mod.push(jit_ir::Inst::TraceLoopStart)?;
-        }
-
+        self.jit_mod.push(jit_ir::Inst::TraceLoopStart)?;
         Ok(())
     }
 
@@ -1240,13 +1239,12 @@ impl TraceBuilder {
             }
         }
 
+        let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
+        let cpcall = blk.insts.iter().rev().nth(1).unwrap();
+        debug_assert!(cpcall.is_control_point(self.aot_mod));
         // If this is a side trace insert a guard that always fails so we can safely return to the
         // beginning of the control point where this trace ended.
         if sti.is_some() {
-            let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
-            let cpcall = blk.insts.iter().rev().nth(1).unwrap();
-            debug_assert!(cpcall.is_control_point(self.aot_mod));
-
             // Make a 0 constant.
             let jitconst = jit_ir::Const::Int(self.jit_mod.int1_tyidx(), 0);
             let constop = jit_ir::Operand::Const(self.jit_mod.insert_const(jitconst)?);
@@ -1254,6 +1252,15 @@ impl TraceBuilder {
             // Create a guard that will always fail.
             let guard = self.create_guard(&constop, true, cpcall.safepoint().unwrap())?;
             self.jit_mod.push(guard.into())?;
+        } else {
+            // For normal traces insert a jump back to the loop start.
+            let safepoint = cpcall.safepoint().unwrap();
+            for idx in 0..safepoint.lives.len() {
+                let aot_op = &safepoint.lives[idx];
+                let jit_op = &self.local_map[&aot_op.to_inst_id()];
+                self.jit_mod.push_loop_jump_var(jit_op.clone());
+            }
+            self.jit_mod.push(jit_ir::Inst::TraceLoopJump)?;
         }
 
         Ok(self.jit_mod)

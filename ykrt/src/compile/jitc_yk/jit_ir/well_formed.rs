@@ -28,6 +28,10 @@ use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
+        if self.loop_start_vars.len() != self.loop_jump_vars.len() {
+            panic!("Loop start/end variables have different lengths.");
+        }
+
         let mut last_inst = None;
         for (iidx, inst) in self.iter_skipping_insts() {
             inst.map_packed_operand_locals(self, &mut |x| {

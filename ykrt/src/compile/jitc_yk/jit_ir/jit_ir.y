@@ -138,6 +138,7 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
       Ok(ASTInst::Proxy{assign: $1?.span(), val: $5? })
     }
   | "TLOOP_START" { Ok(ASTInst::TraceLoopStart) }
+  | "TLOOP_JUMP" { Ok(ASTInst::TraceLoopJump) }
   ;
 
 Operand -> Result<ASTOperand, Box<dyn Error>>:
