@@ -2211,7 +2211,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                 tloop_jump
+                 tloop_jump []
                 ",
             "
                 ...
@@ -2227,8 +2227,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                tloop_start
-                tloop_jump
+                tloop_start []
+                tloop_jump []
             ",
             "
                 ...
@@ -2245,18 +2245,18 @@ mod tests {
             "
               entry:
                 %0: i8 = load_ti 0
-                tloop_start
+                tloop_start [%0]
                 %2: i8 = add %0, %0
-                tloop_jump
+                tloop_jump [%2]
             ",
             "
                 ...
                 ; %0: i8 = load_ti ...
                 ...
-                ; tloop_start []:
+                ; tloop_start [%0]:
                 ; %2: i8 = add %0, %0
                 ...
-                ; tloop_jump []:
+                ; tloop_jump [%2]:
                 ...
                 ...: jmp ...
             ",

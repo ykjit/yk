@@ -137,8 +137,8 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" Operand {
       Ok(ASTInst::Proxy{assign: $1?.span(), val: $5? })
     }
-  | "TLOOP_START" { Ok(ASTInst::TraceLoopStart) }
-  | "TLOOP_JUMP" { Ok(ASTInst::TraceLoopJump) }
+  | "TLOOP_START" "[" OperandsList "]" { Ok(ASTInst::TraceLoopStart($3?)) }
+  | "TLOOP_JUMP"  "[" OperandsList "]" { Ok(ASTInst::TraceLoopJump($3?)) }
   ;
 
 Operand -> Result<ASTOperand, Box<dyn Error>>:
