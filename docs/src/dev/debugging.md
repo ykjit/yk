@@ -4,15 +4,11 @@
 
 Trace optimisation can make it difficult to understand why a yk interpreter has
 behaved in the way it does. It is worth trying to run your code with the
-optimiser turned off/down. You can do this with the `YKD_OPT` environment
+optimiser turned off. You can do this with the `YKD_OPT` environment
 variable, which takes the following values:
 
-  * 1, 2, 3: increasing levels of optimisation. [Currently these all have the
-    same effect, but in the future this might change.]
+  * 1: turn the optimiser on. Default if not otherwise specified.
   * 0: turn the optimiser off.
-
-**NOTE**: Currently the trace optimiser is not enabled by default. This will
-change in the near future.
 
 
 ## Debugging JITted code
