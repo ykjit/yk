@@ -1,4 +1,3 @@
-// ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=4

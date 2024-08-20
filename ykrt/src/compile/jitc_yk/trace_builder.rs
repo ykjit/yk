@@ -1160,6 +1160,7 @@ impl TraceBuilder {
         }
 
         // FIXME: this section of code needs to be refactored.
+        #[cfg(tracer_hwt)]
         let mut last_blk_is_return = false;
         let mut prev_bid = None;
         while let Some(b) = trace_iter.next() {
@@ -1194,6 +1195,7 @@ impl TraceBuilder {
                         }
                     } else {
                         // We are not outlining. Process blocks normally.
+                        #[cfg(tracer_hwt)]
                         if last_blk_is_return {
                             // If the last block had a return terminator, we are returning
                             // from a call, which means the HWT will have recorded an
@@ -1204,6 +1206,7 @@ impl TraceBuilder {
                             prev_bid = Some(bid);
                             continue;
                         }
+                        #[cfg(tracer_hwt)]
                         if self.aot_mod.bblock(&bid).is_return() {
                             last_blk_is_return = true;
                         }
