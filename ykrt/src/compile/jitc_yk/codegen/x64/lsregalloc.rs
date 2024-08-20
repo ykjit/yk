@@ -440,38 +440,6 @@ impl<'a> LSRegAlloc<'a> {
         out.map(|x| x.unwrap())
     }
 
-    /// Return a snapshot of the general purpose registers. Intended only for use at the end of the
-    /// trace header. A temporary hack (at least in its current state).
-    pub(crate) fn snapshot_gp_reg_states_hack(&self) -> [RegState; GP_REGS_LEN] {
-        self.gp_reg_states
-    }
-
-    /// Restore the state of the general purpose registers at the point of a jump at the end of a
-    /// trace. A temporary hack (at least in its current state).
-    pub(crate) fn restore_gp_reg_states_hack(
-        &mut self,
-        asm: &mut Assembler,
-        reg_states: [RegState; GP_REGS_LEN],
-    ) {
-        for (reg_i, x) in reg_states.into_iter().enumerate() {
-            match x {
-                RegState::Reserved => (),
-                RegState::Empty => {
-                    let reg = GP_REGS[reg_i];
-                    self.gp_regset.unset(reg);
-                    self.gp_reg_states[reg_i] = RegState::Empty;
-                }
-                RegState::FromConst(_) => todo!(),
-                RegState::FromInst(iidx) => {
-                    let reg = GP_REGS[reg_i];
-                    self.force_gp_unspill(asm, iidx, reg);
-                    self.gp_regset.set(reg);
-                    self.gp_reg_states[reg_i] = RegState::FromInst(iidx);
-                }
-            }
-        }
-    }
-
     /// If the value stored in `reg` is not already spilled to the heap, then spill it. Note that
     /// this function neither writes to the register or changes the register's [RegState].
     fn spill_gp_if_not_already(&mut self, asm: &mut Assembler, reg: Rq) {
@@ -860,38 +828,6 @@ impl<'a> LSRegAlloc<'a> {
         }
 
         out.map(|x| x.unwrap())
-    }
-
-    /// Return a snapshot of the general purpose registers. Intended only for use at the end of the
-    /// trace header. A temporary hack (at least in its current state).
-    pub(crate) fn snapshot_fp_reg_states_hack(&self) -> [RegState; FP_REGS_LEN] {
-        self.fp_reg_states
-    }
-
-    /// Restore the state of the general purpose registers at the point of a jump at the end of a
-    /// trace. A temporary hack (at least in its current state).
-    pub(crate) fn restore_fp_reg_states_hack(
-        &mut self,
-        asm: &mut Assembler,
-        reg_states: [RegState; FP_REGS_LEN],
-    ) {
-        for (reg_i, x) in reg_states.into_iter().enumerate() {
-            match x {
-                RegState::Reserved => (),
-                RegState::Empty => {
-                    let reg = FP_REGS[reg_i];
-                    self.fp_regset.unset(reg);
-                    self.fp_reg_states[reg_i] = RegState::Empty;
-                }
-                RegState::FromConst(_) => todo!(),
-                RegState::FromInst(iidx) => {
-                    let reg = FP_REGS[reg_i];
-                    self.force_fp_unspill(asm, iidx, reg);
-                    self.fp_regset.set(reg);
-                    self.fp_reg_states[reg_i] = RegState::FromInst(iidx);
-                }
-            }
-        }
     }
 
     /// If the value stored in `reg` is not already spilled to the heap, then spill it. Note that

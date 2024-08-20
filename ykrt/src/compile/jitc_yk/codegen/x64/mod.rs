@@ -135,8 +135,8 @@ impl X64CodeGen {
 struct Assemble<'a> {
     m: &'a jit_ir::Module,
     ra: LSRegAlloc<'a>,
-    tloop_gp_reg_states: Option<[lsregalloc::RegState; 16]>,
-    tloop_fp_reg_states: Option<[lsregalloc::RegState; 16]>,
+    /// The locations of the live variables at the beginning of the loop.
+    loop_start_locs: Vec<VarLocation>,
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
     deoptinfo: Vec<DeoptInfo>,
@@ -177,8 +177,7 @@ impl<'a> Assemble<'a> {
             m,
             ra: LSRegAlloc::new(m, inst_vals_alive_until),
             asm,
-            tloop_gp_reg_states: None,
-            tloop_fp_reg_states: None,
+            loop_start_locs: Vec::new(),
             deoptinfo: Vec::new(),
             comments: Cell::new(IndexMap::new()),
         }))
@@ -194,38 +193,6 @@ impl<'a> Assemble<'a> {
         for (iidx, inst) in self.m.iter_skipping_insts() {
             self.ra.expire_regs(iidx);
             self.cg_inst(iidx, inst)?;
-        }
-
-        // Loop the JITted code if the `tloop_start` label is present.
-        let label = StaticLabel::global("tloop_start");
-        match self.asm.labels().resolve_static(&label) {
-            Ok(_) => {
-                // Found the label, emit a jump to it.
-                self.comment(self.asm.offset(), "tloop_backedge:".to_owned());
-                self.ra
-                    .restore_gp_reg_states_hack(&mut self.asm, self.tloop_gp_reg_states.unwrap());
-                self.ra
-                    .restore_fp_reg_states_hack(&mut self.asm, self.tloop_fp_reg_states.unwrap());
-                dynasm!(self.asm; jmp ->tloop_start);
-            }
-            Err(DynasmError::UnknownLabel(_)) => {
-                // Label not found. This is OK for unit testing, where we sometimes construct
-                // traces that don't loop.
-                #[cfg(test)]
-                {
-                    self.comment(self.asm.offset(), "Unterminated trace".to_owned());
-                    dynasm!(self.asm; ud2);
-                }
-                // FIXME: Side traces don't currently loop back to the parent trace and deopt into
-                // the main interpreter instead. Once we implement proper looping, this check can
-                // be reinstated.
-                // #[cfg(not(test))]
-                // panic!("unterminated trace in non-unit-test");
-            }
-            Err(e) => {
-                // Any other error suggests something has gone quite wrong. Just crash.
-                panic!("{}", e.to_string())
-            }
         }
 
         if !self.deoptinfo.is_empty() {
@@ -341,6 +308,7 @@ impl<'a> Assemble<'a> {
             jit_ir::Inst::ICmp(i) => self.cg_icmp(iidx, i),
             jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
+            jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
             jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(iidx, i),
             jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
@@ -1173,10 +1141,123 @@ impl<'a> Assemble<'a> {
         }
     }
 
+    fn cg_traceloopjump(&mut self) {
+        // Loop the JITted code if the `tloop_start` label is present. If not we are dealing with
+        // IR created by a test or a side-trace (the latter likely needs something similar to loop
+        // jumps, but instead of jumping within the same trace we want it to jump to the outer-most
+        // parent trace).
+        let label = StaticLabel::global("tloop_start");
+        match self.asm.labels().resolve_static(&label) {
+            Ok(_) => {
+                // Found the label, emit a jump to it.
+                for (i, op) in self.m.loop_jump_vars().iter().enumerate() {
+                    let (iidx, src) = match op {
+                        Operand::Local(iidx) => (*iidx, self.ra.var_location(*iidx)),
+                        _ => panic!(),
+                    };
+                    let dst = self.loop_start_locs[i];
+                    if dst == src {
+                        // The value is already in the correct place, so there's nothing we need to
+                        // do.
+                        continue;
+                    }
+                    match dst {
+                        VarLocation::Stack { .. } => {
+                            todo!()
+                        }
+                        VarLocation::Direct { .. } => {
+                            // Direct locations are read-only, so it doesn't make sense to write to
+                            // them. This is likely a case where the direct value has been moved
+                            // somewhere else (register/normal stack) so dst and src no longer
+                            // match. But since the value can't change we can safely ignore this.
+                        }
+                        VarLocation::Indirect { frame_off, size } => {
+                            // FIXME: This isn't very fast as we are pushing and popping rbp
+                            // instead of asking the register allocator for a free variable.
+                            // However, we are going to soon execute the trace on the same frame as
+                            // its parent, which will turn `VarLocation::Indirect` into
+                            // `VarLocation::Stack`.
+                            match src {
+                                VarLocation::Register(reg_alloc::Register::GP(reg)) => match size {
+                                    8 => dynasm!(self.asm;
+                                        push rbp;
+                                        mov rbp, [rbp];
+                                        mov QWORD [rbp + frame_off], Rq(reg.code());
+                                        pop rbp
+                                    ),
+                                    _ => todo!(),
+                                },
+                                VarLocation::Stack {
+                                    frame_off: off,
+                                    size,
+                                } => match size {
+                                    8 => dynasm!(self.asm;
+                                        push rax;
+                                        mov rax, QWORD [rbp - i32::try_from(off).unwrap()];
+                                        push rbp;
+                                        mov rbp, [rbp];
+                                        mov QWORD [rbp - frame_off], rax;
+                                        pop rbp;
+                                        pop rax
+                                    ),
+                                    _ => todo!(),
+                                },
+                                _ => todo!(),
+                            }
+                        }
+                        VarLocation::Register(reg) => {
+                            // Copy the value into a register. We can ask the register allocator to
+                            // this for us, but telling it to load the source operand into the
+                            // target register.
+                            match reg {
+                                reg_alloc::Register::GP(r) => {
+                                    let [_] = self.ra.get_gp_regs(
+                                        &mut self.asm,
+                                        iidx,
+                                        [RegConstraint::InputIntoReg(op.clone(), r)],
+                                    );
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        _ => todo!(),
+                    }
+                }
+                dynasm!(self.asm; jmp ->tloop_start);
+            }
+            Err(DynasmError::UnknownLabel(_)) => {
+                // Label not found. This is OK for unit testing, where we sometimes construct
+                // traces that don't loop.
+                #[cfg(test)]
+                {
+                    self.comment(self.asm.offset(), "Unterminated trace".to_owned());
+                    dynasm!(self.asm; ud2);
+                }
+                // FIXME: Side traces don't currently loop back to the parent trace and deopt into
+                // the main interpreter instead. Once we implement proper looping, this check can
+                // be reinstated.
+                // #[cfg(not(test))]
+                // panic!("unterminated trace in non-unit-test");
+            }
+            Err(e) => {
+                // Any other error suggests something has gone quite wrong. Just crash.
+                panic!("{}", e.to_string())
+            }
+        }
+    }
+
     fn cg_traceloopstart(&mut self) {
+        debug_assert_eq!(self.loop_start_locs.len(), 0);
+        // Remember the locations of the live variables at the beginning of the trace. When we loop
+        // back around here we need to write the live variables back into these same locations.
+        for var in self.m.loop_start_vars() {
+            let loc = match var {
+                Operand::Local(iidx) => self.ra.var_location(*iidx),
+                _ => panic!(),
+            };
+            self.loop_start_locs.push(loc);
+        }
         // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
-        self.tloop_gp_reg_states = Some(self.ra.snapshot_gp_reg_states_hack());
-        self.tloop_fp_reg_states = Some(self.ra.snapshot_fp_reg_states_hack());
         dynasm!(self.asm; ->tloop_start:);
     }
 
@@ -2130,10 +2211,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
+                 tloop_jump []
                 ",
             "
                 ...
-                ; Unterminated trace
                 {{_}} {{_}}: ud2
                 ",
         );
@@ -2146,12 +2227,13 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                tloop_start
+                tloop_start []
+                tloop_jump []
             ",
             "
                 ...
-                ; tloop_start:
-                ; tloop_backedge:
+                ; tloop_start []:
+                ; tloop_jump []:
                 {{_}} {{_}}: jmp {{target}}
             ",
         );
@@ -2163,17 +2245,18 @@ mod tests {
             "
               entry:
                 %0: i8 = load_ti 0
-                tloop_start
+                tloop_start [%0]
                 %2: i8 = add %0, %0
+                tloop_jump [%2]
             ",
             "
                 ...
                 ; %0: i8 = load_ti ...
                 ...
-                ; tloop_start:
+                ; tloop_start [%0]:
                 ; %2: i8 = add %0, %0
                 ...
-                ; tloop_backedge:
+                ; tloop_jump [%2]:
                 ...
                 ...: jmp ...
             ",
@@ -2254,7 +2337,6 @@ mod tests {
                 {{_}} {{_}}: movzx rax, r.8.x
                 {{_}} {{_}}: movsx ax, al
                 {{_}} {{_}}: idiv r.8.y
-                ; unterminated trace
                 ...
             ",
         );

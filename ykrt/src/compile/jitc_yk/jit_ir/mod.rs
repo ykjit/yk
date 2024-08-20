@@ -133,6 +133,10 @@ pub(crate) struct Module {
     guard_info: Vec<GuardInfo>,
     /// Indirect calls.
     indirect_calls: Vec<IndirectCallInst>,
+    /// Live variables at the beginning of the loop.
+    loop_start_vars: Vec<Operand>,
+    /// Live variables at the end of the loop.
+    loop_jump_vars: Vec<Operand>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
@@ -223,6 +227,8 @@ impl Module {
             global_decls: IndexSet::new(),
             guard_info: Vec::new(),
             indirect_calls: Vec::new(),
+            loop_start_vars: Vec::new(),
+            loop_jump_vars: Vec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
         })
@@ -520,6 +526,22 @@ impl Module {
         info: GuardInfo,
     ) -> Result<GuardInfoIdx, CompilationError> {
         GuardInfoIdx::try_from(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
+    }
+
+    pub(crate) fn loop_start_vars(&self) -> &[Operand] {
+        &self.loop_start_vars
+    }
+
+    pub(crate) fn push_loop_start_var(&mut self, op: Operand) {
+        self.loop_start_vars.push(op);
+    }
+
+    pub(crate) fn loop_jump_vars(&self) -> &[Operand] {
+        &self.loop_jump_vars
+    }
+
+    pub(crate) fn push_loop_jump_var(&mut self, op: Operand) {
+        self.loop_jump_vars.push(op);
     }
 }
 
@@ -1274,6 +1296,7 @@ pub(crate) enum Inst {
     Guard(GuardInst),
     /// Marks the place to loop back to at the end of the JITted code.
     TraceLoopStart,
+    TraceLoopJump,
 
     SExt(SExtInst),
     ZeroExtend(ZeroExtendInst),
@@ -1323,6 +1346,7 @@ impl Inst {
             Self::ICmp(_) => m.int1_tyidx(),
             Self::Guard(..) => m.void_tyidx(),
             Self::TraceLoopStart => m.void_tyidx(),
+            Self::TraceLoopJump => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
             Self::ZeroExtend(si) => si.dest_tyidx(),
             Self::Trunc(t) => t.dest_tyidx(),
@@ -1357,7 +1381,8 @@ impl Inst {
             Inst::Store(_) => true,
             Inst::ICmp(_) => false,
             Inst::Guard(_) => true,
-            Inst::TraceLoopStart => true, // FIXME: this shouldn't be an instruction.
+            Inst::TraceLoopStart => true,
+            Inst::TraceLoopJump => true,
             Inst::SExt(_) => false,
             Inst::ZeroExtend(_) => false,
             Inst::Trunc(_) => false,
@@ -1432,7 +1457,22 @@ impl Inst {
                     pop.map_iidx(f);
                 }
             }
-            Inst::TraceLoopStart => (),
+            Inst::TraceLoopStart => {
+                for val in &m.loop_start_vars {
+                    match val {
+                        Operand::Local(iidx) => f(*iidx),
+                        _ => panic!(),
+                    }
+                }
+            }
+            Inst::TraceLoopJump => {
+                for val in &m.loop_jump_vars {
+                    match val {
+                        Operand::Local(iidx) => f(*iidx),
+                        _ => panic!(),
+                    }
+                }
+            }
             Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
             Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
@@ -1594,7 +1634,25 @@ impl fmt::Display for DisplayableInst<'_> {
             }
             Inst::TraceLoopStart => {
                 // Just marks a location, so we format it to look like a label.
-                write!(f, "tloop_start:")
+                write!(f, "tloop_start [")?;
+                for var in &self.m.loop_start_vars {
+                    write!(f, "{}", var.display(self.m))?;
+                    if var != self.m.loop_start_vars.last().unwrap() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]:")
+            }
+            Inst::TraceLoopJump => {
+                // Just marks a location, so we format it to look like a label.
+                write!(f, "tloop_jump [")?;
+                for var in &self.m.loop_jump_vars {
+                    write!(f, "{}", var.display(self.m))?;
+                    if var != self.m.loop_jump_vars.last().unwrap() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]:")
             }
             Inst::SExt(i) => {
                 write!(

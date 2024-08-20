@@ -407,8 +407,19 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let inst = BlackBoxInst::new(self.process_operand(op)?);
                         self.m.push(inst.into()).unwrap();
                     }
-                    ASTInst::TraceLoopStart => {
+                    ASTInst::TraceLoopStart(ops) => {
+                        for op in ops {
+                            let op = self.process_operand(op)?;
+                            self.m.loop_start_vars.push(op);
+                        }
                         self.m.push(Inst::TraceLoopStart).unwrap();
+                    }
+                    ASTInst::TraceLoopJump(ops) => {
+                        for op in ops {
+                            let op = self.process_operand(op)?;
+                            self.m.loop_jump_vars.push(op);
+                        }
+                        self.m.push(Inst::TraceLoopJump).unwrap();
                     }
                     ASTInst::Trunc {
                         assign,
@@ -778,7 +789,8 @@ enum ASTInst {
         volatile: bool,
     },
     BlackBox(ASTOperand),
-    TraceLoopStart,
+    TraceLoopStart(Vec<ASTOperand>),
+    TraceLoopJump(Vec<ASTOperand>),
     Trunc {
         assign: Span,
         type_: ASTType,
@@ -889,7 +901,7 @@ mod tests {
               %1: i32 = trunc %0
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
-              tloop_start
+              tloop_start [%0, %5]
               guard true, %4, [%0, %1, %2]
               call @f1()
               %6: i32 = call @f2(%5)
@@ -937,6 +949,7 @@ mod tests {
               %51: double = fadd 1double, 2.345double
               %52: float = fadd 1float, 2.345float
               %53: i64 = icall<ft1> %9(%5, %7, %0)
+              tloop_jump [%12, %6]
         ",
         );
     }
