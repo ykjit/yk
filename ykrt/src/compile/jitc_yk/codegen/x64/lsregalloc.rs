@@ -521,11 +521,21 @@ impl<'a> LSRegAlloc<'a> {
                 x => todo!("{x}"),
             },
             SpillState::Indirect(off) => {
-                assert_eq!(size, 8);
-                dynasm!(asm
-                    ; mov Rq(reg.code()), [rbp]
-                    ; mov Rq(reg.code()), [Rq(reg.code()) + off]
-                );
+                match size {
+                    8 => {
+                        dynasm!(asm
+                            ; mov Rq(reg.code()), [rbp]
+                            ; mov Rq(reg.code()), [Rq(reg.code()) + off]
+                        );
+                    }
+                    4 => {
+                        dynasm!(asm
+                            ; mov Rq(reg.code()), [rbp]
+                            ; mov Rd(reg.code()), [Rq(reg.code()) + off]
+                        );
+                    }
+                    _ => todo!(),
+                }
                 self.gp_regset.set(reg);
             }
         }
@@ -908,7 +918,18 @@ impl<'a> LSRegAlloc<'a> {
                 self.fp_regset.set(reg);
             }
             SpillState::Direct(_off) => todo!(),
-            SpillState::Indirect(_off) => todo!(),
+            SpillState::Indirect(off) => {
+                let tmp_reg = Rq::RAX;
+                match size {
+                    4 => dynasm!(asm
+                        ; push Rq(tmp_reg.code())
+                        ; mov Rq(tmp_reg.code()), [rbp]
+                        ; movss Rx(reg.code()), [Rq(tmp_reg.code()) + off]
+                        ; pop Rq(tmp_reg.code())
+                    ),
+                    _ => todo!("{}", size),
+                };
+            }
         }
     }
 

@@ -14,6 +14,18 @@ use yksmp::Location as SMLocation;
 
 use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_SIZE};
 
+/// Registers (in DWARF notation) that we want to restore during deopt. Excludes `rsp` (7) and
+/// `return register` (16), which we do not care about.
+const RECOVER_REG: [usize; 31] = [
+    0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+    28, 29, 30, 31, 32,
+];
+
+/// The number of DWARF registers required to cover the general purpose and float registers,
+/// including those omitted from `RECOVER_REG` above (register 32 is XMM15 and numbering starts
+/// from zero). This is used to allocate arrays whose indices need to be the DWARF register number.
+const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
+
 /// Deoptimise back to the interpreter. This function is called from a failing guard (see
 /// `x86_64/mod.rs`). The arguments are: `frameaddr` is the RBP value for the caller of the JIT
 /// function frame; `gidx` the ID of the failing guard; `jitrbp` is the JIT function frame's RBP;
@@ -25,6 +37,7 @@ pub(crate) extern "C" fn __yk_deopt(
     gidx: u64,
     jitrbp: *const c_void,
     gp_regs: &[u64; 16],
+    fp_regs: &[u64; 16],
 ) -> ! {
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
@@ -86,7 +99,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // Calculate space required for the new stack.
     // Add space for live register values which we'll be adding at the end.
-    let mut memsize = 15 * REG64_SIZE;
+    let mut memsize = RECOVER_REG.len() * REG64_SIZE;
     // Calculate amount of space we need to allocate for each stack frame.
     for (i, iframe) in info.inlined_frames.iter().enumerate() {
         let (rec, _) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
@@ -112,7 +125,7 @@ pub(crate) extern "C" fn __yk_deopt(
     let mut lastframesize = 0;
 
     // Live register values that we need to write back into AOT registers.
-    let mut registers = [0; 16];
+    let mut registers = [0; REGISTER_NUM];
     let mut varidx = 0;
     for (i, iframe) in info.inlined_frames.iter().enumerate() {
         let (rec, pinfo) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
@@ -175,7 +188,7 @@ pub(crate) extern "C" fn __yk_deopt(
                 }
                 VarLocation::Register(x) => match x {
                     Register::GP(x) => gp_regs[usize::from(x.code())],
-                    Register::FP(_) => todo!(),
+                    Register::FP(x) => fp_regs[usize::from(x.code())],
                 },
                 VarLocation::ConstInt { bits: _, v } => v,
                 VarLocation::ConstFloat(f) => f.to_bits(),
@@ -184,15 +197,27 @@ pub(crate) extern "C" fn __yk_deopt(
                     varidx += 1;
                     continue;
                 }
-                VarLocation::Indirect { frame_off, size } => {
-                    assert_eq!(size, 8);
-                    unsafe {
+                VarLocation::Indirect { frame_off, size } => match size {
+                    8 => unsafe {
                         (jitrbp as *const *const u64)
                             .read()
                             .byte_offset(isize::try_from(frame_off).unwrap())
                             .read()
-                    }
-                }
+                    },
+                    4 => unsafe {
+                        (jitrbp as *const *const u32)
+                            .read()
+                            .byte_offset(isize::try_from(frame_off).unwrap())
+                            .read() as u64
+                    },
+                    1 => unsafe {
+                        (jitrbp as *const *const u8)
+                            .read()
+                            .byte_offset(isize::try_from(frame_off).unwrap())
+                            .read() as u64
+                    },
+                    _ => todo!("size={}", size),
+                },
             };
             varidx += 1;
 
@@ -202,16 +227,12 @@ pub(crate) extern "C" fn __yk_deopt(
                 todo!("Deal with multi register locations");
             };
             match aotloc {
-                SMLocation::Register(reg, _size, off, extra) => {
+                SMLocation::Register(reg, size, off, extra) => {
                     registers[usize::from(*reg)] = jitval;
                     if *extra != 0 {
                         // The stackmap has recorded an additional register we need to write
                         // this value to.
                         registers[usize::from(*extra - 1)] = jitval;
-                    }
-                    if i == 0 {
-                        // skip first frame
-                        continue;
                     }
                     // Check if there's an additional spill location for this value. Negative
                     // values indicate stack offsets, positive values are registers. Lastly, 0
@@ -219,9 +240,18 @@ pub(crate) extern "C" fn __yk_deopt(
                     // that in order to encode register locations (where RAX = 0), all register
                     // values have been offset by 1.
                     if *off < 0 {
-                        let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
+                        let temp = if i == 0 {
+                            unsafe { frameaddr.offset(isize::try_from(*off).unwrap()) }
+                        } else {
+                            unsafe { rbp.offset(isize::try_from(*off).unwrap()) }
+                        };
                         debug_assert!(*off < i32::try_from(rec.size).unwrap());
-                        unsafe { ptr::write::<u64>(temp as *mut u64, jitval) };
+                        match size {
+                            // FIXME: Check that 16-byte writes are for float registers only.
+                            16 | 8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
+                            4 => unsafe { ptr::write::<u32>(temp as *mut u32, jitval as u32) },
+                            _ => todo!("{}", size),
+                        }
                     } else if *off > 0 {
                         registers[usize::try_from(*off - 1).unwrap()] = jitval;
                     }
@@ -282,7 +312,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // Write the live registers into the new stack. We put these at the very end of the new stack
     // so that they can be immediately popped after we memcpy'd the new stack over.
-    for reg in [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15] {
+    for reg in RECOVER_REG {
         unsafe {
             rsp = rsp.byte_sub(REG64_SIZE);
             ptr::write(rsp as *mut u64, registers[reg]);
@@ -328,6 +358,38 @@ unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size:
         // Free the source which is no longer needed.
         "call free",
         // Recover live registers.
+        "movsd xmm15, [rsp]",
+        "add rsp, 8",
+        "movsd xmm14, [rsp]",
+        "add rsp, 8",
+        "movsd xmm13, [rsp]",
+        "add rsp, 8",
+        "movsd xmm12, [rsp]",
+        "add rsp, 8",
+        "movsd xmm11, [rsp]",
+        "add rsp, 8",
+        "movsd xmm10, [rsp]",
+        "add rsp, 8",
+        "movsd xmm9, [rsp]",
+        "add rsp, 8",
+        "movsd xmm8, [rsp]",
+        "add rsp, 8",
+        "movsd xmm7, [rsp]",
+        "add rsp, 8",
+        "movsd xmm6, [rsp]",
+        "add rsp, 8",
+        "movsd xmm5, [rsp]",
+        "add rsp, 8",
+        "movsd xmm4, [rsp]",
+        "add rsp, 8",
+        "movsd xmm3, [rsp]",
+        "add rsp, 8",
+        "movsd xmm2, [rsp]",
+        "add rsp, 8",
+        "movsd xmm1, [rsp]",
+        "add rsp, 8",
+        "movsd xmm0, [rsp]",
+        "add rsp, 8",
         "pop r15",
         "pop r14",
         "pop r13",

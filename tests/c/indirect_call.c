@@ -39,6 +39,7 @@ int main(int argc, char **argv) {
 
   NOOPT_VAL(loc);
   NOOPT_VAL(i);
+  NOOPT_VAL(fn);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     int x = fn(i);

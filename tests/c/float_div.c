@@ -1,3 +1,4 @@
+// ## yk-config-env: YKB_AOT_OPTLEVEL=1
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -13,7 +14,7 @@
 //     %{{10_5}}: float = fdiv %{{_}}, %{{_}}
 //     %{{10_6}}: double = fp_ext %{{10_5}}, double
 //     ...
-//     %{{10_9}}: double = fdiv %{{_}}, %{{_}}
+//     %{{10_9}}: double = fdiv %{{_}}, 0.2double
 //     ...
 //     %{{_}}: i32 = call fprintf(%{{_}}, @{{_}}, %{{_}}, %{{10_6}}, %{{10_9}})
 //     ...
@@ -23,7 +24,7 @@
 //     %{{16}}: float = fdiv %{{_}}, %{{_}}
 //     %{{17}}: double = fp_ext %{{16}}
 //     ...
-//     %{{20}}: double = fdiv %{{_}}, %{{_}}
+//     %{{20}}: double = fdiv %{{_}}, 0.2double
 //     ...
 //     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{17}}, %{{20}})
 //     ...

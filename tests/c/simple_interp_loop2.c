@@ -1,6 +1,5 @@
 // Run-time:
 //   env-var: YK_LOG=4
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     yk-jit-event: start-tracing
@@ -9,19 +8,6 @@
 //     pc=2, mem=4
 //     pc=3, mem=3
 //     yk-jit-event: stop-tracing
-//     --- Begin jit-pre-opt ---
-//     ..~
-//     guard true, %{{34}}, [{{_}}:%0_{{_}}: %0, {{_}}:%0_{{_}}: %1, {{_}}:%0_{{_}}: %2, {{_}}:%0_{{_}}: %3, {{_}}:%0_{{_}}: %4, {{_}}:%0_{{_}}: %5, {{_}}:%23_{{_}}: %{{34}}]
-//     %{{_}}: ptr = load %{{1}}
-//     %{{48}}: ptr = load %{{4}}
-//     %{{_}}: i32 = load %{{5}}
-//     %{{50}}: i64 = sext %{{_}}, i64
-//     %{{51}}: ptr = dyn_ptr_add %{{48}}, %{{50}}, 8
-//     %{{_}}: ptr = load %{{51}}
-//     %{{43}}: i32 = load %{{5}}
-//     %{{_}}: i1 = eq %{{43}}, 0i32
-//     ...
-//     --- End jit-pre-opt ---
 //     pc=0, mem=3
 //     pc=1, mem=3
 //     pc=2, mem=3

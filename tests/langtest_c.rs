@@ -1,8 +1,11 @@
 use lang_tester::LangTester;
 use regex::Regex;
 use std::{
+    collections::HashMap,
     env,
-    fs::read_to_string,
+    error::Error,
+    fs::{read_to_string, File},
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -11,6 +14,30 @@ use tests::{mk_compiler, EXTRA_LINK};
 use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 const COMMENT: &str = "//";
+const COMMENT_PREFIX: &str = "##";
+
+/// Parse any "extra environment" to pass to yk-config out of the test file.
+fn parse_yk_config_env(p: &Path) -> Result<HashMap<String, String>, Box<dyn Error>> {
+    let f = File::open(p)?;
+    let rdr = BufReader::new(&f);
+    let mut extra = HashMap::new();
+    let env_prefix = format!("{} {} yk-config-env:", COMMENT, COMMENT_PREFIX);
+    for line in rdr.lines() {
+        let line = line?;
+        if !line.starts_with(COMMENT) {
+            break; // won't find any lower down the file.
+        }
+        if line.starts_with(&env_prefix) {
+            let sfx = &line[(&env_prefix).len()..];
+            let mut elems = sfx.split("=");
+            extra.insert(
+                elems.next().ok_or("bad yk-config-env line")?.trim().into(),
+                elems.next().ok_or("bad yk-config-env line")?.trim().into(),
+            );
+        }
+    }
+    Ok(extra)
+}
 
 fn main() {
     println!("Running C tests...");
@@ -36,7 +63,7 @@ fn main() {
     panic!("Unknown target_arch");
 
     LangTester::new()
-        .comment_prefix("##")
+        .comment_prefix(COMMENT_PREFIX)
         .test_dir("c")
         .test_path_filter(|p: &Path| {
             p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
@@ -66,7 +93,15 @@ fn main() {
                 .map(|l| l.generate_obj(tempdir.path()))
                 .collect::<Vec<PathBuf>>();
 
-            let mut compiler = mk_compiler(wrapper_path.as_path(), &exe, p, &extra_objs, true);
+            let yk_config_env = parse_yk_config_env(p).unwrap();
+            let mut compiler = mk_compiler(
+                wrapper_path.as_path(),
+                &exe,
+                p,
+                &extra_objs,
+                true,
+                Some(&yk_config_env),
+            );
             compiler.env("YK_COMPILER_PATH", ykllvm_bin("clang"));
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]

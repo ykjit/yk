@@ -25,7 +25,7 @@ fn compile_bench(tempdir: &TempDir, promote: bool) -> PathBuf {
     exe.push(tempdir);
     exe.push(src.file_stem().unwrap());
 
-    let mut compiler = mk_compiler(&ykllvm_bin("clang"), &exe, &src, &[], true);
+    let mut compiler = mk_compiler(&ykllvm_bin("clang"), &exe, &src, &[], true, None);
     compiler.arg("-ltests");
     if promote {
         compiler.arg("-DDO_PROMOTE");
