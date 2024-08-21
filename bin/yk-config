@@ -14,7 +14,7 @@ fi
 # only the instcombine pass in the below configuration (copied over from the
 # default pipeline). Using `instcombine` on its own breaks, possibly due to the
 # missing `no-verify-fixpoint`.
-POSTLINK_PASSES_STR="instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>"
+POSTLINK_PASSES_STR="mem2reg,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>"
 
 OUTPUT=""
 

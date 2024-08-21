@@ -112,7 +112,7 @@ pub(crate) extern "C" fn __yk_deopt(
     let mut lastframesize = 0;
 
     // Live register values that we need to write back into AOT registers.
-    let mut registers = [0; 16];
+    let mut registers = [0; 33];
     let mut varidx = 0;
     for (frameid, smid) in info.frames.iter().enumerate() {
         let (rec, pinfo) = aot_smaps.get(usize::try_from(*smid).unwrap());
@@ -184,15 +184,21 @@ pub(crate) extern "C" fn __yk_deopt(
                     varidx += 1;
                     continue;
                 }
-                VarLocation::Indirect { frame_off, size } => {
-                    assert_eq!(size, 8);
-                    unsafe {
+                VarLocation::Indirect { frame_off, size } => match size {
+                    8 => unsafe {
                         (jitrbp as *const *const u64)
                             .read()
                             .byte_offset(isize::try_from(frame_off).unwrap())
                             .read()
-                    }
-                }
+                    },
+                    4 => unsafe {
+                        (jitrbp as *const *const u32)
+                            .read()
+                            .byte_offset(isize::try_from(frame_off).unwrap())
+                            .read() as u64
+                    },
+                    _ => todo!(),
+                },
             };
             varidx += 1;
 

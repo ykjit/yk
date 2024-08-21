@@ -521,11 +521,21 @@ impl<'a> LSRegAlloc<'a> {
                 x => todo!("{x}"),
             },
             SpillState::Indirect(off) => {
-                assert_eq!(size, 8);
-                dynasm!(asm
-                    ; mov Rq(reg.code()), [rbp]
-                    ; mov Rq(reg.code()), [Rq(reg.code()) + off]
-                );
+                match size {
+                    8 => {
+                        dynasm!(asm
+                            ; mov Rq(reg.code()), [rbp]
+                            ; mov Rq(reg.code()), [Rq(reg.code()) + off]
+                        );
+                    }
+                    4 => {
+                        dynasm!(asm
+                            ; mov Rq(reg.code()), [rbp]
+                            ; mov Rd(reg.code()), [Rq(reg.code()) + off]
+                        );
+                    }
+                    _ => todo!(),
+                }
                 self.gp_regset.set(reg);
             }
         }
