@@ -471,6 +471,18 @@ impl InstID {
             iidx,
         }
     }
+
+    pub(crate) fn funcidx(&self) -> FuncIdx {
+        self.funcidx
+    }
+
+    pub(crate) fn bbidx(&self) -> BBlockIdx {
+        self.bbidx
+    }
+
+    pub(crate) fn iidx(&self) -> InstIdx {
+        self.iidx
+    }
 }
 
 /// Uniquely identifies a basic block within a [Module].

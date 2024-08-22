@@ -74,11 +74,11 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
     "*" Operand "=" Operand { Ok(ASTInst::Store{tgt: $2?, val: $4?, volatile: false}) }
   | "*" Operand "=" Operand "," "VOLATILE" { Ok(ASTInst::Store{tgt: $2?, val: $4?, volatile: true}) }
   | "BLACK_BOX" Operand { Ok(ASTInst::BlackBox($2?)) }
-  | "GUARD" "TRUE" "," Operand "," "[" LocalsList "]" {
-      Ok(ASTInst::Guard{operand: $4?, is_true: true, live_vars: $7?})
+  | "GUARD" "TRUE" "," Operand "," "[" OperandsList "]" {
+      Ok(ASTInst::Guard{cond: $4?, is_true: true, operands: $7?})
     }
-  | "GUARD" "FALSE" "," Operand "," "[" LocalsList "]" {
-      Ok(ASTInst::Guard{operand: $4?, is_true: false, live_vars: $7?})
+  | "GUARD" "FALSE" "," Operand "," "[" OperandsList "]" {
+      Ok(ASTInst::Guard{cond: $4?, is_true: false, operands: $7?})
     }
   | "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "UINT" {
       Ok(ASTInst::LoadTraceInput{assign: $1?.span(), type_: $3?, tiidx: $6?.span()})
@@ -152,12 +152,6 @@ Operand -> Result<ASTOperand, Box<dyn Error>>:
 OperandsList -> Result<Vec<ASTOperand>, Box<dyn Error>>:
     OperandsList "," Operand { flattenr($1, $3) }
   | Operand { Ok(vec![$1?]) }
-  | { Ok(Vec::new()) }
-  ;
-
-LocalsList -> Result<Vec<Span>, Box<dyn Error>>:
-    LocalsList "," "LOCAL_OPERAND" { flattenr($1, Ok($3?.span())) }
-  | "LOCAL_OPERAND" { Ok(vec![$1?.span()]) }
   | { Ok(Vec::new()) }
   ;
 
