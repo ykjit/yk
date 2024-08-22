@@ -1196,7 +1196,7 @@ impl<'a> Assemble<'a> {
                                         mov rax, QWORD [rbp - i32::try_from(off).unwrap()];
                                         push rbp;
                                         mov rbp, [rbp];
-                                        mov QWORD [rbp - frame_off], rax;
+                                        mov QWORD [rbp + frame_off], rax;
                                         pop rbp;
                                         pop rax
                                     ),
