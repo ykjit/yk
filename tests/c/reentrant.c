@@ -1,13 +1,5 @@
-// ## This test breaks in swt tracer as swt tracer is missing unmappable block so it cannot
-// ## see calls from unmappable blocks to mappable blocks and vice-versa. Disable this test
-// ## for swt until we fix it.
-// ## Example of what hwt see:
-// ## mappable block :           <---
-// ##        unmappable block       |
-// ##         mappable block  ------
-// ##
-// ## Also the new trace builder cannot yet handle callbacks -- hits a todo!
-// ignore-if: test "$YKB_TRACER" = "swt" || true
+// ## FIXME: Test fails for both hwt and swt.
+// ignore-if: test true
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=-:jit-pre-opt

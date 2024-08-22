@@ -1,3 +1,4 @@
+// ## FIXME: Implement setjmp/longjmp detection for swt.
 // ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
