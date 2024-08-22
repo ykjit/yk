@@ -134,6 +134,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         let mut gp_reg_off: u16 = 3; // FIXME: Why do need to start from register 3? I have no idea.
         #[cfg(target_arch = "x86_64")]
         let mut fp_reg_off: u16 = 17; // In DWARF, xmm registers are 17..32.
+        let mut inst_off = 0;
 
         for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
@@ -174,33 +175,23 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         }
                     }
                     ASTInst::Guard {
-                        operand,
+                        cond,
                         is_true,
-                        live_vars,
+                        operands,
                     } => {
-                        let mut mlive_vars = Vec::with_capacity(live_vars.len());
-                        for span in live_vars {
-                            let iidx = self.lexer.span_str(span)[1..]
-                                .parse::<usize>()
-                                .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                            let iidx = InstIdx::try_from(iidx)
-                                .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                            if self.inst_idx_map.get(&iidx).is_none() {
-                                return Err(self.error_at_span(
-                                    span,
-                                    &format!("No such local variable %{iidx}"),
-                                ));
-                            }
-                            mlive_vars.push((
-                                InstID::new(0.into(), 0.into(), 0.into()),
-                                PackedOperand::new(&Operand::Local(iidx)),
+                        let mut live_vars = Vec::with_capacity(operands.len());
+                        for op in operands {
+                            live_vars.push((
+                                InstID::new(0.into(), 0.into(), inst_off.into()),
+                                PackedOperand::new(&self.process_operand(op)?),
                             ));
+                            inst_off += 1;
                         }
                         let gidx = self
                             .m
-                            .push_guardinfo(GuardInfo::new(Vec::new(), mlive_vars, Vec::new()))
+                            .push_guardinfo(GuardInfo::new(Vec::new(), live_vars, Vec::new()))
                             .unwrap();
-                        let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
+                        let inst = GuardInst::new(self.process_operand(cond)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::ICall {
@@ -711,9 +702,9 @@ enum ASTInst {
         args: Vec<ASTOperand>,
     },
     Guard {
-        operand: ASTOperand,
+        cond: ASTOperand,
         is_true: bool,
-        live_vars: Vec<Span>,
+        operands: Vec<ASTOperand>,
     },
     ICall {
         assign: Option<Span>,
@@ -902,7 +893,7 @@ mod tests {
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
               tloop_start [%0, %5]
-              guard true, %4, [%0, %1, %2]
+              guard true, %4, [%0, %1, %2, 1i8]
               call @f1()
               %6: i32 = call @f2(%5)
               %8: i64 = call @f3(%5, %7, %0)
@@ -1170,7 +1161,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "No such local variable %1")]
+    #[should_panic(expected = "Undefined local operand '%1'")]
     fn invalid_guard_inst_ref() {
         Module::from_str(
             "

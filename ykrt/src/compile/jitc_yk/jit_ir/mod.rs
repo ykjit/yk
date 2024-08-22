@@ -1615,7 +1615,15 @@ impl fmt::Display for DisplayableInst<'_> {
                     .guard_info(self.m)
                     .live_vars()
                     .iter()
-                    .map(|(_, x)| x.unpack(self.m).display(self.m).to_string())
+                    .map(|(x, y)| {
+                        format!(
+                            "{}:%{}_{}: {}",
+                            usize::from(x.funcidx()),
+                            usize::from(x.bbidx()),
+                            usize::from(x.iidx()),
+                            y.unpack(self.m).display(self.m)
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(

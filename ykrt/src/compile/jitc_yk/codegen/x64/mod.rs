@@ -2207,6 +2207,39 @@ mod tests {
     }
 
     #[test]
+    fn cg_guard_const() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i1 = load_ti 0
+                %1: i8 = 10i8
+                %2: i8 = 32i8
+                %3: i8 = add %1, %2
+                guard false, %0, [%0, 10i8, 32i8, 42i8]
+            ",
+            "
+                ...
+                ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8]
+                {{_}} {{_}}: cmp r.8.b, 0x00
+                {{_}} {{_}}: jnz 0x...
+                ...
+                ; deopt id for guard 0
+                {{_}} {{_}}: push rsi
+                ... mov rsi, 0x00
+                ... jmp ...
+                ; call __yk_deopt
+                ...
+                ... mov rdi, [rbp]
+                ... mov rdx, rbp
+                ... mov rcx, rsp
+                ... mov rax, 0x...
+                ... sub rsp, 0x08
+                ... call rax
+            ",
+        );
+    }
+
+    #[test]
     fn unterminated_trace() {
         codegen_and_test(
             "
