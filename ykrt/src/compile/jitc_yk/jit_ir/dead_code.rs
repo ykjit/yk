@@ -11,7 +11,7 @@ impl Module {
         // bit.
         let mut used = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
         for iidx in self.iter_all_inst_idxs().rev() {
-            let inst = self.inst_all(iidx);
+            let inst = self.inst_deproxy(iidx);
             if used.get(usize::from(iidx)).unwrap() || inst.has_side_effect(self) {
                 used.set(usize::from(iidx), true);
                 inst.map_packed_operand_locals(self, &mut |x| {

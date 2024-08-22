@@ -294,7 +294,7 @@ impl Module {
     /// Return the instruction at the specified index. Note: unless you are explicitly handling
     /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
     /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
-    pub(crate) fn inst_all(&self, iidx: InstIdx) -> &Inst {
+    pub fn inst_all(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
 
