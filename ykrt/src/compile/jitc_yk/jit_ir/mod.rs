@@ -280,6 +280,17 @@ impl Module {
         }
     }
 
+    /// Return the instruction at the specified index, deproxying `ProxyInst` i.e. searching
+    /// until a non-`ProxyInst` instruction is found.
+    pub(crate) fn inst_deproxy(&self, mut iidx: InstIdx) -> &Inst {
+        loop {
+            match &self.insts[usize::from(iidx)] {
+                Inst::ProxyInst(proxy_iidx) => iidx = *proxy_iidx,
+                x => return x,
+            }
+        }
+    }
+
     /// Return the instruction at the specified index. Note: unless you are explicitly handling
     /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
     /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
@@ -1469,7 +1480,7 @@ impl Inst {
                 for val in &m.loop_jump_vars {
                     match val {
                         Operand::Local(iidx) => f(*iidx),
-                        _ => panic!(),
+                        Operand::Const(_) => (),
                     }
                 }
             }

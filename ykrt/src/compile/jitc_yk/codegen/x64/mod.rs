@@ -2757,4 +2757,27 @@ mod tests {
                 ",
         );
     }
+
+    #[test]
+    fn loop_jump_const() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                tloop_start [%0]
+                %1: i8 = 42i8
+                tloop_jump [%1]
+            ",
+            "
+                ...
+                ; %0: i8 = load_ti ...
+                ...
+                ; tloop_start [%0]:
+                ; tloop_jump [42i8]:
+                {{_}} {{_}}: mov ...
+                {{_}} {{_}}: mov r.8.x, 0x2a
+                ...: jmp ...
+            ",
+        );
+    }
 }

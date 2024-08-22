@@ -32,7 +32,7 @@ use crate::compile::jitc_yk::{
         abs_stack::AbstractStack,
         reg_alloc::{self, VarLocation},
     },
-    jit_ir::{Const, ConstIdx, FloatTy, InstIdx, Module, Operand, Ty},
+    jit_ir::{Const, ConstIdx, FloatTy, Inst, InstIdx, Module, Operand, Ty},
 };
 use dynasmrt::{
     dynasm,
@@ -471,8 +471,13 @@ impl<'a> LSRegAlloc<'a> {
     ///
     /// If `iidx` has not previously been spilled.
     fn force_gp_unspill(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
-        let inst = self.m.inst_no_proxies(iidx);
+        let inst = self.m.inst_deproxy(iidx);
         let size = inst.def_byte_size(self.m);
+
+        if let Inst::ProxyConst(cidx) = inst {
+            self.load_const_into_gp_reg(asm, *cidx, reg);
+            return;
+        }
 
         match self.spills[usize::from(iidx)] {
             SpillState::Empty => {
@@ -651,20 +656,34 @@ impl<'a> LSRegAlloc<'a> {
         }) {
             VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
         } else {
-            let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
-            match self.spills[usize::from(iidx)] {
-                SpillState::Empty => panic!(),
-                SpillState::Stack(off) => VarLocation::Stack {
-                    frame_off: u32::try_from(off).unwrap(),
-                    size,
+            let inst = self.m.inst_deproxy(iidx);
+            let size = inst.def_byte_size(self.m);
+            match inst {
+                Inst::ProxyInst(_) => panic!(),
+                Inst::ProxyConst(cidx) => match self.m.const_(*cidx) {
+                    Const::Float(_, _) => todo!(),
+                    Const::Int(tyidx, v) => {
+                        let Ty::Integer(bits) = self.m.type_(*tyidx) else {
+                            panic!()
+                        };
+                        VarLocation::ConstInt { bits: *bits, v: *v }
+                    }
+                    Const::Ptr(_) => todo!(),
                 },
-                SpillState::Direct(off) => VarLocation::Direct {
-                    frame_off: off,
-                    size,
-                },
-                SpillState::Indirect(off) => VarLocation::Indirect {
-                    frame_off: off,
-                    size,
+                _ => match self.spills[usize::from(iidx)] {
+                    SpillState::Empty => panic!(),
+                    SpillState::Stack(off) => VarLocation::Stack {
+                        frame_off: u32::try_from(off).unwrap(),
+                        size,
+                    },
+                    SpillState::Direct(off) => VarLocation::Direct {
+                        frame_off: off,
+                        size,
+                    },
+                    SpillState::Indirect(off) => VarLocation::Indirect {
+                        frame_off: off,
+                        size,
+                    },
                 },
             }
         }
