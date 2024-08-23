@@ -1453,12 +1453,12 @@ impl<'a> Assemble<'a> {
 
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
         // Convert the guard info into deopt info and store it on the heap.
-        let mut locs: Vec<VarLocation> = Vec::new();
+        let mut lives = Vec::new();
         let gi = inst.guard_info(self.m);
-        for (_, pop) in gi.live_vars() {
+        for (iid, pop) in gi.live_vars() {
             match pop.unpack(self.m) {
                 Operand::Local(x) => {
-                    locs.push(self.ra.var_location(x));
+                    lives.push((iid.clone(), self.ra.var_location(x)));
                 }
                 Operand::Const(x) => {
                     // The live variable is a constant (e.g. this can happen during inlining), so
@@ -1469,7 +1469,7 @@ impl<'a> Assemble<'a> {
                             let Ty::Integer(bits) = self.m.type_(*tyidx) else {
                                 panic!()
                             };
-                            locs.push(VarLocation::ConstInt { bits: *bits, v: *c })
+                            lives.push((iid.clone(), VarLocation::ConstInt { bits: *bits, v: *c }))
                         }
                         _ => todo!(),
                     }
@@ -1482,8 +1482,7 @@ impl<'a> Assemble<'a> {
         let deoptinfo = DeoptInfo {
             fail_label,
             frames: gi.frames().to_vec(),
-            lives: locs,
-            aotlives: gi.live_vars().iter().map(|(x, _)| x.clone()).collect(),
+            live_vars: lives,
             callframes: gi.callframes().to_vec(),
             guard: Guard::new(),
         };
@@ -1508,12 +1507,10 @@ struct DeoptInfo {
     fail_label: DynamicLabel,
     /// Vector of AOT stackmap IDs.
     frames: Vec<u64>,
-    // Vector of live JIT variable locations.
-    lives: Vec<VarLocation>,
-    // Vector of live AOT variables.
-    aotlives: Vec<aot_ir::InstID>,
+    /// Live variables, mapping AOT vars to JIT vars.
+    live_vars: Vec<(aot_ir::InstID, VarLocation)>,
     callframes: Vec<Frame>,
-    // Keeps track of deopt amount and compiled side-trace.
+    /// Keeps track of deopt amount and compiled side-trace.
     guard: Guard,
 }
 
@@ -1546,7 +1543,11 @@ impl CompiledTrace for X64CompiledTrace {
 
     fn sidetraceinfo(&self, gidx: GuardIdx) -> Arc<dyn SideTraceInfo> {
         // FIXME: Can we reference these instead of copying them?
-        let aotlives = self.deoptinfo[usize::from(gidx)].aotlives.clone();
+        let aotlives = self.deoptinfo[usize::from(gidx)]
+            .live_vars
+            .iter()
+            .map(|(iid, _)| iid.clone())
+            .collect();
         let callframes = self.deoptinfo[usize::from(gidx)].callframes.clone();
         Arc::new(YkSideTraceInfo {
             aotlives,
