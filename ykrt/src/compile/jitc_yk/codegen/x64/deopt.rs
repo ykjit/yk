@@ -40,7 +40,7 @@ pub(crate) extern "C" fn __yk_deopt(
         // Prepare the traceinputs "struct" (for now this is just a vector) and pass it into the
         // side-trace.
         let mut ykctrlpvars = Vec::new();
-        for jitval in &info.lives {
+        for (_, jitval) in &info.live_vars {
             let val = match jitval {
                 VarLocation::Stack { frame_off, size } => {
                     let p = unsafe { jitrbp.byte_sub(usize::try_from(*frame_off).unwrap()) };
@@ -162,7 +162,7 @@ pub(crate) extern "C" fn __yk_deopt(
         // stackmap.
         for aotvar in rec.live_vars.iter() {
             // Read live JIT values from the trace's stack frame.
-            let jitval = match info.lives[varidx] {
+            let jitval = match info.live_vars[varidx].1 {
                 VarLocation::Stack { frame_off, size } => {
                     let p = unsafe { jitrbp.byte_sub(usize::try_from(frame_off).unwrap()) };
                     match size {
