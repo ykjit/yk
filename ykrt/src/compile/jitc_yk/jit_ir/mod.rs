@@ -7,39 +7,39 @@
 //!      memory used down (and also bypasses issues with representing graph structures in Rust, but
 //!      that's slightly accidental).
 //!
-//!   2. The IR is designed to allow most manipulations to be performed without requiring
+//!   2. The IR is designed to allow common manipulations to be performed without requiring
 //!      reallocation.
 //!
-//! This second property has some surprising consequences:
+//! This second property has the following consequences:
 //!
-//!   1. We have to introduce `Proxy*` instructions which semi-transparently "forward" an
-//!      instruction's result on. For example if we have IR in memory stored along these lines:
+//!   1. We introduce three "special" instructions which are stored as normal instructions, but
+//!      which are hidden when one views the IR:
+//!        * `ProxyConst`, which represents a constant. What, in the underlying IR, nominally looks
+//!          as follows:
+//!          ```text
+//!          %7: i8 = 1i8
+//!          %8: add %2, %7
+//!          ```
+//!          will be displayed *deconsted* as simply `%8: add %2, 1i8`. Note that this is
+//!          deliberately indistinguishable from IR which directly stores `%8: add %2, 1i8`.
 //!
-//!        ```text
-//!        %0: ...
-//!        %1: 1i8
-//!        %2: add %0, %1
-//!        ```
+//!        * `ProxyInst` which is a (possibly chained) proxy for another instruction. What, in the
+//!          underlying IR, nominally looks as follows:
+//!          ```text
+//!          %7: %6
+//!          %8: add %2, %7
+//!          ```
+//!          will be displayed *deproxied* as simply `%8: add %2, %6`. Note that this is
+//!          deliberately indistinguishable from IR which directly stores `%8: add %2, %6`.
 //!
-//!      Then instruction `%1` is a `ProxyConst`. We very rarely want to view the IR as it is
-//!      directly stored in memory. Instead, we nearly always want to pretend that the IR really
-//!      looks like:
-//!
-//!        ```text
-//!        %0: ...
-//!        %2: add %0, 1i8
-//!        ```
-//!
-//!      i.e. we want to pretend that the `%1` doesn't exist and that the reference to `%1` is
-//!      actually just a constant.
+//!        * `Tombstone` which represents an instruction which is no longer used. These are not
+//!          displayed at all.
 //!
 //!   2. We never store [Operand]s directly: we only ever store [PackedOperand]s. Whenever we want
 //!      to get an [Operand] we *must* use [PackedOperand::unpack]. `unpack` does the necessary
-//!      deproxying.
+//!      deconsting/deproxying.
 //!
-//!   3. In nearly all cases we should view the IR as deproxied: unless you explicitly intend to
-//!      handle proxies yourself, looking up an instruction should use [Module::inst_no_proxies].
-//!      Only use [Module::inst_all] if you really, really know why you're using it.
+//!   3. External users of the IR should expect to always view the IR as deconsted/deproxied.
 //!
 //! Because using the IR can often involve getting hold of data nested several layers deep, we also
 //! use a number of abbreviations/conventions to keep the length of source down to something
@@ -294,7 +294,7 @@ impl Module {
     /// Return the instruction at the specified index. Note: unless you are explicitly handling
     /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
     /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
-    pub(crate) fn inst_all(&self, iidx: InstIdx) -> &Inst {
+    pub fn inst_all(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
 
