@@ -22,8 +22,7 @@ use crate::{
     compile::{
         jitc_yk::{
             aot_ir,
-            jit_ir::{Const, IndirectCallIdx},
-            trace_builder::Frame,
+            jit_ir::{Const, Frame, IndirectCallIdx},
             YkSideTraceInfo,
         },
         CompiledTrace, Guard, GuardIdx, SideTraceInfo,

@@ -2,10 +2,10 @@
 //!
 //! This takes in an (AOT IR, execution trace) pair and constructs a JIT IR trace from it.
 
-use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
+use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const, PackedOperand},
+    jit_ir::{self, Const, Frame, PackedOperand},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -15,36 +15,6 @@ use std::{collections::HashMap, ffi::CString, sync::Arc};
 
 /// The argument index of the trace inputs struct in the trace function.
 const U64SIZE: usize = 8;
-
-/// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
-/// processed safepoint, call instruction and its arguments.
-#[derive(Debug, Clone)]
-pub(crate) struct Frame {
-    // The call instruction of this frame.
-    callinst: Option<aot_ir::InstID>,
-    // Index of the function of this frame.
-    funcidx: Option<FuncIdx>,
-    /// Safepoint for this frame.
-    safepoint: Option<&'static aot_ir::DeoptSafepoint>,
-    /// JIT arguments of this frame's caller.
-    args: Vec<jit_ir::Operand>,
-}
-
-impl Frame {
-    fn new(
-        callinst: Option<aot_ir::InstID>,
-        funcidx: Option<FuncIdx>,
-        safepoint: Option<&'static aot_ir::DeoptSafepoint>,
-        args: Vec<jit_ir::Operand>,
-    ) -> Frame {
-        Frame {
-            callinst,
-            funcidx,
-            safepoint,
-            args,
-        }
-    }
-}
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {

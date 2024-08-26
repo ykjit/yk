@@ -68,7 +68,6 @@ mod parser;
 mod well_formed;
 
 use super::aot_ir;
-use crate::compile::jitc_yk::trace_builder::Frame;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{
@@ -1268,6 +1267,36 @@ impl GuardInfo {
     /// Return the call frames.
     pub(crate) fn callframes(&self) -> &[Frame] {
         &self.callframes
+    }
+}
+
+/// Keep track of calls and store information about the last
+/// processed safepoint, call instruction and its arguments.
+#[derive(Debug, Clone)]
+pub(crate) struct Frame {
+    // The call instruction of this frame.
+    pub(crate) callinst: Option<aot_ir::InstID>,
+    // Index of the function of this frame.
+    pub(crate) funcidx: Option<aot_ir::FuncIdx>,
+    /// Safepoint for this frame.
+    pub(crate) safepoint: Option<&'static aot_ir::DeoptSafepoint>,
+    /// JIT arguments of this frame's caller.
+    pub(crate) args: Vec<Operand>,
+}
+
+impl Frame {
+    pub(crate) fn new(
+        callinst: Option<aot_ir::InstID>,
+        funcidx: Option<aot_ir::FuncIdx>,
+        safepoint: Option<&'static aot_ir::DeoptSafepoint>,
+        args: Vec<Operand>,
+    ) -> Frame {
+        Frame {
+            callinst,
+            funcidx,
+            safepoint,
+            args,
+        }
     }
 }
 
