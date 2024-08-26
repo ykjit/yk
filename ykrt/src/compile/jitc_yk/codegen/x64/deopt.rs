@@ -88,7 +88,7 @@ pub(crate) extern "C" fn __yk_deopt(
     // Add space for live register values which we'll be adding at the end.
     let mut memsize = 15 * REG64_SIZE;
     // Calculate amount of space we need to allocate for each stack frame.
-    for (frameid, smid) in info.frames.iter().enumerate() {
+    for (frameid, smid) in info.frames_stackmap_id.iter().enumerate() {
         let (rec, _) = aot_smaps.get(usize::try_from(*smid).unwrap());
         debug_assert!(rec.size != u64::MAX);
         if frameid > 0 {
@@ -114,7 +114,7 @@ pub(crate) extern "C" fn __yk_deopt(
     // Live register values that we need to write back into AOT registers.
     let mut registers = [0; 16];
     let mut varidx = 0;
-    for (frameid, smid) in info.frames.iter().enumerate() {
+    for (frameid, smid) in info.frames_stackmap_id.iter().enumerate() {
         let (rec, pinfo) = aot_smaps.get(usize::try_from(*smid).unwrap());
 
         // WRITE RBP
@@ -291,7 +291,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // Compute the address to which we want to write the new stack. This is immediately after the
     // frame containing the control point.
-    let (rec, pinfo) = aot_smaps.get(usize::try_from(info.frames[0]).unwrap());
+    let (rec, pinfo) = aot_smaps.get(usize::try_from(info.frames_stackmap_id[0]).unwrap());
     let mut newframedst = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
     if pinfo.hasfp {
         newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };

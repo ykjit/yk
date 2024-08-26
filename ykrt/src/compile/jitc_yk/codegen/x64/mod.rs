@@ -1481,7 +1481,7 @@ impl<'a> Assemble<'a> {
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let deoptinfo = DeoptInfo {
             fail_label,
-            frames: gi.frames().to_vec(),
+            frames_stackmap_id: gi.frames().to_vec(),
             live_vars: lives,
             callframes: gi.callframes().to_vec(),
             guard: Guard::new(),
@@ -1505,8 +1505,8 @@ impl<'a> Assemble<'a> {
 #[derive(Debug)]
 struct DeoptInfo {
     fail_label: DynamicLabel,
-    /// Vector of AOT stackmap IDs.
-    frames: Vec<u64>,
+    /// Store the stackmap ID relating to each call in the callstack.
+    frames_stackmap_id: Vec<u64>,
     /// Live variables, mapping AOT vars to JIT vars.
     live_vars: Vec<(aot_ir::InstID, VarLocation)>,
     callframes: Vec<Frame>,
