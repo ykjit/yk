@@ -68,7 +68,6 @@ mod parser;
 mod well_formed;
 
 use super::aot_ir;
-use crate::compile::jitc_yk::trace_builder::Frame;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{
@@ -1233,41 +1232,63 @@ impl fmt::Display for DisplayableConst<'_> {
 #[derive(Debug)]
 /// Stores additional guard information.
 pub(crate) struct GuardInfo {
-    /// Stackmap IDs for the active call frames.
-    frames: Vec<u64>,
     /// Live variables, mapping AOT vars to JIT [Operand]s.
     live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
     // Inlined frames info.
-    // FIXME With callframes, the frames and aotlives fields are redunant.
-    callframes: Vec<Frame>,
+    // FIXME With this field, the aotlives field is redundant.
+    inlined_frames: Vec<InlinedFrame>,
 }
 
 impl GuardInfo {
     pub(crate) fn new(
-        frames: Vec<u64>,
         live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
-        callframes: Vec<Frame>,
+        inlined_frames: Vec<InlinedFrame>,
     ) -> Self {
         Self {
-            frames,
             live_vars,
-            callframes,
+            inlined_frames,
         }
     }
 
-    /// Return the stackmap ids for the currently active call frames.
-    pub(crate) fn frames(&self) -> &[u64] {
-        &self.frames
-    }
-
-    /// Return the live variables for this guard.
+    /// Return the `AOT instruction -> PackedOperand` mapping for this guard.
     pub(crate) fn live_vars(&self) -> &[(aot_ir::InstID, PackedOperand)] {
         &self.live_vars
     }
 
-    /// Return the call frames.
-    pub(crate) fn callframes(&self) -> &[Frame] {
-        &self.callframes
+    /// Return the [InlinedFunc]s for this guard.
+    pub(crate) fn inlined_frames(&self) -> &[InlinedFrame] {
+        &self.inlined_frames
+    }
+}
+
+/// An abstract call frame for functions inlined in a trace. This contains enough information for a
+/// failing guard to reconstruct real call frames on the stack.
+#[derive(Debug, Clone)]
+pub(crate) struct InlinedFrame {
+    // The call instruction that led to [funcidx] being inlined.
+    pub(crate) callinst: Option<aot_ir::InstID>,
+    // The function that was inlined to create this abstract frame. Will be `None` for the top-most
+    // function.
+    pub(crate) funcidx: aot_ir::FuncIdx,
+    /// The deopt safepoint for [callinst].
+    pub(crate) safepoint: &'static aot_ir::DeoptSafepoint,
+    /// The [Operand]s passed to [funcidx].
+    pub(crate) args: Vec<Operand>,
+}
+
+impl InlinedFrame {
+    pub(crate) fn new(
+        callinst: Option<aot_ir::InstID>,
+        funcidx: aot_ir::FuncIdx,
+        safepoint: &'static aot_ir::DeoptSafepoint,
+        args: Vec<Operand>,
+    ) -> InlinedFrame {
+        InlinedFrame {
+            callinst,
+            funcidx,
+            safepoint,
+            args,
+        }
     }
 }
 
