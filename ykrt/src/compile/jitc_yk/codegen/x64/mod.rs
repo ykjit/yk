@@ -1480,9 +1480,8 @@ impl<'a> Assemble<'a> {
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let deoptinfo = DeoptInfo {
             fail_label,
-            frames_stackmap_id: gi.frames().to_vec(),
             live_vars: lives,
-            callframes: gi.inlined_frames().to_vec(),
+            inlined_frames: gi.inlined_frames().to_vec(),
             guard: Guard::new(),
         };
         self.deoptinfo.push(deoptinfo);
@@ -1504,11 +1503,9 @@ impl<'a> Assemble<'a> {
 #[derive(Debug)]
 struct DeoptInfo {
     fail_label: DynamicLabel,
-    /// Store the stackmap ID relating to each call in the callstack.
-    frames_stackmap_id: Vec<u64>,
     /// Live variables, mapping AOT vars to JIT vars.
     live_vars: Vec<(aot_ir::InstID, VarLocation)>,
-    callframes: Vec<InlinedFrame>,
+    inlined_frames: Vec<InlinedFrame>,
     /// Keeps track of deopt amount and compiled side-trace.
     guard: Guard,
 }
@@ -1547,7 +1544,7 @@ impl CompiledTrace for X64CompiledTrace {
             .iter()
             .map(|(iid, _)| iid.clone())
             .collect();
-        let callframes = self.deoptinfo[usize::from(gidx)].callframes.clone();
+        let callframes = self.deoptinfo[usize::from(gidx)].inlined_frames.clone();
         Arc::new(YkSideTraceInfo {
             aotlives,
             callframes,

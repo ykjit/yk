@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, InlinedFrame, Const, PackedOperand},
+    jit_ir::{self, Const, InlinedFrame, PackedOperand},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -465,7 +465,6 @@ impl TraceBuilder {
         // Collect the safepoint IDs and live variables from this conditional branch and the
         // previous frames to store inside the guard.
         // Unwrap-safe as each frame at this point must have a safepoint associated with it.
-        let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut live_vars = Vec::new(); // (AOT var, JIT var) pairs
         let mut callframes = Vec::new();
         for frame in &self.frames {
@@ -478,7 +477,6 @@ impl TraceBuilder {
                 // instructions which we won't see at the beginning of a sidetrace.
                 Vec::new(),
             ));
-            smids.push(safepoint.id);
 
             // Collect live variables.
             for op in safepoint.lives.iter() {
@@ -503,7 +501,7 @@ impl TraceBuilder {
             }
         }
 
-        let gi = jit_ir::GuardInfo::new(smids, live_vars, callframes);
+        let gi = jit_ir::GuardInfo::new(live_vars, callframes);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
 
         Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))

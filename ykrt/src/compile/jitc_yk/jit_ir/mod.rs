@@ -1232,8 +1232,6 @@ impl fmt::Display for DisplayableConst<'_> {
 #[derive(Debug)]
 /// Stores additional guard information.
 pub(crate) struct GuardInfo {
-    /// Stackmap IDs for the active call frames.
-    frames: Vec<u64>,
     /// Live variables, mapping AOT vars to JIT [Operand]s.
     live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
     // Inlined frames info.
@@ -1243,20 +1241,13 @@ pub(crate) struct GuardInfo {
 
 impl GuardInfo {
     pub(crate) fn new(
-        frames: Vec<u64>,
         live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
         inlined_frames: Vec<InlinedFrame>,
     ) -> Self {
         Self {
-            frames,
             live_vars,
             inlined_frames,
         }
-    }
-
-    /// Return the stackmap ids for the currently active call frames.
-    pub(crate) fn frames(&self) -> &[u64] {
-        &self.frames
     }
 
     /// Return the `AOT instruction -> PackedOperand` mapping for this guard.
