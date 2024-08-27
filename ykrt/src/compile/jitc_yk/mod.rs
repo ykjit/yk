@@ -40,7 +40,7 @@ pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
 });
 
 struct YkSideTraceInfo {
-    callframes: Vec<jit_ir::Frame>,
+    callframes: Vec<jit_ir::InlinedFrame>,
     aotlives: Vec<aot_ir::InstID>,
 }
 
@@ -53,7 +53,7 @@ impl SideTraceInfo for YkSideTraceInfo {
 impl YkSideTraceInfo {
     /// Return the live call frames which are required to setup the trace builder during
     /// side-tracing.
-    fn callframes(&self) -> &[jit_ir::Frame] {
+    fn callframes(&self) -> &[jit_ir::InlinedFrame] {
         &self.callframes
     }
 

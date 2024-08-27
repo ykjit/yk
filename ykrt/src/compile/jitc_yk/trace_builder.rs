@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const, Frame, PackedOperand},
+    jit_ir::{self, InlinedFrame, Const, PackedOperand},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -29,7 +29,7 @@ pub(crate) struct TraceBuilder {
     /// Index of the first traceinput instruction.
     first_ti_idx: usize,
     /// Inlined calls.
-    frames: Vec<Frame>,
+    frames: Vec<InlinedFrame>,
     /// The block at which to stop outlining.
     outline_target_blk: Option<BBlockId>,
     /// Current count of recursive calls to the function in which outlining was started. Will be 0
@@ -64,7 +64,7 @@ impl TraceBuilder {
             first_ti_idx: 0,
             // We have to set the funcidx to None here as we don't know what it is yet. We'll
             // update it as soon as we do.
-            frames: vec![Frame::new(None, None, None, vec![])],
+            frames: vec![InlinedFrame::new(None, None, None, vec![])],
             outline_target_blk: None,
             recursion_count: 0,
             promotions,
@@ -470,7 +470,7 @@ impl TraceBuilder {
         let mut callframes = Vec::new();
         for frame in &self.frames {
             let safepoint = frame.safepoint.unwrap();
-            callframes.push(Frame::new(
+            callframes.push(InlinedFrame::new(
                 frame.callinst.clone(),
                 frame.funcidx,
                 frame.safepoint,
@@ -691,8 +691,12 @@ impl TraceBuilder {
                 bid.bbidx(),
                 aot_ir::InstIdx::new(aot_inst_idx),
             );
-            self.frames
-                .push(Frame::new(Some(aot_iid), Some(*callee), None, jit_args));
+            self.frames.push(InlinedFrame::new(
+                Some(aot_iid),
+                Some(*callee),
+                None,
+                jit_args,
+            ));
             Ok(())
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect

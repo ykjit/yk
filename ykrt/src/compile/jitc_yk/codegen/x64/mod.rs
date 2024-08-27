@@ -22,7 +22,7 @@ use crate::{
     compile::{
         jitc_yk::{
             aot_ir,
-            jit_ir::{Const, Frame, IndirectCallIdx},
+            jit_ir::{Const, IndirectCallIdx, InlinedFrame},
             YkSideTraceInfo,
         },
         CompiledTrace, Guard, GuardIdx, SideTraceInfo,
@@ -1482,7 +1482,7 @@ impl<'a> Assemble<'a> {
             fail_label,
             frames_stackmap_id: gi.frames().to_vec(),
             live_vars: lives,
-            callframes: gi.callframes().to_vec(),
+            callframes: gi.inlined_frames().to_vec(),
             guard: Guard::new(),
         };
         self.deoptinfo.push(deoptinfo);
@@ -1508,7 +1508,7 @@ struct DeoptInfo {
     frames_stackmap_id: Vec<u64>,
     /// Live variables, mapping AOT vars to JIT vars.
     live_vars: Vec<(aot_ir::InstID, VarLocation)>,
-    callframes: Vec<Frame>,
+    callframes: Vec<InlinedFrame>,
     /// Keeps track of deopt amount and compiled side-trace.
     guard: Guard,
 }
