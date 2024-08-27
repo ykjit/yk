@@ -1187,6 +1187,15 @@ impl<'a> Assemble<'a> {
                                     ),
                                     _ => todo!(),
                                 },
+                                VarLocation::Register(reg_alloc::Register::FP(reg)) => match size {
+                                    4 => dynasm!(self.asm
+                                        ; push rbp
+                                        ; mov rbp, [rbp]
+                                        ; movss [rbp + frame_off], Rx(reg.code())
+                                        ; pop rbp
+                                    ),
+                                    _ => todo!(),
+                                },
                                 VarLocation::ConstInt { bits, v } => match bits {
                                     32 => dynasm!(self.asm;
                                         push rbp;

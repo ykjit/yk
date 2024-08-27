@@ -919,7 +919,20 @@ impl<'a> LSRegAlloc<'a> {
                 self.fp_regset.set(reg);
             }
             SpillState::Direct(_off) => todo!(),
-            SpillState::Indirect(_off) => todo!(),
+            SpillState::Indirect(off) => {
+                // A temporary GP reg is required to load the intermediate pointer. As noted below
+                // in `load_const_into_fp_reg()`, this is problematic for our allocator design.
+                let tmp_reg = Rq::RAX;
+                match size {
+                    4 => dynasm!(asm
+                        ; push Rq(tmp_reg.code())
+                        ; mov Rq(tmp_reg.code()), [rbp]
+                        ; movss Rx(reg.code()), [Rq(tmp_reg.code()) + off]
+                        ; pop Rq(tmp_reg.code())
+                    ),
+                    _ => todo!("{}", size),
+                };
+            }
         }
     }
 
