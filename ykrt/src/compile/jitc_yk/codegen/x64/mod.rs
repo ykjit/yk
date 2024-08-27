@@ -239,10 +239,17 @@ impl<'a> Assemble<'a> {
                         dynasm!(self.asm; push Rq(reg.code()));
                     }
                 }
+                dynasm!(self.asm; mov rcx, rsp);
+                for reg in lsregalloc::FP_REGS.iter().rev() {
+                    dynasm!(self.asm
+                        ; movq r8, Rx(reg.code())
+                        ; push r8
+                    );
+                }
+                dynasm!(self.asm; mov r8, rsp);
                 dynasm!(self.asm
                     ; mov rdi, [rbp]
                     ; mov rdx, rbp
-                    ; mov rcx, rsp
                     ; mov rax, QWORD __yk_deopt as i64
                     ; sub rsp, 8 // Align the stack
                     ; call rax
@@ -2203,7 +2210,6 @@ mod tests {
                 ...
                 ... mov rdi, [rbp]
                 ... mov rdx, rbp
-                ... mov rcx, rsp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
@@ -2233,7 +2239,6 @@ mod tests {
                 ...
                 ... mov rdi, [rbp]
                 ... mov rdx, rbp
-                ... mov rcx, rsp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
@@ -2266,7 +2271,6 @@ mod tests {
                 ...
                 ... mov rdi, [rbp]
                 ... mov rdx, rbp
-                ... mov rcx, rsp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax

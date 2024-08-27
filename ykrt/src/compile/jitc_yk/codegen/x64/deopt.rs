@@ -25,6 +25,7 @@ pub(crate) extern "C" fn __yk_deopt(
     gidx: u64,
     jitrbp: *const c_void,
     gp_regs: &[u64; 16],
+    fp_regs: &[u64; 16],
 ) -> ! {
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
@@ -175,7 +176,7 @@ pub(crate) extern "C" fn __yk_deopt(
                 }
                 VarLocation::Register(x) => match x {
                     Register::GP(x) => gp_regs[usize::from(x.code())],
-                    Register::FP(_) => todo!(),
+                    Register::FP(x) => fp_regs[usize::from(x.code())],
                 },
                 VarLocation::ConstInt { bits: _, v } => v,
                 VarLocation::ConstFloat(f) => f.to_bits(),
