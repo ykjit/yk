@@ -3,7 +3,7 @@
 // ## where we know it'll run fast enough.
 // ##
 // ## FIXME: doesn't trigger "trace too long".
-// ignore-if: test "$YKB_TRACER" = "hwt"
+// ignore-if: test "$YKB_TRACER" != "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=4
@@ -23,6 +23,9 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc1 = yk_location_new();
   YkLocation loc2 = yk_location_new();
+
+  char *w = getenv("YKB_TRACER");
+  printf("tracer: %s\n", w);
 
   int i = 2000;
   NOOPT_VAL(loc1);
