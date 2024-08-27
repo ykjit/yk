@@ -1489,10 +1489,13 @@ impl<'a> Assemble<'a> {
                             };
                             lives.push((iid.clone(), VarLocation::ConstInt { bits: *bits, v: *c }))
                         }
-                        Const::Ptr(p) => locs.push(VarLocation::ConstInt {
-                            bits: 64,
-                            v: u64::try_from(*p).unwrap(),
-                        }),
+                        Const::Ptr(p) => lives.push((
+                            iid.clone(),
+                            VarLocation::ConstInt {
+                                bits: 64,
+                                v: u64::try_from(*p).unwrap(),
+                            },
+                        )),
                         e => todo!("{:?}", e),
                     }
                 }
