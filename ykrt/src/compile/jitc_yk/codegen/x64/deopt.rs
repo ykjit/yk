@@ -197,7 +197,13 @@ pub(crate) extern "C" fn __yk_deopt(
                             .byte_offset(isize::try_from(frame_off).unwrap())
                             .read() as u64
                     },
-                    _ => todo!(),
+                    1 => unsafe {
+                        (jitrbp as *const *const u8)
+                            .read()
+                            .byte_offset(isize::try_from(frame_off).unwrap())
+                            .read() as u64
+                    },
+                    _ => todo!("size={}", size),
                 },
             };
             varidx += 1;
