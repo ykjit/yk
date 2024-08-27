@@ -475,7 +475,7 @@ impl<'a> LSRegAlloc<'a> {
         let size = inst.def_byte_size(self.m);
 
         if let Inst::ProxyConst(cidx) = inst {
-            self.load_const_into_gp_reg(asm, *cidx, reg);
+            self.load_const_into_gp_reg(asm, cidx, reg);
             return;
         }
 
@@ -660,7 +660,7 @@ impl<'a> LSRegAlloc<'a> {
             let size = inst.def_byte_size(self.m);
             match inst {
                 Inst::ProxyInst(_) => panic!(),
-                Inst::ProxyConst(cidx) => match self.m.const_(*cidx) {
+                Inst::ProxyConst(cidx) => match self.m.const_(cidx) {
                     Const::Float(_, _) => todo!(),
                     Const::Int(tyidx, v) => {
                         let Ty::Integer(bits) = self.m.type_(*tyidx) else {
