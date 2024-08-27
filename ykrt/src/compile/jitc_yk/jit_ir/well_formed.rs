@@ -215,7 +215,7 @@ impl Module {
                 }
                 _ => (),
             }
-            last_inst = Some(inst.clone());
+            last_inst = Some(*inst);
         }
     }
 }
