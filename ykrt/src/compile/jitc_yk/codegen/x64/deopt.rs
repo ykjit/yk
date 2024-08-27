@@ -89,7 +89,7 @@ pub(crate) extern "C" fn __yk_deopt(
     let mut memsize = 15 * REG64_SIZE;
     // Calculate amount of space we need to allocate for each stack frame.
     for (i, iframe) in info.inlined_frames.iter().enumerate() {
-        let (rec, _) = aot_smaps.get(usize::try_from(iframe.safepoint.unwrap().id).unwrap());
+        let (rec, _) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
         debug_assert!(rec.size != u64::MAX);
         // The controlpoint frame (i == 0) doesn't need to be recreated.
         if i > 0 {
@@ -115,7 +115,7 @@ pub(crate) extern "C" fn __yk_deopt(
     let mut registers = [0; 16];
     let mut varidx = 0;
     for (i, iframe) in info.inlined_frames.iter().enumerate() {
-        let (rec, pinfo) = aot_smaps.get(usize::try_from(iframe.safepoint.unwrap().id).unwrap());
+        let (rec, pinfo) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
 
         // WRITE RBP
         // If the current frame has pushed RBP we need to do the same (unless we are processing
@@ -291,8 +291,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // Compute the address to which we want to write the new stack. This is immediately after the
     // frame containing the control point.
-    let (rec, pinfo) =
-        aot_smaps.get(usize::try_from(info.inlined_frames[0].safepoint.unwrap().id).unwrap());
+    let (rec, pinfo) = aot_smaps.get(usize::try_from(info.inlined_frames[0].safepoint.id).unwrap());
     let mut newframedst = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
     if pinfo.hasfp {
         newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };

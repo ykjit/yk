@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const, InlinedFrame, PackedOperand},
+    jit_ir::{self, Const, Operand, PackedOperand},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -64,7 +64,12 @@ impl TraceBuilder {
             first_ti_idx: 0,
             // We have to set the funcidx to None here as we don't know what it is yet. We'll
             // update it as soon as we do.
-            frames: vec![InlinedFrame::new(None, None, None, vec![])],
+            frames: vec![InlinedFrame {
+                funcidx: None,
+                callinst: None,
+                safepoint: None,
+                args: Vec::new(),
+            }],
             outline_target_blk: None,
             recursion_count: 0,
             promotions,
@@ -469,10 +474,12 @@ impl TraceBuilder {
         let mut callframes = Vec::new();
         for frame in &self.frames {
             let safepoint = frame.safepoint.unwrap();
-            callframes.push(InlinedFrame::new(
+            // All the `unwrap`s are safe as we've filled in the necessary information during trace
+            // building.
+            callframes.push(jit_ir::InlinedFrame::new(
                 frame.callinst.clone(),
-                frame.funcidx,
-                frame.safepoint,
+                frame.funcidx.unwrap(),
+                frame.safepoint.unwrap(),
                 // We don't need to copy the arguments since they are only required for LoadArg
                 // instructions which we won't see at the beginning of a sidetrace.
                 Vec::new(),
@@ -689,12 +696,12 @@ impl TraceBuilder {
                 bid.bbidx(),
                 aot_ir::InstIdx::new(aot_inst_idx),
             );
-            self.frames.push(InlinedFrame::new(
-                Some(aot_iid),
-                Some(*callee),
-                None,
-                jit_args,
-            ));
+            self.frames.push(InlinedFrame {
+                funcidx: Some(*callee),
+                callinst: Some(aot_iid),
+                safepoint: None,
+                args: jit_args,
+            });
             Ok(())
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
@@ -1100,7 +1107,16 @@ impl TraceBuilder {
                 off += U64SIZE;
             }
             self.cp_block = lastblk;
-            self.frames = sti.callframes().to_vec();
+            self.frames = sti
+                .callframes()
+                .iter()
+                .map(|x| InlinedFrame {
+                    funcidx: Some(x.funcidx),
+                    callinst: x.callinst.clone(),
+                    safepoint: Some(x.safepoint),
+                    args: x.args.clone(),
+                })
+                .collect::<Vec<_>>();
         }
 
         let mut trace_iter = tas.into_iter().peekable();
@@ -1240,6 +1256,16 @@ impl TraceBuilder {
 
         Ok(self.jit_mod)
     }
+}
+
+/// A local version of [jit_ir::InlinedFrame] that deals with the fact that we build up information
+/// about an inlined frame bit-by-bit using `Option`s, all of which will end up as `Some`.
+#[derive(Debug, Clone)]
+struct InlinedFrame {
+    funcidx: Option<aot_ir::FuncIdx>,
+    callinst: Option<aot_ir::InstID>,
+    safepoint: Option<&'static aot_ir::DeoptSafepoint>,
+    args: Vec<Operand>,
 }
 
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.
