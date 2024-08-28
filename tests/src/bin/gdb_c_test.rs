@@ -61,6 +61,7 @@ fn main() {
         &test_path,
         &extra_objs,
         true,
+        None,
     );
     if !cmd.spawn().unwrap().wait().unwrap().success() {
         panic!("compilation failed");

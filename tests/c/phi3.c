@@ -1,3 +1,4 @@
+// ## yk-config-env: YKB_AOT_OPTLEVEL=1
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YK_LOG=4
