@@ -768,6 +768,13 @@ impl TraceBuilder {
             jit_ptr = self
                 .jit_mod
                 .push_and_make_operand(jit_ir::PtrAddInst::new(jit_ptr, off_i32).into())?;
+        } else {
+            jit_ptr = match jit_ptr {
+                Operand::Local(iidx) => self
+                    .jit_mod
+                    .push_and_make_operand(jit_ir::Inst::ProxyInst(iidx))?,
+                _ => todo!(),
+            }
         }
 
         // Now apply any dynamic indices.
