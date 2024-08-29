@@ -68,7 +68,6 @@ mod parser;
 mod well_formed;
 
 use super::aot_ir;
-use crate::compile::jitc_yk::trace_builder::Frame;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{
@@ -273,8 +272,8 @@ impl Module {
     /// # Panics
     ///
     /// If `iidx` points to a `Proxy*` instruction.
-    pub(crate) fn inst_no_proxies(&self, iidx: InstIdx) -> &Inst {
-        match &self.insts[usize::from(iidx)] {
+    pub(crate) fn inst_no_proxies(&self, iidx: InstIdx) -> Inst {
+        match self.insts[usize::from(iidx)] {
             Inst::ProxyConst(_) | Inst::ProxyInst(_) => panic!(),
             x => x,
         }
@@ -282,10 +281,10 @@ impl Module {
 
     /// Return the instruction at the specified index, deproxying `ProxyInst` i.e. searching
     /// until a non-`ProxyInst` instruction is found.
-    pub(crate) fn inst_deproxy(&self, mut iidx: InstIdx) -> &Inst {
+    pub(crate) fn inst_deproxy(&self, mut iidx: InstIdx) -> Inst {
         loop {
-            match &self.insts[usize::from(iidx)] {
-                Inst::ProxyInst(proxy_iidx) => iidx = *proxy_iidx,
+            match self.insts[usize::from(iidx)] {
+                Inst::ProxyInst(proxy_iidx) => iidx = proxy_iidx,
                 x => return x,
             }
         }
@@ -294,7 +293,7 @@ impl Module {
     /// Return the instruction at the specified index. Note: unless you are explicitly handling
     /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
     /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
-    pub fn inst_all(&self, iidx: InstIdx) -> &Inst {
+    fn inst_all(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
 
@@ -1233,47 +1232,69 @@ impl fmt::Display for DisplayableConst<'_> {
 #[derive(Debug)]
 /// Stores additional guard information.
 pub(crate) struct GuardInfo {
-    /// Stackmap IDs for the active call frames.
-    frames: Vec<u64>,
     /// Live variables, mapping AOT vars to JIT [Operand]s.
     live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
     // Inlined frames info.
-    // FIXME With callframes, the frames and aotlives fields are redunant.
-    callframes: Vec<Frame>,
+    // FIXME With this field, the aotlives field is redundant.
+    inlined_frames: Vec<InlinedFrame>,
 }
 
 impl GuardInfo {
     pub(crate) fn new(
-        frames: Vec<u64>,
         live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
-        callframes: Vec<Frame>,
+        inlined_frames: Vec<InlinedFrame>,
     ) -> Self {
         Self {
-            frames,
             live_vars,
-            callframes,
+            inlined_frames,
         }
     }
 
-    /// Return the stackmap ids for the currently active call frames.
-    pub(crate) fn frames(&self) -> &[u64] {
-        &self.frames
-    }
-
-    /// Return the live variables for this guard.
+    /// Return the `AOT instruction -> PackedOperand` mapping for this guard.
     pub(crate) fn live_vars(&self) -> &[(aot_ir::InstID, PackedOperand)] {
         &self.live_vars
     }
 
-    /// Return the call frames.
-    pub(crate) fn callframes(&self) -> &[Frame] {
-        &self.callframes
+    /// Return the [InlinedFunc]s for this guard.
+    pub(crate) fn inlined_frames(&self) -> &[InlinedFrame] {
+        &self.inlined_frames
+    }
+}
+
+/// An abstract call frame for functions inlined in a trace. This contains enough information for a
+/// failing guard to reconstruct real call frames on the stack.
+#[derive(Debug, Clone)]
+pub(crate) struct InlinedFrame {
+    // The call instruction that led to [funcidx] being inlined.
+    pub(crate) callinst: Option<aot_ir::InstID>,
+    // The function that was inlined to create this abstract frame. Will be `None` for the top-most
+    // function.
+    pub(crate) funcidx: aot_ir::FuncIdx,
+    /// The deopt safepoint for [callinst].
+    pub(crate) safepoint: &'static aot_ir::DeoptSafepoint,
+    /// The [Operand]s passed to [funcidx].
+    pub(crate) args: Vec<Operand>,
+}
+
+impl InlinedFrame {
+    pub(crate) fn new(
+        callinst: Option<aot_ir::InstID>,
+        funcidx: aot_ir::FuncIdx,
+        safepoint: &'static aot_ir::DeoptSafepoint,
+        args: Vec<Operand>,
+    ) -> InlinedFrame {
+        InlinedFrame {
+            callinst,
+            funcidx,
+            safepoint,
+            args,
+        }
     }
 }
 
 /// An IR instruction.
 #[repr(u8)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Inst {
     // "Internal" IR instructions: these don't correspond to IR that a user interpreter can
     // express, but are used either for efficient representation of the IR or testing.
@@ -1752,7 +1773,7 @@ inst!(FPToSI, FPToSIInst);
 ///
 /// The naming convention used is based on infix notation, e.g. in `2 + 3`, "2" is the left-hand
 /// side (`lhs`), "+" is the binary operator (`binop`), and "3" is the right-hand side (`rhs`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BinOpInst {
     /// The left-hand side of the operation.
     pub(crate) lhs: PackedOperand,
@@ -1781,7 +1802,7 @@ impl BinOpInst {
 /// value". This is useful to make clear in a test that an operand is used at a certain point,
 /// which prevents optimisations removing some or all of the things that relate to this operand.
 #[cfg(test)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BlackBoxInst {
     op: PackedOperand,
 }
@@ -1805,7 +1826,7 @@ impl BlackBoxInst {
 ///
 /// Loads a value from a given pointer operand.
 ///
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LoadInst {
     /// The pointer to load from.
     op: PackedOperand,
@@ -1845,7 +1866,7 @@ impl LoadInst {
 ///
 /// FIXME (maybe): If we added a third `TraceInput` storage class to the register allocator, could
 /// we kill this instruction kind entirely?
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(packed)]
 pub struct LoadTraceInputInst {
     /// The VarLocation of this input.
@@ -1889,7 +1910,7 @@ impl LoadTraceInputInst {
 /// to implement a special global version for each instruction, e.g. LoadGlobal/StoreGlobal/etc).
 /// The easiest way to do this is to make globals a subclass of constants, similarly to what LLVM
 /// does.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LookupGlobalInst {
     /// The pointer to load from.
     global_decl_idx: GlobalDeclIdx,
@@ -1923,7 +1944,7 @@ impl LookupGlobalInst {
 /// # Semantics
 ///
 /// Perform an indirect call to an external or AOT function.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IndirectCallInst {
     /// The callee.
     target: PackedOperand,
@@ -1994,7 +2015,7 @@ impl IndirectCallInst {
 /// # Semantics
 ///
 /// Perform a call to an external or AOT function.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(packed)]
 pub struct DirectCallInst {
     /// The callee.
@@ -2057,7 +2078,7 @@ impl DirectCallInst {
 /// # Semantics
 ///
 /// Stores a value into a pointer.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StoreInst {
     /// The target pointer that we will store `val` into.
     tgt: PackedOperand,
@@ -2093,7 +2114,7 @@ impl StoreInst {
 /// # Semantics
 ///
 /// Selects from two values depending on a condition.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SelectInst {
     cond: PackedOperand,
     trueval: PackedOperand,
@@ -2134,7 +2155,7 @@ impl SelectInst {
 ///
 /// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
 /// in the LLVM pointer indexing type.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(packed)]
 pub struct PtrAddInst {
     /// The pointer to offset
@@ -2177,7 +2198,7 @@ impl PtrAddInst {
 ///
 /// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
 /// in the LLVM pointer indexing type.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(packed)]
 pub struct DynPtrAddInst {
     /// The pointer to offset
@@ -2223,7 +2244,7 @@ impl DynPtrAddInst {
 /// Compares two integer operands according to a predicate (e.g. greater-than). Defines a local
 /// variable that dictates the truth of the comparison.
 ///
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ICmpInst {
     pub(crate) lhs: PackedOperand,
     pub(crate) pred: Predicate,
@@ -2267,7 +2288,7 @@ impl ICmpInst {
 ///
 /// Compares two floating point operands according to a predicate (e.g. greater-than). Defines a
 /// local variable that dictates the truth of the comparison.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FCmpInst {
     pub(crate) lhs: PackedOperand,
     pub(crate) pred: FloatPredicate,
@@ -2313,7 +2334,7 @@ impl FCmpInst {
 /// the assumption that (at runtime) the guard condition is true. If the guard condition is false,
 /// then execution may not continue, and deoptimisation must occur.
 ///
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GuardInst {
     /// The condition to guard against.
     pub(crate) cond: PackedOperand,
@@ -2345,7 +2366,7 @@ impl GuardInst {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SExtInst {
     /// The value to extend.
     val: PackedOperand,
@@ -2370,7 +2391,7 @@ impl SExtInst {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZeroExtendInst {
     /// The value to extend.
     val: PackedOperand,
@@ -2395,7 +2416,7 @@ impl ZeroExtendInst {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TruncInst {
     /// The value to extend.
     val: PackedOperand,
@@ -2420,7 +2441,7 @@ impl TruncInst {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SIToFPInst {
     /// The value to convert.
     val: PackedOperand,
@@ -2453,7 +2474,7 @@ impl SIToFPInst {
 ///
 /// The source float and destination integer need not be the same width, but if the resulting
 /// numeric value does not fit, the result is undefined.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FPToSIInst {
     /// The value to convert. Must be of floating point type.
     val: PackedOperand,
@@ -2478,7 +2499,7 @@ impl FPToSIInst {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FPExtInst {
     /// The value to convert.
     val: PackedOperand,

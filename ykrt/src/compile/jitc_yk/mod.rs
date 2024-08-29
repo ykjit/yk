@@ -2,10 +2,7 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{
-        jitc_yk::codegen::CodeGen, jitc_yk::trace_builder::Frame, CompiledTrace, Compiler,
-        SideTraceInfo,
-    },
+    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, SideTraceInfo},
     location::HotLocation,
     log::{log_ir, should_log_ir, IRPhase},
     mt::MT,
@@ -43,7 +40,7 @@ pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
 });
 
 struct YkSideTraceInfo {
-    callframes: Vec<Frame>,
+    callframes: Vec<jit_ir::InlinedFrame>,
     aotlives: Vec<aot_ir::InstID>,
 }
 
@@ -56,7 +53,7 @@ impl SideTraceInfo for YkSideTraceInfo {
 impl YkSideTraceInfo {
     /// Return the live call frames which are required to setup the trace builder during
     /// side-tracing.
-    fn callframes(&self) -> &[Frame] {
+    fn callframes(&self) -> &[jit_ir::InlinedFrame] {
         &self.callframes
     }
 

@@ -89,11 +89,11 @@ pub(crate) extern "C" fn __yk_deopt(
     // Add space for live register values which we'll be adding at the end.
     let mut memsize = 15 * REG64_SIZE;
     // Calculate amount of space we need to allocate for each stack frame.
-    for (frameid, smid) in info.frames.iter().enumerate() {
-        let (rec, _) = aot_smaps.get(usize::try_from(*smid).unwrap());
+    for (i, iframe) in info.inlined_frames.iter().enumerate() {
+        let (rec, _) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
         debug_assert!(rec.size != u64::MAX);
-        if frameid > 0 {
-            // The controlpoint frame doesn't need to be recreated.
+        // The controlpoint frame (i == 0) doesn't need to be recreated.
+        if i > 0 {
             // We are on x86_64 so this unwrap is safe.
             memsize += usize::try_from(rec.size).unwrap();
         }
@@ -115,13 +115,13 @@ pub(crate) extern "C" fn __yk_deopt(
     // Live register values that we need to write back into AOT registers.
     let mut registers = [0; 33];
     let mut varidx = 0;
-    for (frameid, smid) in info.frames.iter().enumerate() {
-        let (rec, pinfo) = aot_smaps.get(usize::try_from(*smid).unwrap());
+    for (i, iframe) in info.inlined_frames.iter().enumerate() {
+        let (rec, pinfo) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
 
         // WRITE RBP
         // If the current frame has pushed RBP we need to do the same (unless we are processing
         // the bottom-most frame).
-        if pinfo.hasfp && frameid > 0 {
+        if pinfo.hasfp && i > 0 {
             rsp = unsafe { rsp.sub(REG64_SIZE) };
             rbp = rsp;
             unsafe { ptr::write(rsp as *mut u64, lastframeaddr as u64) };
@@ -129,7 +129,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
         // Calculate the this frame's address by substracting the last frame's size (plus return
         // address) from the last frame's address.
-        if frameid > 0 {
+        if i > 0 {
             lastframeaddr = unsafe { lastframeaddr.byte_sub(lastframesize + REG64_SIZE) };
         }
         lastframesize = usize::try_from(rec.size).unwrap();
@@ -147,7 +147,7 @@ pub(crate) extern "C" fn __yk_deopt(
         //   mov rbp, rsp
         //   push rbx     # this has index -2
         //   push r14     # this has index -3
-        if frameid > 0 {
+        if i > 0 {
             for (reg, idx) in &pinfo.csrs {
                 let mut tmp =
                     unsafe { rbp.byte_sub(usize::try_from(idx.abs()).unwrap() * REG64_SIZE) };
@@ -222,7 +222,7 @@ pub(crate) extern "C" fn __yk_deopt(
                         // this value to.
                         registers[usize::from(*extra - 1)] = jitval;
                     }
-                    if frameid == 0 {
+                    if i == 0 {
                         // skip first frame
                         continue;
                     }
@@ -248,12 +248,12 @@ pub(crate) extern "C" fn __yk_deopt(
                     // exceptions only appear (for now) at frame index 0 (where the control point
                     // is), and since this frame will not be re-written by deopt, there's no need
                     // to restore those direct locations anyway.
-                    debug_assert_eq!(frameid, 0);
+                    debug_assert_eq!(i, 0);
                     continue;
                 }
                 SMLocation::Indirect(reg, off, size) => {
                     debug_assert_eq!(*reg, RBP_DWARF_NUM);
-                    let temp = if frameid == 0 {
+                    let temp = if i == 0 {
                         // While the bottom frame is already on the stack and doesn't need to
                         // be recreated, we still need to copy over new values from the JIT.
                         // Luckily, we know the address of the bottom frame, so we can write
@@ -275,7 +275,7 @@ pub(crate) extern "C" fn __yk_deopt(
             }
         }
 
-        if frameid > 0 {
+        if i > 0 {
             // Advance the "virtual RSP" to the next frame.
             rsp = unsafe { rbp.byte_sub(usize::try_from(rec.size).unwrap()) };
             if pinfo.hasfp {
@@ -304,7 +304,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // Compute the address to which we want to write the new stack. This is immediately after the
     // frame containing the control point.
-    let (rec, pinfo) = aot_smaps.get(usize::try_from(info.frames[0]).unwrap());
+    let (rec, pinfo) = aot_smaps.get(usize::try_from(info.inlined_frames[0].safepoint.id).unwrap());
     let mut newframedst = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
     if pinfo.hasfp {
         newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };

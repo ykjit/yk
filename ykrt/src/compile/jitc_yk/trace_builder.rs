@@ -2,10 +2,10 @@
 //!
 //! This takes in an (AOT IR, execution trace) pair and constructs a JIT IR trace from it.
 
-use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
+use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const, PackedOperand},
+    jit_ir::{self, Const, Operand, PackedOperand},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -15,36 +15,6 @@ use std::{collections::HashMap, ffi::CString, sync::Arc};
 
 /// The argument index of the trace inputs struct in the trace function.
 const U64SIZE: usize = 8;
-
-/// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
-/// processed safepoint, call instruction and its arguments.
-#[derive(Debug, Clone)]
-pub(crate) struct Frame {
-    // The call instruction of this frame.
-    callinst: Option<aot_ir::InstID>,
-    // Index of the function of this frame.
-    funcidx: Option<FuncIdx>,
-    /// Safepoint for this frame.
-    safepoint: Option<&'static aot_ir::DeoptSafepoint>,
-    /// JIT arguments of this frame's caller.
-    args: Vec<jit_ir::Operand>,
-}
-
-impl Frame {
-    fn new(
-        callinst: Option<aot_ir::InstID>,
-        funcidx: Option<FuncIdx>,
-        safepoint: Option<&'static aot_ir::DeoptSafepoint>,
-        args: Vec<jit_ir::Operand>,
-    ) -> Frame {
-        Frame {
-            callinst,
-            funcidx,
-            safepoint,
-            args,
-        }
-    }
-}
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {
@@ -59,7 +29,7 @@ pub(crate) struct TraceBuilder {
     /// Index of the first traceinput instruction.
     first_ti_idx: usize,
     /// Inlined calls.
-    frames: Vec<Frame>,
+    frames: Vec<InlinedFrame>,
     /// The block at which to stop outlining.
     outline_target_blk: Option<BBlockId>,
     /// Current count of recursive calls to the function in which outlining was started. Will be 0
@@ -94,7 +64,12 @@ impl TraceBuilder {
             first_ti_idx: 0,
             // We have to set the funcidx to None here as we don't know what it is yet. We'll
             // update it as soon as we do.
-            frames: vec![Frame::new(None, None, None, vec![])],
+            frames: vec![InlinedFrame {
+                funcidx: None,
+                callinst: None,
+                safepoint: None,
+                args: Vec::new(),
+            }],
             outline_target_blk: None,
             recursion_count: 0,
             promotions,
@@ -495,20 +470,20 @@ impl TraceBuilder {
         // Collect the safepoint IDs and live variables from this conditional branch and the
         // previous frames to store inside the guard.
         // Unwrap-safe as each frame at this point must have a safepoint associated with it.
-        let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut live_vars = Vec::new(); // (AOT var, JIT var) pairs
         let mut callframes = Vec::new();
         for frame in &self.frames {
             let safepoint = frame.safepoint.unwrap();
-            callframes.push(Frame::new(
+            // All the `unwrap`s are safe as we've filled in the necessary information during trace
+            // building.
+            callframes.push(jit_ir::InlinedFrame::new(
                 frame.callinst.clone(),
-                frame.funcidx,
-                frame.safepoint,
+                frame.funcidx.unwrap(),
+                frame.safepoint.unwrap(),
                 // We don't need to copy the arguments since they are only required for LoadArg
                 // instructions which we won't see at the beginning of a sidetrace.
                 Vec::new(),
             ));
-            smids.push(safepoint.id);
 
             // Collect live variables.
             for op in safepoint.lives.iter() {
@@ -533,7 +508,7 @@ impl TraceBuilder {
             }
         }
 
-        let gi = jit_ir::GuardInfo::new(smids, live_vars, callframes);
+        let gi = jit_ir::GuardInfo::new(live_vars, callframes);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
 
         Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))
@@ -721,8 +696,12 @@ impl TraceBuilder {
                 bid.bbidx(),
                 aot_ir::InstIdx::new(aot_inst_idx),
             );
-            self.frames
-                .push(Frame::new(Some(aot_iid), Some(*callee), None, jit_args));
+            self.frames.push(InlinedFrame {
+                funcidx: Some(*callee),
+                callinst: Some(aot_iid),
+                safepoint: None,
+                args: jit_args,
+            });
             Ok(())
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
@@ -1128,7 +1107,16 @@ impl TraceBuilder {
                 off += U64SIZE;
             }
             self.cp_block = lastblk;
-            self.frames = sti.callframes().to_vec();
+            self.frames = sti
+                .callframes()
+                .iter()
+                .map(|x| InlinedFrame {
+                    funcidx: Some(x.funcidx),
+                    callinst: x.callinst.clone(),
+                    safepoint: Some(x.safepoint),
+                    args: x.args.clone(),
+                })
+                .collect::<Vec<_>>();
         }
 
         let mut trace_iter = tas.into_iter().peekable();
@@ -1268,6 +1256,16 @@ impl TraceBuilder {
 
         Ok(self.jit_mod)
     }
+}
+
+/// A local version of [jit_ir::InlinedFrame] that deals with the fact that we build up information
+/// about an inlined frame bit-by-bit using `Option`s, all of which will end up as `Some`.
+#[derive(Debug, Clone)]
+struct InlinedFrame {
+    funcidx: Option<aot_ir::FuncIdx>,
+    callinst: Option<aot_ir::InstID>,
+    safepoint: Option<&'static aot_ir::DeoptSafepoint>,
+    args: Vec<Operand>,
 }
 
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.

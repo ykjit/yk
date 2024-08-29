@@ -22,8 +22,7 @@ use crate::{
     compile::{
         jitc_yk::{
             aot_ir,
-            jit_ir::{Const, IndirectCallIdx},
-            trace_builder::Frame,
+            jit_ir::{Const, IndirectCallIdx, InlinedFrame},
             YkSideTraceInfo,
         },
         CompiledTrace, Guard, GuardIdx, SideTraceInfo,
@@ -1522,9 +1521,8 @@ impl<'a> Assemble<'a> {
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let deoptinfo = DeoptInfo {
             fail_label,
-            frames: gi.frames().to_vec(),
             live_vars: lives,
-            callframes: gi.callframes().to_vec(),
+            inlined_frames: gi.inlined_frames().to_vec(),
             guard: Guard::new(),
         };
         self.deoptinfo.push(deoptinfo);
@@ -1546,11 +1544,9 @@ impl<'a> Assemble<'a> {
 #[derive(Debug)]
 struct DeoptInfo {
     fail_label: DynamicLabel,
-    /// Vector of AOT stackmap IDs.
-    frames: Vec<u64>,
     /// Live variables, mapping AOT vars to JIT vars.
     live_vars: Vec<(aot_ir::InstID, VarLocation)>,
-    callframes: Vec<Frame>,
+    inlined_frames: Vec<InlinedFrame>,
     /// Keeps track of deopt amount and compiled side-trace.
     guard: Guard,
 }
@@ -1589,7 +1585,7 @@ impl CompiledTrace for X64CompiledTrace {
             .iter()
             .map(|(iid, _)| iid.clone())
             .collect();
-        let callframes = self.deoptinfo[usize::from(gidx)].callframes.clone();
+        let callframes = self.deoptinfo[usize::from(gidx)].inlined_frames.clone();
         Arc::new(YkSideTraceInfo {
             aotlives,
             callframes,
