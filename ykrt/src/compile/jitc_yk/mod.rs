@@ -10,7 +10,6 @@ use crate::{
 };
 use parking_lot::Mutex;
 use std::{
-    env,
     error::Error,
     slice,
     sync::{Arc, LazyLock},
@@ -27,11 +26,12 @@ mod trace_builder;
 
 /// Should we turn trace optimisations on or off? Defaults to "on".
 static YKD_OPT: LazyLock<bool> = LazyLock::new(|| {
-    let x = env::var("YKD_OPT");
-    match x.as_ref().map(|x| x.as_str()) {
-        Ok("0") => false,
-        Ok(_) | Err(_) => true,
-    }
+    // let x = env::var("YKD_OPT");
+    // match x.as_ref().map(|x| x.as_str()) {
+    //     Ok("0") => false,
+    //     Ok(_) | Err(_) => true,
+    // }
+    false // FIXME: DCE breaks tests.
 });
 
 pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
