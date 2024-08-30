@@ -30,7 +30,7 @@ ykrt = { path = "../ykrt", features = ["yk_testing", "ykd"] }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
-lang_tester = "0.8"
+lang_tester = "0.9"
 ykcapi = { path = "../ykcapi", features = ["yk_testing"] }
 ykrt = { path = "../ykrt", features = ["yk_testing", "ykd"] }
 

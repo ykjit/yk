@@ -12,9 +12,10 @@ use tempfile::TempDir;
 
 static SRC_EXTS: [&str; 8] = ["c", "C", "cpp", "CPP", "cc", "CC", "cxx", "CXX"];
 
-/// Wrap C compiler commands to help LSP. At the moment this produces output suitable for
-/// [clangd](https://clangd.llvm.org/) into (typically)
-/// `target/<debug|release>/clangd/<crate-name>/compile_commands.json`.
+/// Wrap C compiler commands to help LSP.
+///
+/// At the moment this produces output suitable for [clangd](https://clangd.llvm.org/) into
+/// (typically) `target/<debug|release>/clangd/<crate-name>/compile_commands.json`.
 ///
 /// It works by providing a compiler wrapper which is called in lieu of the compiler: it captures
 /// full compiler command-line invocations, writes them to a temporary directory, then joins them
