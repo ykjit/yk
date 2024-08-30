@@ -377,6 +377,23 @@ impl<'a> LSRegAlloc<'a> {
 
                     // At this point we know the value in `reg` has been spilled if necessary, so
                     // we can overwrite it.
+                    //
+                    // Laurie: this can crash because we call `force_fp_unspill()` on something
+                    // which isn't spilled (currently lives in a register). The function is
+                    // documented to panic if you try to do this.
+                    //
+                    // To repro, run `cargo test dyn_ptradd_simple.c`
+                    //
+                    // Something else fishy: for this crash, the constraint is `Input` and the
+                    // VarLocation is `Register::GP`. So we end up at `self.get_empty_fp_reg()`
+                    // above, i.e. we grab a new register to store something already in a
+                    // register into. But we never copy the contents of the old to the new.
+                    //
+                    // I tried a) not grabbing a new register if it's already in a
+                    // register above (just forward the current register), and b) not calling
+                    // force_gp_unspill if the VarLocation is Register.
+                    //
+                    // This made a different error occur.
                     match op {
                         Operand::Local(op_iidx) => {
                             self.force_gp_unspill(asm, *op_iidx, reg);
