@@ -53,7 +53,7 @@ yk_testing = []
 
 [dev-dependencies]
 cfgrammar = "0.13"
-fm = "0.3.0"
+fm = "0.4.0"
 lazy_static = "1.5.0"
 lrlex = "0.13"
 lrpar = "0.13"
