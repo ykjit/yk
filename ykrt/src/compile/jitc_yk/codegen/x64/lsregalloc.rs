@@ -488,7 +488,7 @@ impl<'a> LSRegAlloc<'a> {
     ///
     /// If `iidx` has not previously been spilled.
     fn force_gp_unspill(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
-        let inst = self.m.inst_deproxy(iidx);
+        let (iidx, inst) = self.m.inst_deproxy(iidx);
         let size = inst.def_byte_size(self.m);
 
         if let Inst::ProxyConst(cidx) = inst {
@@ -683,7 +683,7 @@ impl<'a> LSRegAlloc<'a> {
         }) {
             VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
         } else {
-            let inst = self.m.inst_deproxy(iidx);
+            let (iidx, inst) = self.m.inst_deproxy(iidx);
             let size = inst.def_byte_size(self.m);
             match inst {
                 Inst::ProxyInst(_) => panic!(),

@@ -13,7 +13,7 @@ use crate::compile::{
 
 pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
     for iidx in m.iter_all_inst_idxs() {
-        let inst = m.inst_deproxy(iidx);
+        let (iidx, inst) = m.inst_deproxy(iidx);
         match inst {
             Inst::BinOp(BinOpInst {
                 lhs,

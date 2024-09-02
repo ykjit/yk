@@ -281,11 +281,11 @@ impl Module {
 
     /// Return the instruction at the specified index, deproxying `ProxyInst` i.e. searching
     /// until a non-`ProxyInst` instruction is found.
-    pub(crate) fn inst_deproxy(&self, mut iidx: InstIdx) -> Inst {
+    pub(crate) fn inst_deproxy(&self, mut iidx: InstIdx) -> (InstIdx, Inst) {
         loop {
             match self.insts[usize::from(iidx)] {
                 Inst::ProxyInst(proxy_iidx) => iidx = proxy_iidx,
-                x => return x,
+                x => return (iidx, x),
             }
         }
     }
@@ -1086,6 +1086,16 @@ impl Operand {
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableOperand<'a> {
         DisplayableOperand { operand: self, m }
     }
+
+    /// If this [Operand] represents a local instruction, call `f` with its `InstIdx`.
+    fn map_iidx<F>(&self, f: &mut F)
+    where
+        F: FnMut(InstIdx),
+    {
+        if let Operand::Local(iidx) = self {
+            f(*iidx)
+        }
+    }
 }
 
 pub(crate) struct DisplayableOperand<'a> {
@@ -1426,6 +1436,97 @@ impl Inst {
         }
     }
 
+    /// Apply the function `f` to each of this instruction's [Operand]s iff they are of type
+    /// [Operand::Local]. When an instruction references more than one [Operand], the order of
+    /// traversal is undefined.
+    pub(crate) fn map_operand_locals<F>(&self, m: &Module, f: &mut F)
+    where
+        F: FnMut(InstIdx),
+    {
+        match self {
+            #[cfg(test)]
+            Inst::BlackBox(BlackBoxInst { op }) => {
+                op.unpack(m).map_iidx(f);
+            }
+            Inst::ProxyConst(_) => (),
+            Inst::ProxyInst(_) => (),
+            Inst::Tombstone => (),
+            Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
+                lhs.unpack(m).map_iidx(f);
+                rhs.unpack(m).map_iidx(f);
+            }
+            Inst::Load(LoadInst { op, .. }) => op.unpack(m).map_iidx(f),
+            Inst::LookupGlobal(_) => (),
+            Inst::LoadTraceInput(_) => (),
+            Inst::Call(x) => {
+                for i in x.iter_args_idx() {
+                    m.arg(i).map_iidx(f);
+                }
+            }
+            Inst::IndirectCall(x) => {
+                let ici = m.indirect_call(*x);
+                let IndirectCallInst { target, .. } = ici;
+                target.unpack(m).map_iidx(f);
+                for i in ici.iter_args_idx() {
+                    m.arg(i).map_iidx(f);
+                }
+            }
+            Inst::PtrAdd(x) => {
+                let ptr = x.ptr;
+                ptr.unpack(m).map_iidx(f);
+            }
+            Inst::DynPtrAdd(x) => {
+                let ptr = x.ptr;
+                ptr.unpack(m).map_iidx(f);
+                let num_elems = x.num_elems;
+                num_elems.unpack(m).map_iidx(f);
+            }
+            Inst::Store(StoreInst { tgt, val, .. }) => {
+                tgt.unpack(m).map_iidx(f);
+                val.unpack(m).map_iidx(f);
+            }
+            Inst::ICmp(ICmpInst { lhs, pred: _, rhs }) => {
+                lhs.unpack(m).map_iidx(f);
+                rhs.unpack(m).map_iidx(f);
+            }
+            Inst::Guard(x @ GuardInst { cond, .. }) => {
+                cond.unpack(m).map_iidx(f);
+                for (_, pop) in x.guard_info(m).live_vars() {
+                    pop.unpack(m).map_iidx(f);
+                }
+            }
+            Inst::TraceLoopStart => {
+                for x in &m.loop_start_vars {
+                    x.map_iidx(f);
+                }
+            }
+            Inst::TraceLoopJump => {
+                for x in &m.loop_jump_vars {
+                    x.map_iidx(f);
+                }
+            }
+            Inst::SExt(SExtInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::Trunc(TruncInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::Select(SelectInst {
+                cond,
+                trueval,
+                falseval,
+            }) => {
+                cond.unpack(m).map_iidx(f);
+                trueval.unpack(m).map_iidx(f);
+                falseval.unpack(m).map_iidx(f);
+            }
+            Inst::SIToFP(SIToFPInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::FPExt(FPExtInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::FCmp(FCmpInst { lhs, pred: _, rhs }) => {
+                lhs.unpack(m).map_iidx(f);
+                rhs.unpack(m).map_iidx(f);
+            }
+            Inst::FPToSI(FPToSIInst { val, .. }) => val.unpack(m).map_iidx(f),
+        }
+    }
+
     /// Apply the function `f` to each of this instruction's [PackedOperand]s that references a
     /// local instruction. When an instruction references more than one [PackedOperand], the order
     /// of traversal is undefined.
@@ -1443,7 +1544,7 @@ impl Inst {
                 op.map_iidx(f);
             }
             Inst::ProxyConst(_) => (),
-            Inst::ProxyInst(_) => (),
+            Inst::ProxyInst(iidx) => f(*iidx),
             Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
                 lhs.map_iidx(f);
