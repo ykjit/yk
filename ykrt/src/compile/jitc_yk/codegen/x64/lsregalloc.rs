@@ -125,7 +125,7 @@ pub(crate) struct LSRegAlloc<'a> {
 }
 
 impl<'a> LSRegAlloc<'a> {
-    pub(crate) fn new(m: &'a Module, inst_vals_alive_until: Vec<InstIdx>) -> Self {
+    pub(crate) fn new(m: &'a Module) -> Self {
         #[cfg(debug_assertions)]
         {
             // We rely on the registers in GP_REGS being numbered 0..15 (inc.) for correctness.
@@ -155,7 +155,7 @@ impl<'a> LSRegAlloc<'a> {
             gp_reg_states,
             fp_regset: RegSet::with_fp_reserved(),
             fp_reg_states,
-            inst_vals_alive_until,
+            inst_vals_alive_until: m.inst_vals_alive_until(),
             spills: vec![SpillState::Empty; m.insts_len()],
             stack: Default::default(),
         }
@@ -471,7 +471,7 @@ impl<'a> LSRegAlloc<'a> {
     ///
     /// If `iidx` has not previously been spilled.
     fn force_gp_unspill(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
-        let inst = self.m.inst_deproxy(iidx);
+        let (iidx, inst) = self.m.inst_deproxy(iidx);
         let size = inst.def_byte_size(self.m);
 
         if let Inst::ProxyConst(cidx) = inst {
@@ -656,7 +656,7 @@ impl<'a> LSRegAlloc<'a> {
         }) {
             VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
         } else {
-            let inst = self.m.inst_deproxy(iidx);
+            let (iidx, inst) = self.m.inst_deproxy(iidx);
             let size = inst.def_byte_size(self.m);
             match inst {
                 Inst::ProxyInst(_) => panic!(),

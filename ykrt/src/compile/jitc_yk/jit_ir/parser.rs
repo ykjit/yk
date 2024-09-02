@@ -439,7 +439,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::Proxy { assign, val } => {
                         let op = self.process_operand(val)?;
                         let inst = match op {
-                            Operand::Local(_) => todo!(),
+                            Operand::Local(iidx) => Inst::ProxyInst(iidx),
                             Operand::Const(cidx) => Inst::ProxyConst(cidx),
                         };
                         self.push_assign(inst.into(), assign)?;

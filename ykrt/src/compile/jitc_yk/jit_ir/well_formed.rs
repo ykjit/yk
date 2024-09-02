@@ -34,9 +34,8 @@ impl Module {
 
         let mut last_inst = None;
         for (iidx, inst) in self.iter_skipping_insts() {
-            inst.map_packed_operand_locals(self, &mut |x| {
-                let i = self.inst_deproxy(x);
-                if i.def_type(self).is_none() {
+            inst.map_operand_locals(self, &mut |x| {
+                if let Inst::Tombstone = self.inst_all(x) {
                     panic!(
                         "Instruction at position {iidx} uses undefined value (%{x})\n  {}",
                         self.inst_no_proxies(iidx).display(iidx, self)
