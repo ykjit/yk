@@ -1230,7 +1230,7 @@ impl<'a> Assemble<'a> {
                                         mov eax, DWORD [rbp - i32::try_from(off).unwrap()];
                                         push rbp;
                                         mov rbp, [rbp];
-                                        mov DWORD [rbp - frame_off], eax;
+                                        mov DWORD [rbp + frame_off], eax;
                                         pop rbp;
                                         pop rax
                                     ),
