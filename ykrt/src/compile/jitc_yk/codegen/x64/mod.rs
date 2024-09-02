@@ -155,8 +155,9 @@ impl<'a> Assemble<'a> {
 
         let mut inst_vals_alive_until = vec![InstIdx::try_from(0).unwrap(); m.insts_len()];
         for iidx in m.iter_all_inst_idxs() {
-            let (iidx, inst) = m.inst_deproxy(iidx);
+            let inst = m.inst_all(iidx);
             inst.map_operand_locals(m, &mut |x| {
+                debug_assert!(inst_vals_alive_until[usize::from(x)] <= iidx);
                 inst_vals_alive_until[usize::from(x)] = iidx;
             });
         }

@@ -293,7 +293,7 @@ impl Module {
     /// Return the instruction at the specified index. Note: unless you are explicitly handling
     /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
     /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
-    fn inst_all(&self, iidx: InstIdx) -> &Inst {
+    pub(crate) fn inst_all(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
 
@@ -1449,7 +1449,7 @@ impl Inst {
                 op.unpack(m).map_iidx(f);
             }
             Inst::ProxyConst(_) => (),
-            Inst::ProxyInst(_) => (),
+            Inst::ProxyInst(iidx) => m.inst_all(*iidx).map_operand_locals(m, f),
             Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
                 lhs.unpack(m).map_iidx(f);
