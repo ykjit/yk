@@ -10,7 +10,7 @@
 
 use super::{
     super::{
-        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, Ty},
+        jit_ir::{self, BinOp, FloatTy, InstIdx, Module, Operand, Ty},
         CompilationError,
     },
     reg_alloc::{self, StackDirection, VarLocation},
@@ -153,28 +153,11 @@ impl<'a> Assemble<'a> {
         #[cfg(debug_assertions)]
         m.assert_well_formed();
 
-        let mut inst_vals_alive_until = vec![InstIdx::try_from(0).unwrap(); m.insts_len()];
-        for iidx in m.iter_all_inst_idxs() {
-            let inst = m.inst_deproxy(iidx);
-            inst.map_packed_operand_locals(m, &mut |x| {
-                inst_vals_alive_until[usize::from(x)] = iidx;
-            });
-        }
-
-        // FIXME: this is a hack.
-        for (iidx, inst) in m.iter_skipping_insts() {
-            if let Inst::TraceLoopStart = inst {
-                break;
-            }
-            inst_vals_alive_until[usize::from(iidx)] =
-                InstIdx::try_from(usize::from(m.last_inst_idx()) + 1)?;
-        }
-
         let asm = dynasmrt::x64::Assembler::new()
             .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, inst_vals_alive_until),
+            ra: LSRegAlloc::new(m),
             asm,
             loop_start_locs: Vec::new(),
             deoptinfo: Vec::new(),
