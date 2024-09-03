@@ -977,10 +977,24 @@ impl<'a> Assemble<'a> {
             }
         }
         // If the function we called has a return value, then store it into a local variable.
-        if fty.ret_type(self.m) != &Ty::Void {
-            let [_] =
-                self.ra
-                    .get_gp_regs(&mut self.asm, iidx, [RegConstraint::OutputFromReg(Rq::RAX)]);
+        match fty.ret_type(self.m) {
+            Ty::Void => (),
+            Ty::Float(_) => {
+                let [_] = self.ra.get_fp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::OutputFromReg(Rx::XMM0)],
+                );
+            }
+            Ty::Integer(_) | Ty::Ptr => {
+                let [_] = self.ra.get_gp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::OutputFromReg(Rq::RAX)],
+                );
+            }
+            Ty::Func(_) => todo!(),
+            Ty::Unimplemented(_) => todo!(),
         }
 
         if fty.is_vararg() {
