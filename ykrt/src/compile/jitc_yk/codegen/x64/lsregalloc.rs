@@ -706,12 +706,11 @@ impl<'a> LSRegAlloc<'a> {
         for cnstr in &constraints {
             match cnstr {
                 RegConstraint::InputIntoReg(_, reg)
-                | RegConstraint::InputIntoRegAndClobber(_, reg) => avoid.set(*reg),
+                | RegConstraint::InputIntoRegAndClobber(_, reg)
+                | RegConstraint::OutputFromReg(reg) => avoid.set(*reg),
                 RegConstraint::Input(_) | RegConstraint::InputOutput(_) | RegConstraint::Output => {
                 }
-                RegConstraint::InputOutputIntoReg(_, _)
-                | RegConstraint::OutputFromReg(_)
-                | RegConstraint::Temporary => {
+                RegConstraint::InputOutputIntoReg(_, _) | RegConstraint::Temporary => {
                     panic!();
                 }
             }
