@@ -293,7 +293,7 @@ impl Module {
     /// Return the instruction at the specified index. Note: unless you are explicitly handling
     /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
     /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
-    pub(crate) fn inst_all(&self, iidx: InstIdx) -> &Inst {
+    fn inst_all(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
 
@@ -552,6 +552,32 @@ impl Module {
 
     pub(crate) fn push_loop_jump_var(&mut self, op: Operand) {
         self.loop_jump_vars.push(op);
+    }
+
+    pub(crate) fn inst_vals_alive_until(&self) -> Vec<InstIdx> {
+        let mut alives = vec![InstIdx::try_from(0).unwrap(); self.insts_len()];
+        for iidx in self.iter_all_inst_idxs() {
+            let inst = self.inst_all(iidx);
+            inst.map_operand_locals(self, &mut |x| {
+                let (x, _) = self.inst_deproxy(x);
+                debug_assert!(alives[usize::from(x)] <= iidx);
+                alives[usize::from(x)] = iidx;
+            });
+        }
+
+        // FIXME: this is a hack.
+        for (iidx, inst) in self.iter_skipping_insts() {
+            if let Inst::TraceLoopStart = inst {
+                break;
+            }
+            // FIXME: this `unwrap` *could* fail, but only because we haven't properly implemented
+            // backward jumps. When we do so, we will have implicitly guaranteed that every
+            // `InstIdx` is representable without the `unwrap` failing.
+            alives[usize::from(iidx)] =
+                InstIdx::try_from(usize::from(self.last_inst_idx()) + 1).unwrap();
+        }
+
+        alives
     }
 }
 
@@ -1449,7 +1475,7 @@ impl Inst {
                 op.unpack(m).map_iidx(f);
             }
             Inst::ProxyConst(_) => (),
-            Inst::ProxyInst(iidx) => m.inst_all(*iidx).map_operand_locals(m, f),
+            Inst::ProxyInst(_) => (),
             Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
                 lhs.unpack(m).map_iidx(f);
@@ -2842,5 +2868,44 @@ mod tests {
         assert_eq!(Ty::Integer(127).byte_size().unwrap(), 16);
         assert_eq!(Ty::Integer(128).byte_size().unwrap(), 16);
         assert_eq!(Ty::Integer(129).byte_size().unwrap(), 17);
+    }
+
+    #[test]
+    fn alive_until() {
+        let m = Module::from_str(
+            "
+            entry:
+              %0: i8 = load_ti 0
+              tloop_start [%0]
+              %2: i8 = %0
+              tloop_jump [%2]
+            ",
+        );
+        assert_eq!(
+            m.inst_vals_alive_until(),
+            vec![4, 0, 0, 0]
+                .iter()
+                .map(|x: &usize| InstIdx::try_from(*x).unwrap())
+                .collect::<Vec<_>>()
+        );
+
+        let m = Module::from_str(
+            "
+            entry:
+              %0: i8 = load_ti 0
+              tloop_start [%0]
+              %2: i8 = add %0, %0
+              %3: i8 = add %0, %0
+              %4: i8 = %2
+              tloop_jump [%4]
+            ",
+        );
+        assert_eq!(
+            m.inst_vals_alive_until(),
+            vec![6, 0, 5, 0, 0, 0]
+                .iter()
+                .map(|x: &usize| InstIdx::try_from(*x).unwrap())
+                .collect::<Vec<_>>()
+        );
     }
 }
