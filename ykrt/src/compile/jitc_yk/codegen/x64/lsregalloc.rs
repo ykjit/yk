@@ -308,7 +308,7 @@ impl<'a> LSRegAlloc<'a> {
         for (i, cnstr) in constraints.iter().enumerate() {
             match cnstr {
                 RegConstraint::Input(op) | RegConstraint::InputOutput(op) => match op {
-                    Operand::Local(op_iidx) => {
+                    Operand::Var(op_iidx) => {
                         if let Some(reg_i) = self.gp_reg_states.iter().position(|x| {
                             if let RegState::FromInst(y) = x {
                                 y == op_iidx
@@ -378,7 +378,7 @@ impl<'a> LSRegAlloc<'a> {
                     // At this point we know the value in `reg` has been spilled if necessary, so
                     // we can overwrite it.
                     match op {
-                        Operand::Local(op_iidx) => {
+                        Operand::Var(op_iidx) => {
                             self.force_gp_unspill(asm, *op_iidx, reg);
                         }
                         Operand::Const(cidx) => {
@@ -392,7 +392,7 @@ impl<'a> LSRegAlloc<'a> {
                     avoid.set(reg);
                     let st = match x {
                         RegConstraint::Input(_) | RegConstraint::InputIntoReg(_, _) => match op {
-                            Operand::Local(op_iidx) => RegState::FromInst(*op_iidx),
+                            Operand::Var(op_iidx) => RegState::FromInst(*op_iidx),
                             Operand::Const(cidx) => RegState::FromConst(*cidx),
                         },
                         RegConstraint::InputIntoRegAndClobber(_, _) => {
@@ -730,7 +730,7 @@ impl<'a> LSRegAlloc<'a> {
         for (i, cnstr) in constraints.iter().enumerate() {
             match cnstr {
                 RegConstraint::Input(op) | RegConstraint::InputOutput(op) => match op {
-                    Operand::Local(op_iidx) => {
+                    Operand::Var(op_iidx) => {
                         if let Some(reg_i) = self.fp_reg_states.iter().position(|x| {
                             if let RegState::FromInst(y) = x {
                                 y == op_iidx
@@ -800,7 +800,7 @@ impl<'a> LSRegAlloc<'a> {
                     // At this point we know the value in `reg` has been spilled if necessary, so
                     // we can overwrite it.
                     match op {
-                        Operand::Local(op_iidx) => {
+                        Operand::Var(op_iidx) => {
                             self.force_fp_unspill(asm, *op_iidx, reg);
                         }
                         Operand::Const(cidx) => {
@@ -814,7 +814,7 @@ impl<'a> LSRegAlloc<'a> {
                     avoid.set(reg);
                     let st = match x {
                         RegConstraint::Input(_) | RegConstraint::InputIntoReg(_, _) => match op {
-                            Operand::Local(op_iidx) => RegState::FromInst(*op_iidx),
+                            Operand::Var(op_iidx) => RegState::FromInst(*op_iidx),
                             Operand::Const(cidx) => RegState::FromConst(*cidx),
                         },
                         RegConstraint::InputIntoRegAndClobber(_, _) => {

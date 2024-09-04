@@ -1155,7 +1155,7 @@ impl<'a> Assemble<'a> {
                 // Found the label, emit a jump to it.
                 for (i, op) in self.m.loop_jump_vars().iter().enumerate() {
                     let (iidx, src) = match op {
-                        Operand::Local(iidx) => (*iidx, self.ra.var_location(*iidx)),
+                        Operand::Var(iidx) => (*iidx, self.ra.var_location(*iidx)),
                         _ => panic!(),
                     };
                     let dst = self.loop_start_locs[i];
@@ -1288,7 +1288,7 @@ impl<'a> Assemble<'a> {
         // back around here we need to write the live variables back into these same locations.
         for var in self.m.loop_start_vars() {
             let loc = match var {
-                Operand::Local(iidx) => self.ra.var_location(*iidx),
+                Operand::Var(iidx) => self.ra.var_location(*iidx),
                 _ => panic!(),
             };
             self.loop_start_locs.push(loc);
@@ -1493,7 +1493,7 @@ impl<'a> Assemble<'a> {
         let gi = inst.guard_info(self.m);
         for (iid, pop) in gi.live_vars() {
             match pop.unpack(self.m) {
-                Operand::Local(x) => {
+                Operand::Var(x) => {
                     lives.push((iid.clone(), self.ra.var_location(x)));
                 }
                 Operand::Const(x) => {

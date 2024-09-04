@@ -353,7 +353,7 @@ impl Module {
         debug_assert!(inst.def_type(self).is_some());
         InstIdx::try_from(self.insts.len()).map(|x| {
             self.insts.push(inst);
-            Operand::Local(x)
+            Operand::Var(x)
         })
     }
 
@@ -1031,7 +1031,7 @@ pub(crate) struct PackedOperand(u16);
 impl PackedOperand {
     pub fn new(op: &Operand) -> Self {
         match op {
-            Operand::Local(lidx) => {
+            Operand::Var(lidx) => {
                 debug_assert!(u16::from(*lidx) <= MAX_OPERAND_IDX);
                 PackedOperand(u16::from(*lidx))
             }
@@ -1055,7 +1055,7 @@ impl PackedOperand {
                         iidx = *x;
                     }
                     _ => {
-                        return Operand::Local(iidx);
+                        return Operand::Var(iidx);
                     }
                 }
             }
@@ -1082,7 +1082,7 @@ impl PackedOperand {
 /// to add type safety when using operands.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Operand {
-    Local(InstIdx),
+    Var(InstIdx),
     Const(ConstIdx),
 }
 
@@ -1096,7 +1096,7 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Local(l) => m.inst_all(*l).def_byte_size(m),
+            Self::Var(l) => m.inst_all(*l).def_byte_size(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).byte_size().unwrap(),
         }
     }
@@ -1104,7 +1104,7 @@ impl Operand {
     /// Returns the type index of the operand.
     pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => m.inst_all(*l).tyidx(m),
+            Self::Var(l) => m.inst_all(*l).tyidx(m),
             Self::Const(c) => m.const_(*c).tyidx(m),
         }
     }
@@ -1118,7 +1118,7 @@ impl Operand {
     where
         F: FnMut(InstIdx),
     {
-        if let Operand::Local(iidx) = self {
+        if let Operand::Var(iidx) = self {
             f(*iidx)
         }
     }
@@ -1132,7 +1132,7 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Local(idx) => match self.m.inst_all(*idx) {
+            Operand::Var(idx) => match self.m.inst_all(*idx) {
                 Inst::ProxyConst(c) => {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
@@ -1619,7 +1619,7 @@ impl Inst {
             Inst::TraceLoopStart => {
                 for val in &m.loop_start_vars {
                     match val {
-                        Operand::Local(iidx) => f(*iidx),
+                        Operand::Var(iidx) => f(*iidx),
                         _ => panic!(),
                     }
                 }
@@ -1627,7 +1627,7 @@ impl Inst {
             Inst::TraceLoopJump => {
                 for val in &m.loop_jump_vars {
                     match val {
-                        Operand::Local(iidx) => f(*iidx),
+                        Operand::Var(iidx) => f(*iidx),
                         Operand::Const(_) => (),
                     }
                 }
@@ -2661,14 +2661,14 @@ mod tests {
             LoadTraceInputInst::new(0, TyIdx::try_from(0).unwrap()).into(),
             LoadTraceInputInst::new(8, TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
-                Operand::Local(InstIdx(0)),
+                Operand::Var(InstIdx(0)),
                 TyIdx(U24::try_from(0).unwrap()),
                 false,
             )
             .into(),
         ];
         prog[2] = LoadInst::new(
-            Operand::Local(InstIdx(1)),
+            Operand::Var(InstIdx(1)),
             TyIdx(U24::try_from(0).unwrap()),
             false,
         )
@@ -2694,9 +2694,9 @@ mod tests {
 
         // Build a call to the function.
         let args = vec![
-            Operand::Local(InstIdx(0)),
-            Operand::Local(InstIdx(1)),
-            Operand::Local(InstIdx(2)),
+            Operand::Var(InstIdx(0)),
+            Operand::Var(InstIdx(1)),
+            Operand::Var(InstIdx(2)),
         ];
         m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(0, i32_tyidx)))
             .unwrap();
@@ -2707,9 +2707,9 @@ mod tests {
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
-        assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
-        assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
+        assert_eq!(ci.operand(&m, 0), Operand::Var(InstIdx(0)));
+        assert_eq!(ci.operand(&m, 1), Operand::Var(InstIdx(1)));
+        assert_eq!(ci.operand(&m, 2), Operand::Var(InstIdx(2)));
     }
 
     #[test]
@@ -2727,9 +2727,9 @@ mod tests {
 
         // Now build a call to the function.
         let args = vec![
-            Operand::Local(InstIdx(0)),
-            Operand::Local(InstIdx(1)),
-            Operand::Local(InstIdx(2)),
+            Operand::Var(InstIdx(0)),
+            Operand::Var(InstIdx(1)),
+            Operand::Var(InstIdx(2)),
         ];
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
