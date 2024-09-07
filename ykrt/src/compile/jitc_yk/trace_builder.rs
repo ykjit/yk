@@ -655,10 +655,10 @@ impl TraceBuilder {
             return Ok(());
         }
         // Ignore software tracer calls. Software tracer inserts
-        // `yk_trace_basicblock` instruction calls into the beginning of
+        // `__yk_trace_basicblock` instruction calls into the beginning of
         // every basic block. These calls can be ignored as they are
         // only used to collect runtime information for the tracer itself.
-        if AOT_MOD.func(*callee).name() == "yk_trace_basicblock" {
+        if AOT_MOD.func(*callee).name() == "__yk_trace_basicblock" {
             return Ok(());
         }
         // Convert AOT args to JIT args.
