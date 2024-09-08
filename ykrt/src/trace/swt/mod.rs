@@ -51,7 +51,7 @@ thread_local! {
 /// * `block_index` - The index of the basic block within the function.
 #[cfg(tracer_swt)]
 #[no_mangle]
-pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize) {
+pub extern "C" fn __yk_trace_basicblock(function_index: usize, block_index: usize) {
     MTThread::with(|mtt| {
         if mtt.is_tracing() {
             BASIC_BLOCKS.with(|v| {
