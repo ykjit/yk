@@ -1,13 +1,13 @@
 //! A simple linear scan register allocator.
 //!
-//! The "main" interface from the code generator to the register allocator is `get_gp_regs` (and/or
+//! The "main" interface from the code generator to the register allocator is `assign_gp_regs` (and/or
 //! `get_fp_regs`) and [RegConstraint]. For example:
 //!
 //! ```rust,ignore
 //! match binop {
 //!   BinOp::Add => {
 //!     let size = lhs.byte_size(self.m);
-//!     let [lhs_reg, rhs_reg] = self.ra.get_gp_regs(
+//!     let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
 //!       &mut self.asm,
 //!       iidx,
 //!       [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -18,7 +18,7 @@
 //!     }
 //! ```
 //!
-//! This says "return two x64 registers: `lhs_reg` will take a value as input and later contain an
+//! This says "assign two x64 registers: `lhs_reg` will take a value as input and later contain an
 //! output value (clobbering the input value, which will be spilled if necessary); `rhs_reg` will
 //! take a value as input (and mustn't clobber it)". Those registers can then be used with dynasmrt
 //! as one expects.
@@ -264,20 +264,20 @@ impl<'a> LSRegAlloc<'a> {
         self.spills[usize::from(iidx)] = SpillState::Indirect(frame_off);
     }
 
-    /// Allocate registers for the instruction at position `iidx`.
-    pub(crate) fn get_gp_regs<const N: usize>(
+    /// Assign registers for the instruction at position `iidx`.
+    pub(crate) fn assign_gp_regs<const N: usize>(
         &mut self,
         asm: &mut Assembler,
         iidx: InstIdx,
         constraints: [RegConstraint<Rq>; N],
     ) -> [Rq; N] {
-        self.get_gp_regs_avoiding(asm, iidx, constraints, RegSet::with_gp_reserved())
+        self.assign_gp_regs_avoiding(asm, iidx, constraints, RegSet::with_gp_reserved())
     }
 
-    /// Allocate registers for the instruction at position `iidx`. Registers which should not be
+    /// Assign registers for the instruction at position `iidx`. Registers which should not be
     /// allocated/touched in any way are specified in `avoid`: note that these registers are not
     /// considered clobbered so will not be spilled.
-    pub(crate) fn get_gp_regs_avoiding<const N: usize>(
+    pub(crate) fn assign_gp_regs_avoiding<const N: usize>(
         &mut self,
         asm: &mut Assembler,
         iidx: InstIdx,
@@ -359,7 +359,7 @@ impl<'a> LSRegAlloc<'a> {
                 | RegConstraint::InputOutputIntoReg(op, _) => {
                     let reg = match x {
                         RegConstraint::Input(_) | RegConstraint::InputOutput(_) => {
-                            self.get_empty_gp_reg(asm, iidx, avoid)
+                            self.assign_empty_gp_reg(asm, iidx, avoid)
                         }
                         RegConstraint::InputIntoReg(_, reg)
                         | RegConstraint::InputIntoRegAndClobber(_, reg)
@@ -413,7 +413,7 @@ impl<'a> LSRegAlloc<'a> {
                     self.gp_reg_states[usize::from(reg.code())] = st;
                 }
                 RegConstraint::Output => {
-                    let reg = self.get_empty_gp_reg(asm, iidx, avoid);
+                    let reg = self.assign_empty_gp_reg(asm, iidx, avoid);
                     self.gp_regset.set(reg);
                     self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
                     avoid.set(reg);
@@ -428,7 +428,7 @@ impl<'a> LSRegAlloc<'a> {
                     out[i] = Some(*reg);
                 }
                 RegConstraint::Temporary => {
-                    let reg = self.get_empty_gp_reg(asm, iidx, avoid);
+                    let reg = self.assign_empty_gp_reg(asm, iidx, avoid);
                     self.gp_regset.unset(reg);
                     self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
                     avoid.set(reg);
@@ -565,9 +565,9 @@ impl<'a> LSRegAlloc<'a> {
         }
     }
 
-    /// Get an empty general purpose register, freeing one if necessary. Will not touch any
+    /// Assign an empty general purpose register, freeing one if necessary. Will not touch any
     /// registers set in `avoid`.
-    fn get_empty_gp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, avoid: RegSet<Rq>) -> Rq {
+    fn assign_empty_gp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, avoid: RegSet<Rq>) -> Rq {
         match self.gp_regset.find_empty_avoiding(avoid) {
             Some(reg) => reg,
             None => {
