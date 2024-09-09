@@ -1,7 +1,7 @@
 //! A simple linear scan register allocator.
 //!
 //! The "main" interface from the code generator to the register allocator is `assign_gp_regs` (and/or
-//! `get_fp_regs`) and [RegConstraint]. For example:
+//! `assign_fp_regs`) and [RegConstraint]. For example:
 //!
 //! ```rust,ignore
 //! match binop {
@@ -703,7 +703,7 @@ impl<'a> LSRegAlloc<'a> {
 /// The parts of the register allocator needed for floating point registers.
 impl<'a> LSRegAlloc<'a> {
     /// Allocate registers for the instruction at position `iidx`.
-    pub(crate) fn get_fp_regs<const N: usize>(
+    pub(crate) fn assign_fp_regs<const N: usize>(
         &mut self,
         asm: &mut Assembler,
         iidx: InstIdx,
@@ -779,7 +779,7 @@ impl<'a> LSRegAlloc<'a> {
                 | RegConstraint::InputOutput(op) => {
                     let reg = match x {
                         RegConstraint::Input(_) | RegConstraint::InputOutput(_) => {
-                            self.get_empty_fp_reg(asm, iidx, avoid)
+                            self.assign_empty_fp_reg(asm, iidx, avoid)
                         }
                         RegConstraint::InputIntoReg(_, reg)
                         | RegConstraint::InputIntoRegAndClobber(_, reg) => {
@@ -836,7 +836,7 @@ impl<'a> LSRegAlloc<'a> {
                     self.fp_reg_states[usize::from(reg.code())] = st;
                 }
                 RegConstraint::Output => {
-                    let reg = self.get_empty_fp_reg(asm, iidx, avoid);
+                    let reg = self.assign_empty_fp_reg(asm, iidx, avoid);
                     self.fp_regset.set(reg);
                     self.fp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
                     avoid.set(reg);
@@ -971,7 +971,7 @@ impl<'a> LSRegAlloc<'a> {
 
     /// Get an empty general purpose register, freeing one if necessary. Will not touch any
     /// registers set in `avoid`.
-    fn get_empty_fp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, avoid: RegSet<Rx>) -> Rx {
+    fn assign_empty_fp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, avoid: RegSet<Rx>) -> Rx {
         match self.fp_regset.find_empty_avoiding(avoid) {
             Some(reg) => reg,
             None => {
