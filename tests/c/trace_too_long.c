@@ -3,7 +3,7 @@
 // ## where we know it'll run fast enough.
 // ##
 // ## FIXME: doesn't trigger "trace too long".
-// ignore-if: test "$YKB_TRACER" = "hwt"
+// ignore-if: test "$YKB_TRACER" != "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=4

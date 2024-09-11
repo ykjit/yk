@@ -221,10 +221,17 @@ impl<'a> Assemble<'a> {
                         dynasm!(self.asm; push Rq(reg.code()));
                     }
                 }
+                dynasm!(self.asm; mov rcx, rsp);
+                for reg in lsregalloc::FP_REGS.iter().rev() {
+                    dynasm!(self.asm
+                        ; movq r8, Rx(reg.code())
+                        ; push r8
+                    );
+                }
+                dynasm!(self.asm; mov r8, rsp);
                 dynasm!(self.asm
                     ; mov rdi, [rbp]
                     ; mov rdx, rbp
-                    ; mov rcx, rsp
                     ; mov rax, QWORD __yk_deopt as i64
                     ; sub rsp, 8 // Align the stack
                     ; call rax
@@ -1183,6 +1190,30 @@ impl<'a> Assemble<'a> {
                                     ),
                                     _ => todo!(),
                                 },
+                                VarLocation::Register(reg_alloc::Register::FP(reg)) => match size {
+                                    4 => dynasm!(self.asm
+                                        ; push rbp
+                                        ; mov rbp, [rbp]
+                                        ; movss [rbp + frame_off], Rx(reg.code())
+                                        ; pop rbp
+                                    ),
+                                    8 => dynasm!(self.asm
+                                        ; push rbp
+                                        ; mov rbp, [rbp]
+                                        ; movsd [rbp + frame_off], Rx(reg.code())
+                                        ; pop rbp
+                                    ),
+                                    e => todo!("{}", e),
+                                },
+                                VarLocation::ConstInt { bits, v } => match bits {
+                                    32 => dynasm!(self.asm;
+                                        push rbp;
+                                        mov rbp, [rbp];
+                                        mov DWORD [rbp + frame_off], v as i32;
+                                        pop rbp
+                                    ),
+                                    _ => todo!(),
+                                },
                                 VarLocation::Stack {
                                     frame_off: off,
                                     size,
@@ -1196,9 +1227,18 @@ impl<'a> Assemble<'a> {
                                         pop rbp;
                                         pop rax
                                     ),
+                                    4 => dynasm!(self.asm;
+                                        push rax;
+                                        mov eax, DWORD [rbp - i32::try_from(off).unwrap()];
+                                        push rbp;
+                                        mov rbp, [rbp];
+                                        mov DWORD [rbp + frame_off], eax;
+                                        pop rbp;
+                                        pop rax
+                                    ),
                                     _ => todo!(),
                                 },
-                                _ => todo!(),
+                                e => todo!("{:?}", e),
                             }
                         }
                         VarLocation::Register(reg) => {
@@ -1467,7 +1507,14 @@ impl<'a> Assemble<'a> {
                             };
                             lives.push((iid.clone(), VarLocation::ConstInt { bits: *bits, v: *c }))
                         }
-                        _ => todo!(),
+                        Const::Ptr(p) => lives.push((
+                            iid.clone(),
+                            VarLocation::ConstInt {
+                                bits: 64,
+                                v: u64::try_from(*p).unwrap(),
+                            },
+                        )),
+                        e => todo!("{:?}", e),
                     }
                 }
             }
@@ -2162,7 +2209,6 @@ mod tests {
                 ...
                 ... mov rdi, [rbp]
                 ... mov rdx, rbp
-                ... mov rcx, rsp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
@@ -2192,7 +2238,6 @@ mod tests {
                 ...
                 ... mov rdi, [rbp]
                 ... mov rdx, rbp
-                ... mov rcx, rsp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
@@ -2225,7 +2270,6 @@ mod tests {
                 ...
                 ... mov rdi, [rbp]
                 ... mov rdx, rbp
-                ... mov rcx, rsp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax

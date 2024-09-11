@@ -112,6 +112,7 @@ pub fn mk_compiler(
     src: &Path,
     extra_objs: &[PathBuf],
     patch_cp: bool,
+    extra_env: Option<&HashMap<String, String>>,
 ) -> Command {
     let mut compiler = Command::new(compiler);
 
@@ -129,28 +130,12 @@ pub fn mk_compiler(
     #[cfg(cargo_profile = "release")]
     let mode = "release";
 
-    let prelink_args = env::var("PRELINK_PASSES").unwrap_or_default();
-    let postlink_args = env::var("POSTLINK_PASSES").unwrap_or_default();
-
-    let mut yk_config_args = vec![mode];
-
-    if !prelink_args.is_empty() {
-        yk_config_args.push("--prelink-pipeline");
-        yk_config_args.push(&prelink_args);
+    let mut yk_config = Command::new(yk_config);
+    yk_config.args([mode, "--cflags", "--cppflags", "--ldflags", "--libs"]);
+    if let Some(extra_env) = extra_env {
+        yk_config.envs(extra_env);
     }
-    yk_config_args.push("--cflags");
-    yk_config_args.push("--cppflags");
-    if !postlink_args.is_empty() {
-        yk_config_args.push("--postlink-pipeline");
-        yk_config_args.push(&postlink_args);
-    }
-    yk_config_args.push("--ldflags");
-    yk_config_args.push("--libs");
-
-    let yk_config_out = Command::new(yk_config)
-        .args(&yk_config_args)
-        .output()
-        .expect("failed to execute yk-config");
+    let yk_config_out = yk_config.output().expect("failed to execute yk-config");
     if !yk_config_out.status.success() {
         io::stderr().write_all(&yk_config_out.stderr).ok();
         panic!("yk-config exited with non-zero status");

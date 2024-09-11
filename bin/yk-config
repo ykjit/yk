@@ -10,21 +10,58 @@ if [ ! -d "${DIR}/../ykrt" ]; then
     exit 1
 fi
 
-# The post-link time optimisations that we can tolerate. At this moment this is
-# only the instcombine pass in the below configuration (copied over from the
-# default pipeline). Using `instcombine` on its own breaks, possibly due to the
-# missing `no-verify-fixpoint`.
-POSTLINK_PASSES_STR="instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>"
+set_aot_pipeline() {
+    level=$1
+    # env var always takes precident.
+    if [ ! -z "${YKB_AOT_OPTLEVEL}" ]; then
+        level=${YKB_AOT_OPTLEVEL}
+    fi
+    case ${level} in
+        0)
+            POSTLINK_PASSES=${POSTLINK_PASSES_AO0}
+            PRELINK_PASSES=${PRELINK_PASSES_AO0}
+            ;;
+        1)
+            POSTLINK_PASSES=${POSTLINK_PASSES_AO1}
+            PRELINK_PASSES=${PRELINK_PASSES_AO1}
+            ;;
+        *)
+            echo "error: invalid yk AOT optimisation level '${level}'" >&2
+            exit 1
+            ;;
+    esac
+}
+
+# Canned pipelines.
+#
+# Ideally we'd detect the optimisation level from the CFLAGS env var, but it's
+# not easy to reliably parse that info out of CFLAGS. So for now we allow `--ao
+# <n>` to yk-config (or set YKB_AOT_OPTLEVEL in the env) to specify the AOT
+# optimisation level.
+#
+# Note that clang is still passed -O0 regardless. We just add our own pipeline
+# specification on top.
+PRELINK_PASSES_AO0=""
+POSTLINK_PASSES_AO0="instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>"
+PRELINK_PASSES_AO1=""
+POSTLINK_PASSES_AO1="instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,mem2reg,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>"
+# Initialise the AOT pipeline to level 0 unless YKB_AOT_OPTLEVEL is set.
+set_aot_pipeline 0
 
 OUTPUT=""
 
 usage() {
     echo "Generate C compiler flags for building against the yk JIT.\n"
     echo "Usage:"
-    echo "    yk-config <profile> [--prelink-pipeline <passes>] [--postlink-pipeline <passes>] <--cc|--cxx|--ar|--ranlib|--cppflags|--cflags|--ldflags>\n"
-    echo "    Where <profile> is a Rust cargo profile starting with either 'debug' or 'release'."
+    echo "    yk-config <profile> [--ao <0|1>] \\"
+    echo "        <--cc|--cxx|--ar|--ranlib|--cppflags|--cflags|--ldflags>\n"
+    echo "    Where <profile> is a Rust cargo profile starting with either 'debug' or 'release'.\n"
+    echo "    --cc, --cxx, --ar, --ranlib, --cppflags, --cflags and --ldflags specify "
+    echo "    what flags to output.\n"
+    echo "    --ao specifies the yk-specific AOT optimisation pipeline to use for flags "
+    echo "    that follow. Defaults to 0, but (if set) the YKB_AOT_OPTLEVEL environment "
+    echo "    variable always takes precedent."
 }
-
 
 handle_arg() {
     profile=$1
@@ -38,30 +75,11 @@ handle_arg() {
     fi
 
     case $1 in
+        --ao) set_aot_pipeline $2;;
         --cc) OUTPUT="${ykllvm_bin_dir}/clang" ;;
         --cxx) OUTPUT="${ykllvm_bin_dir}/clang++" ;;
         --ar) OUTPUT="${ykllvm_bin_dir}/llvm-ar" ;;
         --ranlib) OUTPUT="${ykllvm_bin_dir}/llvm-ranlib" ;;
-        --prelink-pipeline)
-            if [ -z "$2" ] || [ "$(echo $2 | cut -b 1,2)" = "--" ]; then
-                1>&2 echo "Error: Expected passes after --prelink-pipeline."
-                usage
-                exit 1
-            else
-                PRELINK_PASSES_STR=$2
-                shift
-            fi
-            ;;
-        --postlink-pipeline)
-            if [ -z "$2" ] || [ "$(echo $2 | cut -b 1,2)" = "--" ]; then
-                1>&2 echo "Error: Expected passes after --postlink-pipeline."
-                usage
-                exit 1
-            else
-                POSTLINK_PASSES_STR=$2
-                shift
-            fi
-            ;;
         --cflags)
             # FIXME: we can only do -O0 for now.
             OUTPUT="${OUTPUT} -O0"
@@ -74,8 +92,11 @@ handle_arg() {
             # Without this, clang will slap `optnone` attributes on every
             # function, causing optimisations to skip them.
             OUTPUT="${OUTPUT} -Xclang -disable-O0-optnone"
-            if [ ! -z "${PRELINK_PASSES_STR}" ]; then
-                OUTPUT="${OUTPUT} -mllvm --newpm-passes=${PRELINK_PASSES_STR}"
+            # Run these "prelink" optimisation passes.
+            #
+            # These are run on the individual pre-LTO-merged LLVM modules.
+            if [ ! -z "${PRELINK_PASSES}" ]; then
+                OUTPUT="${OUTPUT} -mllvm --newpm-passes=${PRELINK_PASSES}"
             fi
             case $profile in
                 debug*) OUTPUT="$OUTPUT -g" ;;
@@ -147,7 +168,12 @@ handle_arg() {
             # This pairs with `-Xclang -disable-O0-optnone`. See above.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-optnone-after-ir-passes"
 
-            OUTPUT="${OUTPUT} -Xlinker --lto-newpm-passes=${POSTLINK_PASSES_STR}"
+            # Run these post-link passes.
+            #
+            # These are run on the merged LTO LLVM module.
+            if [ ! -z "${POSTLINK_PASSES}" ]; then
+                OUTPUT="${OUTPUT} -Xlinker --lto-newpm-passes=${POSTLINK_PASSES}"
+            fi
 
             # Emit a basic block map section. Used for block mapping.
             OUTPUT="${OUTPUT} -Wl,--lto-basic-block-sections=labels"
