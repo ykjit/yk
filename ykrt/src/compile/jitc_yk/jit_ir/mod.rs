@@ -2839,7 +2839,7 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push_tiloc(yksmp::Location::Register(3, 1, 0, 0));
+        m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
         m.push(LoadTraceInputInst::new(0, m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(
@@ -2861,7 +2861,7 @@ mod tests {
             "global_decl tls @some_thread_local",
             "",
             "entry:",
-            "    %0: i8 = load_ti Register(3, 1, 0, 0)",
+            "    %0: i8 = load_ti Register(3, 1, 0, [])",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);
