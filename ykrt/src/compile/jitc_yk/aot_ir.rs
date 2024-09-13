@@ -917,6 +917,7 @@ pub(crate) enum Inst {
     },
     #[deku(id = "14")]
     Phi {
+        tyidx: TyIdx,
         #[deku(temp)]
         num_incoming: usize,
         #[deku(count = "num_incoming")]
@@ -1014,9 +1015,9 @@ impl Inst {
             Self::Store { .. } => None,
             Self::Cast { dest_tyidx, .. } => Some(m.type_(*dest_tyidx)),
             Self::Switch { .. } => None,
-            Self::Phi { incoming_vals, .. } => {
+            Self::Phi { tyidx, .. } => {
                 // Indexing cannot crash: correct PHI nodes have at least one incoming value.
-                Some(incoming_vals[0].type_(m))
+                Some(m.type_(*tyidx))
             }
             Self::IndirectCall { ftyidx, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
@@ -1276,6 +1277,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Phi {
                 incoming_vals,
                 incoming_bbs,
+                ..
             } => {
                 let args = incoming_bbs
                     .iter()

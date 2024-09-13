@@ -232,6 +232,7 @@ impl TraceBuilder {
                 aot_ir::Inst::Phi {
                     incoming_bbs,
                     incoming_vals,
+                    ..
                 } => {
                     debug_assert_eq!(prevbb.as_ref().unwrap().funcidx(), bid.funcidx());
                     self.handle_phi(
