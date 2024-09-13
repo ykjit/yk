@@ -35,8 +35,8 @@ fn opt_mul(
     rhs: PackedOperand,
 ) -> Result<(), CompilationError> {
     match (lhs.unpack(m), rhs.unpack(m)) {
-        (Operand::Local(mut mul_inst), Operand::Const(mul_const))
-        | (Operand::Const(mul_const), Operand::Local(mut mul_inst)) => {
+        (Operand::Var(mut mul_inst), Operand::Const(mul_const))
+        | (Operand::Const(mul_const), Operand::Var(mut mul_inst)) => {
             let old_const = m.const_(mul_const);
             if let Some(old_val) = old_const.int_to_u64() {
                 let mut new_val = old_val;
@@ -49,8 +49,8 @@ fn opt_mul(
                     rhs: chain_rhs,
                 }) = m.inst_no_proxies(mul_inst)
                 {
-                    if let (Operand::Local(chain_mul_inst), Operand::Const(chain_mul_const))
-                    | (Operand::Const(chain_mul_const), Operand::Local(chain_mul_inst)) =
+                    if let (Operand::Var(chain_mul_inst), Operand::Const(chain_mul_const))
+                    | (Operand::Const(chain_mul_const), Operand::Var(chain_mul_inst)) =
                         (chain_lhs.unpack(m), chain_rhs.unpack(m))
                     {
                         if let Some(y) = m.const_(chain_mul_const).int_to_u64() {
@@ -72,12 +72,12 @@ fn opt_mul(
                     let shl = u64::from(new_val.ilog2());
                     let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(shl))?);
                     let new_inst =
-                        BinOpInst::new(Operand::Local(mul_inst), BinOp::Shl, new_const).into();
+                        BinOpInst::new(Operand::Var(mul_inst), BinOp::Shl, new_const).into();
                     m.replace(iidx, new_inst);
                 } else if new_val != old_val {
                     let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(new_val))?);
                     let new_inst =
-                        BinOpInst::new(Operand::Local(mul_inst), BinOp::Mul, new_const).into();
+                        BinOpInst::new(Operand::Var(mul_inst), BinOp::Mul, new_const).into();
                     m.replace(iidx, new_inst);
                 }
             }
@@ -92,7 +92,7 @@ fn opt_mul(
             let new_const = m.insert_const(x.u64_to_int(new_val))?;
             m.replace(iidx, Inst::ProxyConst(new_const));
         }
-        (Operand::Local(_), Operand::Local(_)) => (),
+        (Operand::Var(_), Operand::Var(_)) => (),
     }
     Ok(())
 }

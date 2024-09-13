@@ -131,10 +131,10 @@ impl TraceBuilder {
                     self.jit_mod.push_tiloc(var.get(0).unwrap().clone());
                     self.local_map.insert(
                         aot_op.to_inst_id(),
-                        jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
+                        jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
                     );
                     self.jit_mod
-                        .push_loop_start_var(jit_ir::Operand::Local(self.jit_mod.last_inst_idx()));
+                        .push_loop_start_var(jit_ir::Operand::Var(self.jit_mod.last_inst_idx()));
                 }
                 break;
             }
@@ -284,10 +284,8 @@ impl TraceBuilder {
         );
         // The unwrap is safe because we've already inserted an element at this index and proven
         // that the index is in bounds.
-        self.local_map.insert(
-            aot_iid,
-            jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
-        );
+        self.local_map
+            .insert(aot_iid, jit_ir::Operand::Var(self.jit_mod.last_inst_idx()));
     }
 
     fn copy_inst(
@@ -490,9 +488,9 @@ impl TraceBuilder {
                 match op {
                     aot_ir::Operand::LocalVariable(iid) => {
                         match self.local_map[iid] {
-                            jit_ir::Operand::Local(liidx) => live_vars.push((
+                            jit_ir::Operand::Var(liidx) => live_vars.push((
                                 iid.clone(),
-                                PackedOperand::new(&jit_ir::Operand::Local(liidx)),
+                                PackedOperand::new(&jit_ir::Operand::Var(liidx)),
                             )),
                             jit_ir::Operand::Const(_) => {
                                 // Since we are forcing constants into `ProxyConst`s during inlining, this
@@ -671,7 +669,7 @@ impl TraceBuilder {
                     // reference that.
                     let inst = jit_ir::Inst::ProxyConst(c);
                     self.jit_mod.push(inst)?;
-                    let op = jit_ir::Operand::Local(self.jit_mod.last_inst_idx());
+                    let op = jit_ir::Operand::Var(self.jit_mod.last_inst_idx());
                     jit_args.push(op);
                 }
                 op => jit_args.push(op),
@@ -770,7 +768,7 @@ impl TraceBuilder {
                 .push_and_make_operand(jit_ir::PtrAddInst::new(jit_ptr, off_i32).into())?;
         } else {
             jit_ptr = match jit_ptr {
-                Operand::Local(iidx) => self
+                Operand::Var(iidx) => self
                     .jit_mod
                     .push_and_make_operand(jit_ir::Inst::ProxyInst(iidx))?,
                 _ => todo!(),
@@ -959,7 +957,7 @@ impl TraceBuilder {
                 // reference that.
                 let inst = jit_ir::Inst::ProxyConst(c);
                 self.jit_mod.push(inst)?;
-                jit_ir::Operand::Local(self.jit_mod.last_inst_idx())
+                jit_ir::Operand::Var(self.jit_mod.last_inst_idx())
             }
             op => op,
         };
@@ -1011,7 +1009,7 @@ impl TraceBuilder {
             _ => panic!(),
         }
         match self.handle_operand(val)? {
-            jit_ir::Operand::Local(ref_iidx) => {
+            jit_ir::Operand::Var(ref_iidx) => {
                 self.jit_mod.push(jit_ir::Inst::ProxyInst(ref_iidx))?;
                 self.link_iid_to_last_inst(bid, aot_inst_idx);
 
@@ -1046,7 +1044,7 @@ impl TraceBuilder {
                 };
                 let cidx = self.jit_mod.insert_const(c)?;
                 let cmp_instr = jit_ir::ICmpInst::new(
-                    jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
+                    jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
                     aot_ir::Predicate::Equal,
                     jit_ir::Operand::Const(cidx),
                 );
@@ -1108,7 +1106,7 @@ impl TraceBuilder {
                 self.jit_mod.push(load_ti_inst)?;
                 self.local_map.insert(
                     aotid.clone(),
-                    jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
+                    jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
                 );
                 // FIXME: We currently pass all live variables into the side-trace as `u64`s.
                 off += U64SIZE;

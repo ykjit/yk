@@ -1,45 +1,56 @@
-//! The JIT's Intermediate Representation (IR).
+//! The Intermediate Representation (IR) of a trace.
 //!
-//! This is the IR created by [trace_builder] and which is then analysed and optimised. The IR has
-//! the following properties:
+//! ## General SSA properties
 //!
-//!   1. We use vectors rather than direct references. This allows us to squeeze the amount of the
-//!      memory used down (and also bypasses issues with representing graph structures in Rust, but
-//!      that's slightly accidental).
+//! The most important part of the IR is the *instruction* sequence created by [trace_builder].
+//! Instructions are defined by the [Inst] enum.
 //!
-//!   2. The IR is designed to allow common manipulations to be performed without requiring
-//!      reallocation.
+//! Instructions are in [SSA form](https://en.wikipedia.org/wiki/Static_single-assignment_form).
+//! Since traces are linear, we do not have explicit Φ nodes in the IR. However, there are implicit
+//! Φ nodes at the `TLoopStart` instruction: there is only one such instruction per trace; and
+//! there are no other implicit Φ nodes.
 //!
-//! This second property has the following consequences:
+//! SSA variable "names" are offsets into a vector of instructions. For example, the instruction at
+//! position 0 in the vector implicitly defines a variable `%0`.
 //!
-//!   1. We introduce three "special" instructions which are stored as normal instructions, but
-//!      which are hidden when one views the IR:
-//!        * `ProxyConst`, which represents a constant. What, in the underlying IR, nominally looks
-//!          as follows:
-//!          ```text
-//!          %7: i8 = 1i8
-//!          %8: add %2, %7
-//!          ```
-//!          will be displayed *deconsted* as simply `%8: add %2, 1i8`. Note that this is
-//!          deliberately indistinguishable from IR which directly stores `%8: add %2, 1i8`.
 //!
-//!        * `ProxyInst` which is a (possibly chained) proxy for another instruction. What, in the
-//!          underlying IR, nominally looks as follows:
-//!          ```text
-//!          %7: %6
-//!          %8: add %2, %7
-//!          ```
-//!          will be displayed *deproxied* as simply `%8: add %2, %6`. Note that this is
-//!          deliberately indistinguishable from IR which directly stores `%8: add %2, %6`.
+//! ## Instruction operands
 //!
-//!        * `Tombstone` which represents an instruction which is no longer used. These are not
-//!          displayed at all.
+//! Instructions contain zero or more *operands*. These are *stored* as [PackedOperand]s, which is
+//! an efficient, opaque encoding of an operand. To operate on an operand we must *unpack* a
+//! [PackedOperand] to an [Operand]. This also implicitly deconsts/deproxies (see below). Because
+//! of this aspect of unpacking, it is important to work on [Operand]s, not [PackedOperand]s.
 //!
-//!   2. We never store [Operand]s directly: we only ever store [PackedOperand]s. Whenever we want
-//!      to get an [Operand] we *must* use [PackedOperand::unpack]. `unpack` does the necessary
-//!      deconsting/deproxying.
+//! The IR has three "special" instructions which are stored as normal instructions, but which are
+//! hidden by deconsting/deproxying (including when one views the IR):
 //!
-//!   3. External users of the IR should expect to always view the IR as deconsted/deproxied.
+//!   * `ProxyConst`, which represents a constant. What, in the underlying IR, nominally looks
+//!     as follows:
+//!     ```text
+//!     %7: i8 = 1i8
+//!     %8: add %2, %7
+//!     ```
+//!     will be displayed *deconsted* as simply `%8: add %2, 1i8`. Note that this is
+//!     deliberately indistinguishable from IR which directly stores `%8: add %2, 1i8`.
+//!
+//!   * `ProxyInst` which is a (possibly chained) proxy for another instruction. What, in the
+//!     underlying IR, nominally looks as follows:
+//!     ```text
+//!     %7: %6
+//!     %8: add %2, %7
+//!     ```
+//!     will be displayed *deproxied* as simply `%8: add %2, %6`. Note that this is
+//!     deliberately indistinguishable from IR which directly stores `%8: add %2, %6`.
+//!
+//!   * `Tombstone` which represents an instruction which is no longer used. These are not
+//!     displayed at all.
+//!
+//! Formally speaking, deconsting/deproxying allows us to efficiently encode union sets: it is
+//! equivalent to "forwarding" in RPython (see e.g. [this blog
+//! post](https://pypy.org/posts/2022/07/toy-optimizer.html)).
+//!
+//!
+//! ## Abbreviations and terminological conventions
 //!
 //! Because using the IR can often involve getting hold of data nested several layers deep, we also
 //! use a number of abbreviations/conventions to keep the length of source down to something
@@ -353,7 +364,7 @@ impl Module {
         debug_assert!(inst.def_type(self).is_some());
         InstIdx::try_from(self.insts.len()).map(|x| {
             self.insts.push(inst);
-            Operand::Local(x)
+            Operand::Var(x)
         })
     }
 
@@ -1010,28 +1021,30 @@ impl FuncDecl {
     }
 }
 
-/// The packed representation of an instruction operand.
-///
-/// # Encoding
-///
-/// ```ignore
-///  1             15
-/// +---+--------------------------+
-/// | k |         index            |
-/// +---+--------------------------+
-/// ```
-///
-///  - `k=0`: `index` is a local variable index
-///  - `k=1`: `index` is a constant index
-///
-///  The IR can represent 2^{15} = 32768 locals, and as many constants.
+/// The packed representation of an instruction operand. In general, you should *store*
+/// `PackedOperand`s but *operate* on (unpacked) [Operand]s.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct PackedOperand(u16);
+pub(crate) struct PackedOperand(
+    /// # Encoding
+    ///
+    /// ```ignore
+    ///  1             15
+    /// +---+--------------------------+
+    /// | k |         index            |
+    /// +---+--------------------------+
+    /// ```
+    ///
+    ///  - `k=0`: `index` is a local variable index
+    ///  - `k=1`: `index` is a constant index
+    ///
+    ///  The IR can represent 2^{15} = 32768 locals, and as many constants.
+    u16,
+);
 
 impl PackedOperand {
     pub fn new(op: &Operand) -> Self {
         match op {
-            Operand::Local(lidx) => {
+            Operand::Var(lidx) => {
                 debug_assert!(u16::from(*lidx) <= MAX_OPERAND_IDX);
                 PackedOperand(u16::from(*lidx))
             }
@@ -1042,7 +1055,7 @@ impl PackedOperand {
         }
     }
 
-    /// Unpacks a [PackedOperand] into a [Operand].
+    /// Unpacks and deproxies a [PackedOperand] into a [Operand].
     pub(crate) fn unpack(&self, m: &Module) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             let mut iidx = InstIdx(self.0);
@@ -1055,7 +1068,7 @@ impl PackedOperand {
                         iidx = *x;
                     }
                     _ => {
-                        return Operand::Local(iidx);
+                        return Operand::Var(iidx);
                     }
                 }
             }
@@ -1076,27 +1089,24 @@ impl PackedOperand {
     }
 }
 
-/// An unpacked representation of a operand.
-///
-/// This exists both as a convenience (as working with packed operands is laborious) and as a means
-/// to add type safety when using operands.
+/// An operand.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Operand {
-    Local(InstIdx),
+    /// This operand references another SSA variable.
+    Var(InstIdx),
+    /// This operand is a constant.
     Const(ConstIdx),
 }
 
 impl Operand {
-    /// Returns the size of the operand in bytes.
-    ///
-    /// Assumes no padding is required for alignment.
+    /// Returns the size of the operand in bytes. Assumes no padding is required for alignment.
     ///
     /// # Panics
     ///
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Local(l) => m.inst_all(*l).def_byte_size(m),
+            Self::Var(l) => m.inst_all(*l).def_byte_size(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).byte_size().unwrap(),
         }
     }
@@ -1104,7 +1114,7 @@ impl Operand {
     /// Returns the type index of the operand.
     pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => m.inst_all(*l).tyidx(m),
+            Self::Var(l) => m.inst_all(*l).tyidx(m),
             Self::Const(c) => m.const_(*c).tyidx(m),
         }
     }
@@ -1118,7 +1128,7 @@ impl Operand {
     where
         F: FnMut(InstIdx),
     {
-        if let Operand::Local(iidx) = self {
+        if let Operand::Var(iidx) = self {
             f(*iidx)
         }
     }
@@ -1132,7 +1142,7 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Local(idx) => match self.m.inst_all(*idx) {
+            Operand::Var(idx) => match self.m.inst_all(*idx) {
                 Inst::ProxyConst(c) => {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
@@ -1619,7 +1629,7 @@ impl Inst {
             Inst::TraceLoopStart => {
                 for val in &m.loop_start_vars {
                     match val {
-                        Operand::Local(iidx) => f(*iidx),
+                        Operand::Var(iidx) => f(*iidx),
                         _ => panic!(),
                     }
                 }
@@ -1627,7 +1637,7 @@ impl Inst {
             Inst::TraceLoopJump => {
                 for val in &m.loop_jump_vars {
                     match val {
-                        Operand::Local(iidx) => f(*iidx),
+                        Operand::Var(iidx) => f(*iidx),
                         Operand::Const(_) => (),
                     }
                 }
@@ -2661,14 +2671,14 @@ mod tests {
             LoadTraceInputInst::new(0, TyIdx::try_from(0).unwrap()).into(),
             LoadTraceInputInst::new(8, TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
-                Operand::Local(InstIdx(0)),
+                Operand::Var(InstIdx(0)),
                 TyIdx(U24::try_from(0).unwrap()),
                 false,
             )
             .into(),
         ];
         prog[2] = LoadInst::new(
-            Operand::Local(InstIdx(1)),
+            Operand::Var(InstIdx(1)),
             TyIdx(U24::try_from(0).unwrap()),
             false,
         )
@@ -2694,9 +2704,9 @@ mod tests {
 
         // Build a call to the function.
         let args = vec![
-            Operand::Local(InstIdx(0)),
-            Operand::Local(InstIdx(1)),
-            Operand::Local(InstIdx(2)),
+            Operand::Var(InstIdx(0)),
+            Operand::Var(InstIdx(1)),
+            Operand::Var(InstIdx(2)),
         ];
         m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(0, i32_tyidx)))
             .unwrap();
@@ -2707,9 +2717,9 @@ mod tests {
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
-        assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
-        assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
+        assert_eq!(ci.operand(&m, 0), Operand::Var(InstIdx(0)));
+        assert_eq!(ci.operand(&m, 1), Operand::Var(InstIdx(1)));
+        assert_eq!(ci.operand(&m, 2), Operand::Var(InstIdx(2)));
     }
 
     #[test]
@@ -2727,9 +2737,9 @@ mod tests {
 
         // Now build a call to the function.
         let args = vec![
-            Operand::Local(InstIdx(0)),
-            Operand::Local(InstIdx(1)),
-            Operand::Local(InstIdx(2)),
+            Operand::Var(InstIdx(0)),
+            Operand::Var(InstIdx(1)),
+            Operand::Var(InstIdx(2)),
         ];
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 

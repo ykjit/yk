@@ -439,7 +439,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::Proxy { assign, val } => {
                         let op = self.process_operand(val)?;
                         let inst = match op {
-                            Operand::Local(iidx) => Inst::ProxyInst(iidx),
+                            Operand::Var(iidx) => Inst::ProxyInst(iidx),
                             Operand::Const(cidx) => Inst::ProxyConst(cidx),
                         };
                         self.push_assign(inst.into(), assign)?;
@@ -601,7 +601,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                 let mapped_idx = self.inst_idx_map.get(&idx).ok_or_else(|| {
                     self.error_at_span(span, &format!("Undefined local operand '%{idx}'"))
                 })?;
-                Ok(Operand::Local(*mapped_idx))
+                Ok(Operand::Var(*mapped_idx))
             }
         }
     }

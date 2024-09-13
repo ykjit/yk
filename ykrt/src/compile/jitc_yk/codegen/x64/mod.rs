@@ -396,7 +396,7 @@ impl<'a> Assemble<'a> {
         match binop {
             BinOp::Add => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_gp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -411,7 +411,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::And => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_gp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -426,7 +426,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::AShr => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, _rhs_reg] = self.ra.get_gp_regs(
+                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
@@ -445,7 +445,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::LShr => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, _rhs_reg] = self.ra.get_gp_regs(
+                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
@@ -464,7 +464,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::Shl => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, _rhs_reg] = self.ra.get_gp_regs(
+                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
@@ -485,7 +485,7 @@ impl<'a> Assemble<'a> {
                 let size = lhs.byte_size(self.m);
                 self.ra
                     .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
-                let [_lhs_reg, rhs_reg] = self.ra.get_gp_regs_avoiding(
+                let [_lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
                     [
@@ -507,7 +507,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::Or => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_gp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -524,7 +524,7 @@ impl<'a> Assemble<'a> {
                 let size = lhs.byte_size(self.m);
                 self.ra
                     .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
-                let [_lhs_reg, rhs_reg] = self.ra.get_gp_regs_avoiding(
+                let [_lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
                     [
@@ -558,7 +558,7 @@ impl<'a> Assemble<'a> {
                 // RDX.
                 let size = lhs.byte_size(self.m);
                 debug_assert!(size == 4 || size == 8);
-                let [_lhs_reg, rhs_reg, _rem_reg] = self.ra.get_gp_regs(
+                let [_lhs_reg, rhs_reg, _rem_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
@@ -581,7 +581,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::Sub => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_gp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -596,7 +596,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::Xor => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_gp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -613,7 +613,7 @@ impl<'a> Assemble<'a> {
                 let size = lhs.byte_size(self.m);
                 self.ra
                     .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
-                let [_lhs_reg, rhs_reg] = self.ra.get_gp_regs_avoiding(
+                let [_lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
                     [
@@ -639,7 +639,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::FDiv => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_fp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -652,7 +652,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::FAdd => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_fp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -665,7 +665,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::FMul => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_fp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -678,7 +678,7 @@ impl<'a> Assemble<'a> {
             }
             BinOp::FSub => {
                 let size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.get_fp_regs(
+                let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -753,7 +753,7 @@ impl<'a> Assemble<'a> {
     fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
-                let [reg] = self.ra.get_gp_regs(
+                let [reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(inst.operand(self.m))],
@@ -769,14 +769,14 @@ impl<'a> Assemble<'a> {
                 };
             }
             Ty::Float(fty) => {
-                let [src_reg] = self.ra.get_gp_regs(
+                let [src_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::Input(inst.operand(self.m))],
                 );
-                let [tgt_reg] = self
-                    .ra
-                    .get_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+                let [tgt_reg] =
+                    self.ra
+                        .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
                 match fty {
                     FloatTy::Float => {
                         dynasm!(self.asm; movss Rx(tgt_reg.code()), [Rq(src_reg.code())])
@@ -795,7 +795,7 @@ impl<'a> Assemble<'a> {
         // size of the LLVM pointer index type. For address space zero on x86, truncation can't
         // happen, and when an immediate second operand is used for x86_64 `add`, it is implicitly
         // sign extended.
-        let [reg] = self.ra.get_gp_regs(
+        let [reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [RegConstraint::InputOutput(inst.ptr(self.m))],
@@ -805,7 +805,7 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_dynptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::DynPtrAddInst) {
-        let [num_elems_reg, ptr_reg] = self.ra.get_gp_regs(
+        let [num_elems_reg, ptr_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [
@@ -833,7 +833,7 @@ impl<'a> Assemble<'a> {
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
                 let size = val.byte_size(self.m);
-                let [tgt_reg, val_reg] = self.ra.get_gp_regs(
+                let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
@@ -850,14 +850,14 @@ impl<'a> Assemble<'a> {
                 }
             }
             Ty::Float(fty) => {
-                let [tgt_reg] = self.ra.get_gp_regs(
+                let [tgt_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::Input(inst.tgt(self.m))],
                 );
                 let [val_reg] =
                     self.ra
-                        .get_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(val)]);
+                        .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(val)]);
                 match fty {
                     FloatTy::Float => {
                         dynasm!(self.asm ; movss [Rq(tgt_reg.code())], Rx(val_reg.code()));
@@ -880,7 +880,7 @@ impl<'a> Assemble<'a> {
         }
         let [tgt_reg] = self
             .ra
-            .get_gp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
         let sym_addr = self.m.globalvar_ptr(inst.global_decl_idx()).addr();
         dynasm!(self.asm ; mov Rq(tgt_reg.code()), QWORD i64::try_from(sym_addr).unwrap());
     }
@@ -947,7 +947,7 @@ impl<'a> Assemble<'a> {
                     let Some(reg) = fp_regs.next() else {
                         todo!("ran out of fp regs");
                     };
-                    let [_] = self.ra.get_fp_regs(
+                    let [_] = self.ra.assign_fp_regs(
                         &mut self.asm,
                         iidx,
                         [RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg)],
@@ -958,7 +958,7 @@ impl<'a> Assemble<'a> {
                     let Some(reg) = gp_regs.next() else {
                         todo!("ran out of gp regs");
                     };
-                    let [_] = self.ra.get_gp_regs(
+                    let [_] = self.ra.assign_gp_regs(
                         &mut self.asm,
                         iidx,
                         [RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg)],
@@ -970,14 +970,14 @@ impl<'a> Assemble<'a> {
         match fty.ret_type(self.m) {
             Ty::Void => (),
             Ty::Float(_) => {
-                let [_] = self.ra.get_fp_regs(
+                let [_] = self.ra.assign_fp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::OutputFromReg(Rx::XMM0)],
                 );
             }
             Ty::Integer(_) | Ty::Ptr => {
-                let [_] = self.ra.get_gp_regs(
+                let [_] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::OutputFromReg(Rq::RAX)],
@@ -997,7 +997,7 @@ impl<'a> Assemble<'a> {
         // Actually perform the call.
         match (callee, callee_op) {
             (Some(p), None) => {
-                let [reg] = self.ra.get_gp_regs_avoiding(
+                let [reg] = self.ra.assign_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::Temporary],
@@ -1009,7 +1009,7 @@ impl<'a> Assemble<'a> {
                 );
             }
             (None, Some(op)) => {
-                let [reg] = self.ra.get_gp_regs_avoiding(
+                let [reg] = self.ra.assign_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::Input(op)],
@@ -1026,7 +1026,7 @@ impl<'a> Assemble<'a> {
     fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
         let size = lhs.byte_size(self.m);
-        let [lhs_reg, rhs_reg] = self.ra.get_gp_regs(
+        let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
@@ -1065,14 +1065,14 @@ impl<'a> Assemble<'a> {
     fn cg_fcmp(&mut self, iidx: InstIdx, inst: &jit_ir::FCmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
         let size = lhs.byte_size(self.m);
-        let [lhs_reg, rhs_reg] = self.ra.get_fp_regs(
+        let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
             &mut self.asm,
             iidx,
             [RegConstraint::Input(lhs), RegConstraint::Input(rhs)],
         );
         let [tgt_reg] = self
             .ra
-            .get_gp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
 
         match pred.is_ordered() {
             Some(true) => match size {
@@ -1127,7 +1127,7 @@ impl<'a> Assemble<'a> {
         //  - All other comparisons are false.
         let [tmp_reg] = self
             .ra
-            .get_gp_regs(&mut self.asm, iidx, [RegConstraint::Temporary]);
+            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Temporary]);
         match pred {
             jit_ir::FloatPredicate::OrderedNotEqual | jit_ir::FloatPredicate::UnorderedNotEqual => {
                 dynasm!(self.asm
@@ -1155,7 +1155,7 @@ impl<'a> Assemble<'a> {
                 // Found the label, emit a jump to it.
                 for (i, op) in self.m.loop_jump_vars().iter().enumerate() {
                     let (iidx, src) = match op {
-                        Operand::Local(iidx) => (*iidx, self.ra.var_location(*iidx)),
+                        Operand::Var(iidx) => (*iidx, self.ra.var_location(*iidx)),
                         _ => panic!(),
                     };
                     let dst = self.loop_start_locs[i];
@@ -1247,7 +1247,7 @@ impl<'a> Assemble<'a> {
                             // target register.
                             match reg {
                                 reg_alloc::Register::GP(r) => {
-                                    let [_] = self.ra.get_gp_regs(
+                                    let [_] = self.ra.assign_gp_regs(
                                         &mut self.asm,
                                         iidx,
                                         [RegConstraint::InputIntoReg(op.clone(), r)],
@@ -1288,7 +1288,7 @@ impl<'a> Assemble<'a> {
         // back around here we need to write the live variables back into these same locations.
         for var in self.m.loop_start_vars() {
             let loc = match var {
-                Operand::Local(iidx) => self.ra.var_location(*iidx),
+                Operand::Var(iidx) => self.ra.var_location(*iidx),
                 _ => panic!(),
             };
             self.loop_start_locs.push(loc);
@@ -1298,7 +1298,7 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_sext(&mut self, iidx: InstIdx, i: &jit_ir::SExtInst) {
-        let [reg] = self.ra.get_gp_regs(
+        let [reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [RegConstraint::InputOutput(i.val(self.m))],
@@ -1323,7 +1323,7 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_zeroextend(&mut self, iidx: InstIdx, i: &jit_ir::ZeroExtendInst) {
-        let [reg] = self.ra.get_gp_regs(
+        let [reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [RegConstraint::InputOutput(i.val(self.m))],
@@ -1358,14 +1358,14 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_sitofp(&mut self, iidx: InstIdx, inst: &jit_ir::SIToFPInst) {
-        let [src_reg] = self.ra.get_gp_regs(
+        let [src_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [RegConstraint::Input(inst.val(self.m))],
         );
         let [tgt_reg] = self
             .ra
-            .get_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+            .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
 
         let src_size = inst.val(self.m).byte_size(self.m);
         match self.m.type_(inst.dest_tyidx()) {
@@ -1389,12 +1389,12 @@ impl<'a> Assemble<'a> {
         let from_size = self.m.type_(from_val.tyidx(self.m)).byte_size().unwrap();
         let to_size = to_ty.byte_size().unwrap();
 
-        let [src_reg] = self
-            .ra
-            .get_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(from_val)]);
+        let [src_reg] =
+            self.ra
+                .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(from_val)]);
         let [tgt_reg] = self
             .ra
-            .get_gp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
 
         match from_size {
             4 => dynasm!(self.asm; cvttss2si Rq(tgt_reg.code()), Rx(src_reg.code())),
@@ -1426,7 +1426,7 @@ impl<'a> Assemble<'a> {
 
         let [tgt_reg] =
             self.ra
-                .get_fp_regs(&mut self.asm, iidx, [RegConstraint::InputOutput(from_val)]);
+                .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::InputOutput(from_val)]);
 
         match (from_type, to_type) {
             (
@@ -1442,7 +1442,7 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_trunc(&mut self, iidx: InstIdx, i: &jit_ir::TruncInst) {
-        let [_reg] = self.ra.get_gp_regs(
+        let [_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [RegConstraint::InputOutput(i.val(self.m))],
@@ -1474,7 +1474,7 @@ impl<'a> Assemble<'a> {
     fn cg_select(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
         // First load the true case. We then immediately follow this up with a conditional move,
         // overwriting the value with the false case, if the condition was false.
-        let [true_reg, cond_reg, false_reg] = self.ra.get_gp_regs(
+        let [true_reg, cond_reg, false_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [
@@ -1493,7 +1493,7 @@ impl<'a> Assemble<'a> {
         let gi = inst.guard_info(self.m);
         for (iid, pop) in gi.live_vars() {
             match pop.unpack(self.m) {
-                Operand::Local(x) => {
+                Operand::Var(x) => {
                     lives.push((iid.clone(), self.ra.var_location(x)));
                 }
                 Operand::Const(x) => {
@@ -1535,7 +1535,7 @@ impl<'a> Assemble<'a> {
         debug_assert_eq!(cond.byte_size(self.m), 1);
         let [reg] = self
             .ra
-            .get_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(cond)]);
+            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(cond)]);
         dynasm!(self.asm
             ; cmp Rb(reg.code()), inst.expect() as i8 // `as` intentional.
             ; jne =>fail_label
