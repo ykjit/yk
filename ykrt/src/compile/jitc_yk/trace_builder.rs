@@ -668,7 +668,7 @@ impl TraceBuilder {
                     // We don't want to do constant propagation here as it makes our life harder
                     // creating guards. Instead we simply create a proxy instruction here and
                     // reference that.
-                    let inst = jit_ir::Inst::ProxyConst(c);
+                    let inst = jit_ir::Inst::Const(c);
                     self.jit_mod.push(inst)?;
                     let op = jit_ir::Operand::Var(self.jit_mod.last_inst_idx());
                     jit_args.push(op);
@@ -956,7 +956,7 @@ impl TraceBuilder {
                 // We don't want to do constant propagation here as it makes our life harder
                 // creating guards. Instead we simply create a proxy instruction here and
                 // reference that.
-                let inst = jit_ir::Inst::ProxyConst(c);
+                let inst = jit_ir::Inst::Const(c);
                 self.jit_mod.push(inst)?;
                 jit_ir::Operand::Var(self.jit_mod.last_inst_idx())
             }

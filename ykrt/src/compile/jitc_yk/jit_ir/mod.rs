@@ -285,7 +285,7 @@ impl Module {
     /// If `iidx` points to a `Proxy*` instruction.
     pub(crate) fn inst_no_proxies(&self, iidx: InstIdx) -> Inst {
         match self.insts[usize::from(iidx)] {
-            Inst::ProxyConst(_) | Inst::Copy(_) => panic!(),
+            Inst::Const(_) | Inst::Copy(_) => panic!(),
             x => x,
         }
     }
@@ -642,7 +642,7 @@ impl<'a> Iterator for SkippingInstsIterator<'a> {
             let old = InstIdx::unchecked_from(self.cur);
             self.cur += 1;
             match x {
-                Inst::ProxyConst(_) | Inst::Copy(_) | Inst::Tombstone => (),
+                Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => (),
                 _ => return Some((old, &self.m.insts[usize::from(old)])),
             }
         }
@@ -1061,7 +1061,7 @@ impl PackedOperand {
             let mut iidx = InstIdx(self.0);
             loop {
                 match m.inst_all(iidx) {
-                    Inst::ProxyConst(x) => {
+                    Inst::Const(x) => {
                         return Operand::Const(*x);
                     }
                     Inst::Copy(x) => {
@@ -1143,7 +1143,7 @@ impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
             Operand::Var(idx) => match self.m.inst_all(*idx) {
-                Inst::ProxyConst(c) => {
+                Inst::Const(c) => {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
                 Inst::Copy(idx) => {
@@ -1351,7 +1351,7 @@ pub(crate) enum Inst {
     BlackBox(BlackBoxInst),
     /// This instruction does not produce a value itself: it is equivalent to the constant at
     /// `ConstIdx`.
-    ProxyConst(ConstIdx),
+    Const(ConstIdx),
     /// This instruction does not produce a value itself: it is equivalent to the value produced by
     /// `InstIdx`.
     Copy(InstIdx),
@@ -1402,7 +1402,7 @@ impl Inst {
         match self {
             #[cfg(test)]
             Self::BlackBox(_) => m.void_tyidx(),
-            Self::ProxyConst(x) => m.const_(*x).tyidx(m),
+            Self::Const(x) => m.const_(*x).tyidx(m),
             Self::Copy(x) => m.inst_all(*x).tyidx(m),
             Self::Tombstone => panic!(),
 
@@ -1444,7 +1444,7 @@ impl Inst {
         match self {
             #[cfg(test)]
             Inst::BlackBox(_) => true,
-            Inst::ProxyConst(_) => false,
+            Inst::Const(_) => false,
             Inst::Copy(x) => m.inst_all(*x).has_side_effect(m),
             Inst::Tombstone => false,
             Inst::BinOp(_) => false,
@@ -1483,7 +1483,7 @@ impl Inst {
             Inst::BlackBox(BlackBoxInst { op }) => {
                 op.unpack(m).map_iidx(f);
             }
-            Inst::ProxyConst(_) => (),
+            Inst::Const(_) => (),
             Inst::Copy(_) => (),
             Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
@@ -1578,7 +1578,7 @@ impl Inst {
             Inst::BlackBox(BlackBoxInst { op }) => {
                 op.map_iidx(f);
             }
-            Inst::ProxyConst(_) => (),
+            Inst::Const(_) => (),
             Inst::Copy(iidx) => f(*iidx),
             Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
@@ -1705,7 +1705,7 @@ impl fmt::Display for DisplayableInst<'_> {
         match self.inst {
             #[cfg(test)]
             Inst::BlackBox(x) => write!(f, "black_box {}", x.operand(self.m).display(self.m)),
-            Inst::ProxyConst(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
 
             Inst::BinOp(BinOpInst { lhs, binop, rhs }) => write!(
                 f,

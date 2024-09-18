@@ -63,7 +63,7 @@ fn opt_mul(
                 if new_val == 0 {
                     // Replace `x * 0` with `0`.
                     let cidx = m.insert_const(old_const.u64_to_int(0))?;
-                    m.replace(iidx, Inst::ProxyConst(cidx));
+                    m.replace(iidx, Inst::Const(cidx));
                 } else if new_val == 1 {
                     // Replace `x * 1` with `x`.
                     m.replace(iidx, Inst::Copy(mul_inst));
@@ -90,7 +90,7 @@ fn opt_mul(
             // author is at fault.
             let new_val = x.int_to_u64().unwrap() * y.int_to_u64().unwrap();
             let new_const = m.insert_const(x.u64_to_int(new_val))?;
-            m.replace(iidx, Inst::ProxyConst(new_const));
+            m.replace(iidx, Inst::Const(new_const));
         }
         (Operand::Var(_), Operand::Var(_)) => (),
     }
@@ -141,9 +141,9 @@ fn opt_icmp(
             };
 
             if r {
-                m.replace(iidx, Inst::ProxyConst(m.true_constidx()));
+                m.replace(iidx, Inst::Const(m.true_constidx()));
             } else {
-                m.replace(iidx, Inst::ProxyConst(m.false_constidx()));
+                m.replace(iidx, Inst::Const(m.false_constidx()));
             }
         }
     }

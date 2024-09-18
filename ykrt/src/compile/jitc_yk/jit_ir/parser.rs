@@ -440,7 +440,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let op = self.process_operand(val)?;
                         let inst = match op {
                             Operand::Var(iidx) => Inst::Copy(iidx),
-                            Operand::Const(cidx) => Inst::ProxyConst(cidx),
+                            Operand::Const(cidx) => Inst::Const(cidx),
                         };
                         self.push_assign(inst.into(), assign)?;
                     }
