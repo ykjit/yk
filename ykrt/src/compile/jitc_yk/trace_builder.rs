@@ -494,11 +494,11 @@ impl TraceBuilder {
                                 PackedOperand::new(&jit_ir::Operand::Var(liidx)),
                             )),
                             jit_ir::Operand::Const(_) => {
-                                // Since we are forcing constants into `ProxyConst`s during inlining, this
-                                // case should never happen. If you see this panic, then look for a
-                                // safepoint live variable that maps to a constant and make the builder
-                                // insert a `ProxyConst` for it instead.
-                                panic!("constant encountered while building guardinfo!")
+                                // Since we are forcing constants into `Inst::Const`s during
+                                // inlining, this case should never happen. If you see this panic,
+                                // then look for a safepoint live variable that maps to a constant
+                                // and make the builder insert an `Inst::Const` for it instead.
+                                panic!("Constant encountered while building guardinfo!")
                             }
                         }
                     }
@@ -666,9 +666,9 @@ impl TraceBuilder {
             match self.handle_operand(arg)? {
                 jit_ir::Operand::Const(c) => {
                     // We don't want to do constant propagation here as it makes our life harder
-                    // creating guards. Instead we simply create a proxy instruction here and
+                    // creating guards. Instead we simply create a `Const` instruction here and
                     // reference that.
-                    let inst = jit_ir::Inst::ProxyConst(c);
+                    let inst = jit_ir::Inst::Const(c);
                     self.jit_mod.push(inst)?;
                     let op = jit_ir::Operand::Var(self.jit_mod.last_inst_idx());
                     jit_args.push(op);
@@ -771,7 +771,7 @@ impl TraceBuilder {
             jit_ptr = match jit_ptr {
                 Operand::Var(iidx) => self
                     .jit_mod
-                    .push_and_make_operand(jit_ir::Inst::ProxyInst(iidx))?,
+                    .push_and_make_operand(jit_ir::Inst::Copy(iidx))?,
                 _ => todo!(),
             }
         }
@@ -954,9 +954,9 @@ impl TraceBuilder {
         let op = match self.handle_operand(chosen_val)? {
             jit_ir::Operand::Const(c) => {
                 // We don't want to do constant propagation here as it makes our life harder
-                // creating guards. Instead we simply create a proxy instruction here and
+                // creating guards. Instead we simply create a `Const` instruction here and
                 // reference that.
-                let inst = jit_ir::Inst::ProxyConst(c);
+                let inst = jit_ir::Inst::Const(c);
                 self.jit_mod.push(inst)?;
                 jit_ir::Operand::Var(self.jit_mod.last_inst_idx())
             }
@@ -1011,7 +1011,7 @@ impl TraceBuilder {
         }
         match self.handle_operand(val)? {
             jit_ir::Operand::Var(ref_iidx) => {
-                self.jit_mod.push(jit_ir::Inst::ProxyInst(ref_iidx))?;
+                self.jit_mod.push(jit_ir::Inst::Copy(ref_iidx))?;
                 self.link_iid_to_last_inst(bid, aot_inst_idx);
 
                 // Insert a guard to ensure the trace only runs if the value we encounter is the

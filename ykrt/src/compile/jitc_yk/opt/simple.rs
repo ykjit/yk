@@ -13,7 +13,7 @@ use crate::compile::{
 
 pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
     for iidx in m.iter_all_inst_idxs() {
-        let (iidx, inst) = m.inst_deproxy(iidx);
+        let (iidx, inst) = m.inst_decopy(iidx);
         match inst {
             Inst::BinOp(BinOpInst {
                 lhs,
@@ -47,7 +47,7 @@ fn opt_mul(
                     lhs: chain_lhs,
                     binop: BinOp::Mul,
                     rhs: chain_rhs,
-                }) = m.inst_no_proxies(mul_inst)
+                }) = m.inst_no_copies(mul_inst)
                 {
                     if let (Operand::Var(chain_mul_inst), Operand::Const(chain_mul_const))
                     | (Operand::Const(chain_mul_const), Operand::Var(chain_mul_inst)) =
@@ -63,10 +63,10 @@ fn opt_mul(
                 if new_val == 0 {
                     // Replace `x * 0` with `0`.
                     let cidx = m.insert_const(old_const.u64_to_int(0))?;
-                    m.replace(iidx, Inst::ProxyConst(cidx));
+                    m.replace(iidx, Inst::Const(cidx));
                 } else if new_val == 1 {
                     // Replace `x * 1` with `x`.
-                    m.replace(iidx, Inst::ProxyInst(mul_inst));
+                    m.replace(iidx, Inst::Copy(mul_inst));
                 } else if new_val & (new_val - 1) == 0 {
                     // Replace `x * y` with `x << ...`.
                     let shl = u64::from(new_val.ilog2());
@@ -90,7 +90,7 @@ fn opt_mul(
             // author is at fault.
             let new_val = x.int_to_u64().unwrap() * y.int_to_u64().unwrap();
             let new_const = m.insert_const(x.u64_to_int(new_val))?;
-            m.replace(iidx, Inst::ProxyConst(new_const));
+            m.replace(iidx, Inst::Const(new_const));
         }
         (Operand::Var(_), Operand::Var(_)) => (),
     }
@@ -141,9 +141,9 @@ fn opt_icmp(
             };
 
             if r {
-                m.replace(iidx, Inst::ProxyConst(m.true_constidx()));
+                m.replace(iidx, Inst::Const(m.true_constidx()));
             } else {
-                m.replace(iidx, Inst::ProxyConst(m.false_constidx()));
+                m.replace(iidx, Inst::Const(m.false_constidx()));
             }
         }
     }
