@@ -135,7 +135,7 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
       Ok(ASTInst::Select{assign: $1?.span(), cond: $5?, trueval: $7?, falseval: $9? })
     }
   | "LOCAL_OPERAND" ":" Type "=" Operand {
-      Ok(ASTInst::Proxy{assign: $1?.span(), val: $5? })
+      Ok(ASTInst::Assign{assign: $1?.span(), val: $5? })
     }
   | "TLOOP_START" "[" OperandsList "]" { Ok(ASTInst::TraceLoopStart($3?)) }
   | "TLOOP_JUMP"  "[" OperandsList "]" { Ok(ASTInst::TraceLoopJump($3?)) }

@@ -13,7 +13,7 @@ use crate::compile::{
 
 pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
     for iidx in m.iter_all_inst_idxs() {
-        let (iidx, inst) = m.inst_deproxy(iidx);
+        let (iidx, inst) = m.inst_decopy(iidx);
         match inst {
             Inst::BinOp(BinOpInst {
                 lhs,
@@ -47,7 +47,7 @@ fn opt_mul(
                     lhs: chain_lhs,
                     binop: BinOp::Mul,
                     rhs: chain_rhs,
-                }) = m.inst_no_proxies(mul_inst)
+                }) = m.inst_no_copies(mul_inst)
                 {
                     if let (Operand::Var(chain_mul_inst), Operand::Const(chain_mul_const))
                     | (Operand::Const(chain_mul_const), Operand::Var(chain_mul_inst)) =

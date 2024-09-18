@@ -139,6 +139,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
                 match inst {
+                    ASTInst::Assign { assign, val } => {
+                        let op = self.process_operand(val)?;
+                        let inst = match op {
+                            Operand::Var(iidx) => Inst::Copy(iidx),
+                            Operand::Const(cidx) => Inst::Const(cidx),
+                        };
+                        self.push_assign(inst.into(), assign)?;
+                    }
                     ASTInst::BinOp {
                         assign,
                         type_,
@@ -434,14 +442,6 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             self.process_operand(trueval)?,
                             self.process_operand(falseval)?,
                         );
-                        self.push_assign(inst.into(), assign)?;
-                    }
-                    ASTInst::Proxy { assign, val } => {
-                        let op = self.process_operand(val)?;
-                        let inst = match op {
-                            Operand::Var(iidx) => Inst::Copy(iidx),
-                            Operand::Const(cidx) => Inst::Const(cidx),
-                        };
                         self.push_assign(inst.into(), assign)?;
                     }
                 }
@@ -793,7 +793,7 @@ enum ASTInst {
         trueval: ASTOperand,
         falseval: ASTOperand,
     },
-    Proxy {
+    Assign {
         assign: Span,
         val: ASTOperand,
     },

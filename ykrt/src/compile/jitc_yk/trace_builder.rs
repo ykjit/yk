@@ -494,11 +494,11 @@ impl TraceBuilder {
                                 PackedOperand::new(&jit_ir::Operand::Var(liidx)),
                             )),
                             jit_ir::Operand::Const(_) => {
-                                // Since we are forcing constants into `ProxyConst`s during inlining, this
-                                // case should never happen. If you see this panic, then look for a
-                                // safepoint live variable that maps to a constant and make the builder
-                                // insert a `ProxyConst` for it instead.
-                                panic!("constant encountered while building guardinfo!")
+                                // Since we are forcing constants into `Inst::Const`s during
+                                // inlining, this case should never happen. If you see this panic,
+                                // then look for a safepoint live variable that maps to a constant
+                                // and make the builder insert an `Inst::Const` for it instead.
+                                panic!("Constant encountered while building guardinfo!")
                             }
                         }
                     }
@@ -666,7 +666,7 @@ impl TraceBuilder {
             match self.handle_operand(arg)? {
                 jit_ir::Operand::Const(c) => {
                     // We don't want to do constant propagation here as it makes our life harder
-                    // creating guards. Instead we simply create a proxy instruction here and
+                    // creating guards. Instead we simply create a `Const` instruction here and
                     // reference that.
                     let inst = jit_ir::Inst::Const(c);
                     self.jit_mod.push(inst)?;
@@ -954,7 +954,7 @@ impl TraceBuilder {
         let op = match self.handle_operand(chosen_val)? {
             jit_ir::Operand::Const(c) => {
                 // We don't want to do constant propagation here as it makes our life harder
-                // creating guards. Instead we simply create a proxy instruction here and
+                // creating guards. Instead we simply create a `Const` instruction here and
                 // reference that.
                 let inst = jit_ir::Inst::Const(c);
                 self.jit_mod.push(inst)?;

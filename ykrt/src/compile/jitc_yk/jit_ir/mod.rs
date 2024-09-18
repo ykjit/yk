@@ -22,9 +22,9 @@
 //! of this aspect of unpacking, it is important to work on [Operand]s, not [PackedOperand]s.
 //!
 //! The IR has three "special" instructions which are stored as normal instructions, but which are
-//! hidden by deconsting/deproxying (including when one views the IR):
+//! hidden by deconsting/decopying (including when one views the IR):
 //!
-//!   * `ProxyConst`, which represents a constant. What, in the underlying IR, nominally looks
+//!   * `Const`, which represents a constant. What, in the underlying IR, nominally looks
 //!     as follows:
 //!     ```text
 //!     %7: i8 = 1i8
@@ -33,19 +33,19 @@
 //!     will be displayed *deconsted* as simply `%8: add %2, 1i8`. Note that this is
 //!     deliberately indistinguishable from IR which directly stores `%8: add %2, 1i8`.
 //!
-//!   * `ProxyInst` which is a (possibly chained) proxy for another instruction. What, in the
+//!   * `Copy` which is a (possibly chained) proxy for another instruction. What, in the
 //!     underlying IR, nominally looks as follows:
 //!     ```text
 //!     %7: %6
 //!     %8: add %2, %7
 //!     ```
-//!     will be displayed *deproxied* as simply `%8: add %2, %6`. Note that this is
+//!     will be displayed *decopied* as simply `%8: add %2, %6`. Note that this is
 //!     deliberately indistinguishable from IR which directly stores `%8: add %2, %6`.
 //!
 //!   * `Tombstone` which represents an instruction which is no longer used. These are not
 //!     displayed at all.
 //!
-//! Formally speaking, deconsting/deproxying allows us to efficiently encode union sets: it is
+//! Formally speaking, deconsting/decopying allows us to efficiently encode union sets: it is
 //! equivalent to "forwarding" in RPython (see e.g. [this blog
 //! post](https://pypy.org/posts/2022/07/toy-optimizer.html)).
 //!
@@ -282,28 +282,29 @@ impl Module {
     ///
     /// # Panics
     ///
-    /// If `iidx` points to a `Proxy*` instruction.
-    pub(crate) fn inst_no_proxies(&self, iidx: InstIdx) -> Inst {
+    /// If `iidx` points to a `Copy` instruction.
+    pub(crate) fn inst_no_copies(&self, iidx: InstIdx) -> Inst {
         match self.insts[usize::from(iidx)] {
-            Inst::Const(_) | Inst::Copy(_) => panic!(),
+            Inst::Const(_) => todo!(),
+            Inst::Copy(_) => panic!(),
             x => x,
         }
     }
 
-    /// Return the instruction at the specified index, deproxying `ProxyInst` i.e. searching
-    /// until a non-`ProxyInst` instruction is found.
-    pub(crate) fn inst_deproxy(&self, mut iidx: InstIdx) -> (InstIdx, Inst) {
+    /// Return the decopied instruction at the specified index (i.e. searching
+    /// until a non-`Copy` instruction is found).
+    pub(crate) fn inst_decopy(&self, mut iidx: InstIdx) -> (InstIdx, Inst) {
         loop {
             match self.insts[usize::from(iidx)] {
-                Inst::Copy(proxy_iidx) => iidx = proxy_iidx,
+                Inst::Copy(copy_iidx) => iidx = copy_iidx,
                 x => return (iidx, x),
             }
         }
     }
 
     /// Return the instruction at the specified index. Note: unless you are explicitly handling
-    /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
-    /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
+    /// `Copy` instructions in your code you must use [Self::inst_no_copies] -- not handling
+    /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_copies].
     fn inst_all(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
@@ -326,19 +327,19 @@ impl Module {
         InstIdx::try_from(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
-    /// Iterate, in order, over all `InstIdx`s of this module (including `Proxy*` and `Tombstone`
-    /// instructions).
+    /// Iterate, in order, over all `InstIdx`s of this module (including `Const`, `Copy`, and
+    /// `Tombstone` instructions).
     pub(crate) fn iter_all_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
         // The `unchecked_from` is safe because we know from `Self::push` that we can't have
         // exceeded `InstIdx`'s bounds.
         (0..self.insts.len()).map(InstIdx::unchecked_from)
     }
 
-    /// An iterator over instructions that skips `Proxy*` and `Tombstone` instructions.
+    /// An iterator over instructions that skips `Const`, `Copy`, and `Tombstone` instructions.
     ///
-    /// This implicitly deduplicates the callers view of instructions (since `Proxy*` instructions
-    /// are skipped), but note that the indices, while strictly monotonically increasing, may be
-    /// non-consecutive (because of skipping).
+    /// This implicitly deduplicates the callers view of instructions (since `Const` and `Copy`
+    /// instructions are skipped), but note that the indices, while strictly monotonically
+    /// increasing, may be non-consecutive (because of skipping).
     pub(crate) fn iter_skipping_insts(&self) -> SkippingInstsIterator<'_> {
         SkippingInstsIterator { m: self, cur: 0 }
     }
@@ -570,7 +571,7 @@ impl Module {
         for iidx in self.iter_all_inst_idxs() {
             let inst = self.inst_all(iidx);
             inst.map_operand_locals(self, &mut |x| {
-                let (x, _) = self.inst_deproxy(x);
+                let (x, _) = self.inst_decopy(x);
                 debug_assert!(alives[usize::from(x)] <= iidx);
                 alives[usize::from(x)] = iidx;
             });
@@ -621,11 +622,11 @@ impl fmt::Display for Module {
     }
 }
 
-/// An iterator over instructions that skips `Proxy*` and `Tombstone` instructions.
+/// An iterator over instructions that skips `Const`, `Copy`, and `Tombstone` instructions.
 ///
-/// This implicitly deduplicates the callers view of instructions (since `Proxy*` instructions are
-/// skipped), but note that the indices, while strictly monotonically increasing, may be
-/// non-consecutive (because of skipping).
+/// This implicitly deduplicates the callers view of instructions (since `Copy` and `Const`
+/// instructions are skipped), but note that the indices, while strictly monotonically increasing,
+/// may be non-consecutive (because of skipping).
 pub(crate) struct SkippingInstsIterator<'a> {
     m: &'a Module,
     cur: usize,

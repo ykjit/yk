@@ -731,7 +731,7 @@ impl<'a> Assemble<'a> {
                 todo!("{:?}", e);
             }
         };
-        let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
+        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
         match m {
             VarLocation::Register(reg_alloc::Register::GP(reg)) => {
@@ -758,7 +758,7 @@ impl<'a> Assemble<'a> {
                     iidx,
                     [RegConstraint::InputOutput(inst.operand(self.m))],
                 );
-                let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
+                let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
                 match size {
                     1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code())]),
@@ -2434,7 +2434,7 @@ mod tests {
     }
 
     #[test]
-    fn cg_proxyconst() {
+    fn cg_const() {
         codegen_and_test(
             "
               entry:

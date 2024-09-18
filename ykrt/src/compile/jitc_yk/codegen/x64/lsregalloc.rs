@@ -447,7 +447,7 @@ impl<'a> LSRegAlloc<'a> {
             RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
             RegState::FromInst(iidx) => {
                 if self.spills[usize::from(iidx)] == SpillState::Empty {
-                    let inst = self.m.inst_no_proxies(iidx);
+                    let inst = self.m.inst_no_copies(iidx);
                     let size = inst.def_byte_size(self.m);
                     self.stack.align(size); // FIXME
                     let frame_off = self.stack.grow(size);
@@ -471,7 +471,7 @@ impl<'a> LSRegAlloc<'a> {
     ///
     /// If `iidx` has not previously been spilled.
     fn force_gp_unspill(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
-        let (iidx, inst) = self.m.inst_deproxy(iidx);
+        let (iidx, inst) = self.m.inst_decopy(iidx);
         let size = inst.def_byte_size(self.m);
 
         if let Inst::Const(cidx) = inst {
@@ -666,7 +666,7 @@ impl<'a> LSRegAlloc<'a> {
         }) {
             VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
         } else {
-            let (iidx, inst) = self.m.inst_deproxy(iidx);
+            let (iidx, inst) = self.m.inst_decopy(iidx);
             let size = inst.def_byte_size(self.m);
             match inst {
                 Inst::Copy(_) => panic!(),
@@ -865,7 +865,7 @@ impl<'a> LSRegAlloc<'a> {
             RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
             RegState::FromInst(iidx) => {
                 if self.spills[usize::from(iidx)] == SpillState::Empty {
-                    let inst = self.m.inst_no_proxies(iidx);
+                    let inst = self.m.inst_no_copies(iidx);
                     let size = inst.def_byte_size(self.m);
                     self.stack.align(size); // FIXME
                     let frame_off = self.stack.grow(size);
@@ -887,7 +887,7 @@ impl<'a> LSRegAlloc<'a> {
     ///
     /// If `iidx` has not previously been spilled.
     fn force_fp_unspill(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rx) {
-        let inst = self.m.inst_no_proxies(iidx);
+        let inst = self.m.inst_no_copies(iidx);
         let size = inst.def_byte_size(self.m);
 
         match self.spills[usize::from(iidx)] {
