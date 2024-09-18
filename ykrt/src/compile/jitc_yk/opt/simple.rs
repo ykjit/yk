@@ -66,7 +66,7 @@ fn opt_mul(
                     m.replace(iidx, Inst::ProxyConst(cidx));
                 } else if new_val == 1 {
                     // Replace `x * 1` with `x`.
-                    m.replace(iidx, Inst::ProxyInst(mul_inst));
+                    m.replace(iidx, Inst::Copy(mul_inst));
                 } else if new_val & (new_val - 1) == 0 {
                     // Replace `x * y` with `x << ...`.
                     let shl = u64::from(new_val.ilog2());

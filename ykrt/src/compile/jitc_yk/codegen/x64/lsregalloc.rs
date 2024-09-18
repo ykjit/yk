@@ -669,7 +669,7 @@ impl<'a> LSRegAlloc<'a> {
             let (iidx, inst) = self.m.inst_deproxy(iidx);
             let size = inst.def_byte_size(self.m);
             match inst {
-                Inst::ProxyInst(_) => panic!(),
+                Inst::Copy(_) => panic!(),
                 Inst::ProxyConst(cidx) => match self.m.const_(cidx) {
                     Const::Float(_, _) => todo!(),
                     Const::Int(tyidx, v) => {

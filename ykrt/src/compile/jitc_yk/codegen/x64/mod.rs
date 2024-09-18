@@ -281,7 +281,7 @@ impl<'a> Assemble<'a> {
         match inst {
             #[cfg(test)]
             jit_ir::Inst::BlackBox(_) => unreachable!(),
-            jit_ir::Inst::ProxyConst(_) | jit_ir::Inst::ProxyInst(_) | jit_ir::Inst::Tombstone => {
+            jit_ir::Inst::ProxyConst(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
                 unreachable!();
             }
 

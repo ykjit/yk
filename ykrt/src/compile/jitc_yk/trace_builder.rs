@@ -771,7 +771,7 @@ impl TraceBuilder {
             jit_ptr = match jit_ptr {
                 Operand::Var(iidx) => self
                     .jit_mod
-                    .push_and_make_operand(jit_ir::Inst::ProxyInst(iidx))?,
+                    .push_and_make_operand(jit_ir::Inst::Copy(iidx))?,
                 _ => todo!(),
             }
         }
@@ -1011,7 +1011,7 @@ impl TraceBuilder {
         }
         match self.handle_operand(val)? {
             jit_ir::Operand::Var(ref_iidx) => {
-                self.jit_mod.push(jit_ir::Inst::ProxyInst(ref_iidx))?;
+                self.jit_mod.push(jit_ir::Inst::Copy(ref_iidx))?;
                 self.link_iid_to_last_inst(bid, aot_inst_idx);
 
                 // Insert a guard to ensure the trace only runs if the value we encounter is the

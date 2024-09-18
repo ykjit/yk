@@ -285,7 +285,7 @@ impl Module {
     /// If `iidx` points to a `Proxy*` instruction.
     pub(crate) fn inst_no_proxies(&self, iidx: InstIdx) -> Inst {
         match self.insts[usize::from(iidx)] {
-            Inst::ProxyConst(_) | Inst::ProxyInst(_) => panic!(),
+            Inst::ProxyConst(_) | Inst::Copy(_) => panic!(),
             x => x,
         }
     }
@@ -295,7 +295,7 @@ impl Module {
     pub(crate) fn inst_deproxy(&self, mut iidx: InstIdx) -> (InstIdx, Inst) {
         loop {
             match self.insts[usize::from(iidx)] {
-                Inst::ProxyInst(proxy_iidx) => iidx = proxy_iidx,
+                Inst::Copy(proxy_iidx) => iidx = proxy_iidx,
                 x => return (iidx, x),
             }
         }
@@ -642,7 +642,7 @@ impl<'a> Iterator for SkippingInstsIterator<'a> {
             let old = InstIdx::unchecked_from(self.cur);
             self.cur += 1;
             match x {
-                Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
+                Inst::ProxyConst(_) | Inst::Copy(_) | Inst::Tombstone => (),
                 _ => return Some((old, &self.m.insts[usize::from(old)])),
             }
         }
@@ -1064,7 +1064,7 @@ impl PackedOperand {
                     Inst::ProxyConst(x) => {
                         return Operand::Const(*x);
                     }
-                    Inst::ProxyInst(x) => {
+                    Inst::Copy(x) => {
                         iidx = *x;
                     }
                     _ => {
@@ -1146,7 +1146,7 @@ impl fmt::Display for DisplayableOperand<'_> {
                 Inst::ProxyConst(c) => {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
-                Inst::ProxyInst(idx) => {
+                Inst::Copy(idx) => {
                     write!(f, "%{idx}")
                 }
                 _ => write!(f, "%{idx}"),
@@ -1354,8 +1354,7 @@ pub(crate) enum Inst {
     ProxyConst(ConstIdx),
     /// This instruction does not produce a value itself: it is equivalent to the value produced by
     /// `InstIdx`.
-    #[allow(clippy::enum_variant_names)]
-    ProxyInst(InstIdx),
+    Copy(InstIdx),
     /// This instruction has been permanently removed. Note: this must only be used if you are
     /// entirely sure that the value this instruction once produced is no longer used.
     Tombstone,
@@ -1404,7 +1403,7 @@ impl Inst {
             #[cfg(test)]
             Self::BlackBox(_) => m.void_tyidx(),
             Self::ProxyConst(x) => m.const_(*x).tyidx(m),
-            Self::ProxyInst(x) => m.inst_all(*x).tyidx(m),
+            Self::Copy(x) => m.inst_all(*x).tyidx(m),
             Self::Tombstone => panic!(),
 
             Self::BinOp(x) => x.tyidx(m),
@@ -1446,7 +1445,7 @@ impl Inst {
             #[cfg(test)]
             Inst::BlackBox(_) => true,
             Inst::ProxyConst(_) => false,
-            Inst::ProxyInst(x) => m.inst_all(*x).has_side_effect(m),
+            Inst::Copy(x) => m.inst_all(*x).has_side_effect(m),
             Inst::Tombstone => false,
             Inst::BinOp(_) => false,
             Inst::Load(_) => false,
@@ -1485,7 +1484,7 @@ impl Inst {
                 op.unpack(m).map_iidx(f);
             }
             Inst::ProxyConst(_) => (),
-            Inst::ProxyInst(_) => (),
+            Inst::Copy(_) => (),
             Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
                 lhs.unpack(m).map_iidx(f);
@@ -1580,7 +1579,7 @@ impl Inst {
                 op.map_iidx(f);
             }
             Inst::ProxyConst(_) => (),
-            Inst::ProxyInst(iidx) => f(*iidx),
+            Inst::Copy(iidx) => f(*iidx),
             Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
                 lhs.map_iidx(f);
@@ -1706,7 +1705,7 @@ impl fmt::Display for DisplayableInst<'_> {
         match self.inst {
             #[cfg(test)]
             Inst::BlackBox(x) => write!(f, "black_box {}", x.operand(self.m).display(self.m)),
-            Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => unreachable!(),
+            Inst::ProxyConst(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
 
             Inst::BinOp(BinOpInst { lhs, binop, rhs }) => write!(
                 f,
