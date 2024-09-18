@@ -700,16 +700,22 @@ unsafe extern "C" fn exec_trace(
         // Reset RSP to the end of the control point frame (this includes the registers we pushed
         // just before the control point)
         "mov rsp, rsi",
-        "sub rsp, 8",  // Return address of control point call
-        "sub rsp, 56", // Registers pushed in naked cp call
-        //// Restore callee-saved registers which were pushed to the stack in __ykrt_control_point.
+        "sub rsp, 8",   // Return address of control point call
+        "sub rsp, 104", // Registers pushed in naked cp call (includes alignment)
+        // Restore registers which were pushed to the stack in [ykcapi::__ykrt_control_point].
         "pop r15",
         "pop r14",
         "pop r13",
         "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
         "pop rsi",
-        "pop rdi", // Don't overwrite `rdi` for now until we remove the first two args.
+        "pop rdi",
         "pop rbx",
+        "pop rcx",
+        "pop rax",
         // Call the trace function.
         "jmp rdx",
         "ret",

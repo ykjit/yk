@@ -45,8 +45,6 @@ const MAGIC: u32 = 0xedd5f00d;
 /// The version of the bytecode format.
 const FORMAT_VERSION: u32 = 0;
 
-/// The symbol name of the control point function (after ykllvm has transformed it).
-const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
 const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 
 /// A struct identifying a line in a source file.
@@ -1059,8 +1057,13 @@ impl Inst {
 
     /// Returns whether `self` is a call to the control point.
     pub(crate) fn is_control_point(&self, m: &Module) -> bool {
+        // FIXME: We don't really expect any other patchpoints here, but it would be nice to check
+        // the third argument is actually the control point. This would require the ability to
+        // reconstitute a string from constant bytes though.
         match self {
-            Self::Call { callee, .. } => m.func(*callee).name == CONTROL_POINT_NAME,
+            Self::Call { callee, .. } => {
+                m.func(*callee).name == "llvm.experimental.patchpoint.void"
+            }
             _ => false,
         }
     }

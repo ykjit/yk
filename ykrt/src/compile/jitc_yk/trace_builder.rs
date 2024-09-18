@@ -660,6 +660,11 @@ impl TraceBuilder {
         if AOT_MOD.func(*callee).name() == "__yk_trace_basicblock" {
             return Ok(());
         }
+
+        if inst.is_control_point(self.aot_mod) {
+            return Ok(());
+        }
+
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
         for arg in args {
@@ -721,9 +726,6 @@ impl TraceBuilder {
                     todo!()
                 }
                 _ => panic!(),
-            }
-            if inst.is_control_point(self.aot_mod) {
-                return Ok(());
             }
             let jit_func_decl_idx = self.handle_func(*callee)?;
             let inst =
