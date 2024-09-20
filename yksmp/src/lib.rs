@@ -58,7 +58,7 @@ pub enum Location {
     ///
     /// FIXME: We may need more additional locations in the future, which however will require
     /// rewriting the stackmap format (until now we managed to get by with two extra locations).
-    Register(u16, u16, i32, u16),
+    Register(u16, u16, i32, Vec<i16>),
     /// The live variable is a pointer into the stack. To avoid unnecessary spilling and
     /// dereferencing LLVM just records the value as an (offset, register) pair where the register
     /// is typically the base pointer:
@@ -247,12 +247,16 @@ impl StackMapParser<'_> {
             self.read_u8();
             let size = self.read_u16();
             let dwreg = self.read_u16();
-            let extrareg = self.read_u16();
+            self.read_u16();
+            let mut extras = Vec::new();
+            for _ in 0..self.read_u16() {
+                extras.push(self.read_i16());
+            }
 
             let location = match kind {
                 0x01 => {
                     let offset = self.read_i32();
-                    Location::Register(dwreg, size, offset, extrareg)
+                    Location::Register(dwreg, size, offset, extras)
                 }
                 0x02 => {
                     let offset = self.read_i32();
@@ -321,6 +325,12 @@ impl StackMapParser<'_> {
 
     fn read_u16(&mut self) -> u16 {
         let d = u16::from_ne_bytes(self.data[self.offset..self.offset + 2].try_into().unwrap());
+        self.offset += 2;
+        d
+    }
+
+    fn read_i16(&mut self) -> i16 {
+        let d = i16::from_ne_bytes(self.data[self.offset..self.offset + 2].try_into().unwrap());
         self.offset += 2;
         d
     }

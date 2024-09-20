@@ -227,33 +227,30 @@ pub(crate) extern "C" fn __yk_deopt(
                 todo!("Deal with multi register locations");
             };
             match aotloc {
-                SMLocation::Register(reg, size, off, extra) => {
+                SMLocation::Register(reg, size, off, extras) => {
                     registers[usize::from(*reg)] = jitval;
-                    if *extra != 0 {
-                        // The stackmap has recorded an additional register we need to write
-                        // this value to.
-                        registers[usize::from(*extra - 1)] = jitval;
-                    }
-                    // Check if there's an additional spill location for this value. Negative
-                    // values indicate stack offsets, positive values are registers. Lastly, 0
-                    // indicates that there's no additional location. Note, that this means
-                    // that in order to encode register locations (where RAX = 0), all register
-                    // values have been offset by 1.
-                    if *off < 0 {
-                        let temp = if i == 0 {
-                            unsafe { frameaddr.offset(isize::try_from(*off).unwrap()) }
-                        } else {
-                            unsafe { rbp.offset(isize::try_from(*off).unwrap()) }
-                        };
-                        debug_assert!(*off < i32::try_from(rec.size).unwrap());
-                        match size {
-                            // FIXME: Check that 16-byte writes are for float registers only.
-                            16 | 8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
-                            4 => unsafe { ptr::write::<u32>(temp as *mut u32, jitval as u32) },
-                            _ => todo!("{}", size),
+                    for extra in extras {
+                        // Write any additional locations that were tracked for this variable.
+                        // Numbers greater or equal to zero are registers in Dwarf notation.
+                        // Negative numbers are offsets relative to RBP.
+                        if *extra >= 0 {
+                            registers[usize::try_from(*extra).unwrap()] = jitval;
+                        } else if *extra < 0 {
+                            let temp = if i == 0 {
+                                // Write values to the (still intact) bottom frame.
+                                unsafe { frameaddr.offset(isize::from(*extra)) }
+                            } else {
+                                // Write values to a reconstructed frame.
+                                unsafe { rbp.offset(isize::from(*extra)) }
+                            };
+                            debug_assert!(*off < i32::try_from(rec.size).unwrap());
+                            match size {
+                                // FIXME: Check that 16-byte writes are for float registers only.
+                                16 | 8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
+                                4 => unsafe { ptr::write::<u32>(temp as *mut u32, jitval as u32) },
+                                _ => todo!("{}", size),
+                            }
                         }
-                    } else if *off > 0 {
-                        registers[usize::try_from(*off - 1).unwrap()] = jitval;
                     }
                 }
                 SMLocation::Direct(..) => {
