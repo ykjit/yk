@@ -35,7 +35,7 @@ impl Module {
         let mut last_inst = None;
         for (iidx, inst) in self.iter_skipping_insts() {
             inst.map_operand_locals(self, &mut |x| {
-                if let Inst::Tombstone = self.inst_all(x) {
+                if let Inst::Tombstone = self.inst_raw(x) {
                     panic!(
                         "Instruction at position {iidx} uses undefined value (%{x})\n  {}",
                         self.inst_no_copies(iidx).display(iidx, self)

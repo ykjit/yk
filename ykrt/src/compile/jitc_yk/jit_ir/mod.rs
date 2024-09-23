@@ -2,10 +2,12 @@
 //!
 //! ## General SSA properties
 //!
-//! The most important part of the IR is the *instruction* sequence created by [trace_builder].
-//! Instructions are defined by the [Inst] enum.
+//! The most important part of the IR is the
+//! [SSA](https://en.wikipedia.org/wiki/Static_single-assignment_form) *instruction sequence*
+//! (stored in a [Vec]) created by [trace_builder]. Instructions are defined by the [Inst] enum.
+//! Those instructions which produce a value (which is nearly all of them!) define a variable whose
+//! "name" is the offset into the instruction vector.
 //!
-//! Instructions are in [SSA form](https://en.wikipedia.org/wiki/Static_single-assignment_form).
 //! Since traces are linear, we do not have explicit Φ nodes in the IR. However, there are implicit
 //! Φ nodes at the `TLoopStart` instruction: there is only one such instruction per trace; and
 //! there are no other implicit Φ nodes.
@@ -16,10 +18,10 @@
 //!
 //! ## Instruction operands
 //!
-//! Instructions contain zero or more *operands*. These are *stored* as [PackedOperand]s, which is
-//! an efficient, opaque encoding of an operand. To operate on an operand we must *unpack* a
-//! [PackedOperand] to an [Operand]. This also implicitly deconsts/deproxies (see below). Because
-//! of this aspect of unpacking, it is important to work on [Operand]s, not [PackedOperand]s.
+//! Instructions contain zero or more *operands*. These are stored as [PackedOperand]s, which is an
+//! efficient, opaque encoding. To operate on an operand we must *unpack* a [PackedOperand] to an
+//! [Operand]. This also implicitly deconsts/decopied (see below): because of this aspect of
+//! unpacking, it is important to work on [Operand]s, not [PackedOperand]s.
 //!
 //! The IR has three "special" instructions which are stored as normal instructions, but which are
 //! hidden by deconsting/decopying (including when one views the IR):
@@ -302,10 +304,12 @@ impl Module {
         }
     }
 
-    /// Return the instruction at the specified index. Note: unless you are explicitly handling
-    /// `Copy` instructions in your code you must use [Self::inst_no_copies] -- not handling
-    /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_copies].
-    fn inst_all(&self, iidx: InstIdx) -> &Inst {
+    /// Return the instruction at the specified index "raw", that is without decopying.
+    ///
+    /// This function has very few uses and unless you explicitly know why you're using it, you
+    /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
+    /// correctly leads to undefined behaviour.
+    fn inst_raw(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
 
@@ -569,7 +573,7 @@ impl Module {
     pub(crate) fn inst_vals_alive_until(&self) -> Vec<InstIdx> {
         let mut alives = vec![InstIdx::try_from(0).unwrap(); self.insts_len()];
         for iidx in self.iter_all_inst_idxs() {
-            let inst = self.inst_all(iidx);
+            let inst = self.inst_raw(iidx);
             inst.map_operand_locals(self, &mut |x| {
                 let (x, _) = self.inst_decopy(x);
                 debug_assert!(alives[usize::from(x)] <= iidx);
@@ -1056,12 +1060,12 @@ impl PackedOperand {
         }
     }
 
-    /// Unpacks and deproxies a [PackedOperand] into a [Operand].
+    /// Unpacks and decopies a [PackedOperand] into a [Operand].
     pub(crate) fn unpack(&self, m: &Module) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             let mut iidx = InstIdx(self.0);
             loop {
-                match m.inst_all(iidx) {
+                match m.inst_raw(iidx) {
                     Inst::Const(x) => {
                         return Operand::Const(*x);
                     }
@@ -1079,7 +1083,7 @@ impl PackedOperand {
     }
 
     /// If this [PackedOperand] represents a local instruction, call `f` with its `InstIdx`. Note
-    /// that this does not perform any kind of deproxification.
+    /// that this does not perform any kind of decopying.
     fn map_iidx<F>(&self, f: &mut F)
     where
         F: FnMut(InstIdx),
@@ -1107,7 +1111,7 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Var(l) => m.inst_all(*l).def_byte_size(m),
+            Self::Var(l) => m.inst_raw(*l).def_byte_size(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).byte_size().unwrap(),
         }
     }
@@ -1115,7 +1119,7 @@ impl Operand {
     /// Returns the type index of the operand.
     pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Var(l) => m.inst_all(*l).tyidx(m),
+            Self::Var(l) => m.inst_raw(*l).tyidx(m),
             Self::Const(c) => m.const_(*c).tyidx(m),
         }
     }
@@ -1143,7 +1147,7 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Var(idx) => match self.m.inst_all(*idx) {
+            Operand::Var(idx) => match self.m.inst_raw(*idx) {
                 Inst::Const(c) => {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
@@ -1404,7 +1408,7 @@ impl Inst {
             #[cfg(test)]
             Self::BlackBox(_) => m.void_tyidx(),
             Self::Const(x) => m.const_(*x).tyidx(m),
-            Self::Copy(x) => m.inst_all(*x).tyidx(m),
+            Self::Copy(x) => m.inst_raw(*x).tyidx(m),
             Self::Tombstone => panic!(),
 
             Self::BinOp(x) => x.tyidx(m),
@@ -1446,7 +1450,7 @@ impl Inst {
             #[cfg(test)]
             Inst::BlackBox(_) => true,
             Inst::Const(_) => false,
-            Inst::Copy(x) => m.inst_all(*x).has_side_effect(m),
+            Inst::Copy(x) => m.inst_raw(*x).has_side_effect(m),
             Inst::Tombstone => false,
             Inst::BinOp(_) => false,
             Inst::Load(_) => false,
@@ -1567,9 +1571,9 @@ impl Inst {
     /// local instruction. When an instruction references more than one [PackedOperand], the order
     /// of traversal is undefined.
     ///
-    /// Note that this function does not perform deproxification, and thus must only be used when
-    /// you know that you want to know which local an instruction's operands directly refers to
-    /// (e.g. for dead code elimination).
+    /// Note that this function does not perform decopying, and thus must only be used when you
+    /// know that you want to know which local an instruction's operands directly refers to (e.g.
+    /// for dead code elimination).
     pub(crate) fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
     where
         F: FnMut(InstIdx),
