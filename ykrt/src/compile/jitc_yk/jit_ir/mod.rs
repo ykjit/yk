@@ -2,10 +2,12 @@
 //!
 //! ## General SSA properties
 //!
-//! The most important part of the IR is the *instruction* sequence created by [trace_builder].
-//! Instructions are defined by the [Inst] enum.
+//! The most important part of the IR is the
+//! [SSA](https://en.wikipedia.org/wiki/Static_single-assignment_form) *instruction sequence*
+//! (stored in a [Vec]) created by [trace_builder]. Instructions are defined by the [Inst] enum.
+//! Those instructions which produce a value (which is nearly all of them!) define a variable whose
+//! "name" is the offset into the instruction vector.
 //!
-//! Instructions are in [SSA form](https://en.wikipedia.org/wiki/Static_single-assignment_form).
 //! Since traces are linear, we do not have explicit Φ nodes in the IR. However, there are implicit
 //! Φ nodes at the `TLoopStart` instruction: there is only one such instruction per trace; and
 //! there are no other implicit Φ nodes.
