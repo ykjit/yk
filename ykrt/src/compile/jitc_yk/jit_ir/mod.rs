@@ -304,11 +304,12 @@ impl Module {
         }
     }
 
-    /// Return the instruction at the specified index. Note: unless you are explicitly handling
-    /// `Copy` instructions in your code you must use [Self::inst_no_copies] -- not handling `Copy`
-    /// instructions correctly leads to undefined behaviour. If in doubt, use
-    /// [Self::inst_no_copies].
-    fn inst_all(&self, iidx: InstIdx) -> &Inst {
+    /// Return the instruction at the specified index "raw", that is without decopying.
+    ///
+    /// This function has very few uses and unless you explicitly know why you're using it, you
+    /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
+    /// correctly leads to undefined behaviour.
+    fn inst_raw(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
 
@@ -572,7 +573,7 @@ impl Module {
     pub(crate) fn inst_vals_alive_until(&self) -> Vec<InstIdx> {
         let mut alives = vec![InstIdx::try_from(0).unwrap(); self.insts_len()];
         for iidx in self.iter_all_inst_idxs() {
-            let inst = self.inst_all(iidx);
+            let inst = self.inst_raw(iidx);
             inst.map_operand_locals(self, &mut |x| {
                 let (x, _) = self.inst_decopy(x);
                 debug_assert!(alives[usize::from(x)] <= iidx);
@@ -1064,7 +1065,7 @@ impl PackedOperand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             let mut iidx = InstIdx(self.0);
             loop {
-                match m.inst_all(iidx) {
+                match m.inst_raw(iidx) {
                     Inst::Const(x) => {
                         return Operand::Const(*x);
                     }
@@ -1110,7 +1111,7 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Var(l) => m.inst_all(*l).def_byte_size(m),
+            Self::Var(l) => m.inst_raw(*l).def_byte_size(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).byte_size().unwrap(),
         }
     }
@@ -1118,7 +1119,7 @@ impl Operand {
     /// Returns the type index of the operand.
     pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Var(l) => m.inst_all(*l).tyidx(m),
+            Self::Var(l) => m.inst_raw(*l).tyidx(m),
             Self::Const(c) => m.const_(*c).tyidx(m),
         }
     }
@@ -1146,7 +1147,7 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Var(idx) => match self.m.inst_all(*idx) {
+            Operand::Var(idx) => match self.m.inst_raw(*idx) {
                 Inst::Const(c) => {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
@@ -1407,7 +1408,7 @@ impl Inst {
             #[cfg(test)]
             Self::BlackBox(_) => m.void_tyidx(),
             Self::Const(x) => m.const_(*x).tyidx(m),
-            Self::Copy(x) => m.inst_all(*x).tyidx(m),
+            Self::Copy(x) => m.inst_raw(*x).tyidx(m),
             Self::Tombstone => panic!(),
 
             Self::BinOp(x) => x.tyidx(m),
@@ -1449,7 +1450,7 @@ impl Inst {
             #[cfg(test)]
             Inst::BlackBox(_) => true,
             Inst::Const(_) => false,
-            Inst::Copy(x) => m.inst_all(*x).has_side_effect(m),
+            Inst::Copy(x) => m.inst_raw(*x).has_side_effect(m),
             Inst::Tombstone => false,
             Inst::BinOp(_) => false,
             Inst::Load(_) => false,
