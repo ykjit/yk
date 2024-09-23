@@ -16,10 +16,10 @@
 //!
 //! ## Instruction operands
 //!
-//! Instructions contain zero or more *operands*. These are *stored* as [PackedOperand]s, which is
-//! an efficient, opaque encoding of an operand. To operate on an operand we must *unpack* a
-//! [PackedOperand] to an [Operand]. This also implicitly deconsts/deproxies (see below). Because
-//! of this aspect of unpacking, it is important to work on [Operand]s, not [PackedOperand]s.
+//! Instructions contain zero or more *operands*. These are stored as [PackedOperand]s, which is an
+//! efficient, opaque encoding. To operate on an operand we must *unpack* a [PackedOperand] to an
+//! [Operand]. This also implicitly deconsts/decopied (see below): because of this aspect of
+//! unpacking, it is important to work on [Operand]s, not [PackedOperand]s.
 //!
 //! The IR has three "special" instructions which are stored as normal instructions, but which are
 //! hidden by deconsting/decopying (including when one views the IR):
@@ -303,8 +303,9 @@ impl Module {
     }
 
     /// Return the instruction at the specified index. Note: unless you are explicitly handling
-    /// `Copy` instructions in your code you must use [Self::inst_no_copies] -- not handling
-    /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_copies].
+    /// `Copy` instructions in your code you must use [Self::inst_no_copies] -- not handling `Copy`
+    /// instructions correctly leads to undefined behaviour. If in doubt, use
+    /// [Self::inst_no_copies].
     fn inst_all(&self, iidx: InstIdx) -> &Inst {
         &self.insts[usize::from(iidx)]
     }
@@ -1056,7 +1057,7 @@ impl PackedOperand {
         }
     }
 
-    /// Unpacks and deproxies a [PackedOperand] into a [Operand].
+    /// Unpacks and decopies a [PackedOperand] into a [Operand].
     pub(crate) fn unpack(&self, m: &Module) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             let mut iidx = InstIdx(self.0);
@@ -1079,7 +1080,7 @@ impl PackedOperand {
     }
 
     /// If this [PackedOperand] represents a local instruction, call `f` with its `InstIdx`. Note
-    /// that this does not perform any kind of deproxification.
+    /// that this does not perform any kind of decopying.
     fn map_iidx<F>(&self, f: &mut F)
     where
         F: FnMut(InstIdx),
@@ -1567,9 +1568,9 @@ impl Inst {
     /// local instruction. When an instruction references more than one [PackedOperand], the order
     /// of traversal is undefined.
     ///
-    /// Note that this function does not perform deproxification, and thus must only be used when
-    /// you know that you want to know which local an instruction's operands directly refers to
-    /// (e.g. for dead code elimination).
+    /// Note that this function does not perform decopying, and thus must only be used when you
+    /// know that you want to know which local an instruction's operands directly refers to (e.g.
+    /// for dead code elimination).
     pub(crate) fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
     where
         F: FnMut(InstIdx),
