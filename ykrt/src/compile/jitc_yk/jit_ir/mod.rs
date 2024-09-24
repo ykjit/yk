@@ -309,8 +309,8 @@ impl Module {
     /// This function has very few uses and unless you explicitly know why you're using it, you
     /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
     /// correctly leads to undefined behaviour.
-    fn inst_raw(&self, iidx: InstIdx) -> &Inst {
-        &self.insts[usize::from(iidx)]
+    fn inst_raw(&self, iidx: InstIdx) -> Inst {
+        self.insts[usize::from(iidx)]
     }
 
     pub(crate) fn push_indirect_call(
@@ -1067,10 +1067,10 @@ impl PackedOperand {
             loop {
                 match m.inst_raw(iidx) {
                     Inst::Const(x) => {
-                        return Operand::Const(*x);
+                        return Operand::Const(x);
                     }
                     Inst::Copy(x) => {
-                        iidx = *x;
+                        iidx = x;
                     }
                     _ => {
                         return Operand::Var(iidx);
@@ -1149,7 +1149,7 @@ impl fmt::Display for DisplayableOperand<'_> {
         match self.operand {
             Operand::Var(idx) => match self.m.inst_raw(*idx) {
                 Inst::Const(c) => {
-                    write!(f, "{}", self.m.const_(*c).display(self.m))
+                    write!(f, "{}", self.m.const_(c).display(self.m))
                 }
                 Inst::Copy(idx) => {
                     write!(f, "%{idx}")
