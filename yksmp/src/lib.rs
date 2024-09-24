@@ -285,6 +285,7 @@ impl StackMapParser<'_> {
     fn read_liveouts(&mut self, num: u16) {
         for _ in 0..num {
             let _dwreg = self.read_u16();
+            let _reserved = self.read_u8();
             let _size = self.read_u8();
         }
     }

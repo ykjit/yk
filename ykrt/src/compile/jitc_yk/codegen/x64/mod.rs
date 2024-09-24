@@ -695,6 +695,17 @@ impl<'a> Assemble<'a> {
 
     fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
         let m = match &self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
+            yksmp::Location::Register(0, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))
+            }
+            yksmp::Location::Register(1, ..) => {
+                // The third argument to the control point is the stackmap ID and is passed by RDX.
+                // We don't anticipate this ever being a live variable.
+                unreachable!()
+            }
+            yksmp::Location::Register(2, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::RCX))
+            }
             yksmp::Location::Register(3, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RBX))
             }
@@ -703,6 +714,15 @@ impl<'a> Assemble<'a> {
             }
             yksmp::Location::Register(5, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RDI))
+            }
+            yksmp::Location::Register(8, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::R8))
+            }
+            yksmp::Location::Register(9, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::R9))
+            }
+            yksmp::Location::Register(10, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::R10))
             }
             yksmp::Location::Register(12, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::R12))
