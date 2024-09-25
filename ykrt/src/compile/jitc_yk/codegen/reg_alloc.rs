@@ -9,7 +9,8 @@ use dynasmrt::x64::{Rq, Rx};
 /// Where is an SSA variable stored?
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum VarLocation {
-    /// The SSA variable is on the stack.
+    /// The SSA variable is on the stack of the of the executed trace or the main interpreter loop.
+    /// Since we execute the trace on the main interpreter frame we can't distinguish the two.
     Stack {
         /// The offset from the base of the trace's function frame.
         frame_off: u32,
@@ -18,13 +19,6 @@ pub(crate) enum VarLocation {
     },
     /// The SSA variable is a stack pointer with the value `RBP-frame_off`.
     Direct {
-        /// The offset from the base of the trace's function frame.
-        frame_off: i32,
-        /// Size in bytes of the allocation.
-        size: usize,
-    },
-    /// The SSA variable is behind a pointer that's stored on the stack: `[RBP-frame_off]`.
-    Indirect {
         /// The offset from the base of the trace's function frame.
         frame_off: i32,
         /// Size in bytes of the allocation.

@@ -27,15 +27,14 @@ const RECOVER_REG: [usize; 31] = [
 const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 
 /// Deoptimise back to the interpreter. This function is called from a failing guard (see
-/// `x86_64/mod.rs`). The arguments are: `frameaddr` is the RBP value for the caller of the JIT
-/// function frame; `gidx` the ID of the failing guard; `jitrbp` is the JIT function frame's RBP;
-/// and `gp_regs` is a pointer to the saved values of the 16 general purpose registers in the same
-/// order as [lsregalloc::GP_REGS].
+/// `x86_64/mod.rs`). The arguments are: `frameaddr` is the RBP value for main interpreter loop
+/// (and also the JIT since the trace executes on the same frame); `gidx` the ID of the failing
+/// guard; and `gp_regs` is a pointer to the saved values of the 16 general purpose registers in
+/// the same order as [lsregalloc::GP_REGS].
 #[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
     frameaddr: *const c_void,
     gidx: u64,
-    jitrbp: *const c_void,
     gp_regs: &[u64; 16],
     fp_regs: &[u64; 16],
 ) -> ! {
@@ -56,7 +55,7 @@ pub(crate) extern "C" fn __yk_deopt(
         for (_, jitval) in &info.live_vars {
             let val = match jitval {
                 VarLocation::Stack { frame_off, size } => {
-                    let p = unsafe { jitrbp.byte_sub(usize::try_from(*frame_off).unwrap()) };
+                    let p = unsafe { frameaddr.byte_sub(usize::try_from(*frame_off).unwrap()) };
                     match *size {
                         1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
                         2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
@@ -72,7 +71,6 @@ pub(crate) extern "C" fn __yk_deopt(
                 VarLocation::ConstFloat(_) => todo!(),
                 VarLocation::ConstInt { bits: _, v } => *v,
                 VarLocation::Direct { .. } => panic!(),
-                VarLocation::Indirect { .. } => panic!(),
             };
             ykctrlpvars.push(val);
         }
@@ -177,7 +175,7 @@ pub(crate) extern "C" fn __yk_deopt(
             // Read live JIT values from the trace's stack frame.
             let jitval = match info.live_vars[varidx].1 {
                 VarLocation::Stack { frame_off, size } => {
-                    let p = unsafe { jitrbp.byte_sub(usize::try_from(frame_off).unwrap()) };
+                    let p = unsafe { frameaddr.byte_sub(usize::try_from(frame_off).unwrap()) };
                     match size {
                         1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
                         2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
@@ -197,27 +195,6 @@ pub(crate) extern "C" fn __yk_deopt(
                     varidx += 1;
                     continue;
                 }
-                VarLocation::Indirect { frame_off, size } => match size {
-                    8 => unsafe {
-                        (jitrbp as *const *const u64)
-                            .read()
-                            .byte_offset(isize::try_from(frame_off).unwrap())
-                            .read()
-                    },
-                    4 => unsafe {
-                        (jitrbp as *const *const u32)
-                            .read()
-                            .byte_offset(isize::try_from(frame_off).unwrap())
-                            .read() as u64
-                    },
-                    1 => unsafe {
-                        (jitrbp as *const *const u8)
-                            .read()
-                            .byte_offset(isize::try_from(frame_off).unwrap())
-                            .read() as u64
-                    },
-                    _ => todo!("size={}", size),
-                },
             };
             varidx += 1;
 
@@ -322,6 +299,8 @@ pub(crate) extern "C" fn __yk_deopt(
     let (rec, pinfo) = aot_smaps.get(usize::try_from(info.inlined_frames[0].safepoint.id).unwrap());
     let mut newframedst = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
     if pinfo.hasfp {
+        // `frameaddr` is the RBP value of the bottom frame after pushing the previous frame's RBP.
+        // However, `rec.size` includes the pushed RBP, so we need to subtract it here again.
         newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
     }
 

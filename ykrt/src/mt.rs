@@ -716,6 +716,7 @@ unsafe extern "C" fn exec_trace(
         "pop rbx",
         "pop rcx",
         "pop rax",
+        "add rsp, 8", // Remove return pointer
         // Call the trace function.
         "jmp rdx",
         "ret",

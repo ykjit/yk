@@ -19,6 +19,7 @@ use super::{
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::gdb::{self, GdbCtx};
 use crate::{
+    aotsmp::AOT_STACKMAPS,
     compile::{
         jitc_yk::{
             aot_ir,
@@ -94,7 +95,7 @@ static STACKMAP_GP_REGS: [Rq; 7] = [
 static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 
 /// The size of a 64-bit register in bytes.
-static REG64_SIZE: usize = 8;
+pub(crate) static REG64_SIZE: usize = 8;
 static RBP_DWARF_NUM: u16 = 6;
 
 /// The x64 SysV ABI requires a 16-byte aligned stack prior to any call.
@@ -170,6 +171,30 @@ impl<'a> Assemble<'a> {
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        // Retrieve the stack size of the main interpreter frame. We need this to initialise the
+        // trace's register allocator, since we are executing the trace in the main interpreter
+        // frame in order to access local variables.
+        // FIXME: For now the control point stackmap id is always 0. Though we likely want to
+        // support multiple control points in the future. We can either pass the correct stackmap
+        // id in via the control point, or compute the stack size dynamically upon entering the
+        // control point (e.g. by subtracting the current RBP from the previous RBP).
+        if let Ok(sm) = AOT_STACKMAPS.as_ref() {
+            let (rec, pinfo) = sm.get(0);
+            let size = if pinfo.hasfp {
+                // The frame size includes the pushed RBP, but since we only care about the size of
+                // the local variables we need to subtract it again.
+                rec.size - u64::try_from(REG64_SIZE).unwrap()
+            } else {
+                rec.size
+            };
+            self.ra.init_stack(usize::try_from(size).unwrap());
+        } else {
+            // The unit tests in this file don't have AOT code. So if we don't find stackmaps here
+            // that's ok. In real-world programs and our C-tests this shouldn't happen though.
+            #[cfg(not(test))]
+            panic!("Couldn't find AOT stackmaps.");
+        }
+
         let alloc_off = self.emit_prologue();
 
         for (iidx, inst) in self.m.iter_skipping_insts() {
@@ -221,17 +246,16 @@ impl<'a> Assemble<'a> {
                         dynasm!(self.asm; push Rq(reg.code()));
                     }
                 }
-                dynasm!(self.asm; mov rcx, rsp);
+                dynasm!(self.asm; mov rdx, rsp);
                 for reg in lsregalloc::FP_REGS.iter().rev() {
                     dynasm!(self.asm
-                        ; movq r8, Rx(reg.code())
-                        ; push r8
+                        ; movq rcx, Rx(reg.code())
+                        ; push rcx
                     );
                 }
                 dynasm!(self.asm; mov r8, rsp);
                 dynasm!(self.asm
-                    ; mov rdi, [rbp]
-                    ; mov rdx, rbp
+                    ; mov rdi, rbp
                     ; mov rax, QWORD __yk_deopt as i64
                     ; sub rsp, 8 // Align the stack
                     ; call rax
@@ -317,8 +341,10 @@ impl<'a> Assemble<'a> {
 
     /// Emit the prologue of the JITted code.
     ///
-    /// The JITted code is a function, so it has to stash the old stack poninter, open a new frame
-    /// and allocate space for local variables etc.
+    /// The JITted code is executed inside the same frame as the main interpreter loop. This allows
+    /// us to easily access live variables on that frame's stack. Because of this we don't need to
+    /// create a new frame here, though we do need to make space for any extra stack space this
+    /// trace needs.
     ///
     /// Note that there is no correspoinding `emit_epilogue()`. This is because the only way out of
     /// JITted code is via deoptimisation, which will rewrite the whole stack anyway.
@@ -326,14 +352,6 @@ impl<'a> Assemble<'a> {
     /// Returns the offset at which to patch up the stack allocation later.
     fn emit_prologue(&mut self) -> AssemblyOffset {
         self.comment(self.asm.offset(), "prologue".to_owned());
-
-        // Start a frame for the JITted code.
-        dynasm!(self.asm
-            // Save base pointer which we use to access the parent stack.
-            ; push rbp
-            // Reset base pointer.
-            ; mov rbp, rsp
-        );
 
         // Emit a dummy frame allocation instruction that initially allocates 0 bytes, but will be
         // patched later when we know how big the frame needs to be.
@@ -743,8 +761,11 @@ impl<'a> Assemble<'a> {
                 frame_off: *off,
                 size: usize::from(*size),
             },
-            yksmp::Location::Indirect(6, off, size) => VarLocation::Indirect {
-                frame_off: *off,
+            // Since the trace shares the same stack frame as the main interpreter loop, we can
+            // translate indirect locations into normal stack locations. Note that while stackmaps
+            // use negative offsets, we use positive offsets for stack locations.
+            yksmp::Location::Indirect(6, off, size) => VarLocation::Stack {
+                frame_off: u32::try_from(*off * -1).unwrap(),
                 size: usize::from(*size),
             },
             e => {
@@ -763,8 +784,9 @@ impl<'a> Assemble<'a> {
             VarLocation::Direct { frame_off, size: _ } => {
                 self.ra.force_assign_inst_direct(iidx, frame_off);
             }
-            VarLocation::Indirect { frame_off, size: _ } => {
-                self.ra.force_assign_inst_indirect(iidx, frame_off);
+            VarLocation::Stack { frame_off, size: _ } => {
+                self.ra
+                    .force_assign_inst_indirect(iidx, i32::try_from(frame_off).unwrap());
             }
             _ => panic!(),
         }
@@ -1185,81 +1207,47 @@ impl<'a> Assemble<'a> {
                         continue;
                     }
                     match dst {
-                        VarLocation::Stack { .. } => {
-                            todo!()
-                        }
-                        VarLocation::Direct { .. } => {
-                            // Direct locations are read-only, so it doesn't make sense to write to
-                            // them. This is likely a case where the direct value has been moved
-                            // somewhere else (register/normal stack) so dst and src no longer
-                            // match. But since the value can't change we can safely ignore this.
-                        }
-                        VarLocation::Indirect { frame_off, size } => {
-                            // FIXME: This isn't very fast as we are pushing and popping rbp
-                            // instead of asking the register allocator for a free variable.
-                            // However, we are going to soon execute the trace on the same frame as
-                            // its parent, which will turn `VarLocation::Indirect` into
-                            // `VarLocation::Stack`.
+                        VarLocation::Stack {
+                            frame_off: off_dst,
+                            size: size_dst,
+                        } => {
                             match src {
-                                VarLocation::Register(reg_alloc::Register::GP(reg)) => match size {
-                                    8 => dynasm!(self.asm;
-                                        push rbp;
-                                        mov rbp, [rbp];
-                                        mov QWORD [rbp + frame_off], Rq(reg.code());
-                                        pop rbp
-                                    ),
-                                    _ => todo!(),
-                                },
-                                VarLocation::Register(reg_alloc::Register::FP(reg)) => match size {
-                                    4 => dynasm!(self.asm
-                                        ; push rbp
-                                        ; mov rbp, [rbp]
-                                        ; movss [rbp + frame_off], Rx(reg.code())
-                                        ; pop rbp
-                                    ),
-                                    8 => dynasm!(self.asm
-                                        ; push rbp
-                                        ; mov rbp, [rbp]
-                                        ; movsd [rbp + frame_off], Rx(reg.code())
-                                        ; pop rbp
-                                    ),
-                                    e => todo!("{}", e),
-                                },
+                                VarLocation::Register(reg_alloc::Register::GP(reg)) => {
+                                    match size_dst {
+                                        8 => dynasm!(self.asm;
+                                            mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
+                                        ),
+                                        _ => todo!(),
+                                    }
+                                }
                                 VarLocation::ConstInt { bits, v } => match bits {
                                     32 => dynasm!(self.asm;
-                                        push rbp;
-                                        mov rbp, [rbp];
-                                        mov DWORD [rbp + frame_off], v as i32;
-                                        pop rbp
+                                        mov DWORD [rbp - i32::try_from(off_dst).unwrap()], v as i32
                                     ),
                                     _ => todo!(),
                                 },
                                 VarLocation::Stack {
-                                    frame_off: off,
-                                    size,
-                                } => match size {
+                                    frame_off: off_src,
+                                    size: size_src,
+                                } => match size_src {
+                                    // FIXME: Better to ask register allocator for a free register
+                                    // rather than pushing/popping RAX here?
                                     8 => dynasm!(self.asm;
                                         push rax;
-                                        mov rax, QWORD [rbp - i32::try_from(off).unwrap()];
-                                        push rbp;
-                                        mov rbp, [rbp];
-                                        mov QWORD [rbp + frame_off], rax;
-                                        pop rbp;
-                                        pop rax
-                                    ),
-                                    4 => dynasm!(self.asm;
-                                        push rax;
-                                        mov eax, DWORD [rbp - i32::try_from(off).unwrap()];
-                                        push rbp;
-                                        mov rbp, [rbp];
-                                        mov DWORD [rbp + frame_off], eax;
-                                        pop rbp;
+                                        mov rax, QWORD [rbp - i32::try_from(off_src).unwrap()];
+                                        mov QWORD [rbp - i32::try_from(off_dst).unwrap()], rax;
                                         pop rax
                                     ),
                                     _ => todo!(),
                                 },
                                 e => todo!("{:?}", e),
                             }
+                        }
+                        VarLocation::Direct { .. } => {
+                            // Direct locations are read-only, so it doesn't make sense to write to
+                            // them. This is likely a case where the direct value has been moved
+                            // somewhere else (register/normal stack) so dst and src no longer
+                            // match. But since the value can't change we can safely ignore this.
                         }
                         VarLocation::Register(reg) => {
                             // Copy the value into a register. We can ask the register allocator to
@@ -2227,8 +2215,7 @@ mod tests {
                 ... jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, [rbp]
-                ... mov rdx, rbp
+                ... mov rdi, rbp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
@@ -2256,8 +2243,7 @@ mod tests {
                 ... jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, [rbp]
-                ... mov rdx, rbp
+                ... mov rdi, rbp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
@@ -2288,8 +2274,7 @@ mod tests {
                 ... jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, [rbp]
-                ... mov rdx, rbp
+                ... mov rdi, rbp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
