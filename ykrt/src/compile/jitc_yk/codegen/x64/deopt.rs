@@ -27,15 +27,14 @@ const RECOVER_REG: [usize; 31] = [
 const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 
 /// Deoptimise back to the interpreter. This function is called from a failing guard (see
-/// `x86_64/mod.rs`). The arguments are: `frameaddr` is the RBP value for the caller of the JIT
-/// function frame; `gidx` the ID of the failing guard; `jitrbp` is the JIT function frame's RBP;
-/// and `gp_regs` is a pointer to the saved values of the 16 general purpose registers in the same
-/// order as [lsregalloc::GP_REGS].
+/// `x86_64/mod.rs`). The arguments are: `frameaddr` is the RBP value for main interpreter loop
+/// (and also the JIT since the trace executes on the same frame); `gidx` the ID of the failing
+/// guard; and `gp_regs` is a pointer to the saved values of the 16 general purpose registers in
+/// the same order as [lsregalloc::GP_REGS].
 #[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
     frameaddr: *const c_void,
     gidx: u64,
-    jitrbp: *const c_void,
     gp_regs: &[u64; 16],
     fp_regs: &[u64; 16],
 ) -> ! {
@@ -56,7 +55,7 @@ pub(crate) extern "C" fn __yk_deopt(
         for (_, jitval) in &info.live_vars {
             let val = match jitval {
                 VarLocation::Stack { frame_off, size } => {
-                    let p = unsafe { jitrbp.byte_sub(usize::try_from(*frame_off).unwrap()) };
+                    let p = unsafe { frameaddr.byte_sub(usize::try_from(*frame_off).unwrap()) };
                     match *size {
                         1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
                         2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
@@ -176,7 +175,7 @@ pub(crate) extern "C" fn __yk_deopt(
             // Read live JIT values from the trace's stack frame.
             let jitval = match info.live_vars[varidx].1 {
                 VarLocation::Stack { frame_off, size } => {
-                    let p = unsafe { jitrbp.byte_sub(usize::try_from(frame_off).unwrap()) };
+                    let p = unsafe { frameaddr.byte_sub(usize::try_from(frame_off).unwrap()) };
                     match size {
                         1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
                         2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
