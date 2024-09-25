@@ -2,7 +2,10 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, SideTraceInfo},
+    compile::{
+        jitc_yk::codegen::CodeGen,
+        CompiledTrace, Compiler, SideTraceInfo,
+    },
     location::HotLocation,
     log::{log_ir, should_log_ir, IRPhase},
     mt::MT,

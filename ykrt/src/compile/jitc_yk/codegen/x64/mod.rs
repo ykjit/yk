@@ -19,6 +19,7 @@ use super::{
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::gdb::{self, GdbCtx};
 use crate::{
+    aotsmp::AOT_STACKMAPS,
     compile::{
         jitc_yk::{
             aot_ir,
@@ -94,7 +95,7 @@ static STACKMAP_GP_REGS: [Rq; 7] = [
 static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 
 /// The size of a 64-bit register in bytes.
-static REG64_SIZE: usize = 8;
+pub(crate) static REG64_SIZE: usize = 8;
 static RBP_DWARF_NUM: u16 = 6;
 
 /// The x64 SysV ABI requires a 16-byte aligned stack prior to any call.
@@ -170,6 +171,30 @@ impl<'a> Assemble<'a> {
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        // Retrieve the stack size of the main interpreter frame. We need this to initialise the
+        // trace's register allocator, since we are executing the trace in the main interpreter
+        // frame in order to access local variables.
+        // FIXME: For now the control point stackmap id is always 0. Though we likely want to
+        // support multiple control points in the future. We can either pass the correct stackmap
+        // id in via the control point, or compute the stack size dynamically upon entering the
+        // control point (e.g. by subtracting the current RBP from the previous RBP).
+        if let Ok(sm) = AOT_STACKMAPS.as_ref() {
+            let (rec, pinfo) = sm.get(0);
+            let size = if pinfo.hasfp {
+                // The frame size includes the pushed RBP, but since we only care about the size of
+                // the local variables we need to subtract it again.
+                rec.size - u64::try_from(REG64_SIZE).unwrap()
+            } else {
+                rec.size
+            };
+            self.ra.init_stack(usize::try_from(size).unwrap());
+        } else {
+            // The unit tests in this file don't have AOT code. So if we don't find stackmaps here
+            // that's ok. In real-world programs and our C-tests this shouldn't happen though.
+            #[cfg(not(test))]
+            panic!("Couldn't find AOT stackmaps.");
+        }
+
         let alloc_off = self.emit_prologue();
 
         for (iidx, inst) in self.m.iter_skipping_insts() {
@@ -230,7 +255,7 @@ impl<'a> Assemble<'a> {
                 }
                 dynasm!(self.asm; mov r8, rsp);
                 dynasm!(self.asm
-                    ; mov rdi, [rbp]
+                    ; mov rdi, rbp
                     ; mov rdx, rbp
                     ; mov rax, QWORD __yk_deopt as i64
                     ; sub rsp, 8 // Align the stack
@@ -317,8 +342,10 @@ impl<'a> Assemble<'a> {
 
     /// Emit the prologue of the JITted code.
     ///
-    /// The JITted code is a function, so it has to stash the old stack poninter, open a new frame
-    /// and allocate space for local variables etc.
+    /// The JITted code is executed inside the same frame as the main interpreter loop. This allows
+    /// us to easily access live variables on that frame's stack. Because of this we don't need to
+    /// create a new frame here, though we do need to make space for any extra stack space this
+    /// trace needs.
     ///
     /// Note that there is no correspoinding `emit_epilogue()`. This is because the only way out of
     /// JITted code is via deoptimisation, which will rewrite the whole stack anyway.
@@ -326,14 +353,6 @@ impl<'a> Assemble<'a> {
     /// Returns the offset at which to patch up the stack allocation later.
     fn emit_prologue(&mut self) -> AssemblyOffset {
         self.comment(self.asm.offset(), "prologue".to_owned());
-
-        // Start a frame for the JITted code.
-        dynasm!(self.asm
-            // Save base pointer which we use to access the parent stack.
-            ; push rbp
-            // Reset base pointer.
-            ; mov rbp, rsp
-        );
 
         // Emit a dummy frame allocation instruction that initially allocates 0 bytes, but will be
         // patched later when we know how big the frame needs to be.
@@ -1203,34 +1222,22 @@ impl<'a> Assemble<'a> {
                             match src {
                                 VarLocation::Register(reg_alloc::Register::GP(reg)) => match size {
                                     8 => dynasm!(self.asm;
-                                        push rbp;
-                                        mov rbp, [rbp];
-                                        mov QWORD [rbp + frame_off], Rq(reg.code());
-                                        pop rbp
+                                        mov QWORD [rbp + frame_off], Rq(reg.code())
                                     ),
                                     _ => todo!(),
                                 },
                                 VarLocation::Register(reg_alloc::Register::FP(reg)) => match size {
                                     4 => dynasm!(self.asm
-                                        ; push rbp
-                                        ; mov rbp, [rbp]
                                         ; movss [rbp + frame_off], Rx(reg.code())
-                                        ; pop rbp
                                     ),
                                     8 => dynasm!(self.asm
-                                        ; push rbp
-                                        ; mov rbp, [rbp]
                                         ; movsd [rbp + frame_off], Rx(reg.code())
-                                        ; pop rbp
                                     ),
                                     e => todo!("{}", e),
                                 },
                                 VarLocation::ConstInt { bits, v } => match bits {
                                     32 => dynasm!(self.asm;
-                                        push rbp;
-                                        mov rbp, [rbp];
-                                        mov DWORD [rbp + frame_off], v as i32;
-                                        pop rbp
+                                        mov DWORD [rbp + frame_off], v as i32
                                     ),
                                     _ => todo!(),
                                 },
@@ -1241,19 +1248,13 @@ impl<'a> Assemble<'a> {
                                     8 => dynasm!(self.asm;
                                         push rax;
                                         mov rax, QWORD [rbp - i32::try_from(off).unwrap()];
-                                        push rbp;
-                                        mov rbp, [rbp];
                                         mov QWORD [rbp + frame_off], rax;
-                                        pop rbp;
                                         pop rax
                                     ),
                                     4 => dynasm!(self.asm;
                                         push rax;
                                         mov eax, DWORD [rbp - i32::try_from(off).unwrap()];
-                                        push rbp;
-                                        mov rbp, [rbp];
                                         mov DWORD [rbp + frame_off], eax;
-                                        pop rbp;
                                         pop rax
                                     ),
                                     _ => todo!(),
@@ -2227,7 +2228,7 @@ mod tests {
                 ... jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, [rbp]
+                ... mov rdi, rbp
                 ... mov rdx, rbp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
@@ -2256,7 +2257,7 @@ mod tests {
                 ... jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, [rbp]
+                ... mov rdi, rbp
                 ... mov rdx, rbp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
@@ -2288,7 +2289,7 @@ mod tests {
                 ... jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, [rbp]
+                ... mov rdi, rbp
                 ... mov rdx, rbp
                 ... mov rax, 0x...
                 ... sub rsp, 0x08

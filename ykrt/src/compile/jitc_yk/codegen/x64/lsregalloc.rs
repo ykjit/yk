@@ -222,6 +222,10 @@ impl<'a> LSRegAlloc<'a> {
         self.stack.size()
     }
 
+    pub(crate) fn init_stack(&mut self, size: usize) {
+        self.stack.grow(size);
+    }
+
     // Is the value produced by instruction `query_iidx` used after (but not including!)
     // instruction `cur_idx`?
     fn is_inst_var_still_used_after(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
@@ -515,8 +519,7 @@ impl<'a> LSRegAlloc<'a> {
             }
             SpillState::Direct(off) => match size {
                 8 => dynasm!(asm
-                    ; mov Rq(reg.code()), [rbp]
-                    ; lea Rq(reg.code()), [Rq(reg.code()) + off]
+                    ; lea Rq(reg.code()), [rbp + off]
                 ),
                 x => todo!("{x}"),
             },
@@ -524,14 +527,12 @@ impl<'a> LSRegAlloc<'a> {
                 match size {
                     8 => {
                         dynasm!(asm
-                            ; mov Rq(reg.code()), [rbp]
-                            ; mov Rq(reg.code()), [Rq(reg.code()) + off]
+                            ; mov Rq(reg.code()), [rbp + off]
                         );
                     }
                     4 => {
                         dynasm!(asm
-                            ; mov Rq(reg.code()), [rbp]
-                            ; mov Rd(reg.code()), [Rq(reg.code()) + off]
+                            ; mov Rd(reg.code()), [rbp + off]
                         );
                     }
                     _ => todo!(),
@@ -919,13 +920,9 @@ impl<'a> LSRegAlloc<'a> {
             }
             SpillState::Direct(_off) => todo!(),
             SpillState::Indirect(off) => {
-                let tmp_reg = Rq::RAX;
                 match size {
                     4 => dynasm!(asm
-                        ; push Rq(tmp_reg.code())
-                        ; mov Rq(tmp_reg.code()), [rbp]
-                        ; movss Rx(reg.code()), [Rq(tmp_reg.code()) + off]
-                        ; pop Rq(tmp_reg.code())
+                        ; movss Rx(reg.code()), [rbp + off]
                     ),
                     _ => todo!("{}", size),
                 };

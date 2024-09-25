@@ -199,20 +199,17 @@ pub(crate) extern "C" fn __yk_deopt(
                 }
                 VarLocation::Indirect { frame_off, size } => match size {
                     8 => unsafe {
-                        (jitrbp as *const *const u64)
-                            .read()
+                        (jitrbp as *const u64)
                             .byte_offset(isize::try_from(frame_off).unwrap())
                             .read()
                     },
                     4 => unsafe {
-                        (jitrbp as *const *const u32)
-                            .read()
+                        (jitrbp as *const u32)
                             .byte_offset(isize::try_from(frame_off).unwrap())
                             .read() as u64
                     },
                     1 => unsafe {
-                        (jitrbp as *const *const u8)
-                            .read()
+                        (jitrbp as *const u8)
                             .byte_offset(isize::try_from(frame_off).unwrap())
                             .read() as u64
                     },
@@ -322,6 +319,8 @@ pub(crate) extern "C" fn __yk_deopt(
     let (rec, pinfo) = aot_smaps.get(usize::try_from(info.inlined_frames[0].safepoint.id).unwrap());
     let mut newframedst = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
     if pinfo.hasfp {
+        // `frameaddr` is the RBP value of the bottom frame after pushing the previous frame's RBP.
+        // However, `rec.size` includes the pushed RBP, so we need to subtract it here again.
         newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
     }
 
