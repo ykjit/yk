@@ -762,8 +762,11 @@ impl<'a> Assemble<'a> {
                 frame_off: *off,
                 size: usize::from(*size),
             },
-            yksmp::Location::Indirect(6, off, size) => VarLocation::Indirect {
-                frame_off: *off,
+            // Since the trace shares the same stack frame as the main interpreter loop, we can
+            // translate indirect locations into normal stack locations. Note that while stackmaps
+            // use negative offsets, we use positive offsets for stack locations.
+            yksmp::Location::Indirect(6, off, size) => VarLocation::Stack {
+                frame_off: u32::try_from(*off * -1).unwrap(),
                 size: usize::from(*size),
             },
             e => {
@@ -782,8 +785,9 @@ impl<'a> Assemble<'a> {
             VarLocation::Direct { frame_off, size: _ } => {
                 self.ra.force_assign_inst_direct(iidx, frame_off);
             }
-            VarLocation::Indirect { frame_off, size: _ } => {
-                self.ra.force_assign_inst_indirect(iidx, frame_off);
+            VarLocation::Stack { frame_off, size: _ } => {
+                self.ra
+                    .force_assign_inst_indirect(iidx, i32::try_from(frame_off).unwrap());
             }
             _ => panic!(),
         }
@@ -1204,63 +1208,47 @@ impl<'a> Assemble<'a> {
                         continue;
                     }
                     match dst {
-                        VarLocation::Stack { .. } => {
-                            todo!()
-                        }
-                        VarLocation::Direct { .. } => {
-                            // Direct locations are read-only, so it doesn't make sense to write to
-                            // them. This is likely a case where the direct value has been moved
-                            // somewhere else (register/normal stack) so dst and src no longer
-                            // match. But since the value can't change we can safely ignore this.
-                        }
-                        VarLocation::Indirect { frame_off, size } => {
-                            // FIXME: This isn't very fast as we are pushing and popping rbp
-                            // instead of asking the register allocator for a free variable.
-                            // However, we are going to soon execute the trace on the same frame as
-                            // its parent, which will turn `VarLocation::Indirect` into
-                            // `VarLocation::Stack`.
+                        VarLocation::Stack {
+                            frame_off: off_dst,
+                            size: size_dst,
+                        } => {
                             match src {
-                                VarLocation::Register(reg_alloc::Register::GP(reg)) => match size {
-                                    8 => dynasm!(self.asm;
-                                        mov QWORD [rbp + frame_off], Rq(reg.code())
-                                    ),
-                                    _ => todo!(),
-                                },
-                                VarLocation::Register(reg_alloc::Register::FP(reg)) => match size {
-                                    4 => dynasm!(self.asm
-                                        ; movss [rbp + frame_off], Rx(reg.code())
-                                    ),
-                                    8 => dynasm!(self.asm
-                                        ; movsd [rbp + frame_off], Rx(reg.code())
-                                    ),
-                                    e => todo!("{}", e),
-                                },
+                                VarLocation::Register(reg_alloc::Register::GP(reg)) => {
+                                    match size_dst {
+                                        8 => dynasm!(self.asm;
+                                            mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
+                                        ),
+                                        _ => todo!(),
+                                    }
+                                }
                                 VarLocation::ConstInt { bits, v } => match bits {
                                     32 => dynasm!(self.asm;
-                                        mov DWORD [rbp + frame_off], v as i32
+                                        mov DWORD [rbp - i32::try_from(off_dst).unwrap()], v as i32
                                     ),
                                     _ => todo!(),
                                 },
                                 VarLocation::Stack {
-                                    frame_off: off,
-                                    size,
-                                } => match size {
+                                    frame_off: off_src,
+                                    size: size_src,
+                                } => match size_src {
+                                    // FIXME: Better to ask register allocator for a free register
+                                    // rather than pushing/popping RAX here?
                                     8 => dynasm!(self.asm;
                                         push rax;
-                                        mov rax, QWORD [rbp - i32::try_from(off).unwrap()];
-                                        mov QWORD [rbp + frame_off], rax;
-                                        pop rax
-                                    ),
-                                    4 => dynasm!(self.asm;
-                                        push rax;
-                                        mov eax, DWORD [rbp - i32::try_from(off).unwrap()];
-                                        mov DWORD [rbp + frame_off], eax;
+                                        mov rax, QWORD [rbp - i32::try_from(off_src).unwrap()];
+                                        mov QWORD [rbp - i32::try_from(off_dst).unwrap()], rax;
                                         pop rax
                                     ),
                                     _ => todo!(),
                                 },
                                 e => todo!("{:?}", e),
                             }
+                        }
+                        VarLocation::Direct { .. } => {
+                            // Direct locations are read-only, so it doesn't make sense to write to
+                            // them. This is likely a case where the direct value has been moved
+                            // somewhere else (register/normal stack) so dst and src no longer
+                            // match. But since the value can't change we can safely ignore this.
                         }
                         VarLocation::Register(reg) => {
                             // Copy the value into a register. We can ask the register allocator to

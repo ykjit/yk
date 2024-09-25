@@ -72,7 +72,6 @@ pub(crate) extern "C" fn __yk_deopt(
                 VarLocation::ConstFloat(_) => todo!(),
                 VarLocation::ConstInt { bits: _, v } => *v,
                 VarLocation::Direct { .. } => panic!(),
-                VarLocation::Indirect { .. } => panic!(),
             };
             ykctrlpvars.push(val);
         }
@@ -197,24 +196,6 @@ pub(crate) extern "C" fn __yk_deopt(
                     varidx += 1;
                     continue;
                 }
-                VarLocation::Indirect { frame_off, size } => match size {
-                    8 => unsafe {
-                        (jitrbp as *const u64)
-                            .byte_offset(isize::try_from(frame_off).unwrap())
-                            .read()
-                    },
-                    4 => unsafe {
-                        (jitrbp as *const u32)
-                            .byte_offset(isize::try_from(frame_off).unwrap())
-                            .read() as u64
-                    },
-                    1 => unsafe {
-                        (jitrbp as *const u8)
-                            .byte_offset(isize::try_from(frame_off).unwrap())
-                            .read() as u64
-                    },
-                    _ => todo!("size={}", size),
-                },
             };
             varidx += 1;
 

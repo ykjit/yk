@@ -265,7 +265,7 @@ impl<'a> LSRegAlloc<'a> {
     /// Forcibly assign the value produced by instruction `iidx` to `Indirect` `frame_off`.
     pub(crate) fn force_assign_inst_indirect(&mut self, iidx: InstIdx, frame_off: i32) {
         debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
-        self.spills[usize::from(iidx)] = SpillState::Indirect(frame_off);
+        self.spills[usize::from(iidx)] = SpillState::Stack(frame_off);
     }
 
     /// Assign registers for the instruction at position `iidx`.
@@ -523,22 +523,6 @@ impl<'a> LSRegAlloc<'a> {
                 ),
                 x => todo!("{x}"),
             },
-            SpillState::Indirect(off) => {
-                match size {
-                    8 => {
-                        dynasm!(asm
-                            ; mov Rq(reg.code()), [rbp + off]
-                        );
-                    }
-                    4 => {
-                        dynasm!(asm
-                            ; mov Rd(reg.code()), [rbp + off]
-                        );
-                    }
-                    _ => todo!(),
-                }
-                self.gp_regset.set(reg);
-            }
         }
     }
 
@@ -688,10 +672,6 @@ impl<'a> LSRegAlloc<'a> {
                         size,
                     },
                     SpillState::Direct(off) => VarLocation::Direct {
-                        frame_off: off,
-                        size,
-                    },
-                    SpillState::Indirect(off) => VarLocation::Indirect {
                         frame_off: off,
                         size,
                     },
@@ -919,14 +899,6 @@ impl<'a> LSRegAlloc<'a> {
                 self.fp_regset.set(reg);
             }
             SpillState::Direct(_off) => todo!(),
-            SpillState::Indirect(off) => {
-                match size {
-                    4 => dynasm!(asm
-                        ; movss Rx(reg.code()), [rbp + off]
-                    ),
-                    _ => todo!("{}", size),
-                };
-            }
         }
     }
 
@@ -1188,8 +1160,6 @@ enum SpillState {
     Stack(i32),
     /// This variable is spilt to the stack with the same semantics as [VarLocation::Direct].
     Direct(i32),
-    /// This variable is spilt to the stack with the same semantics as [VarLocation::Indirect].
-    Indirect(i32),
 }
 
 #[cfg(test)]
