@@ -125,7 +125,9 @@ pub(crate) struct LSRegAlloc<'a> {
 }
 
 impl<'a> LSRegAlloc<'a> {
-    pub(crate) fn new(m: &'a Module) -> Self {
+    /// Create a new register allocator, with the existing interpreter frame spanning
+    /// `interp_stack_len` bytes.
+    pub(crate) fn new(m: &'a Module, interp_stack_len: usize) -> Self {
         #[cfg(debug_assertions)]
         {
             // We rely on the registers in GP_REGS being numbered 0..15 (inc.) for correctness.
@@ -149,6 +151,9 @@ impl<'a> LSRegAlloc<'a> {
             fp_reg_states[usize::from(reg.code())] = RegState::Reserved;
         }
 
+        let mut stack = AbstractStack::default();
+        stack.grow(interp_stack_len);
+
         LSRegAlloc {
             m,
             gp_regset: RegSet::with_gp_reserved(),
@@ -157,7 +162,7 @@ impl<'a> LSRegAlloc<'a> {
             fp_reg_states,
             inst_vals_alive_until: m.inst_vals_alive_until(),
             spills: vec![SpillState::Empty; m.insts_len()],
-            stack: Default::default(),
+            stack,
         }
     }
 
@@ -220,10 +225,6 @@ impl<'a> LSRegAlloc<'a> {
     pub(crate) fn align_stack(&mut self, align: usize) -> usize {
         self.stack.align(align);
         self.stack.size()
-    }
-
-    pub(crate) fn init_stack(&mut self, size: usize) {
-        self.stack.grow(size);
     }
 
     // Is the value produced by instruction `query_iidx` used after (but not including!)
