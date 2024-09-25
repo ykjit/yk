@@ -1176,50 +1176,6 @@ pub(crate) enum Const {
     Ptr(usize),
 }
 
-/// This wrapper is deliberately private to this module and is solely used to allow us to maintain
-/// a hashable pool of constants. Because `Const` doesn't implement `PartialEq`, we provide a
-/// manual implementation here, knowing that it allows some duplicate constants to be stored in the
-/// constant pool. There's no way around this, because of floats.
-#[derive(Clone, Debug)]
-struct ConstIndexSetWrapper(Const);
-
-impl PartialEq for ConstIndexSetWrapper {
-    fn eq(&self, other: &Self) -> bool {
-        match (&self.0, &other.0) {
-            (Const::Float(lhs_tyidx, lhs_v), Const::Float(rhs_tyidx, rhs_v)) => {
-                // We treat floats as bit patterns: because we can accept duplicates, this is
-                // acceptable.
-                lhs_tyidx == rhs_tyidx && lhs_v.to_bits() == rhs_v.to_bits()
-            }
-            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
-                lhs_tyidx == rhs_tyidx && lhs_v == rhs_v
-            }
-            (Const::Ptr(lhs_v), Const::Ptr(rhs_v)) => lhs_v == rhs_v,
-            (_, _) => false,
-        }
-    }
-}
-
-impl Eq for ConstIndexSetWrapper {}
-
-impl Hash for ConstIndexSetWrapper {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self.0 {
-            Const::Float(tyidx, v) => {
-                tyidx.hash(state);
-                // We treat floats as bit patterns: because we can accept duplicates, this is
-                // acceptable.
-                v.to_bits().hash(state);
-            }
-            Const::Int(tyidx, v) => {
-                tyidx.hash(state);
-                v.hash(state);
-            }
-            Const::Ptr(v) => v.hash(state),
-        }
-    }
-}
-
 impl Const {
     pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
@@ -1276,6 +1232,50 @@ impl fmt::Display for DisplayableConst<'_> {
                 write!(f, "{x}i{width}")
             }
             Const::Ptr(x) => write!(f, "{:#x}", *x),
+        }
+    }
+}
+
+/// This wrapper is deliberately private to this module and is solely used to allow us to maintain
+/// a hashable pool of constants. Because `Const` doesn't implement `PartialEq`, we provide a
+/// manual implementation here, knowing that it allows some duplicate constants to be stored in the
+/// constant pool. There's no way around this, because of floats.
+#[derive(Clone, Debug)]
+struct ConstIndexSetWrapper(Const);
+
+impl PartialEq for ConstIndexSetWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (Const::Float(lhs_tyidx, lhs_v), Const::Float(rhs_tyidx, rhs_v)) => {
+                // We treat floats as bit patterns: because we can accept duplicates, this is
+                // acceptable.
+                lhs_tyidx == rhs_tyidx && lhs_v.to_bits() == rhs_v.to_bits()
+            }
+            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                lhs_tyidx == rhs_tyidx && lhs_v == rhs_v
+            }
+            (Const::Ptr(lhs_v), Const::Ptr(rhs_v)) => lhs_v == rhs_v,
+            (_, _) => false,
+        }
+    }
+}
+
+impl Eq for ConstIndexSetWrapper {}
+
+impl Hash for ConstIndexSetWrapper {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self.0 {
+            Const::Float(tyidx, v) => {
+                tyidx.hash(state);
+                // We treat floats as bit patterns: because we can accept duplicates, this is
+                // acceptable.
+                v.to_bits().hash(state);
+            }
+            Const::Int(tyidx, v) => {
+                tyidx.hash(state);
+                v.hash(state);
+            }
+            Const::Ptr(v) => v.hash(state),
         }
     }
 }
