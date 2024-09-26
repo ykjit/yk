@@ -156,9 +156,34 @@ impl<'a> Assemble<'a> {
 
         let asm = dynasmrt::x64::Assembler::new()
             .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
+        // Retrieve the stack size of the main interpreter frame. We need this to initialise the
+        // trace's register allocator, since we are executing the trace in the main interpreter
+        // frame in order to access local variables.
+        // FIXME: For now the control point stackmap id is always 0. Though we likely want to
+        // support multiple control points in the future. We can either pass the correct stackmap
+        // id in via the control point, or compute the stack size dynamically upon entering the
+        // control point (e.g. by subtracting the current RBP from the previous RBP).
+        let interp_stack_len = if let Ok(sm) = AOT_STACKMAPS.as_ref() {
+            let (rec, pinfo) = sm.get(0);
+            let size = if pinfo.hasfp {
+                // The frame size includes the pushed RBP, but since we only care about the size of
+                // the local variables we need to subtract it again.
+                rec.size - u64::try_from(REG64_SIZE).unwrap()
+            } else {
+                rec.size
+            };
+            usize::try_from(size).unwrap()
+        } else {
+            // The unit tests in this file don't have AOT code. So if we don't find stackmaps here
+            // that's ok. In real-world programs and our C-tests this shouldn't happen though.
+            #[cfg(not(test))]
+            panic!("Couldn't find AOT stackmaps.");
+            #[cfg(test)]
+            0
+        };
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m),
+            ra: LSRegAlloc::new(m, interp_stack_len),
             asm,
             loop_start_locs: Vec::new(),
             deoptinfo: Vec::new(),
@@ -171,30 +196,6 @@ impl<'a> Assemble<'a> {
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        // Retrieve the stack size of the main interpreter frame. We need this to initialise the
-        // trace's register allocator, since we are executing the trace in the main interpreter
-        // frame in order to access local variables.
-        // FIXME: For now the control point stackmap id is always 0. Though we likely want to
-        // support multiple control points in the future. We can either pass the correct stackmap
-        // id in via the control point, or compute the stack size dynamically upon entering the
-        // control point (e.g. by subtracting the current RBP from the previous RBP).
-        if let Ok(sm) = AOT_STACKMAPS.as_ref() {
-            let (rec, pinfo) = sm.get(0);
-            let size = if pinfo.hasfp {
-                // The frame size includes the pushed RBP, but since we only care about the size of
-                // the local variables we need to subtract it again.
-                rec.size - u64::try_from(REG64_SIZE).unwrap()
-            } else {
-                rec.size
-            };
-            self.ra.init_stack(usize::try_from(size).unwrap());
-        } else {
-            // The unit tests in this file don't have AOT code. So if we don't find stackmaps here
-            // that's ok. In real-world programs and our C-tests this shouldn't happen though.
-            #[cfg(not(test))]
-            panic!("Couldn't find AOT stackmaps.");
-        }
-
         let alloc_off = self.emit_prologue();
 
         for (iidx, inst) in self.m.iter_skipping_insts() {
