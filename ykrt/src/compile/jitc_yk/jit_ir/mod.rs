@@ -1836,20 +1836,10 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(f, "]:")
             }
             Inst::SExt(i) => {
-                write!(
-                    f,
-                    "sext {}, {}",
-                    i.val(self.m).display(self.m),
-                    self.m.type_(i.dest_tyidx()).display(self.m)
-                )
+                write!(f, "sext {}", i.val(self.m).display(self.m),)
             }
             Inst::ZeroExtend(i) => {
-                write!(
-                    f,
-                    "zext {}, {}",
-                    i.val(self.m).display(self.m),
-                    self.m.type_(i.dest_tyidx()).display(self.m)
-                )
+                write!(f, "zext {}", i.val(self.m).display(self.m),)
             }
             Inst::Trunc(i) => {
                 write!(f, "trunc {}", i.val(self.m).display(self.m))
