@@ -47,15 +47,12 @@ impl PerfTracer {
         Self: Sized,
     {
         // Check for inavlid configuration.
-        fn power_of_2(v: size_t) -> bool {
-            (v & (v - 1)) == 0
-        }
-        if !power_of_2(config.data_bufsize) {
+        if !config.data_bufsize.is_power_of_two() {
             return Err(HWTracerError::ConfigError(
                 "data_bufsize must be a positive power of 2".into(),
             ));
         }
-        if !power_of_2(config.aux_bufsize) {
+        if !config.aux_bufsize.is_power_of_two() {
             return Err(HWTracerError::ConfigError(
                 "aux_bufsize must be a positive power of 2".into(),
             ));

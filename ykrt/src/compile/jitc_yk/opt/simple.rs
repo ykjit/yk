@@ -67,7 +67,7 @@ fn opt_mul(
                 } else if new_val == 1 {
                     // Replace `x * 1` with `x`.
                     m.replace(iidx, Inst::Copy(mul_inst));
-                } else if new_val & (new_val - 1) == 0 {
+                } else if new_val.is_power_of_two() {
                     // Replace `x * y` with `x << ...`.
                     let shl = u64::from(new_val.ilog2());
                     let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(shl))?);
