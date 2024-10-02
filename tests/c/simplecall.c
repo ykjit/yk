@@ -1,3 +1,5 @@
+// Compiler:
+//   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -25,8 +27,8 @@
 //     2
 //     foo
 //     1
-//     yk-jit-event: deoptimise
 //     bar
+//     yk-jit-event: deoptimise
 //     0
 //     exit
 

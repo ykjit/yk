@@ -1,4 +1,5 @@
-// ignore-if: test $YK_CARGO_PROFILE != "debug"
+// Compiler:
+//   env-var: YKB_EXTRA_CC_FLAGS=-O1 -g
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -9,6 +10,7 @@
 //     %{{_}}: ptr = call yk_mt_new(0x0)
 //     ...
 //     # aot_debuginfo.c:{{_}}: yk_mt_hot_threshold_set(mt, 0);
+//     ...
 //     call yk_mt_hot_threshold_set(%{{_}}, 0i32)
 //     ...
 //     # aot_debuginfo.c:{{_}}: YkLocation loc = yk_location_new();
@@ -16,6 +18,7 @@
 //     %{{_}}: i64 = call yk_location_new()
 //     ...
 //     # aot_debuginfo.c:{{_}}: int i = 4;
+//     ...
 //     *%{{_}} = 4i32
 //     ...
 //     # aot_debuginfo.c:{{_}}: while (i > 0) {

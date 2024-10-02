@@ -1,3 +1,5 @@
+// Compiler:
+//   env-var: YKB_EXTRA_CC_FLAGS=-O0 -Xclang -disable-O0-optnone -Xlinker --lto-newpm-passes=instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -51,8 +53,8 @@ int main(int argc, char **argv) {
 
   int i = 0;
   NOOPT_VAL(loc);
-  NOOPT_VAL(i);
   NOOPT_VAL(array);
+  NOOPT_VAL(i);
   while (i < 4) {
     yk_mt_control_point(mt, &loc);
     fprintf(stderr, "i=%d, elem=%03d\n", i, array[i][i][i]);

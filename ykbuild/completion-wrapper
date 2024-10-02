@@ -2,8 +2,11 @@
 
 # This wrapper script is used to record compiler invocations in sub-builds.
 # That information can then be used for e.g. code completion purposes.
+#
+# It is also used to allow tests to insert extra flags into the compiler
+# invocation.
 
 set -e
 
-echo "${YK_COMPILER_PATH} $@" > $(mktemp -p ${YK_COMPILER_TEMPDIR})
-${YK_COMPILER_PATH} $@
+echo "${YK_COMPILER_PATH} ${YKB_EXTRA_CC_FLAGS} $@" > $(mktemp -p ${YK_COMPILER_TEMPDIR})
+${YK_COMPILER_PATH} ${YKB_EXTRA_CC_FLAGS} $@

@@ -10,59 +10,16 @@ if [ ! -d "${DIR}/../ykrt" ]; then
     exit 1
 fi
 
-set_aot_pipeline() {
-    level=$1
-    # env var always takes precident.
-    if [ ! -z "${YKB_AOT_OPTLEVEL}" ]; then
-        level=${YKB_AOT_OPTLEVEL}
-    fi
-    case ${level} in
-        0)
-            POSTLINK_PASSES=${POSTLINK_PASSES_AO0}
-            PRELINK_PASSES=${PRELINK_PASSES_AO0}
-            ;;
-        1)
-            POSTLINK_PASSES=${POSTLINK_PASSES_AO1}
-            PRELINK_PASSES=${PRELINK_PASSES_AO1}
-            ;;
-        *)
-            echo "error: invalid yk AOT optimisation level '${level}'" >&2
-            exit 1
-            ;;
-    esac
-}
-
-# Canned pipelines.
-#
-# Ideally we'd detect the optimisation level from the CFLAGS env var, but it's
-# not easy to reliably parse that info out of CFLAGS. So for now we allow `--ao
-# <n>` to yk-config (or set YKB_AOT_OPTLEVEL in the env) to specify the AOT
-# optimisation level.
-#
-# Note that clang is still passed -O0 regardless. We just add our own pipeline
-# specification on top.
-PRELINK_PASSES_AO0=""
-POSTLINK_PASSES_AO0="instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>"
-PRELINK_PASSES_AO1=""
-# The whole -O1 pipeline, as reported by `opt -O1 -print-pipeline-passes
-# /dev/null`.
-POSTLINK_PASSES_AO1="annotation2metadata,forceattrs,inferattrs,coro-early,function<eager-inv>(lower-expect,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,sroa<modify-cfg>,early-cse<>),openmp-opt,ipsccp,called-value-propagation,globalopt,function<eager-inv>(mem2reg,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>),require<globals-aa>,function(invalidate<aa>),require<profile-summary>,cgscc(devirt<4>(inline<only-mandatory>,inline,function-attrs<skip-non-recursive-function-attrs>,function<eager-inv;no-rerun>(sroa<modify-cfg>,early-cse<memssa>,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,libcalls-shrinkwrap,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,reassociate,loop-mssa(loop-instsimplify,loop-simplifycfg,licm<no-allowspeculation>,loop-rotate<header-duplication;no-prepare-for-lto>,licm<allowspeculation>,simple-loop-unswitch<no-nontrivial;trivial>),simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,loop(loop-idiom,indvars,loop-deletion,loop-unroll-full),sroa<modify-cfg>,memcpyopt,sccp,bdce,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,coro-elide,adce,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>),function-attrs,function(require<should-not-run-function-passes>),coro-split)),deadargelim,coro-cleanup,globalopt,globaldce,elim-avail-extern,rpo-function-attrs,recompute-globalsaa,function<eager-inv>(float2int,lower-constant-intrinsics,loop(loop-rotate<header-duplication;no-prepare-for-lto>,loop-deletion),loop-distribute,inject-tli-mappings,loop-vectorize<no-interleave-forced-only;vectorize-forced-only;>,infer-alignment,loop-load-elim,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,simplifycfg<bonus-inst-threshold=1;forward-switch-cond;switch-range-to-icmp;switch-to-lookup;no-keep-loops;hoist-common-insts;sink-common-insts;speculate-blocks;simplify-cond-branch>,vector-combine,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,loop-unroll<O1>,transform-warning,sroa<preserve-cfg>,infer-alignment,instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>,loop-mssa(licm<allowspeculation>),alignment-from-assumptions,loop-sink,instsimplify,div-rem-pairs,tailcallelim,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>),globaldce,constmerge,cg-profile,rel-lookup-table-converter,function(annotation-remarks),verify"
-# Initialise the AOT pipeline to level 0 unless YKB_AOT_OPTLEVEL is set.
-set_aot_pipeline 0
-
 OUTPUT=""
 
 usage() {
     echo "Generate C compiler flags for building against the yk JIT.\n"
     echo "Usage:"
-    echo "    yk-config <profile> [--ao <0|1>] \\"
+    echo "    yk-config <profile> \\"
     echo "        <--cc|--cxx|--ar|--ranlib|--cppflags|--cflags|--ldflags>\n"
     echo "    Where <profile> is a Rust cargo profile starting with either 'debug' or 'release'.\n"
     echo "    --cc, --cxx, --ar, --ranlib, --cppflags, --cflags and --ldflags specify "
-    echo "    what flags to output.\n"
-    echo "    --ao specifies the yk-specific AOT optimisation pipeline to use for flags "
-    echo "    that follow. Defaults to 0, but (if set) the YKB_AOT_OPTLEVEL environment "
-    echo "    variable always takes precedent."
+    echo "    what flags to output.\n\n"
 }
 
 handle_arg() {
@@ -77,32 +34,18 @@ handle_arg() {
     fi
 
     case $1 in
-        --ao) set_aot_pipeline $2;;
         --cc) OUTPUT="${ykllvm_bin_dir}/clang" ;;
         --cxx) OUTPUT="${ykllvm_bin_dir}/clang++" ;;
         --ar) OUTPUT="${ykllvm_bin_dir}/llvm-ar" ;;
         --ranlib) OUTPUT="${ykllvm_bin_dir}/llvm-ranlib" ;;
         --cflags)
-            # FIXME: we can only do -O0 for now.
-            OUTPUT="${OUTPUT} -O0"
             # Enable LTO.
             OUTPUT="${OUTPUT} -flto"
             # Outline functions containing loops during AOT compilation. Needed
             # for `yk_unroll_safe`.
             OUTPUT="${OUTPUT} -fyk-noinline-funcs-with-loops"
-            # Required so that our curated set of optimisation passes can run.
-            # Without this, clang will slap `optnone` attributes on every
-            # function, causing optimisations to skip them.
-            OUTPUT="${OUTPUT} -Xclang -disable-O0-optnone"
-            # Run these "prelink" optimisation passes.
-            #
-            # These are run on the individual pre-LTO-merged LLVM modules.
-            if [ ! -z "${PRELINK_PASSES}" ]; then
-                OUTPUT="${OUTPUT} -mllvm --newpm-passes=${PRELINK_PASSES}"
-            fi
-            case $profile in
-                debug*) OUTPUT="$OUTPUT -g" ;;
-            esac
+            # Don't optimise functions by changing their calling convention.
+            OUTPUT="${OUTPUT} -mllvm -yk-dont-opt-func-abi"
             ;;
         --cppflags)
             # Path to yk.h
@@ -167,17 +110,10 @@ handle_arg() {
             if [ "${YKB_TRACER}" = "swt" ]; then
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
             fi
-            # Add known yk-friendly optimisations.
-            #
-            # This pairs with `-Xclang -disable-O0-optnone`. See above.
+            # Disable backend optimisations that Yk can't handle by adding the
+            # `optnone` attribute onto every function after high-level IR
+            # optimisations have finished.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-optnone-after-ir-passes"
-
-            # Run these post-link passes.
-            #
-            # These are run on the merged LTO LLVM module.
-            if [ ! -z "${POSTLINK_PASSES}" ]; then
-                OUTPUT="${OUTPUT} -Xlinker --lto-newpm-passes=${POSTLINK_PASSES}"
-            fi
 
             # Emit a basic block map section. Used for block mapping.
             OUTPUT="${OUTPUT} -Wl,--lto-basic-block-sections=labels"
