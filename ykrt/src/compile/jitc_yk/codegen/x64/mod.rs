@@ -1345,7 +1345,11 @@ impl<'a> Assemble<'a> {
         let to_type = self.m.type_(i.dest_tyidx());
         let to_size = to_type.byte_size().unwrap();
 
-        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
+        // Note that the src/dest types may be pointers for cases where non-truncating
+        // inttoptr/ptrtoint are serialised to zero-extends by ykllvm.
+        debug_assert!(
+            matches!(to_type, jit_ir::Ty::Integer(_)) || matches!(to_type, jit_ir::Ty::Ptr)
+        );
         debug_assert!(
             matches!(from_type, jit_ir::Ty::Integer(_)) || matches!(from_type, jit_ir::Ty::Ptr)
         );
