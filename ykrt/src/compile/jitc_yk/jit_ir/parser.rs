@@ -4,6 +4,8 @@
 //! method to [Module] which takes in JIT IR as a string, parses it, and produces a [Module]. This
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
 
+use crate::compile::jitc_yk::aot_ir;
+
 use super::super::{
     aot_ir::{BinOp, FloatPredicate, InstID, Predicate},
     jit_ir::{
@@ -197,7 +199,11 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         }
                         let gidx = self
                             .m
-                            .push_guardinfo(GuardInfo::new(live_vars, Vec::new()))
+                            .push_guardinfo(GuardInfo::new(
+                                aot_ir::BBlockId::new(0.into(), 0.into()),
+                                live_vars,
+                                Vec::new(),
+                            ))
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(cond)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();

@@ -276,6 +276,9 @@ impl MT {
             } else {
                 (None, None)
             };
+            // FIXME: Can we pass in the root trace address, root trace entry variable locations,
+            // and the base stack-size from here, rather than spreading them out via
+            // DeoptInfo/SideTraceInfo, and CompiledTrace?
             match compiler.compile(
                 Arc::clone(&mt),
                 trace_iter.0,
@@ -357,7 +360,7 @@ impl MT {
                 }
                 let trace_addr = ctr.entry();
                 MTThread::with(|mtt| {
-                    mtt.set_running_trace(Some(ctr));
+                    mtt.set_running_trace(Some(ctr), None);
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
 
@@ -751,7 +754,12 @@ enum MTThreadState {
     ///    variation in regard to dropping thread locals), so this mechanism can't be fully relied
     ///    upon: however, we can't monitor thread death in any other reasonable way, so this will
     ///    have to do.
-    Executing(Arc<dyn CompiledTrace>),
+    Executing {
+        /// The currently executing compiled trace.
+        ctr: Arc<dyn CompiledTrace>,
+        /// The root trace if the currently executing trace is a side-trace.
+        root: Option<Arc<dyn CompiledTrace>>,
+    },
 }
 
 /// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
@@ -789,17 +797,29 @@ impl MTThread {
     }
 
     /// If a trace is currently running, return a reference to its `CompiledTrace`.
-    pub(crate) fn running_trace(&self) -> Option<Arc<dyn CompiledTrace>> {
+    pub(crate) fn running_trace(
+        &self,
+    ) -> (
+        Option<Arc<dyn CompiledTrace>>,
+        Option<Arc<dyn CompiledTrace>>,
+    ) {
         match &*self.tstate.borrow() {
-            MTThreadState::Executing(ctr_arc) => Some(Arc::clone(ctr_arc)),
-            _ => None,
+            MTThreadState::Executing { ctr: ctr_arc, root } => {
+                let root_clone = root.as_ref().map(Arc::clone);
+                (Some(Arc::clone(ctr_arc)), root_clone)
+            }
+            _ => (None, None),
         }
     }
 
     /// Update the currently running trace: `None` means that no trace is running.
-    pub(crate) fn set_running_trace(&self, ctr: Option<Arc<dyn CompiledTrace>>) {
+    pub(crate) fn set_running_trace(
+        &self,
+        ctr: Option<Arc<dyn CompiledTrace>>,
+        root: Option<Arc<dyn CompiledTrace>>,
+    ) {
         *self.tstate.borrow_mut() = match ctr {
-            Some(ctr) => MTThreadState::Executing(ctr),
+            Some(ctr) => MTThreadState::Executing { ctr, root },
             None => MTThreadState::Interpreting,
         };
     }

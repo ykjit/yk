@@ -44,3 +44,57 @@ pub(crate) enum StackDirection {
     GrowsUp,
     GrowsDown,
 }
+
+impl From<&VarLocation> for yksmp::Location {
+    fn from(val: &VarLocation) -> Self {
+        match val {
+            VarLocation::Stack { frame_off, size } => {
+                // A stack location translates is an offset in relation to RBP which has the DWARF
+                // number 6.
+                yksmp::Location::Indirect(
+                    6,
+                    -i32::try_from(*frame_off).unwrap(),
+                    u16::try_from(*size).unwrap(),
+                )
+            }
+            VarLocation::Direct { frame_off, size } => {
+                yksmp::Location::Direct(6, *frame_off, u16::try_from(*size).unwrap())
+            }
+            VarLocation::Register(reg) => {
+                let dwarf = match reg {
+                    Register::GP(reg) => match reg {
+                        Rq::RAX => 0,
+                        Rq::RDX => 1,
+                        Rq::RCX => 2,
+                        Rq::RBX => 3,
+                        Rq::RSI => 4,
+                        Rq::RDI => 5,
+                        Rq::R8 => 8,
+                        Rq::R9 => 9,
+                        Rq::R10 => 10,
+                        Rq::R11 => 11,
+                        Rq::R12 => 12,
+                        Rq::R13 => 13,
+                        Rq::R14 => 14,
+                        Rq::R15 => 15,
+                        e => todo!("{:?}", e),
+                    },
+                    Register::FP(_reg) => {
+                        todo!()
+                    }
+                };
+                // We currently only use 8 byte registers, so the size is constant. Since these are
+                // JIT values there are no extra locations we need to worry about.
+                yksmp::Location::Register(dwarf, 8, 0, Vec::new())
+            }
+            VarLocation::ConstInt { bits, v } => {
+                if *bits <= 32 {
+                    yksmp::Location::Constant(u32::try_from(*v).unwrap())
+                } else {
+                    todo!(">32 bit constant")
+                }
+            }
+            e => todo!("{:?}", e),
+        }
+    }
+}
