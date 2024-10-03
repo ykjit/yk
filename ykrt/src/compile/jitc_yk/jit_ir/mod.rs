@@ -309,7 +309,7 @@ impl Module {
     /// This function has very few uses and unless you explicitly know why you're using it, you
     /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
     /// correctly leads to undefined behaviour.
-    fn inst_raw(&self, iidx: InstIdx) -> Inst {
+    pub(crate) fn inst_raw(&self, iidx: InstIdx) -> Inst {
         self.insts[usize::from(iidx)]
     }
 
@@ -1166,7 +1166,7 @@ impl fmt::Display for DisplayableOperand<'_> {
 /// Note that this struct deliberately does not implement `PartialEq` (or `Eq`): two instances of
 /// `Const` may represent the same underlying constant, but (because of floats), you as the user
 /// need to determine what notion of equality you wish to use on a given const.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Const {
     Float(TyIdx, f64),
     /// A constant integer at most 64 bits wide. This can be treated a signed or unsigned integer
@@ -1182,15 +1182,6 @@ impl Const {
             Const::Float(tyidx, _) => *tyidx,
             Const::Int(tyidx, _) => *tyidx,
             Const::Ptr(_) => m.ptr_tyidx,
-        }
-    }
-
-    /// If this constant is an integer that can be represented in 64 bits, return it as an `i64`.
-    pub(crate) fn int_to_u64(&self) -> Option<u64> {
-        match self {
-            Const::Float(_, _) => None,
-            Const::Int(_, x) => Some(*x),
-            Const::Ptr(_) => None,
         }
     }
 
@@ -1909,7 +1900,7 @@ pub(crate) struct BinOpInst {
     /// The left-hand side of the operation.
     pub(crate) lhs: PackedOperand,
     /// The operation to perform.
-    pub(crate) binop: BinOp,
+    binop: BinOp,
     /// The right-hand side of the operation.
     pub(crate) rhs: PackedOperand,
 }
@@ -1921,6 +1912,18 @@ impl BinOpInst {
             binop,
             rhs: PackedOperand::new(&rhs),
         }
+    }
+
+    pub(crate) fn lhs(&self, m: &Module) -> Operand {
+        self.lhs.unpack(m)
+    }
+
+    pub(crate) fn binop(&self) -> BinOp {
+        self.binop
+    }
+
+    pub(crate) fn rhs(&self, m: &Module) -> Operand {
+        self.rhs.unpack(m)
     }
 
     /// Returns the type index of the operands being added.

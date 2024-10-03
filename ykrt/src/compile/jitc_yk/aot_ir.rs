@@ -508,20 +508,42 @@ impl BBlockId {
     }
 }
 
-/// Predicates for use in numeric comparisons.
+/// Predicates for use in numeric comparisons. These are directly based on [LLVM's `icmp`
+/// semantics](https://llvm.org/docs/LangRef.html#icmp-instruction). All quotes below are taken
+/// from there.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 #[deku(type = "u8")]
 pub(crate) enum Predicate {
+    /// "eq: yields true if the operands are equal, false otherwise. No sign
+    /// interpretation is necessary or performed."
     Equal = 0,
+    /// "ne: yields true if the operands are unequal, false otherwise. No sign
+    /// interpretation is necessary or performed."
     NotEqual,
+    /// "ugt: interprets the operands as unsigned values and yields true if op1 is
+    /// greater than op2."
     UnsignedGreater,
+    /// "uge: interprets the operands as unsigned values and yields true if op1 is
+    /// greater than or equal to op2."
     UnsignedGreaterEqual,
+    /// "ule: interprets the operands as unsigned values and yields true if op1 is
+    /// less than or equal to op2."
     UnsignedLess,
+    /// "ule: interprets the operands as unsigned values and yields true if op1 is
+    /// less than or equal to op2."
     UnsignedLessEqual,
+    /// "sgt: interprets the operands as signed values and yields true if op1 is greater
+    /// than op2."
     SignedGreater,
+    /// "sge: interprets the operands as signed values and yields true if op1 is
+    /// greater than or equal to op2."
     SignedGreaterEqual,
+    /// "slt: interprets the operands as signed values and yields true if op1 is less
+    /// than op2."
     SignedLess,
+    /// "sle: interprets the operands as signed values and yields true if op1 is less
+    /// than or equal to op2."
     SignedLessEqual,
 }
 
