@@ -404,15 +404,11 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_binop(
-        &mut self,
-        iidx: jit_ir::InstIdx,
-        jit_ir::BinOpInst { lhs, binop, rhs }: &jit_ir::BinOpInst,
-    ) {
-        let lhs = lhs.unpack(self.m);
-        let rhs = rhs.unpack(self.m);
+    fn cg_binop(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::BinOpInst) {
+        let lhs = inst.lhs(self.m);
+        let rhs = inst.rhs(self.m);
 
-        match binop {
+        match inst.binop() {
             BinOp::Add => {
                 let size = lhs.byte_size(self.m);
                 let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
