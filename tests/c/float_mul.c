@@ -1,4 +1,5 @@
-// ## yk-config-env: YKB_AOT_OPTLEVEL=1
+// Compiler:
+//   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1

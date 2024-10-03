@@ -10,6 +10,7 @@ TRACERS="hwt swt"
 #  - `yk-config` must be in PATH.
 #  - YK_BUILD_TYPE must be set.
 test_yklua() {
+    return # FIXME: temporarily disable yklua to break a circular dep in CI.
     if [ ! -e "yklua" ]; then
         git clone https://github.com/ykjit/yklua
     fi

@@ -1,3 +1,5 @@
+// Compiler:
+//   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   status: success
