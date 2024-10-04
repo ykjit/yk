@@ -217,7 +217,7 @@ pub(crate) struct YkPTBlockIterator<'t> {
     unbound_modes: bool,
 }
 
-impl<'t> YkPTBlockIterator<'t> {
+impl YkPTBlockIterator<'_> {
     pub(crate) fn new(trace: PerfTraceBuf, trace_len: usize) -> Self {
         // We must keep `self.trace` alive at least as long as `self.parser`
         let bytes = unsafe { slice::from_raw_parts(trace.0, trace_len) };
@@ -817,7 +817,7 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 }
 
-impl<'t> Iterator for YkPTBlockIterator<'t> {
+impl Iterator for YkPTBlockIterator<'_> {
     type Item = Result<Block, HWTracerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -829,7 +829,7 @@ impl<'t> Iterator for YkPTBlockIterator<'t> {
     }
 }
 
-impl<'t> Drop for YkPTBlockIterator<'t> {
+impl Drop for YkPTBlockIterator<'_> {
     fn drop(&mut self) {
         // FIXME: `self.parser` is technically active at this point, and it still has a `&`
         // reference to `self.trace`. For example, `self.parser.drop` method could be called and do
