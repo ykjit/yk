@@ -508,7 +508,7 @@ impl TraceBuilder {
         }
 
         let gi = jit_ir::GuardInfo::new(live_vars, callframes);
-        let gi_idx = self.jit_mod.push_guardinfo(gi)?;
+        let gi_idx = self.jit_mod.push_guardinfo(gi).unwrap();
 
         Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))
     }

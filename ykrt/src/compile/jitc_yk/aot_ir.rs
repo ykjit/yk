@@ -31,7 +31,7 @@ use deku::prelude::*;
 use std::{
     collections::HashMap,
     error::Error,
-    ffi::CString,
+    ffi::{CString, OsStr},
     fmt::{self, Display},
     fs,
     io::{BufRead, BufReader, Seek, SeekFrom},
@@ -1134,8 +1134,8 @@ impl fmt::Display for DisplayableInst<'_> {
         if let Some(instid) = &self.instid {
             if let Some(li) = self.m.line_infos.get(instid) {
                 let path = self.m.path(li.pathidx);
-                // Absolute path: unwrap cannot fail.
-                let basename = path.file_name().unwrap();
+                // Sometimes the filename cannot be determined.
+                let basename = path.file_name().unwrap_or(OsStr::new("<unknown-filename>"));
                 // We assume the filename is expressible in UTF-8.
                 let src = self.m.source_line(path, li.line_num);
                 write!(
