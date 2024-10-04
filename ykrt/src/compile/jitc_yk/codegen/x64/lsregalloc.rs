@@ -240,7 +240,7 @@ impl<'a> LSRegAlloc<'a> {
 }
 
 /// The parts of the register allocator needed for general purpose registers.
-impl<'a> LSRegAlloc<'a> {
+impl LSRegAlloc<'_> {
     /// Forcibly assign the machine register `reg`, which must be in the [RegState::Empty] state,
     /// to the value produced by instruction `iidx`.
     pub(crate) fn force_assign_inst_gp_reg(&mut self, iidx: InstIdx, reg: Rq) {
@@ -683,7 +683,7 @@ impl<'a> LSRegAlloc<'a> {
 }
 
 /// The parts of the register allocator needed for floating point registers.
-impl<'a> LSRegAlloc<'a> {
+impl LSRegAlloc<'_> {
     /// Allocate registers for the instruction at position `iidx`.
     pub(crate) fn assign_fp_regs<const N: usize>(
         &mut self,

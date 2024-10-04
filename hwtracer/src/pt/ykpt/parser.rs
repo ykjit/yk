@@ -211,7 +211,7 @@ impl<'t> PacketParser<'t> {
     }
 }
 
-impl<'t> Iterator for PacketParser<'t> {
+impl Iterator for PacketParser<'_> {
     type Item = Result<Packet, HWTracerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
