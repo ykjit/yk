@@ -40,9 +40,9 @@ use dynasmrt::{
 };
 use indexmap::IndexMap;
 use parking_lot::Mutex;
-use std::error::Error;
 use std::sync::{Arc, Weak};
 use std::{cell::Cell, slice};
+use std::{collections::HashMap, error::Error};
 use ykaddr::addr::symbol_to_ptr;
 use yksmp;
 
@@ -139,7 +139,7 @@ struct Assemble<'a> {
     loop_start_locs: Vec<VarLocation>,
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
-    deoptinfo: Vec<DeoptInfo>,
+    deoptinfo: HashMap<usize, DeoptInfo>,
     ///
     /// Maps assembly offsets to comments.
     ///
@@ -186,7 +186,7 @@ impl<'a> Assemble<'a> {
             ra: LSRegAlloc::new(m, interp_stack_len),
             asm,
             loop_start_locs: Vec::new(),
-            deoptinfo: Vec::new(),
+            deoptinfo: HashMap::new(),
             comments: Cell::new(IndexMap::new()),
         }))
     }
@@ -210,14 +210,23 @@ impl<'a> Assemble<'a> {
             // those labels. Since, in general, we'll have multiple guards, we construct a simple
             // stub which puts an ID in a register then JMPs to (shared amongst all guards) code
             // which does the full call to __yk_deopt.
-            let fail_labels = self
+            #[allow(unused_mut)] // `mut` required in debug builds. See below.
+            let mut infos = self
                 .deoptinfo
                 .iter()
-                .map(|x| x.fail_label)
+                .map(|(id, l)| (*id, l.fail_label))
                 .collect::<Vec<_>>();
+
+            // Debugging deopt asm is much easier if the stubs are in order.
+            #[cfg(debug_assertions)]
+            infos.sort_by(|a, b| a.0.cmp(&b.0));
+
             let deopt_label = self.asm.new_dynamic_label();
-            for (deoptid, fail_label) in fail_labels.into_iter().enumerate() {
-                self.comment(self.asm.offset(), format!("Deopt ID for guard {deoptid}"));
+            for (deoptid, fail_label) in infos {
+                self.comment(
+                    self.asm.offset(),
+                    format!("Deopt ID for guard {:?}", deoptid),
+                );
                 // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
                 let deoptid = i32::try_from(deoptid).unwrap();
                 dynasm!(self.asm
@@ -1258,7 +1267,13 @@ impl<'a> Assemble<'a> {
                                         [RegConstraint::InputIntoReg(op.clone(), r)],
                                     );
                                 }
-                                _ => todo!(),
+                                reg_alloc::Register::FP(r) => {
+                                    let [_] = self.ra.assign_fp_regs(
+                                        &mut self.asm,
+                                        iidx,
+                                        [RegConstraint::InputIntoReg(op.clone(), r)],
+                                    );
+                                }
                             }
                         }
                         _ => todo!(),
@@ -1311,19 +1326,31 @@ impl<'a> Assemble<'a> {
 
         let src_val = i.val(self.m);
         let src_type = self.m.type_(src_val.tyidx(self.m));
-        let src_size = src_type.byte_size().unwrap();
+        let Ty::Integer(src_bitsize) = src_type else {
+            unreachable!(); // must be an integer
+        };
 
         let dest_type = self.m.type_(i.dest_tyidx());
-        let dest_size = dest_type.byte_size().unwrap();
+        let Ty::Integer(dest_bitsize) = dest_type else {
+            unreachable!(); // must be an integer
+        };
 
         // FIXME: assumes the input and output fit in a register.
-        match (src_size, dest_size) {
-            (1, 4) => dynasm!(self.asm; movsx Rd(reg.code()), Rb(reg.code())),
-            (1, 8) => dynasm!(self.asm; movsx Rq(reg.code()), Rb(reg.code())),
-            (2, 4) => dynasm!(self.asm; movsx Rd(reg.code()), Rw(reg.code())),
-            (2, 8) => dynasm!(self.asm; movsx Rq(reg.code()), Rw(reg.code())),
-            (4, 8) => dynasm!(self.asm; movsx Rq(reg.code()), Rd(reg.code())),
-            _ => todo!("{} {}", src_size, dest_size),
+        match (src_bitsize, dest_bitsize) {
+            (1, 64) => {
+                // FIXME: find a way to efficiently generalise all the non-byte-sized extends.
+                // Copy what LLVM does?
+                dynasm!(self.asm
+                    ; and Rb(reg.code()), 1
+                    ; neg Rb(reg.code())
+                    ; movsx Rq(reg.code()), Rb(reg.code()));
+            }
+            (8, 32) => dynasm!(self.asm; movsx Rd(reg.code()), Rb(reg.code())),
+            (8, 64) => dynasm!(self.asm; movsx Rq(reg.code()), Rb(reg.code())),
+            (16, 32) => dynasm!(self.asm; movsx Rd(reg.code()), Rw(reg.code())),
+            (16, 64) => dynasm!(self.asm; movsx Rq(reg.code()), Rw(reg.code())),
+            (32, 64) => dynasm!(self.asm; movsx Rq(reg.code()), Rd(reg.code())),
+            _ => todo!("{} {}", src_bitsize, dest_bitsize),
         }
     }
 
@@ -1537,7 +1564,7 @@ impl<'a> Assemble<'a> {
             inlined_frames: gi.inlined_frames().to_vec(),
             guard: Guard::new(),
         };
-        self.deoptinfo.push(deoptinfo);
+        self.deoptinfo.insert(inst.gidx.into(), deoptinfo);
 
         let cond = inst.cond(self.m);
         // ICmp instructions evaluate to a one-byte zero/one value.
@@ -1569,9 +1596,14 @@ pub(super) struct X64CompiledTrace {
     mt: Arc<MT>,
     /// The executable code itself.
     buf: ExecutableBuffer,
-    /// Vector of deopt info, tracked here so they can be freed when the compiled trace is
-    /// dropped.
-    deoptinfo: Vec<DeoptInfo>,
+    /// Deoptimisation info: maps a deoptimisation ID to it's information.
+    ///
+    /// Tracked here so they can be freed when the compiled trace is dropped.
+    ///
+    /// FIXME: The key of this shouldn't be a raw integer. I think it should be either GuardIdx or
+    /// GuardInfoIdx (which are effectively the same thing, just defined differently and in
+    /// different places -- can/should we merge them?)
+    deoptinfo: HashMap<usize, DeoptInfo>,
     /// Reference to the HotLocation, required for side tracing.
     hl: Weak<Mutex<HotLocation>>,
     /// Comments to be shown when printing the compiled trace using `AsmPrinter`.
@@ -1592,12 +1624,12 @@ impl CompiledTrace for X64CompiledTrace {
 
     fn sidetraceinfo(&self, gidx: GuardIdx) -> Arc<dyn SideTraceInfo> {
         // FIXME: Can we reference these instead of copying them?
-        let aotlives = self.deoptinfo[usize::from(gidx)]
+        let aotlives = self.deoptinfo[&usize::from(gidx)]
             .live_vars
             .iter()
             .map(|(iid, _)| iid.clone())
             .collect();
-        let callframes = self.deoptinfo[usize::from(gidx)].inlined_frames.clone();
+        let callframes = self.deoptinfo[&usize::from(gidx)].inlined_frames.clone();
         Arc::new(YkSideTraceInfo {
             aotlives,
             callframes,
@@ -1605,7 +1637,7 @@ impl CompiledTrace for X64CompiledTrace {
     }
 
     fn guard(&self, gid: GuardIdx) -> &crate::compile::Guard {
-        &self.deoptinfo[usize::from(gid)].guard
+        &self.deoptinfo[&usize::from(gid)].guard
     }
 
     fn hl(&self) -> &std::sync::Weak<parking_lot::Mutex<crate::location::HotLocation>> {

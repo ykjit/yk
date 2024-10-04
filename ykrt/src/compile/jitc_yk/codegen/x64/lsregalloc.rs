@@ -887,8 +887,7 @@ impl LSRegAlloc<'_> {
                     .unwrap();
                 let cur_reg = FP_REGS[reg_i];
                 if cur_reg != reg {
-                    todo!();
-                    // dynasm!(asm; mov Rq(reg.code()), Rq(cur_reg.code()));
+                    dynasm!(asm; mov Rq(reg.code()), Rq(cur_reg.code()));
                 }
             }
             SpillState::Stack(off) => {
