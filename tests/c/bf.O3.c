@@ -1,5 +1,5 @@
 // Compiler:
-//   env-var: YKB_EXTRA_CC_FLAGS=-O0 -Xclang -disable-O0-optnone -Xlinker --lto-newpm-passes=instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>
+//   env-var: YKB_EXTRA_CC_FLAGS=-O3
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=4
