@@ -65,7 +65,7 @@ pub extern "C" fn __ykrt_control_point(
     // still run the epilogue of the control point function call, which automatically restores the
     // callee-saved registers for us (so we don't have to do it here).
     unsafe {
-        std::arch::asm!(
+        std::arch::naked_asm!(
             // Push all registers to the stack as these may contain trace inputs (live
             // variables) referenced by the control point's stackmap.
             //
@@ -107,7 +107,6 @@ pub extern "C" fn __ykrt_control_point(
             "pop rcx",
             "pop rax",
             "ret",
-            options(noreturn)
         );
     }
 }
