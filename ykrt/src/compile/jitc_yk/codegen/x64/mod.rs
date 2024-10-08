@@ -419,13 +419,79 @@ impl<'a> Assemble<'a> {
 
         match inst.binop() {
             BinOp::Add => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
+                match (&lhs, &rhs) {
+                    (Operand::Const(cidx), Operand::Var(_))
+                    | (Operand::Var(_), Operand::Const(cidx)) => {
+                        let Const::Int(ctyidx, v) = self.m.const_(*cidx) else {
+                            unreachable!()
+                        };
+                        let Ty::Integer(bit_size) = self.m.type_(*ctyidx) else {
+                            panic!();
+                        };
+                        // Try to emit `add` instructions with immediate operands.
+                        //
+                        // We assume nothing about the unused upper bits (if any) of `lhs_reg` and
+                        // the `u64` backing the constant, so we can't simply try and use `add r64,
+                        // imm32` to cover lots of cases. This would lead to undesired overflows
+                        // caused by (potentially set) upper bits.
+                        let mut get_lhs_reg = |lhs| {
+                            self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::InputOutput(lhs)],
+                            )
+                        };
+                        match bit_size {
+                            8 => {
+                                if let Ok(_v8) = i8::try_from(*v as i64) {
+                                    todo!("add r/m8, imm8");
+                                    //return;
+                                }
+                            }
+                            16 => {
+                                if let Ok(_v8) = i8::try_from(*v as i16) {
+                                    todo!("add r/m16, imm8");
+                                    //return;
+                                } else {
+                                    todo!("add r/m16, imm16");
+                                    //return;
+                                }
+                            }
+                            32 => {
+                                if let Ok(v8) = i8::try_from(*v as i32) {
+                                    let [lhs_reg] = get_lhs_reg(lhs.clone());
+                                    dynasm!(self.asm; add Rd(lhs_reg.code()), BYTE v8);
+                                    return;
+                                } else {
+                                    let [lhs_reg] = get_lhs_reg(lhs.clone());
+                                    dynasm!(self.asm; add Rq(lhs_reg.code()), *v as i32);
+                                    return;
+                                }
+                            }
+                            64 => {
+                                if let Ok(v8) = i8::try_from(*v as i64) {
+                                    let [lhs_reg] = get_lhs_reg(lhs.clone());
+                                    dynasm!(self.asm; add Rq(lhs_reg.code()), BYTE v8);
+                                    return;
+                                } else if let Ok(v32) = i32::try_from(*v as i64) {
+                                    let [lhs_reg] = get_lhs_reg(lhs.clone());
+                                    dynasm!(self.asm; add Rq(lhs_reg.code()), v32);
+                                    return;
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                    _ => (),
+                }
+
                 let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
+                match byte_size {
                     1 => dynasm!(self.asm; add Rb(lhs_reg.code()), Rb(rhs_reg.code())),
                     2 => dynasm!(self.asm; add Rw(lhs_reg.code()), Rw(rhs_reg.code())),
                     4 => dynasm!(self.asm; add Rd(lhs_reg.code()), Rd(rhs_reg.code())),
