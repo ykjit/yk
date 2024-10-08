@@ -694,7 +694,7 @@ unsafe extern "C" fn exec_trace(
     rsp: *const c_void,
     trace: *const c_void,
 ) -> ! {
-    std::arch::asm!(
+    std::arch::naked_asm!(
         // Reset RBP
         "mov rbp, rdi",
         // Reset RSP to the end of the control point frame (this includes the registers we pushed
@@ -720,7 +720,6 @@ unsafe extern "C" fn exec_trace(
         // Call the trace function.
         "jmp rdx",
         "ret",
-        options(noreturn)
     )
 }
 
