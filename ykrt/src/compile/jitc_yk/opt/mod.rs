@@ -6,8 +6,11 @@
 // value an instruction might produce. These two actions are subtly different: mutation is done
 // in this module; the refinement of values in the [Analyse] module.
 
-use super::jit_ir::{
-    BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate, Ty,
+use super::{
+    int_signs::{SignExtend, Truncate},
+    jit_ir::{
+        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate, Ty,
+    },
 };
 use crate::compile::CompilationError;
 
@@ -72,7 +75,7 @@ impl Opt {
                                     let Ty::Integer(bits) = self.m.type_(*lhs_ty) else {
                                         panic!()
                                     };
-                                    let mul = lhs_v.sign_extend(*bits) * rhs_v.sign_extend(*bits);
+                                    let mul: u64 = lhs_v.truncate(*bits) * rhs_v.truncate(*bits);
                                     let trun = mul.truncate(*bits);
                                     let cidx = self.m.insert_const(lhs_c.u64_to_int(trun))?;
                                     self.m.replace(iidx, Inst::Const(cidx));
@@ -94,6 +97,25 @@ impl Opt {
                         self.m.replace(iidx, Inst::Tombstone);
                     } else {
                         self.an.guard(&self.m, x);
+                    }
+                }
+                Inst::SExt(x) => {
+                    if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
+                        let Const::Int(src_ty, src_val) = self.m.const_(cidx) else {
+                            unreachable!()
+                        };
+                        let src_ty = self.m.type_(*src_ty);
+                        let dst_ty = self.m.type_(x.dest_tyidx());
+                        let (Ty::Integer(src_bits), Ty::Integer(dst_bits)) = (src_ty, dst_ty)
+                        else {
+                            unreachable!()
+                        };
+                        let dst_val = match (src_bits, dst_bits) {
+                            (32, 64) => Const::Int(x.dest_tyidx(), src_val.sign_extend(32, 64)),
+                            _ => todo!("{src_bits} {dst_bits}"),
+                        };
+                        let dst_cidx = self.m.insert_const(dst_val)?;
+                        self.m.replace(iidx, Inst::Const(dst_cidx));
                     }
                 }
                 _ => (),
@@ -181,37 +203,6 @@ impl Opt {
             }
             _ => unreachable!(),
         }
-    }
-}
-
-trait SignExtend {
-    fn sign_extend(&self, bits: u32) -> Self;
-}
-
-impl SignExtend for u64 {
-    fn sign_extend(&self, bits: u32) -> Self {
-        debug_assert!(
-            bits > 0 && bits <= Self::BITS,
-            "{bits} outside range 1..={}",
-            Self::BITS
-        );
-        let shift = Self::BITS - bits;
-        (*self << shift) >> shift
-    }
-}
-
-trait Truncate {
-    fn truncate(&self, bits: u32) -> Self;
-}
-
-impl Truncate for u64 {
-    fn truncate(&self, bits: u32) -> Self {
-        debug_assert!(
-            bits > 0 && bits <= Self::BITS,
-            "{bits} outside range 1..={}",
-            Self::BITS
-        );
-        *self & ((1 as Self).wrapping_shl(bits) - 1)
     }
 }
 

@@ -21,6 +21,7 @@ pub mod aot_ir;
 mod codegen;
 #[cfg(any(debug_assertions, test))]
 mod gdb;
+mod int_signs;
 pub mod jit_ir;
 mod opt;
 mod trace_builder;
