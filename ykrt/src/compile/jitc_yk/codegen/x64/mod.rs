@@ -1015,7 +1015,14 @@ impl<'a> Assemble<'a> {
             }
         }
         // If the function we called has a return value, then store it into a local variable.
-        match fty.ret_type(self.m) {
+        //
+        // FIXME: We only support up to register-sized return values at the moment.
+        let ret_ty = fty.ret_type(self.m);
+        #[cfg(debug_assertions)]
+        if !matches!(ret_ty, Ty::Void) {
+            debug_assert!(ret_ty.byte_size().unwrap() <= REG64_SIZE);
+        }
+        match ret_ty {
             Ty::Void => (),
             Ty::Float(_) => {
                 let [_] = self.ra.assign_fp_regs(
