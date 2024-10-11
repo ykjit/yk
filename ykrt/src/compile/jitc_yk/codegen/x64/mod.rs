@@ -451,6 +451,19 @@ impl<'a> Assemble<'a> {
                             dynasm!(self.asm; add Rq(lhs_reg.code()), v32 as i32);
                             return;
                         }
+                        // Same optimisation, but for 32-bit add.
+                        //
+                        // This time the constant fits by definition.
+                        if *bit_size == 32 {
+                            let v32 = v.truncate(32);
+                            let [lhs_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::InputOutput(lhs)],
+                            );
+                            dynasm!(self.asm; add Rd(lhs_reg.code()), v32 as i32);
+                            return;
+                        }
                     }
                     _ => (),
                 }
@@ -2183,6 +2196,42 @@ mod tests {
                 ......
                 {{_}} {{_}}: mov r.64.x, 0x80000000
                 {{_}} {{_}}: add r.64.y, r.64.x
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_const_add_one_i32() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = add %0, 1i32
+            ",
+            "
+                ...
+                ; %1: i32 = add %0, 1i32
+                ......
+                {{_}} {{_}}: add r.32.x, 0x01
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_const_add_minus_one_i32() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = add %0, 4294967295i32
+            ",
+            "
+                ...
+                ; %1: i32 = add %0, 4294967295i32
+                ......
+                {{_}} {{_}}: add r.32.x, 0xffffffff
                 ...
                 ",
         );
