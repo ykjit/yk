@@ -12,7 +12,7 @@ use super::super::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst, FPExtInst,
         FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst,
         Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PackedOperand, PtrAddInst,
-        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
+        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZeroExtendInst,
     },
 };
 use fm::FMBuilder;
@@ -395,6 +395,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             SExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
+                    ASTInst::ZExt { assign, type_, val } => {
+                        let inst = ZeroExtendInst::new(
+                            &self.process_operand(val)?,
+                            self.process_type(type_)?,
+                        );
+                        self.push_assign(inst.into(), assign)?;
+                    }
                     ASTInst::SIToFP { assign, type_, val } => {
                         let inst =
                             SIToFPInst::new(&self.process_operand(val)?, self.process_type(type_)?);
@@ -775,6 +782,12 @@ enum ASTInst {
         type_: ASTType,
         val: ASTOperand,
     },
+    ZExt {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        val: ASTOperand,
+    },
     SIToFP {
         assign: Span,
         type_: ASTType,
@@ -917,6 +930,7 @@ mod tests {
               *%9 = %8
               %10: i32 = load %9
               %11: i64 = sext %10
+              %111: i16 = zext %10
               %12: i32 = add %0, %1
               %13: i32 = sub %0, %1
               %14: i32 = mul %0, %1

@@ -547,6 +547,27 @@ pub(crate) enum Predicate {
     SignedLessEqual,
 }
 
+impl Predicate {
+    /// Returns whether the comparison is signed.
+    ///
+    /// Not that [Self::Equal] and [Self::NotEqual] are considered not unsigned, since such
+    /// comparisons are signedness agnostic.
+    pub(crate) fn signed(&self) -> bool {
+        match self {
+            Self::Equal
+            | Self::NotEqual
+            | Self::UnsignedGreater
+            | Self::UnsignedGreaterEqual
+            | Self::UnsignedLess
+            | Self::UnsignedLessEqual => false,
+            Self::SignedGreater
+            | Self::SignedGreaterEqual
+            | Self::SignedLess
+            | Self::SignedLessEqual => true,
+        }
+    }
+}
+
 impl Display for Predicate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Following LLVM's precedent, use short predicate names for formatting.

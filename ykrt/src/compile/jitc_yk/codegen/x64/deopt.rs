@@ -12,7 +12,7 @@ use libc::c_void;
 use std::{ptr, sync::Arc};
 use yksmp::Location as SMLocation;
 
-use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_SIZE};
+use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_BYTESIZE};
 
 /// Registers (in DWARF notation) that we want to restore during deopt. Excludes `rsp` (7) and
 /// `return register` (16), which we do not care about.
@@ -113,7 +113,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // Calculate space required for the new stack.
     // Add space for live register values which we'll be adding at the end.
-    let mut memsize = RECOVER_REG.len() * REG64_SIZE;
+    let mut memsize = RECOVER_REG.len() * REG64_BYTESIZE;
     // Calculate amount of space we need to allocate for each stack frame.
     for (i, iframe) in info.inlined_frames.iter().enumerate() {
         let (rec, _) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
@@ -124,7 +124,7 @@ pub(crate) extern "C" fn __yk_deopt(
             memsize += usize::try_from(rec.size).unwrap();
         }
         // Reserve return address space for each frame.
-        memsize += REG64_SIZE;
+        memsize += REG64_BYTESIZE;
     }
 
     // Allocate space on the heap for the new stack. We will later memcpy this new stack over the
@@ -148,7 +148,7 @@ pub(crate) extern "C" fn __yk_deopt(
         // If the current frame has pushed RBP we need to do the same (unless we are processing
         // the bottom-most frame).
         if pinfo.hasfp && i > 0 {
-            rsp = unsafe { rsp.sub(REG64_SIZE) };
+            rsp = unsafe { rsp.sub(REG64_BYTESIZE) };
             rbp = rsp;
             unsafe { ptr::write(rsp as *mut u64, lastframeaddr as u64) };
         }
@@ -156,7 +156,7 @@ pub(crate) extern "C" fn __yk_deopt(
         // Calculate the this frame's address by substracting the last frame's size (plus return
         // address) from the last frame's address.
         if i > 0 {
-            lastframeaddr = unsafe { lastframeaddr.byte_sub(lastframesize + REG64_SIZE) };
+            lastframeaddr = unsafe { lastframeaddr.byte_sub(lastframesize + REG64_BYTESIZE) };
         }
         lastframesize = usize::try_from(rec.size).unwrap();
 
@@ -176,9 +176,9 @@ pub(crate) extern "C" fn __yk_deopt(
         if i > 0 {
             for (reg, idx) in &pinfo.csrs {
                 let mut tmp =
-                    unsafe { rbp.byte_sub(usize::try_from(idx.abs()).unwrap() * REG64_SIZE) };
+                    unsafe { rbp.byte_sub(usize::try_from(idx.abs()).unwrap() * REG64_BYTESIZE) };
                 if pinfo.hasfp {
-                    tmp = unsafe { tmp.byte_add(REG64_SIZE) };
+                    tmp = unsafe { tmp.byte_add(REG64_BYTESIZE) };
                 }
                 let val = registers[usize::from(*reg)];
                 unsafe { ptr::write(tmp as *mut u64, val) };
@@ -290,13 +290,13 @@ pub(crate) extern "C" fn __yk_deopt(
                 // The stack size recorded by the stackmap includes a pushed RBP. However, we will
                 // have already adjusted the "virtual RSP" earlier (when writing RBP) if `hasfp` is
                 // true. If that's the case, re-adjust the "virtual RSP" again to account for this.
-                rsp = unsafe { rsp.byte_add(REG64_SIZE) };
+                rsp = unsafe { rsp.byte_add(REG64_BYTESIZE) };
             }
         }
 
         // Write the return address for the previous frame into the current frame.
         unsafe {
-            rsp = rsp.sub(REG64_SIZE);
+            rsp = rsp.sub(REG64_BYTESIZE);
             ptr::write(rsp as *mut u64, rec.offset);
         }
     }
@@ -305,7 +305,7 @@ pub(crate) extern "C" fn __yk_deopt(
     // so that they can be immediately popped after we memcpy'd the new stack over.
     for reg in RECOVER_REG {
         unsafe {
-            rsp = rsp.byte_sub(REG64_SIZE);
+            rsp = rsp.byte_sub(REG64_BYTESIZE);
             ptr::write(rsp as *mut u64, registers[reg]);
         }
     }
@@ -317,7 +317,7 @@ pub(crate) extern "C" fn __yk_deopt(
     if pinfo.hasfp {
         // `frameaddr` is the RBP value of the bottom frame after pushing the previous frame's RBP.
         // However, `rec.size` includes the pushed RBP, so we need to subtract it here again.
-        newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
+        newframedst = unsafe { newframedst.byte_add(REG64_BYTESIZE) };
     }
 
     // The `clone` should really be `Arc::clone(&ctr)` but that doesn't play well with type
