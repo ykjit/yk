@@ -96,7 +96,8 @@ static STACKMAP_GP_REGS: [Rq; 7] = [
 static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 
 /// The size of a 64-bit register in bytes.
-pub(crate) static REG64_SIZE: usize = 8;
+pub(crate) static REG64_BYTESIZE: usize = 8;
+static REG64_BITSIZE: usize = REG64_BYTESIZE * 8;
 static RBP_DWARF_NUM: u16 = 6;
 
 /// The x64 SysV ABI requires a 16-byte aligned stack prior to any call.
@@ -169,7 +170,7 @@ impl<'a> Assemble<'a> {
             let size = if pinfo.hasfp {
                 // The frame size includes the pushed RBP, but since we only care about the size of
                 // the local variables we need to subtract it again.
-                rec.size - u64::try_from(REG64_SIZE).unwrap()
+                rec.size - u64::try_from(REG64_BYTESIZE).unwrap()
             } else {
                 rec.size
             };
@@ -390,6 +391,57 @@ impl<'a> Assemble<'a> {
         alloc_off
     }
 
+    /// Sign extend the `from_bits`-sized integer stored in `reg` up to the full size of the 64-bit
+    /// register.
+    ///
+    /// `from_bits` must be between 1 and 64.
+    fn sign_extend_reg64(&mut self, reg: Rq, from_bits: u8) {
+        debug_assert!(from_bits > 0 && from_bits <= 64);
+        // For "regularly-sized" integers, we can use movsx to achieve the sign extend and without
+        // fear of register stalls.
+        match from_bits {
+            8 => dynasm!(self.asm; movsx Rq(reg.code()), Rb(reg.code())),
+            16 => dynasm!(self.asm; movsx Rq(reg.code()), Rw(reg.code())),
+            32 => dynasm!(self.asm; movsx Rq(reg.code()), Rd(reg.code())),
+            64 => (), // nothing to do.
+            _ => {
+                // For "oddly-sized" integers we have to do the sign extend ourselves.
+                let shift = REG64_BITSIZE - usize::from(from_bits);
+                dynasm!(self.asm
+                    ; shl Rq(reg.code()), shift as i8 // shift all the way left.
+                    ; sar Rq(reg.code()), shift as i8 // shift back with the correct leading bits.
+                );
+            }
+        }
+    }
+
+    /// Zero extend the `from_bits`-sized integer stored in `reg` up to the full size of the 64-bit
+    /// register.
+    ///
+    /// `from_bits` must be between 1 and 64.
+    fn zero_extend_reg64(&mut self, reg: Rq, from_bits: u8) {
+        debug_assert!(from_bits > 0 && from_bits <= 64);
+        // For "regularly-sized" integers, we can use movzx to achieve the zero extend and without
+        // fear of register stalls.
+        match from_bits {
+            8 => dynasm!(self.asm; movzx Rq(reg.code()), Rb(reg.code())),
+            16 => dynasm!(self.asm; movzx Rq(reg.code()), Rw(reg.code())),
+            32 => {
+                // mov into a 32-bit register sign-extends up to 64 already.
+                dynasm!(self.asm; mov Rw(reg.code()), Rw(reg.code()));
+            }
+            64 => (), // nothing to do.
+            _ => {
+                // For "oddly-sized" integers we have to do the zero extend ourselves.
+                let shift = REG64_BITSIZE - usize::from(from_bits);
+                dynasm!(self.asm
+                    ; shl Rq(reg.code()), shift as i8 // shift all the way left.
+                    ; shr Rq(reg.code()), shift as i8 // shift back with leading zeros.
+                );
+            }
+        }
+    }
+
     fn patch_frame_allocation(&mut self, asm_off: AssemblyOffset) {
         // The stack should be 16-byte aligned after allocation. This ensures that calls in the
         // trace also get a 16-byte aligned stack, as per the SysV ABI.
@@ -441,6 +493,8 @@ impl<'a> Assemble<'a> {
                         // since we are currently only dealing with i32s and i64s, but if/when we
                         // want to cover operations on other "odd-bit-size" integers we will need
                         // these custom implementations.
+                        //
+                        // FIXME/OPT: This can be simplified/optimised.
                         if *bit_size == 64 && v.truncate(32).sign_extend(32, 64) == *v {
                             let v32 = v.truncate(32);
                             let [lhs_reg] = self.ra.assign_gp_regs(
@@ -474,10 +528,10 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
                 match byte_size {
-                    1 => dynasm!(self.asm; add Rb(lhs_reg.code()), Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; add Rw(lhs_reg.code()), Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; add Rd(lhs_reg.code()), Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code())),
+                    1..=8 => {
+                        // OK to ignore any undefined high-order bits here.
+                        dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                    }
                     _ => todo!(),
                 }
             }
@@ -489,15 +543,17 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
                 match size {
-                    1 => dynasm!(self.asm; and Rb(lhs_reg.code()), Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; and Rw(lhs_reg.code()), Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; and Rd(lhs_reg.code()), Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; and Rq(lhs_reg.code()), Rq(rhs_reg.code())),
+                    1..=8 => {
+                        // OK to ignore any undefined high-order bits here.
+                        dynasm!(self.asm; and Rq(lhs_reg.code()), Rq(rhs_reg.code()))
+                    }
                     _ => todo!(),
                 }
             }
             BinOp::AShr => {
-                let size = lhs.byte_size(self.m);
+                let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
+                    unreachable!()
+                };
                 let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
@@ -507,16 +563,19 @@ impl<'a> Assemble<'a> {
                     ],
                 );
                 debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match size {
-                    1 => dynasm!(self.asm; sar Rb(lhs_reg.code()), cl),
-                    2 => dynasm!(self.asm; sar Rw(lhs_reg.code()), cl),
-                    4 => dynasm!(self.asm; sar Rd(lhs_reg.code()), cl),
-                    8 => dynasm!(self.asm; sar Rq(lhs_reg.code()), cl),
+                match bit_size {
+                    1..=64 => {
+                        // Ensure we shift in the correct most-significant bits.
+                        self.sign_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        dynasm!(self.asm; sar Rq(lhs_reg.code()), cl);
+                    }
                     _ => todo!(),
                 }
             }
             BinOp::LShr => {
-                let size = lhs.byte_size(self.m);
+                let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
+                    unreachable!()
+                };
                 let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
@@ -526,16 +585,17 @@ impl<'a> Assemble<'a> {
                     ],
                 );
                 debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match size {
-                    1 => dynasm!(self.asm; shr Rb(lhs_reg.code()), cl),
-                    2 => dynasm!(self.asm; shr Rw(lhs_reg.code()), cl),
-                    4 => dynasm!(self.asm; shr Rd(lhs_reg.code()), cl),
-                    8 => dynasm!(self.asm; shr Rq(lhs_reg.code()), cl),
+                match bit_size {
+                    1..=64 => {
+                        // Ensure we shift in zeros at the most-significant bits.
+                        self.zero_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        dynasm!(self.asm; shr Rq(lhs_reg.code()), cl);
+                    }
                     _ => todo!(),
                 }
             }
             BinOp::Shl => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
@@ -545,16 +605,16 @@ impl<'a> Assemble<'a> {
                     ],
                 );
                 debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match size {
-                    1 => dynasm!(self.asm; shl Rb(lhs_reg.code()), cl),
-                    2 => dynasm!(self.asm; shl Rw(lhs_reg.code()), cl),
-                    4 => dynasm!(self.asm; shl Rd(lhs_reg.code()), cl),
-                    8 => dynasm!(self.asm; shl Rq(lhs_reg.code()), cl),
+                match byte_size {
+                    1..=8 => {
+                        // OK to ignore any undefined high-order bits here.
+                        dynasm!(self.asm; shl Rq(lhs_reg.code()), cl);
+                    }
                     _ => todo!(),
                 }
             }
             BinOp::Mul => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
                 self.ra
                     .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
                 let [_lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
@@ -567,102 +627,104 @@ impl<'a> Assemble<'a> {
                     RegSet::from(Rq::RDX),
                 );
                 debug_assert_eq!(_lhs_reg, Rq::RAX);
-                match size {
-                    1 => dynasm!(self.asm; mul Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; mul Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; mul Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; mul Rq(rhs_reg.code())),
+                match byte_size {
+                    1..=8 => {
+                        // OK to ignore any undefined high-order bits here.
+                        dynasm!(self.asm; mul Rq(rhs_reg.code()));
+                    }
                     _ => todo!(),
                 }
                 // Note that because we are code-genning an unchecked multiply, the higher-order part of
                 // the result in RDX is entirely ignored.
             }
             BinOp::Or => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
-                    1 => dynasm!(self.asm; or Rb(lhs_reg.code()), Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; or Rw(lhs_reg.code()), Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; or Rd(lhs_reg.code()), Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; or Rq(lhs_reg.code()), Rq(rhs_reg.code())),
+                match byte_size {
+                    1..=8 => {
+                        // OK to ignore any undefined high-order bits here.
+                        dynasm!(self.asm; or Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                    }
                     _ => todo!(),
                 }
             }
             BinOp::SDiv => {
-                let size = lhs.byte_size(self.m);
+                let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
+                    unreachable!()
+                };
                 self.ra
                     .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
-                let [_lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
+                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
                     [
-                        // The quotient is stored in RAX. We don't care about the remainder stored
-                        // in RDX.
+                        // 64-bit signed division with idiv operates on RDX:RAX and stores the
+                        // quotient in RAX (we ignore the remainder put into RDX).
                         RegConstraint::InputOutputIntoReg(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
                     ],
                     RegSet::from(Rq::RDX),
                 );
-                // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
-                // values or want to optimise register usage, we won't be needing this, and just zero out
-                // RDX.
-
-                // Signed division (idiv) operates on the DX:AX, EDX:EAX, RDX:RAX registers, so we
-                // use `cdq`/`cqo` to double the size via sign extension and store the result in
-                // DX:AX, EDX:EAX, RDX:RAX.
-                match size {
-                    // There's no `cwd` equivalent for byte-sized values, so we use `movsx`
-                    // (sign-extend) instead.
-                    1 => dynasm!(self.asm; movsx ax, al; idiv Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; cwd; idiv Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; cdq; idiv Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; cqo; idiv Rq(rhs_reg.code())),
+                match bit_size {
+                    1..=64 => {
+                        self.sign_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                        dynasm!(self.asm
+                            ; cqo // Sign extend RAX up to RDX:RAX.
+                            ; idiv Rq(rhs_reg.code())
+                        );
+                    }
                     _ => todo!(),
                 }
             }
             BinOp::SRem => {
-                // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
-                // values or want to optimise register usage, we won't be needing this, and just zero out
-                // RDX.
-                let size = lhs.byte_size(self.m);
-                debug_assert!(size == 4 || size == 8);
-                let [_lhs_reg, rhs_reg, _rem_reg] = self.ra.assign_gp_regs(
+                let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
+                    unreachable!()
+                };
+                let [lhs_reg, rhs_reg, _rem_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
+                        // 64-bit signed division with idiv operates on RDX:RAX and stores the
+                        // remainder in RDX (we ignore the quotient put into RAX).
                         RegConstraint::InputIntoRegAndClobber(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
                         RegConstraint::OutputFromReg(Rq::RDX),
                     ],
                 );
-                debug_assert_eq!(_lhs_reg, Rq::RAX);
+                debug_assert_eq!(lhs_reg, Rq::RAX);
                 debug_assert_eq!(_rem_reg, Rq::RDX);
-                dynasm!(self.asm; xor rdx, rdx);
-                match size {
-                    1 => dynasm!(self.asm; idiv Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; idiv Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; idiv Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; idiv Rq(rhs_reg.code())),
+                match bit_size {
+                    1..=64 => {
+                        self.sign_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                        dynasm!(self.asm
+                            ; cqo // Sign extend RAX up to RDX:RAX.
+                            ; idiv Rq(rhs_reg.code())
+                        );
+                    }
                     _ => todo!(),
                 }
-                // The remainder is stored in RDX. We don't care about the quotient stored in RAX.
             }
             BinOp::Sub => {
-                let size = lhs.byte_size(self.m);
+                let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
+                    unreachable!()
+                };
                 let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
-                    1 => dynasm!(self.asm; sub Rb(lhs_reg.code()), Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; sub Rw(lhs_reg.code()), Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; sub Rd(lhs_reg.code()), Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; sub Rq(lhs_reg.code()), Rq(rhs_reg.code())),
+                match bit_size {
+                    1..=64 => {
+                        self.sign_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                        dynasm!(self.asm; sub Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                    }
                     _ => todo!(),
                 }
             }
@@ -674,38 +736,37 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
                 match size {
-                    1 => dynasm!(self.asm; xor Rb(lhs_reg.code()), Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; xor Rw(lhs_reg.code()), Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; xor Rd(lhs_reg.code()), Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code())),
+                    1..=8 => dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code())),
                     _ => todo!(),
                 }
             }
             BinOp::UDiv => {
-                let size = lhs.byte_size(self.m);
+                let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
+                    unreachable!()
+                };
                 self.ra
                     .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
-                let [_lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
+                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
                     [
-                        // The quotient is stored in RAX. We don't care about the remainder stored
-                        // in RDX.
+                        // 64-bit unsigned division with idiv operates on RDX:RAX and stores the
+                        // quotient in RAX (we ignore the remainder put into RDX).
                         RegConstraint::InputOutputIntoReg(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
                     ],
                     RegSet::from(Rq::RDX),
                 );
-                debug_assert_eq!(_lhs_reg, Rq::RAX);
-                // Like SDiv the dividend goes into AX, DX:AX, EDX:EAX, RDX:RAX. But since the
-                // values aren't signed we don't need to sign-extend them and can just zero out
-                // `rdx`.
-                dynasm!(self.asm; xor rdx, rdx);
-                match size {
-                    1 => dynasm!(self.asm; div Rb(rhs_reg.code())),
-                    2 => dynasm!(self.asm; div Rw(rhs_reg.code())),
-                    4 => dynasm!(self.asm; div Rd(rhs_reg.code())),
-                    8 => dynasm!(self.asm; div Rq(rhs_reg.code())),
+                debug_assert_eq!(lhs_reg, Rq::RAX);
+                match bit_size {
+                    1..=64 => {
+                        self.zero_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.zero_extend_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                        dynasm!(self.asm
+                            ; xor rdx, rdx // Zero extend RAX into RDX:RAX.
+                            ; div Rq(rhs_reg.code())
+                        );
+                    }
                     _ => todo!(),
                 }
             }
@@ -827,7 +888,7 @@ impl<'a> Assemble<'a> {
             }
         };
         let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
-        debug_assert!(size <= REG64_SIZE);
+        debug_assert!(size <= REG64_BYTESIZE);
         match m {
             VarLocation::Register(reg_alloc::Register::GP(reg)) => {
                 self.ra.force_assign_inst_gp_reg(iidx, reg);
@@ -855,7 +916,7 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(inst.operand(self.m))],
                 );
                 let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
-                debug_assert!(size <= REG64_SIZE);
+                debug_assert!(size <= REG64_BYTESIZE);
                 match size {
                     1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code())]),
                     2 => dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code())]),
@@ -1068,7 +1129,7 @@ impl<'a> Assemble<'a> {
         let ret_ty = fty.ret_type(self.m);
         #[cfg(debug_assertions)]
         if !matches!(ret_ty, Ty::Void) {
-            debug_assert!(ret_ty.byte_size().unwrap() <= REG64_SIZE);
+            debug_assert!(ret_ty.byte_size().unwrap() <= REG64_BYTESIZE);
         }
         match ret_ty {
             Ty::Void => (),
@@ -1435,7 +1496,7 @@ impl<'a> Assemble<'a> {
         debug_assert!(from_size <= to_size);
 
         // FIXME: assumes the input and output fit in a register.
-        debug_assert!(to_size <= REG64_SIZE);
+        debug_assert!(to_size <= REG64_BYTESIZE);
 
         // FIXME: Assumes we don't assign to sub-registers.
         match (to_size, from_size) {
@@ -1554,7 +1615,7 @@ impl<'a> Assemble<'a> {
         debug_assert!(from_size > to_size);
 
         // FIXME: assumes the input and output fit in a register.
-        debug_assert!(to_size <= REG64_SIZE);
+        debug_assert!(to_size <= REG64_BYTESIZE);
 
         // FIXME: There's no instruction on x86_64 to mov from a bigger register into a smaller
         // register. The simplest way to truncate the value is to zero out the higher order bits.
@@ -2102,7 +2163,7 @@ mod tests {
                 ...
                 ; %2: i16 = add %0, %1
                 ......
-                {{_}} {{_}}: add r.16.x, r.16.y
+                {{_}} {{_}}: add r.64.x, r.64.y
                 ...
                 ",
         );
@@ -2277,7 +2338,7 @@ mod tests {
                 ...
                 ; call @puts(%0, %1, %2)
                 ...
-                {{{{_}}}} {{{{_}}}}: mov edi, ...
+                {{{{_}}}} {{{{_}}}}: mov rdi, ...
                 {{{{_}}}} {{{{_}}}}: mov esi, ...
                 {{{{_}}}} {{{{_}}}}: mov edx, ...
                 {{{{_}}}} {{{{_}}}}: mov r.64.tgt, 0x{sym_addr:X}
@@ -2306,7 +2367,7 @@ mod tests {
                 ...
                 ; call @puts(%0, %1, %2)
                 ...
-                {{{{_}}}} {{{{_}}}}: movzx rdi, ...
+                {{{{_}}}} {{{{_}}}}: mov rdi, ...
                 {{{{_}}}} {{{{_}}}}: movzx rsi, ...
                 {{{{_}}}} {{{{_}}}}: mov rdx, ...
                 {{{{_}}}} {{{{_}}}}: mov r.64.tgt, 0x{sym_addr:X}
@@ -2347,7 +2408,7 @@ mod tests {
                 ; %1: i32 = add %0, %0
                 {{_}} {{_}}: mov [rbp-0x04], eax
                 {{_}} {{_}}: mov r.32.x, [rbp-0x04]
-                {{_}} {{_}}: add eax, r.32.x
+                {{_}} {{_}}: add rax, r.64.x
                 ...
             ",
         );
@@ -2538,20 +2599,46 @@ mod tests {
     }
 
     #[test]
-    fn cg_srem() {
+    fn cg_srem_i8() {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i32 = srem %0, %1
+                %0: i8 = load_ti 0
+                %1: i8 = load_ti 1
+                %2: i8 = srem %0, %1
             ",
             "
                 ...
-                ; %2: i32 = srem %0, %1
-                {{_}} {{_}}: mov eax, r.32.y
-                {{_}} {{_}}: xor rdx, rdx
-                {{_}} {{_}}: idiv r.32.x
+                ; %2: i8 = srem %0, %1
+                {{_}} {{_}}: mov rax, r.64.y
+                {{_}} {{_}}: movsx rax, al
+                {{_}} {{_}}: movsx rsi, sil
+                {{_}} {{_}}: cqo
+                {{_}} {{_}}: idiv r.64.x
+                ...
+            ",
+        );
+    }
+
+    #[test]
+    fn cg_srem_i56() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i56 = load_ti 0
+                %1: i56 = load_ti 1
+                %2: i56 = srem %0, %1
+            ",
+            "
+                ...
+                ; %2: i56 = srem %0, %1
+                {{_}} {{_}}: mov rax, r.64.y
+                {{_}} {{_}}: shl rax, 0x08
+                {{_}} {{_}}: sar rax, 0x08
+                {{_}} {{_}}: shl rsi, 0x08
+                {{_}} {{_}}: sar rsi, 0x08
+                {{_}} {{_}}: cqo
+                {{_}} {{_}}: idiv r.64.x
                 ...
             ",
         );
@@ -2587,8 +2674,8 @@ mod tests {
             "
                 ...
                 ; %1: i32 = %0 ? 1i32 : 2i32
-                {{_}} {{_}}: mov r.32.x, 0x01
-                {{_}} {{_}}: mov r.32.y, 0x02
+                {{_}} {{_}}: mov r.64.x, 0x01
+                {{_}} {{_}}: mov r.64.y, 0x02
                 {{_}} {{_}}: cmp r.8.z, 0x00
                 {{_}} {{_}}: cmovz r.64.x, r.64.y
                 ...
@@ -2597,7 +2684,7 @@ mod tests {
     }
 
     #[test]
-    fn cg_sdiv() {
+    fn cg_sdiv_i8() {
         codegen_and_test(
             "
               entry:
@@ -2608,16 +2695,42 @@ mod tests {
             "
                 ...
                 ; %2: i8 = sdiv %0, %1
-                {{_}} {{_}}: movzx rax, r.8.x
-                {{_}} {{_}}: movsx ax, al
-                {{_}} {{_}}: idiv r.8.y
+                {{_}} {{_}}: mov rax, r.64.x
+                {{_}} {{_}}: movsx rax, al
+                {{_}} {{_}}: movsx rsi, sil
+                {{_}} {{_}}: cqo
+                {{_}} {{_}}: idiv rsi
                 ...
             ",
         );
     }
 
     #[test]
-    fn cg_udiv() {
+    fn cg_sdiv_i56() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i56 = load_ti 0
+                %1: i56 = load_ti 1
+                %2: i56 = sdiv %0, %1
+            ",
+            "
+                ...
+                ; %2: i56 = sdiv %0, %1
+                {{_}} {{_}}: mov rax, r.64.x
+                {{_}} {{_}}: shl rax, 0x08
+                {{_}} {{_}}: sar rax, 0x08
+                {{_}} {{_}}: shl rsi, 0x08
+                {{_}} {{_}}: sar rsi, 0x08
+                {{_}} {{_}}: cqo
+                {{_}} {{_}}: idiv rsi
+                ...
+            ",
+        );
+    }
+
+    #[test]
+    fn cg_udiv_i8() {
         codegen_and_test(
             "
               entry:
@@ -2628,9 +2741,35 @@ mod tests {
             "
                 ...
                 ; %2: i8 = udiv %0, %1
-                {{_}} {{_}}: movzx rax, r.8.x
+                {{_}} {{_}}: mov rax, r.64.x
+                {{_}} {{_}}: movzx rax, al
+                {{_}} {{_}}: movzx rsi, sil
                 {{_}} {{_}}: xor rdx, rdx
-                {{_}} {{_}}: div r.8.y
+                {{_}} {{_}}: div r.64.y
+                ...
+            ",
+        );
+    }
+
+    #[test]
+    fn cg_udiv_i56() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i56 = load_ti 0
+                %1: i56 = load_ti 1
+                %2: i56 = udiv %0, %1
+            ",
+            "
+                ...
+                ; %2: i56 = udiv %0, %1
+                {{_}} {{_}}: mov rax, r.64.x
+                {{_}} {{_}}: shl rax, 0x08
+                {{_}} {{_}}: shr rax, 0x08
+                {{_}} {{_}}: shl rsi, 0x08
+                {{_}} {{_}}: shr rsi, 0x08
+                {{_}} {{_}}: xor rdx, rdx
+                {{_}} {{_}}: div r.64.y
                 ...
             ",
         );
@@ -2649,8 +2788,8 @@ mod tests {
                 ...
                 ; %2: i8 = add %0, 1i8
                 ......
-                {{_}} {{_}}: mov r.8.x, 0x01
-                {{_}} {{_}}: add r.8.y, r.8.x
+                {{_}} {{_}}: mov r.64.x, 0x01
+                {{_}} {{_}}: add r.64.y, r.64.x
                 ...
             ",
         );
@@ -2669,8 +2808,8 @@ mod tests {
                 ...
                 ; %2: i8 = shl %0, %1
                 ...
-                {{_}} {{_}}: movzx rcx, r.8.a
-                {{_}} {{_}}: shl r.8.b, cl
+                {{_}} {{_}}: mov rcx, r.64.a
+                {{_}} {{_}}: shl r.64.b, cl
                 ...
             ",
         );
@@ -3016,7 +3155,7 @@ mod tests {
                 ; tloop_start [%0]:
                 ; tloop_jump [42i8]:
                 {{_}} {{_}}: mov ...
-                {{_}} {{_}}: mov r.8.x, 0x2a
+                {{_}} {{_}}: mov r.64.x, 0x2a
                 ...: jmp ...
             ",
         );
