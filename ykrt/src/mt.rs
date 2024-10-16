@@ -694,7 +694,7 @@ unsafe extern "C" fn exec_trace(
     rsp: *const c_void,
     trace: *const c_void,
 ) -> ! {
-    std::arch::asm!(
+    std::arch::naked_asm!(
         // Reset RBP
         "mov rbp, rdi",
         // Reset RSP to the end of the control point frame (this includes the registers we pushed
@@ -720,7 +720,6 @@ unsafe extern "C" fn exec_trace(
         // Call the trace function.
         "jmp rdx",
         "ret",
-        options(noreturn)
     )
 }
 
@@ -812,6 +811,22 @@ impl MTThread {
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
     pub(crate) fn promote_i32(&self, val: i32) -> bool {
+        if let MTThreadState::Tracing {
+            ref mut promotions, ..
+        } = *self.tstate.borrow_mut()
+        {
+            promotions.extend_from_slice(&val.to_ne_bytes());
+        }
+        true
+    }
+
+    /// Records `val` as a value to be promoted. Returns `true` if either: no trace is being
+    /// recorded; or recording the promotion succeeded.
+    ///
+    /// If `false` is returned, the current trace is unable to record the promotion successfully
+    /// and further calls are probably pointless, though they will not cause the tracer to enter
+    /// undefined behaviour territory.
+    pub(crate) fn promote_i64(&self, val: i64) -> bool {
         if let MTThreadState::Tracing {
             ref mut promotions, ..
         } = *self.tstate.borrow_mut()

@@ -318,7 +318,7 @@ pub(crate) extern "C" fn __yk_deopt(
 #[naked]
 #[no_mangle]
 unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
-    std::arch::asm!(
+    std::arch::naked_asm!(
         // Reset RSP to the end of the control point frame (this doesn't include the
         // return address which will thus be overwritten in the process)
         "mov rsp, rdi",
@@ -382,6 +382,5 @@ unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size:
         "pop rdx",
         "pop rax",
         "ret",
-        options(noreturn)
     )
 }

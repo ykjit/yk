@@ -10,6 +10,7 @@
 
 use super::{
     super::{
+        int_signs::{SignExtend, Truncate},
         jit_ir::{self, BinOp, FloatTy, InstIdx, Module, Operand, Ty},
         CompilationError,
     },
@@ -419,13 +420,60 @@ impl<'a> Assemble<'a> {
 
         match inst.binop() {
             BinOp::Add => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
+                match (&lhs, &rhs) {
+                    (Operand::Const(cidx), Operand::Var(_))
+                    | (Operand::Var(_), Operand::Const(cidx)) => {
+                        // Addition involves a constant. We may be able to emit more optimal code.
+                        let Const::Int(ctyidx, v) = self.m.const_(*cidx) else {
+                            unreachable!()
+                        };
+                        let Ty::Integer(bit_size) = self.m.type_(*ctyidx) else {
+                            unreachable!()
+                        };
+                        // If it's a 64-bit add and the numeric value of the constant can be
+                        // expressed in 32-bits...
+                        //
+                        // We are only optimising (exactly) 64-bit add operations for now, but
+                        // there is certainly oppertunity to optimised other cases later.
+                        //
+                        // We could have used Rust `as` casts to truncate and sign-extend here,
+                        // since we are currently only dealing with i32s and i64s, but if/when we
+                        // want to cover operations on other "odd-bit-size" integers we will need
+                        // these custom implementations.
+                        if *bit_size == 64 && v.truncate(32).sign_extend(32, 64) == *v {
+                            let v32 = v.truncate(32);
+                            let [lhs_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::InputOutput(lhs)],
+                            );
+                            dynasm!(self.asm; add Rq(lhs_reg.code()), v32 as i32);
+                            return;
+                        }
+                        // Same optimisation, but for 32-bit add.
+                        //
+                        // This time the constant fits by definition.
+                        if *bit_size == 32 {
+                            let v32 = v.truncate(32);
+                            let [lhs_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::InputOutput(lhs)],
+                            );
+                            dynasm!(self.asm; add Rd(lhs_reg.code()), v32 as i32);
+                            return;
+                        }
+                    }
+                    _ => (),
+                }
+
                 let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
+                match byte_size {
                     1 => dynasm!(self.asm; add Rb(lhs_reg.code()), Rb(rhs_reg.code())),
                     2 => dynasm!(self.asm; add Rw(lhs_reg.code()), Rw(rhs_reg.code())),
                     4 => dynasm!(self.asm; add Rd(lhs_reg.code()), Rd(rhs_reg.code())),
@@ -1015,7 +1063,14 @@ impl<'a> Assemble<'a> {
             }
         }
         // If the function we called has a return value, then store it into a local variable.
-        match fty.ret_type(self.m) {
+        //
+        // FIXME: We only support up to register-sized return values at the moment.
+        let ret_ty = fty.ret_type(self.m);
+        #[cfg(debug_assertions)]
+        if !matches!(ret_ty, Ty::Void) {
+            debug_assert!(ret_ty.byte_size().unwrap() <= REG64_SIZE);
+        }
+        match ret_ty {
             Ty::Void => (),
             Ty::Float(_) => {
                 let [_] = self.ra.assign_fp_regs(
@@ -2067,6 +2122,116 @@ mod tests {
                 ; %2: i64 = add %0, %1
                 ......
                 {{_}} {{_}}: add r.64.x, r.64.y
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_const_add_one_i64() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = load_ti 0
+                %1: i64 = add %0, 1i64
+            ",
+            "
+                ...
+                ; %1: i64 = add %0, 1i64
+                ......
+                {{_}} {{_}}: add r.64.x, 0x01
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_const_add_minus_one_i64() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = load_ti 0
+                %1: i64 = add %0, 18446744073709551615i64
+            ",
+            "
+                ...
+                ; %1: i64 = add %0, 18446744073709551615i64
+                ......
+                {{_}} {{_}}: add r.64.x, 0xffffffffffffffff
+                ...
+                ",
+        );
+        // note: disassembler sign-extended the immediate when displaying it.
+    }
+
+    #[test]
+    fn cg_const_add_i32max_i64() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = load_ti 0
+                %1: i64 = add %0, 2147483647i64
+            ",
+            "
+                ...
+                ; %1: i64 = add %0, 2147483647i64
+                ......
+                {{_}} {{_}}: add r.64.x, 0x7fffffff
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_const_add_i32max_plus_one_i64() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = load_ti 0
+                %1: i64 = add %0, 2147483648i64
+            ",
+            "
+                ...
+                ; %1: i64 = add %0, 2147483648i64
+                ......
+                {{_}} {{_}}: mov r.64.x, 0x80000000
+                {{_}} {{_}}: add r.64.y, r.64.x
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_const_add_one_i32() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = add %0, 1i32
+            ",
+            "
+                ...
+                ; %1: i32 = add %0, 1i32
+                ......
+                {{_}} {{_}}: add r.32.x, 0x01
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_const_add_minus_one_i32() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = add %0, 4294967295i32
+            ",
+            "
+                ...
+                ; %1: i32 = add %0, 4294967295i32
+                ......
+                {{_}} {{_}}: add r.32.x, 0xffffffff
                 ...
                 ",
         );
