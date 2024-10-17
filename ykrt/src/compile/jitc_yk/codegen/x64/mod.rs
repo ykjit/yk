@@ -428,7 +428,7 @@ impl<'a> Assemble<'a> {
             16 => dynasm!(self.asm; movzx Rq(reg.code()), Rw(reg.code())),
             32 => {
                 // mov into a 32-bit register sign-extends up to 64 already.
-                dynasm!(self.asm; mov Rw(reg.code()), Rw(reg.code()));
+                dynasm!(self.asm; mov Rd(reg.code()), Rd(reg.code()));
             }
             64 => (), // nothing to do.
             _ => {
