@@ -26,8 +26,12 @@ const RECOVER_REG: [usize; 31] = [
 /// from zero). This is used to allocate arrays whose indices need to be the DWARF register number.
 const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 
-/// When a guard fails, check if we have compiled a side-trace for this guard and if so, return
-/// it's address. Otherwise return NULL, indicating that we need to deoptimise.
+/// When a guard fails, checks if there exists a compiled side-trace for this guard and if so,
+/// returns it's address. Otherwise returns a null pointer, indicating that we need to deoptimise.
+///
+/// # Arguments
+///
+/// * gidx - The [GuardIdx] of the failing guard.
 #[no_mangle]
 pub(crate) extern "C" fn __yk_guardcheck(gidx: u64) -> *const libc::c_void {
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
@@ -61,6 +65,7 @@ pub(crate) extern "C" fn __yk_guardcheck(gidx: u64) -> *const libc::c_void {
     std::ptr::null()
 }
 
+/// Informs the meta-tracer that we have looped back from a side-trace into the root trace.
 pub(crate) extern "C" fn __yk_reenter_jit() {
     // Get the root trace and set it as the new running trace.
     let (_, root) = MTThread::with(|mtt| mtt.running_trace());
@@ -77,10 +82,15 @@ pub(crate) extern "C" fn __yk_reenter_jit() {
 }
 
 /// Deoptimise back to the interpreter. This function is called from a failing guard (see
-/// `x86_64/mod.rs`). The arguments are: `frameaddr` is the RBP value for main interpreter loop
-/// (and also the JIT since the trace executes on the same frame); `gidx` the ID of the failing
-/// guard; and `gp_regs` is a pointer to the saved values of the 16 general purpose registers in
-/// the same order as [lsregalloc::GP_REGS].
+/// [super::Assemble::codegen]).
+///
+/// # Arguments
+///
+/// * `frameaddr` - the RBP value for main interpreter loop (and also the JIT since the trace
+///   executes on the same frame)
+/// * `gidx` - the [GuardIdx] of the failing guard
+/// * `gp_regs` - a pointer to the saved values of the 16 general purpose registers in the same
+///   order as [crate::compile::jitc_yk::codegen::x64::lsregalloc::GP_REGS]
 #[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
     frameaddr: *const c_void,
@@ -318,13 +328,15 @@ pub(crate) extern "C" fn __yk_deopt(
     drop(ctr);
 
     // Now overwrite the existing stack with our newly recreated one.
-    unsafe { __replace_stack(newframedst as *mut c_void, newstack, memsize) };
+    unsafe { replace_stack(newframedst as *mut c_void, newstack, memsize) };
 }
 
+/// Writes the stack frames that we recreated in [__yk_deopt] onto the current stack, overwriting
+/// the stack frames of any running traces in the process. This deoptimises trace execution after
+/// which we can safely return to the normal execution of the interpreter.
 #[cfg(target_arch = "x86_64")]
 #[naked]
-#[no_mangle]
-unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
+unsafe extern "C" fn replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
     std::arch::naked_asm!(
         // Reset RSP to the end of the control point frame (this doesn't include the
         // return address which will thus be overwritten in the process)

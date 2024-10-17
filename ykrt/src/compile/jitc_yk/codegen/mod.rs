@@ -23,7 +23,7 @@ pub(crate) trait CodeGen: Send + Sync {
     /// # Arguments
     ///
     /// * `sp_offset` - Stack pointer offset from the base pointer of the interpreter frame as
-    ///   defined in [YkSideTraceInfo::sp_offset].
+    ///   defined in [super::YkSideTraceInfo::sp_offset].
     fn codegen(
         &self,
         m: Module,
