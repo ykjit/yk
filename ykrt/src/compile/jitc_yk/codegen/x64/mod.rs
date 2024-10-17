@@ -829,39 +829,39 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::FAdd => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
+                match byte_size {
                     4 => dynasm!(self.asm; addss Rx(lhs_reg.code()), Rx(rhs_reg.code())),
                     8 => dynasm!(self.asm; addsd Rx(lhs_reg.code()), Rx(rhs_reg.code())),
                     _ => todo!(),
                 }
             }
             BinOp::FMul => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
+                match byte_size {
                     4 => dynasm!(self.asm; mulss Rx(lhs_reg.code()), Rx(rhs_reg.code())),
                     8 => dynasm!(self.asm; mulsd Rx(lhs_reg.code()), Rx(rhs_reg.code())),
                     _ => todo!(),
                 }
             }
             BinOp::FSub => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
+                match byte_size {
                     4 => dynasm!(self.asm; subss Rx(lhs_reg.code()), Rx(rhs_reg.code())),
                     8 => dynasm!(self.asm; subsd Rx(lhs_reg.code()), Rx(rhs_reg.code())),
                     _ => todo!(),
