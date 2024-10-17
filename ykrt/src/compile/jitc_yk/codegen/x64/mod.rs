@@ -551,6 +551,7 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::AShr => {
+                // Note that it's UB to shift by >= the bit width of the first operand.
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
@@ -559,6 +560,7 @@ impl<'a> Assemble<'a> {
                     iidx,
                     [
                         RegConstraint::InputOutput(lhs),
+                        // When using a register second operand, it has to be passed in CL.
                         RegConstraint::InputIntoReg(rhs, Rq::RCX),
                     ],
                 );
@@ -573,6 +575,7 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::LShr => {
+                // Note that it's UB to shift by >= the bit width of the first operand.
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
@@ -581,6 +584,7 @@ impl<'a> Assemble<'a> {
                     iidx,
                     [
                         RegConstraint::InputOutput(lhs),
+                        // When using a register second operand, it has to be passed in CL.
                         RegConstraint::InputIntoReg(rhs, Rq::RCX),
                     ],
                 );
@@ -595,12 +599,14 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::Shl => {
+                // Note that it's UB to shift by >= the bit width of the first operand.
                 let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
                         RegConstraint::InputOutput(lhs),
+                        // When using a register second operand, it has to be passed in CL.
                         RegConstraint::InputIntoReg(rhs, Rq::RCX),
                     ],
                 );
