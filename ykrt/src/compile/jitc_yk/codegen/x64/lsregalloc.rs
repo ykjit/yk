@@ -533,9 +533,10 @@ impl LSRegAlloc<'_> {
             Const::Float(_tyidx, _x) => todo!(),
             Const::Int(tyidx, x) => {
                 // `unwrap` cannot fail, integers are sized.
-                match self.m.type_(*tyidx).byte_size().unwrap() {
-                    s if s <= REG64_BYTESIZE => dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64),
-                    _ => todo!(),
+                if self.m.type_(*tyidx).byte_size().unwrap() <= REG64_BYTESIZE {
+                    dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64);
+                } else {
+                    todo!();
                 }
             }
             Const::Ptr(x) => {
