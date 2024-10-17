@@ -19,11 +19,17 @@ pub(crate) mod x64;
 /// This must be capable of generating code for multiple modules, possibly in parallel.
 pub(crate) trait CodeGen: Send + Sync {
     /// Generate code for the module `m`.
+    ///
+    /// # Arguments
+    ///
+    /// * `sp_offset` - Stack pointer offset from the base pointer of the interpreter frame as
+    ///   defined in [YkSideTraceInfo::sp_offset].
     fn codegen(
         &self,
         m: Module,
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
+        sp_offset: Option<usize>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 

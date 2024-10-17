@@ -8,6 +8,7 @@ use crate::{
     mt::MT,
     trace::AOTTraceIterator,
 };
+use codegen::reg_alloc::VarLocation;
 use parking_lot::Mutex;
 use std::{
     env,
@@ -16,6 +17,7 @@ use std::{
     sync::{Arc, LazyLock},
 };
 use ykaddr::addr::symbol_to_ptr;
+use yksmp::Location;
 
 pub mod aot_ir;
 mod codegen;
@@ -40,9 +42,27 @@ pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
     aot_ir::deserialise_module(ir_slice).unwrap()
 });
 
+struct RootTracePtr(*const libc::c_void);
+unsafe impl Send for RootTracePtr {}
+unsafe impl Sync for RootTracePtr {}
+
 struct YkSideTraceInfo {
+    /// The AOT IR block the failing guard originated from.
+    bid: aot_ir::BBlockId,
     callframes: Vec<jit_ir::InlinedFrame>,
-    aotlives: Vec<aot_ir::InstID>,
+    /// Mapping of AOT variables to their current location. Used to pass variables from a parent
+    /// trace into a side-trace.
+    lives: Vec<(aot_ir::InstID, Location)>,
+    /// The address of the parent trace. This is where the side-trace needs to jump back to after it
+    /// finished its execution.
+    root_addr: RootTracePtr,
+    /// The live variables at the entry point of the parent trace.
+    entry_vars: Vec<VarLocation>,
+    /// Stack pointer offset from the base pointer of the interpreter frame including the
+    /// interpreter frame itself and all parent traces. Since all traces execute in the interpreter
+    /// frame, each trace adds to this value, making extra space on the stack. This then forms the
+    /// new `sp_offset` for any side-traces of this trace.
+    sp_offset: usize,
 }
 
 impl SideTraceInfo for YkSideTraceInfo {
@@ -59,8 +79,8 @@ impl YkSideTraceInfo {
     }
 
     /// Return the live AOT variables for this guard. Used to write live values to during deopt.
-    fn aotlives(&self) -> &[aot_ir::InstID] {
-        &self.aotlives
+    fn lives(&self) -> &[(aot_ir::InstID, Location)] {
+        &self.lives
     }
 }
 
@@ -96,6 +116,7 @@ impl Compiler for JITCYk {
         }
 
         let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo>().unwrap());
+        let sp_offset = sti.as_ref().map(|x| x.sp_offset);
 
         let mut jit_mod = trace_builder::build(
             mt.next_compiled_trace_id(),
@@ -120,7 +141,8 @@ impl Compiler for JITCYk {
             }
         }
 
-        let ct = self.codegen.codegen(jit_mod, mt, hl)?;
+        // FIXME: This needs to be the combined stacksize of all parent traces.
+        let ct = self.codegen.codegen(jit_mod, mt, hl, sp_offset)?;
 
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(

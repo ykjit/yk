@@ -80,7 +80,7 @@ mod parser;
 #[cfg(any(debug_assertions, test))]
 mod well_formed;
 
-use super::aot_ir;
+use super::{aot_ir, codegen::reg_alloc::VarLocation};
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{
@@ -120,6 +120,8 @@ pub(crate) struct Module {
     types: IndexSet<Ty>,
     /// The trace-input location pool.
     tilocs: Vec<yksmp::Location>,
+    /// Addresses of root traces to jump to at the end of a side-trace.
+    root_jump_ptr: *const libc::c_void,
     /// The type index of the void type. Cached for convenience.
     void_tyidx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
@@ -149,6 +151,8 @@ pub(crate) struct Module {
     loop_start_vars: Vec<Operand>,
     /// Live variables at the end of the loop.
     loop_jump_vars: Vec<Operand>,
+    /// Live variables at the beginning of the root trace.
+    root_entry_vars: Vec<VarLocation>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
@@ -228,6 +232,7 @@ impl Module {
             consts,
             types,
             tilocs: Vec::new(),
+            root_jump_ptr: std::ptr::null(),
             void_tyidx,
             ptr_tyidx,
             int1_tyidx,
@@ -241,6 +246,7 @@ impl Module {
             indirect_calls: Vec::new(),
             loop_start_vars: Vec::new(),
             loop_jump_vars: Vec::new(),
+            root_entry_vars: Vec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
         })
@@ -562,12 +568,35 @@ impl Module {
         self.loop_start_vars.push(op);
     }
 
+    /// Store the entry live variables of the root traces so we can copy this side-trace's live
+    /// variables to the right place before jumping back to the root trace.
+    pub(crate) fn set_root_entry_vars(&mut self, entry_vars: &[VarLocation]) {
+        self.root_entry_vars.extend_from_slice(entry_vars);
+    }
+
     pub(crate) fn loop_jump_vars(&self) -> &[Operand] {
         &self.loop_jump_vars
     }
 
+    /// Get the entry live variables of the root trace.
+    pub(crate) fn root_entry_vars(&self) -> &[VarLocation] {
+        &self.root_entry_vars
+    }
+
     pub(crate) fn push_loop_jump_var(&mut self, op: Operand) {
         self.loop_jump_vars.push(op);
+    }
+
+    /// Get the address of the root trace. This is where we need jump to at the end of a
+    /// side-trace.
+    pub(crate) fn root_jump_addr(&self) -> *const libc::c_void {
+        self.root_jump_ptr
+    }
+
+    /// Set the entry address of the root trace. This is where we need jump to at the end of a
+    /// side-trace.
+    pub(crate) fn set_root_jump_addr(&mut self, ptr: *const libc::c_void) {
+        self.root_jump_ptr = ptr;
     }
 
     pub(crate) fn inst_vals_alive_until(&self) -> Vec<InstIdx> {
@@ -1274,6 +1303,8 @@ impl Hash for ConstIndexSetWrapper {
 #[derive(Debug)]
 /// Stores additional guard information.
 pub(crate) struct GuardInfo {
+    /// The id of the AOT block that created this guard.
+    bid: aot_ir::BBlockId,
     /// Live variables, mapping AOT vars to JIT [Operand]s.
     live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
     // Inlined frames info.
@@ -1283,13 +1314,20 @@ pub(crate) struct GuardInfo {
 
 impl GuardInfo {
     pub(crate) fn new(
+        bid: aot_ir::BBlockId,
         live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
         inlined_frames: Vec<InlinedFrame>,
     ) -> Self {
         Self {
+            bid,
             live_vars,
             inlined_frames,
         }
+    }
+
+    /// Return the AOT block for this guard.
+    pub(crate) fn bid(&self) -> &aot_ir::BBlockId {
+        &self.bid
     }
 
     /// Return the `AOT instruction -> PackedOperand` mapping for this guard.
@@ -1370,6 +1408,7 @@ pub(crate) enum Inst {
     /// Marks the place to loop back to at the end of the JITted code.
     TraceLoopStart,
     TraceLoopJump,
+    RootJump,
 
     SExt(SExtInst),
     ZeroExtend(ZeroExtendInst),
@@ -1420,6 +1459,7 @@ impl Inst {
             Self::Guard(..) => m.void_tyidx(),
             Self::TraceLoopStart => m.void_tyidx(),
             Self::TraceLoopJump => m.void_tyidx(),
+            Self::RootJump => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
             Self::ZeroExtend(si) => si.dest_tyidx(),
             Self::Trunc(t) => t.dest_tyidx(),
@@ -1456,6 +1496,7 @@ impl Inst {
             Inst::Guard(_) => true,
             Inst::TraceLoopStart => true,
             Inst::TraceLoopJump => true,
+            Inst::RootJump => true,
             Inst::SExt(_) => false,
             Inst::ZeroExtend(_) => false,
             Inst::Trunc(_) => false,
@@ -1532,6 +1573,11 @@ impl Inst {
                 }
             }
             Inst::TraceLoopJump => {
+                for x in &m.loop_jump_vars {
+                    x.map_iidx(f);
+                }
+            }
+            Inst::RootJump => {
                 for x in &m.loop_jump_vars {
                     x.map_iidx(f);
                 }
@@ -1630,6 +1676,14 @@ impl Inst {
                 }
             }
             Inst::TraceLoopJump => {
+                for val in &m.loop_jump_vars {
+                    match val {
+                        Operand::Var(iidx) => f(*iidx),
+                        Operand::Const(_) => (),
+                    }
+                }
+            }
+            Inst::RootJump => {
                 for val in &m.loop_jump_vars {
                     match val {
                         Operand::Var(iidx) => f(*iidx),
@@ -1818,6 +1872,16 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::TraceLoopJump => {
                 // Just marks a location, so we format it to look like a label.
                 write!(f, "tloop_jump [")?;
+                for var in &self.m.loop_jump_vars {
+                    write!(f, "{}", var.display(self.m))?;
+                    if var != self.m.loop_jump_vars.last().unwrap() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]:")
+            }
+            Inst::RootJump => {
+                write!(f, "parent_jump {:?} [", self.m.root_jump_ptr)?;
                 for var in &self.m.loop_jump_vars {
                     write!(f, "{}", var.display(self.m))?;
                     if var != self.m.loop_jump_vars.last().unwrap() {

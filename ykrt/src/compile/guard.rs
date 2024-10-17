@@ -35,11 +35,7 @@ impl Guard {
                     *lk = GuardState::SideTracing;
                     true
                 } else {
-                    // FIXME: temporarily disable side-tracing by not ever adding to the `failed` count.
-                    #[allow(clippy::identity_op)]
-                    {
-                        *lk = GuardState::Counting(x + 0);
-                    }
+                    *lk = GuardState::Counting(x + 1);
                     false
                 }
             }

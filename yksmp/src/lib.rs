@@ -255,6 +255,7 @@ impl StackMapParser<'_> {
 
             let location = match kind {
                 0x01 => {
+                    // FIXME: This doesn't need `offset` anymore.
                     let offset = self.read_i32();
                     Location::Register(dwreg, size, offset, extras)
                 }

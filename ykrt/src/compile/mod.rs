@@ -73,6 +73,7 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// Return a reference to the guard `id`.
     fn guard(&self, gidx: GuardIdx) -> &Guard;
 
+    /// The pointer to this trace's executable code.
     fn entry(&self) -> *const c_void;
 
     /// Return a weak reference to the [HotLocation] that started the top-level trace. Note that a

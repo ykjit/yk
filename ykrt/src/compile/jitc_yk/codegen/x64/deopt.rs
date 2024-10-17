@@ -4,12 +4,12 @@ use crate::{
         jitc_yk::codegen::reg_alloc::{Register, VarLocation},
         GuardIdx,
     },
-    log::{stats::TimingState, Verbosity},
+    log::Verbosity,
     mt::MTThread,
 };
 use dynasmrt::Register as _;
 use libc::c_void;
-use std::{mem, ptr, sync::Arc};
+use std::{ptr, sync::Arc};
 use yksmp::Location as SMLocation;
 
 use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_SIZE};
@@ -26,6 +26,56 @@ const RECOVER_REG: [usize; 31] = [
 /// from zero). This is used to allocate arrays whose indices need to be the DWARF register number.
 const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 
+/// When a guard fails, check if we have compiled a side-trace for this guard and if so, return
+/// it's address. Otherwise return NULL, indicating that we need to deoptimise.
+#[no_mangle]
+pub(crate) extern "C" fn __yk_guardcheck(gidx: u64) -> *const libc::c_void {
+    let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
+    // The currently executed trace.
+    let (ctr, root) = MTThread::with(|mtt| mtt.running_trace());
+    let ctr = ctr
+        .unwrap()
+        .as_any()
+        .downcast::<X64CompiledTrace>()
+        .unwrap();
+    let info = &ctr.deoptinfo[&usize::from(gidx)];
+    if let Some(st) = info.guard.ctr() {
+        let staddr = st.entry();
+        let mt = Arc::clone(&ctr.mt);
+        mt.log.log(Verbosity::JITEvent, "execute-side-trace");
+
+        // If `root` is Some, then this is the side-trace of a side-trace, so we need to pass in
+        // the root instead of the immediate parent.
+        if root.is_some() {
+            MTThread::with(|mtt| {
+                mtt.set_running_trace(Some(st), root);
+            });
+        } else {
+            MTThread::with(|mtt| {
+                mtt.set_running_trace(Some(st), Some(ctr));
+            });
+        };
+
+        return staddr;
+    }
+    std::ptr::null()
+}
+
+pub(crate) extern "C" fn __yk_reenter_jit() {
+    // Get the root trace and set it as the new running trace.
+    let (_, root) = MTThread::with(|mtt| mtt.running_trace());
+    let root = root
+        .unwrap()
+        .as_any()
+        .downcast::<X64CompiledTrace>()
+        .unwrap();
+    let mt = Arc::clone(&root.mt);
+    mt.log.log(Verbosity::JITEvent, "re-enter-jit-code");
+    MTThread::with(|mtt| {
+        mtt.set_running_trace(Some(root), None);
+    });
+}
+
 /// Deoptimise back to the interpreter. This function is called from a failing guard (see
 /// `x86_64/mod.rs`). The arguments are: `frameaddr` is the RBP value for main interpreter loop
 /// (and also the JIT since the trace executes on the same frame); `gidx` the ID of the failing
@@ -37,9 +87,11 @@ pub(crate) extern "C" fn __yk_deopt(
     gidx: u64,
     gp_regs: &[u64; 16],
     fp_regs: &[u64; 16],
-) -> ! {
+) -> *const libc::c_void {
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
-    let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
+    let (ctr, _) = MTThread::with(|mtt| mtt.running_trace());
+    let ctr = ctr
+        .unwrap()
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
@@ -47,51 +99,6 @@ pub(crate) extern "C" fn __yk_deopt(
     let info = &ctr.deoptinfo[&usize::from(gidx)];
     let mt = Arc::clone(&ctr.mt);
 
-    if let Some(st) = info.guard.ctr() {
-        // Prepare the traceinputs "struct" (for now this is just a vector) and pass it into the
-        // side-trace.
-        let mut ykctrlpvars = Vec::new();
-        for (_, jitval) in &info.live_vars {
-            let val = match jitval {
-                VarLocation::Stack { frame_off, size } => {
-                    let p = unsafe { frameaddr.byte_sub(usize::try_from(*frame_off).unwrap()) };
-                    match *size {
-                        1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
-                        2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
-                        4 => unsafe { u64::from(std::ptr::read::<u32>(p as *const u32)) },
-                        8 => unsafe { std::ptr::read::<u64>(p as *const u64) },
-                        _ => todo!(),
-                    }
-                }
-                VarLocation::Register(x) => match x {
-                    Register::GP(x) => gp_regs[usize::from(x.code())],
-                    Register::FP(_) => todo!(),
-                },
-                VarLocation::ConstFloat(_) => todo!(),
-                VarLocation::ConstInt { bits: _, v } => *v,
-                VarLocation::Direct { .. } => panic!(),
-            };
-            ykctrlpvars.push(val);
-        }
-
-        let f = unsafe {
-            mem::transmute::<*const c_void, unsafe extern "C" fn(*mut c_void, *const c_void) -> !>(
-                st.entry(),
-            )
-        };
-        let mt = Arc::clone(&ctr.mt);
-        drop(ctr);
-        mt.stats.timing_state(TimingState::JitExecuting);
-        mt.log.log(Verbosity::JITEvent, "execute-side-trace");
-
-        MTThread::with(|mtt| {
-            mtt.set_running_trace(Some(st));
-        });
-
-        // FIXME: Calling this function overwrites the current (Rust) function frame,
-        // rather than unwinding it. https://github.com/ykjit/yk/issues/778
-        unsafe { f(ykctrlpvars.as_ptr() as *mut c_void, frameaddr) };
-    }
     mt.log.log(Verbosity::JITEvent, "deoptimise");
 
     // Calculate space required for the new stack.
