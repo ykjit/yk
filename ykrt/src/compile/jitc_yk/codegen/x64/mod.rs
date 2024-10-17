@@ -769,7 +769,7 @@ impl<'a> Assemble<'a> {
                         self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.zero_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm
-                            ; xor rdx, rdx // Zero extend RAX into RDX:RAX.
+                            ; xor rdx, rdx
                             ; div Rq(rhs_reg.code())
                         );
                     }
