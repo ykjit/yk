@@ -528,6 +528,7 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
                 match byte_size {
+                    0 => unreachable!(),
                     1..=8 => {
                         // OK to ignore any undefined high-order bits here.
                         dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code()));
@@ -543,6 +544,7 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
                 match size {
+                    0 => unreachable!(),
                     1..=8 => {
                         // OK to ignore any undefined high-order bits here.
                         dynasm!(self.asm; and Rq(lhs_reg.code()), Rq(rhs_reg.code()))
@@ -566,6 +568,7 @@ impl<'a> Assemble<'a> {
                 );
                 debug_assert_eq!(_rhs_reg, Rq::RCX);
                 match bit_size {
+                    0 => unreachable!(),
                     1..=64 => {
                         // Ensure we shift in the correct most-significant bits.
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
@@ -590,6 +593,7 @@ impl<'a> Assemble<'a> {
                 );
                 debug_assert_eq!(_rhs_reg, Rq::RCX);
                 match bit_size {
+                    0 => unreachable!(),
                     1..=64 => {
                         // Ensure we shift in zeros at the most-significant bits.
                         self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
@@ -612,6 +616,7 @@ impl<'a> Assemble<'a> {
                 );
                 debug_assert_eq!(_rhs_reg, Rq::RCX);
                 match byte_size {
+                    0 => unreachable!(),
                     1..=8 => {
                         // OK to ignore any undefined high-order bits here.
                         dynasm!(self.asm; shl Rq(lhs_reg.code()), cl);
@@ -634,6 +639,7 @@ impl<'a> Assemble<'a> {
                 );
                 debug_assert_eq!(_lhs_reg, Rq::RAX);
                 match byte_size {
+                    0 => unreachable!(),
                     1..=8 => {
                         // OK to ignore any undefined high-order bits here.
                         dynasm!(self.asm; mul Rq(rhs_reg.code()));
@@ -651,6 +657,7 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
                 match byte_size {
+                    0 => unreachable!(),
                     1..=8 => {
                         // OK to ignore any undefined high-order bits here.
                         dynasm!(self.asm; or Rq(lhs_reg.code()), Rq(rhs_reg.code()));
@@ -676,6 +683,7 @@ impl<'a> Assemble<'a> {
                     RegSet::from(Rq::RDX),
                 );
                 match bit_size {
+                    0 => unreachable!(),
                     1..=64 => {
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
@@ -705,6 +713,7 @@ impl<'a> Assemble<'a> {
                 debug_assert_eq!(lhs_reg, Rq::RAX);
                 debug_assert_eq!(_rem_reg, Rq::RDX);
                 match bit_size {
+                    0 => unreachable!(),
                     1..=64 => {
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
@@ -726,6 +735,7 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
                 match bit_size {
+                    0 => unreachable!(),
                     1..=64 => {
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
@@ -742,6 +752,7 @@ impl<'a> Assemble<'a> {
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
                 match size {
+                    0 => unreachable!(),
                     1..=8 => dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code())),
                     _ => todo!(),
                 }
@@ -765,6 +776,7 @@ impl<'a> Assemble<'a> {
                 );
                 debug_assert_eq!(lhs_reg, Rq::RAX);
                 match bit_size {
+                    0 => unreachable!(),
                     1..=64 => {
                         self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.zero_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
