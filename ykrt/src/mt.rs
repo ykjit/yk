@@ -366,7 +366,7 @@ impl MT {
 
                 // FIXME: Calling this function overwrites the current (Rust) function frame,
                 // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
-                unsafe { exec_trace(frameaddr, rsp, trace_addr) };
+                unsafe { __yk_exec_trace(frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl) => {
                 self.log.log(Verbosity::JITEvent, "start-tracing");
@@ -692,7 +692,7 @@ impl MT {
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
-unsafe extern "C" fn exec_trace(
+unsafe extern "C" fn __yk_exec_trace(
     frameaddr: *const c_void,
     rsp: *const c_void,
     trace: *const c_void,

@@ -328,7 +328,7 @@ pub(crate) extern "C" fn __yk_deopt(
     drop(ctr);
 
     // Now overwrite the existing stack with our newly recreated one.
-    unsafe { __replace_stack(newframedst as *mut c_void, newstack, memsize) };
+    unsafe { replace_stack(newframedst as *mut c_void, newstack, memsize) };
 }
 
 /// Writes the stack frames that we recreated in [__yk_deopt] onto the current stack, overwriting
@@ -336,8 +336,7 @@ pub(crate) extern "C" fn __yk_deopt(
 /// which we can safely return to the normal execution of the interpreter.
 #[cfg(target_arch = "x86_64")]
 #[naked]
-#[no_mangle]
-unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
+unsafe extern "C" fn replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
     std::arch::naked_asm!(
         // Reset RSP to the end of the control point frame (this doesn't include the
         // return address which will thus be overwritten in the process)
