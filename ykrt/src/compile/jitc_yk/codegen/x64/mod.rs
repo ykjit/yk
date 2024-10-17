@@ -834,6 +834,8 @@ impl<'a> Assemble<'a> {
         }
     }
 
+    /// Codegen a [jit_ir::LoadTraceInputInst]. This only informs the register allocator about the
+    /// locations of live variables without generating any actual machine code.
     fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
         let m = match &self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
             yksmp::Location::Register(0, ..) => {
@@ -1335,10 +1337,8 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_traceloopjump(&mut self) {
-        // Loop the JITted code if the `tloop_start` label is present. If not we are dealing with
-        // IR created by a test or a side-trace (the latter likely needs something similar to loop
-        // jumps, but instead of jumping within the same trace we want it to jump to the outer-most
-        // parent trace).
+        // Loop the JITted code if the `tloop_start` label is present (not relevant for IR created
+        // by a test or a side-trace).
         let label = StaticLabel::global("tloop_start");
         match self.asm.labels().resolve_static(&label) {
             Ok(_) => {

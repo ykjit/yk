@@ -46,17 +46,20 @@ struct RootTracePtr(*const libc::c_void);
 unsafe impl Send for RootTracePtr {}
 unsafe impl Sync for RootTracePtr {}
 
+/// Contains information required for side-tracing.
 struct YkSideTraceInfo {
     /// The AOT IR block the failing guard originated from.
     bid: aot_ir::BBlockId,
+    /// Inlined calls tracked by [trace_builder] during processing of a trace. Required for
+    /// side-tracing in order setup a new [trace_builder] and process a side-trace.
     callframes: Vec<jit_ir::InlinedFrame>,
     /// Mapping of AOT variables to their current location. Used to pass variables from a parent
     /// trace into a side-trace.
     lives: Vec<(aot_ir::InstID, Location)>,
-    /// The address of the parent trace. This is where the side-trace needs to jump back to after it
+    /// The address of the root trace. This is where the side-trace needs to jump back to after it
     /// finished its execution.
     root_addr: RootTracePtr,
-    /// The live variables at the entry point of the parent trace.
+    /// The live variables at the entry point of the root trace.
     entry_vars: Vec<VarLocation>,
     /// Stack pointer offset from the base pointer of the interpreter frame including the
     /// interpreter frame itself and all parent traces. Since all traces execute in the interpreter
