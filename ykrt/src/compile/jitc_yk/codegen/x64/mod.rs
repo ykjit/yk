@@ -395,7 +395,7 @@ impl<'a> Assemble<'a> {
     /// register.
     ///
     /// `from_bits` must be between 1 and 64.
-    fn sign_extend_reg64(&mut self, reg: Rq, from_bits: u8) {
+    fn sign_extend_to_reg64(&mut self, reg: Rq, from_bits: u8) {
         debug_assert!(from_bits > 0 && from_bits <= 64);
         // For "regularly-sized" integers, we can use movsx to achieve the sign extend and without
         // fear of register stalls.
@@ -419,7 +419,7 @@ impl<'a> Assemble<'a> {
     /// register.
     ///
     /// `from_bits` must be between 1 and 64.
-    fn zero_extend_reg64(&mut self, reg: Rq, from_bits: u8) {
+    fn zero_extend_to_reg64(&mut self, reg: Rq, from_bits: u8) {
         debug_assert!(from_bits > 0 && from_bits <= 64);
         // For "regularly-sized" integers, we can use movzx to achieve the zero extend and without
         // fear of register stalls.
@@ -568,7 +568,7 @@ impl<'a> Assemble<'a> {
                 match bit_size {
                     1..=64 => {
                         // Ensure we shift in the correct most-significant bits.
-                        self.sign_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm; sar Rq(lhs_reg.code()), cl);
                     }
                     _ => todo!(),
@@ -592,7 +592,7 @@ impl<'a> Assemble<'a> {
                 match bit_size {
                     1..=64 => {
                         // Ensure we shift in zeros at the most-significant bits.
-                        self.zero_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm; shr Rq(lhs_reg.code()), cl);
                     }
                     _ => todo!(),
@@ -677,8 +677,8 @@ impl<'a> Assemble<'a> {
                 );
                 match bit_size {
                     1..=64 => {
-                        self.sign_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        self.sign_extend_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm
                             ; cqo // Sign extend RAX up to RDX:RAX.
                             ; idiv Rq(rhs_reg.code())
@@ -706,8 +706,8 @@ impl<'a> Assemble<'a> {
                 debug_assert_eq!(_rem_reg, Rq::RDX);
                 match bit_size {
                     1..=64 => {
-                        self.sign_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        self.sign_extend_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm
                             ; cqo // Sign extend RAX up to RDX:RAX.
                             ; idiv Rq(rhs_reg.code())
@@ -727,8 +727,8 @@ impl<'a> Assemble<'a> {
                 );
                 match bit_size {
                     1..=64 => {
-                        self.sign_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        self.sign_extend_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm; sub Rq(lhs_reg.code()), Rq(rhs_reg.code()));
                     }
                     _ => todo!(),
@@ -766,8 +766,8 @@ impl<'a> Assemble<'a> {
                 debug_assert_eq!(lhs_reg, Rq::RAX);
                 match bit_size {
                     1..=64 => {
-                        self.zero_extend_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        self.zero_extend_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                        self.zero_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm
                             ; xor rdx, rdx // Zero extend RAX into RDX:RAX.
                             ; div Rq(rhs_reg.code())
