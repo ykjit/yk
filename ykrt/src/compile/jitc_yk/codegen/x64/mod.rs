@@ -553,7 +553,9 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::AShr => {
-                // Note that it's UB to shift by >= the bit width of the first operand.
+                // We inherit from LLVM the following semantics: a poison value is computed if you
+                // shift by >= the bit width of the first operand. We can ignore this, since we are
+                // free to compute any value in place of a poison value.
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
@@ -579,7 +581,9 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::LShr => {
-                // Note that it's UB to shift by >= the bit width of the first operand.
+                // We inherit from LLVM the following semantics: a poison value is computed if you
+                // shift by >= the bit width of the first operand. We can ignore this, since we are
+                // free to compute any value in place of a poison value.
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
@@ -605,7 +609,9 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::Shl => {
-                // Note that it's UB to shift by >= the bit width of the first operand.
+                // We inherit from LLVM the following semantics: a poison value is computed if you
+                // shift by >= the bit width of the first operand. We can ignore this, since we are
+                // free to compute any value in place of a poison value.
                 let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
