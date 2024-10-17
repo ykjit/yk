@@ -569,6 +569,7 @@ impl<'a> Assemble<'a> {
                 debug_assert_eq!(_rhs_reg, Rq::RCX);
                 match bit_size {
                     0 => unreachable!(),
+                    32 => dynasm!(self.asm; sar Rd(lhs_reg.code()), cl),
                     1..=64 => {
                         // Ensure we shift in the correct most-significant bits.
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
@@ -594,6 +595,7 @@ impl<'a> Assemble<'a> {
                 debug_assert_eq!(_rhs_reg, Rq::RCX);
                 match bit_size {
                     0 => unreachable!(),
+                    32 => dynasm!(self.asm; shr Rd(lhs_reg.code()), cl),
                     1..=64 => {
                         // Ensure we shift in zeros at the most-significant bits.
                         self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
@@ -675,8 +677,9 @@ impl<'a> Assemble<'a> {
                     &mut self.asm,
                     iidx,
                     [
-                        // 64-bit signed division with idiv operates on RDX:RAX and stores the
-                        // quotient in RAX (we ignore the remainder put into RDX).
+                        // 64-bit (or 32-bit) signed division with idiv operates on RDX:RAX
+                        // (EDX:EAX) and stores the quotient in RAX (EAX). We ignore the remainder
+                        // stored into RDX (EDX).
                         RegConstraint::InputOutputIntoReg(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
                     ],
@@ -684,6 +687,10 @@ impl<'a> Assemble<'a> {
                 );
                 match bit_size {
                     0 => unreachable!(),
+                    32 => dynasm!(self.asm
+                        ; cdq // Sign extend EAX up to EDX:EAX.
+                        ; idiv Rd(rhs_reg.code())
+                    ),
                     1..=64 => {
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
@@ -703,8 +710,9 @@ impl<'a> Assemble<'a> {
                     &mut self.asm,
                     iidx,
                     [
-                        // 64-bit signed division with idiv operates on RDX:RAX and stores the
-                        // remainder in RDX (we ignore the quotient put into RAX).
+                        // 64-bit (or 32-bit) signed division with idiv operates on RDX:RAX
+                        // (EDX:EAX) and stores the remainder in RDX (EDX). We ignore the
+                        // remainder stored into RAX (EAX).
                         RegConstraint::InputIntoRegAndClobber(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
                         RegConstraint::OutputFromReg(Rq::RDX),
@@ -714,6 +722,10 @@ impl<'a> Assemble<'a> {
                 debug_assert_eq!(_rem_reg, Rq::RDX);
                 match bit_size {
                     0 => unreachable!(),
+                    32 => dynasm!(self.asm
+                        ; cdq // Sign extend EAX up to EDX:EAX.
+                        ; idiv Rd(rhs_reg.code())
+                    ),
                     1..=64 => {
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
@@ -736,6 +748,7 @@ impl<'a> Assemble<'a> {
                 );
                 match bit_size {
                     0 => unreachable!(),
+                    32 => dynasm!(self.asm; sub Rd(lhs_reg.code()), Rd(rhs_reg.code())),
                     1..=64 => {
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
@@ -767,8 +780,9 @@ impl<'a> Assemble<'a> {
                     &mut self.asm,
                     iidx,
                     [
-                        // 64-bit unsigned division with idiv operates on RDX:RAX and stores the
-                        // quotient in RAX (we ignore the remainder put into RDX).
+                        // 64-bit (or 32-bit) unsigned division with idiv operates on RDX:RAX
+                        // (EDX:EAX) and stores the quotient in RAX (EAX). We ignore the remainder
+                        // put into RDX (EDX).
                         RegConstraint::InputOutputIntoReg(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
                     ],
@@ -777,6 +791,10 @@ impl<'a> Assemble<'a> {
                 debug_assert_eq!(lhs_reg, Rq::RAX);
                 match bit_size {
                     0 => unreachable!(),
+                    32 => dynasm!(self.asm
+                        ; xor edx, edx
+                        ; div Rd(rhs_reg.code())
+                    ),
                     1..=64 => {
                         self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.zero_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
