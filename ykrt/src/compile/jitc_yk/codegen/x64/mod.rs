@@ -766,7 +766,10 @@ impl<'a> Assemble<'a> {
                 );
                 match size {
                     0 => unreachable!(),
-                    1..=8 => dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code())),
+                    1..=8 => {
+                        // OK to ignore any undefined high-order bits here.
+                        dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                    }
                     _ => todo!(),
                 }
             }
