@@ -537,13 +537,13 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::And => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
+                match byte_size {
                     0 => unreachable!(),
                     1..=8 => {
                         // OK to ignore any undefined high-order bits here.
@@ -764,13 +764,13 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::Xor => {
-                let size = lhs.byte_size(self.m);
+                let byte_size = lhs.byte_size(self.m);
                 let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                 );
-                match size {
+                match byte_size {
                     0 => unreachable!(),
                     1..=8 => {
                         // OK to ignore any undefined high-order bits here.
