@@ -227,6 +227,12 @@ impl<'a> LSRegAlloc<'a> {
         self.stack.size()
     }
 
+    /// The total stack size in bytes of this trace and all it's predecessors (or more accurately
+    /// the stack pointer offset from the base pointer of the interpreter loop frame).
+    pub(crate) fn stack_size(&mut self) -> usize {
+        self.stack.size()
+    }
+
     // Is the value produced by instruction `query_iidx` used after (but not including!)
     // instruction `cur_idx`?
     fn is_inst_var_still_used_after(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
@@ -267,6 +273,12 @@ impl LSRegAlloc<'_> {
     pub(crate) fn force_assign_inst_indirect(&mut self, iidx: InstIdx, frame_off: i32) {
         debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
         self.spills[usize::from(iidx)] = SpillState::Stack(frame_off);
+    }
+
+    /// Forcibly assign a constant to an instruction. This typically only happens when traces pass
+    /// live variables that have been optimised to constants into side-traces.
+    pub(crate) fn assign_const(&mut self, iidx: InstIdx, bits: u32, v: u64) {
+        self.spills[usize::from(iidx)] = SpillState::ConstInt { bits, v };
     }
 
     /// Assign registers for the instruction at position `iidx`.
@@ -524,6 +536,12 @@ impl LSRegAlloc<'_> {
                 ),
                 x => todo!("{x}"),
             },
+            SpillState::ConstInt { bits, v } => match bits {
+                32 => {
+                    dynasm!(asm; mov Rd(reg.code()), v as i32)
+                }
+                _ => todo!(),
+            },
         }
     }
 
@@ -676,6 +694,7 @@ impl LSRegAlloc<'_> {
                         frame_off: off,
                         size,
                     },
+                    SpillState::ConstInt { bits, v } => VarLocation::ConstInt { bits, v },
                 },
             }
         }
@@ -899,6 +918,9 @@ impl LSRegAlloc<'_> {
                 self.fp_regset.set(reg);
             }
             SpillState::Direct(_off) => todo!(),
+            SpillState::ConstInt { bits: _bits, v: _v } => {
+                todo!()
+            }
         }
     }
 
@@ -1160,6 +1182,8 @@ enum SpillState {
     Stack(i32),
     /// This variable is spilt to the stack with the same semantics as [VarLocation::Direct].
     Direct(i32),
+    /// This variable is a constant.
+    ConstInt { bits: u32, v: u64 },
 }
 
 #[cfg(test)]

@@ -25,11 +25,11 @@ use crate::{
         jitc_yk::{
             aot_ir,
             jit_ir::{Const, IndirectCallIdx, InlinedFrame},
-            YkSideTraceInfo,
+            RootTracePtr, YkSideTraceInfo,
         },
         CompiledTrace, Guard, GuardIdx, SideTraceInfo,
     },
-    location::HotLocation,
+    location::{HotLocation, HotLocationKind},
     mt::MT,
 };
 use dynasmrt::{
@@ -50,7 +50,7 @@ use yksmp;
 mod deopt;
 mod lsregalloc;
 
-use deopt::__yk_deopt;
+use deopt::{__yk_deopt, __yk_guardcheck, __yk_reenter_jit};
 use lsregalloc::{LSRegAlloc, RegConstraint, RegSet};
 
 /// General purpose argument registers as defined by the x64 SysV ABI.
@@ -121,8 +121,9 @@ impl CodeGen for X64CodeGen {
         m: Module,
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
+        sp_offset: Option<usize>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        Assemble::new(&m)?.codegen(mt, hl)
+        Assemble::new(&m, sp_offset)?.codegen(mt, hl, sp_offset.is_some())
     }
 }
 
@@ -148,47 +149,64 @@ struct Assemble<'a> {
     ///
     /// Each assembly offset can have zero or more comment lines.
     comments: Cell<IndexMap<usize, Vec<String>>>,
+    /// Stack pointer offset from the base pointer of the interpreter frame. If this is a root
+    /// trace it's initialised to the size of the interpreter frame. Otherwise its value is passed
+    /// in via [YkSideTraceInfo::sp_offset].
+    sp_offset: usize,
 }
 
 impl<'a> Assemble<'a> {
-    fn new(m: &'a jit_ir::Module) -> Result<Box<Assemble<'a>>, CompilationError> {
+    fn new(
+        m: &'a jit_ir::Module,
+        sp_offset: Option<usize>,
+    ) -> Result<Box<Assemble<'a>>, CompilationError> {
         #[cfg(debug_assertions)]
         m.assert_well_formed();
 
         let asm = dynasmrt::x64::Assembler::new()
             .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
-        // Retrieve the stack size of the main interpreter frame. We need this to initialise the
-        // trace's register allocator, since we are executing the trace in the main interpreter
-        // frame in order to access local variables.
-        // FIXME: For now the control point stackmap id is always 0. Though we likely want to
-        // support multiple control points in the future. We can either pass the correct stackmap
-        // id in via the control point, or compute the stack size dynamically upon entering the
-        // control point (e.g. by subtracting the current RBP from the previous RBP).
-        let interp_stack_len = if let Ok(sm) = AOT_STACKMAPS.as_ref() {
-            let (rec, pinfo) = sm.get(0);
-            let size = if pinfo.hasfp {
-                // The frame size includes the pushed RBP, but since we only care about the size of
-                // the local variables we need to subtract it again.
-                rec.size - u64::try_from(REG64_SIZE).unwrap()
-            } else {
-                rec.size
-            };
-            usize::try_from(size).unwrap()
+        // Since we are executing the trace in the main interpreter frame we need this to
+        // initialise the trace's register allocator in order to access local variables.
+        let sp_offset = if let Some(off) = sp_offset {
+            // This is a side-trace. Use the passed in stack size to initialise the register
+            // allocator.
+            off
         } else {
-            // The unit tests in this file don't have AOT code. So if we don't find stackmaps here
-            // that's ok. In real-world programs and our C-tests this shouldn't happen though.
-            #[cfg(not(test))]
-            panic!("Couldn't find AOT stackmaps.");
-            #[cfg(test)]
-            0
+            // This is a normal trace, so we need to retrieve the stack size of the main
+            // interpreter frame.
+            // FIXME: For now the control point stackmap id is always 0. Though
+            // we likely want to support multiple control points in the future. We can either pass
+            // the correct stackmap id in via the control point, or compute the stack size
+            // dynamically upon entering the control point (e.g. by subtracting the current RBP
+            // from the previous RBP).
+            if let Ok(sm) = AOT_STACKMAPS.as_ref() {
+                let (rec, pinfo) = sm.get(0);
+                let size = if pinfo.hasfp {
+                    // The frame size includes the pushed RBP, but since we only care about the size of
+                    // the local variables we need to subtract it again.
+                    rec.size - u64::try_from(REG64_SIZE).unwrap()
+                } else {
+                    rec.size
+                };
+                usize::try_from(size).unwrap()
+            } else {
+                // The unit tests in this file don't have AOT code. So if we don't find stackmaps here
+                // that's ok. In real-world programs and our C-tests this shouldn't happen though.
+                #[cfg(not(test))]
+                panic!("Couldn't find AOT stackmaps.");
+                #[cfg(test)]
+                0
+            }
         };
+
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, interp_stack_len),
+            ra: LSRegAlloc::new(m, sp_offset),
             asm,
             loop_start_locs: Vec::new(),
             deoptinfo: HashMap::new(),
             comments: Cell::new(IndexMap::new()),
+            sp_offset,
         }))
     }
 
@@ -196,7 +214,26 @@ impl<'a> Assemble<'a> {
         mut self: Box<Self>,
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
+        issidetrace: bool,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        if issidetrace {
+            // Recover registers.
+            for reg in lsregalloc::FP_REGS.iter() {
+                dynasm!(self.asm
+                    ; pop rcx
+                    ; movq Rx(reg.code()), rcx
+                );
+            }
+            for reg in lsregalloc::GP_REGS.iter() {
+                dynasm!(self.asm; pop Rq(reg.code()));
+            }
+            // Re-align stack. This was misaligned when we pushed RSI in the guard failure routine.
+            // This isn't really neccessary since we are aligning the stack when we calculate the
+            // stack size for this trace. However, this removes the pushed RSI register which
+            // serves no further pupose at this point.
+            dynasm!(self.asm; add rsp, 8);
+        }
+
         let alloc_off = self.emit_prologue();
 
         for (iidx, inst) in self.m.iter_skipping_insts() {
@@ -217,12 +254,11 @@ impl<'a> Assemble<'a> {
                 .iter()
                 .map(|(id, l)| (*id, l.fail_label))
                 .collect::<Vec<_>>();
-
             // Debugging deopt asm is much easier if the stubs are in order.
             #[cfg(debug_assertions)]
             infos.sort_by(|a, b| a.0.cmp(&b.0));
 
-            let deopt_label = self.asm.new_dynamic_label();
+            let guardcheck_label = self.asm.new_dynamic_label();
             for (deoptid, fail_label) in infos {
                 self.comment(
                     self.asm.offset(),
@@ -235,16 +271,17 @@ impl<'a> Assemble<'a> {
                     ; push rsi // FIXME: We push RSI now so we can fish it back out in
                                // `deopt_label`.
                     ; mov rsi, deoptid
-                    ; jmp => deopt_label
+                    ; jmp => guardcheck_label
                 );
             }
 
+            let deopt_label = self.asm.new_dynamic_label();
             self.comment(self.asm.offset(), "Call __yk_deopt".to_string());
             // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire module
             // is x86 only, we don't need to worry about portability.
             #[allow(clippy::fn_to_numeric_cast)]
             {
-                dynasm!(self.asm; => deopt_label);
+                dynasm!(self.asm; => guardcheck_label);
                 // Push all the general purpose registers to the stack.
                 for (i, reg) in lsregalloc::GP_REGS.iter().rev().enumerate() {
                     if *reg == Rq::RSI {
@@ -264,7 +301,31 @@ impl<'a> Assemble<'a> {
                         ; push rcx
                     );
                 }
-                dynasm!(self.asm; mov r8, rsp);
+                dynasm!(self.asm; mov rcx, rsp);
+
+                // Check whether we need to deoptimise or jump into a side-trace.
+                dynasm!(self.asm
+                    ; push rsi  // Save `deoptid`.
+                    ; push rdx  // Save `gp_regs` pointer.
+                    ; push rcx  // Save `fp_regs` pointer.
+                    ; mov rdi, rsi
+                    ; mov rax, QWORD __yk_guardcheck as i64
+                    ; call rax
+                    ; pop rcx
+                    ; pop rdx
+                    ; pop rsi
+                    ; cmp rax, 0
+                    ; je => deopt_label
+                );
+
+                // Jump into side-trace. The side-trace takes care of recovering the saved
+                // registers.
+                dynasm!(self.asm
+                    ; jmp rax
+                );
+
+                // Deoptimise.
+                dynasm!(self.asm; => deopt_label);
                 dynasm!(self.asm
                     ; mov rdi, rbp
                     ; mov rax, QWORD __yk_deopt as i64
@@ -298,6 +359,8 @@ impl<'a> Assemble<'a> {
             mt,
             buf,
             deoptinfo: self.deoptinfo,
+            sp_offset: self.ra.stack_size(),
+            entry_vars: self.loop_start_locs.clone(),
             hl: Arc::downgrade(&hl),
             comments: self.comments.take(),
             #[cfg(any(debug_assertions, test))]
@@ -333,6 +396,7 @@ impl<'a> Assemble<'a> {
             jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
             jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
+            jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
             jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(iidx, i),
             jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
@@ -381,8 +445,10 @@ impl<'a> Assemble<'a> {
             #[allow(clippy::fn_to_numeric_cast)]
             {
                 dynasm!(self.asm
+                    ; push r11
                     ; mov r11, QWORD __yk_break as i64
                     ; call r11
+                    ; pop r11
                 );
             }
         }
@@ -393,7 +459,10 @@ impl<'a> Assemble<'a> {
     fn patch_frame_allocation(&mut self, asm_off: AssemblyOffset) {
         // The stack should be 16-byte aligned after allocation. This ensures that calls in the
         // trace also get a 16-byte aligned stack, as per the SysV ABI.
-        let stack_size = self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
+        // Since we initialise the register allocator with interpreter frame and parent trace
+        // frames, the actual size we need to substract from RSP is the difference between the
+        // current stack size and the base size we inherited.
+        let stack_size = self.ra.align_stack(SYSV_CALL_STACK_ALIGN) - self.sp_offset;
 
         match i32::try_from(stack_size) {
             Ok(asp) => {
@@ -771,9 +840,9 @@ impl<'a> Assemble<'a> {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))
             }
             yksmp::Location::Register(1, ..) => {
-                // The third argument to the control point is the stackmap ID and is passed by RDX.
-                // We don't anticipate this ever being a live variable.
-                unreachable!()
+                // Since the control point passes the stackmap ID via RDX this case only happens in
+                // side-traces.
+                VarLocation::Register(reg_alloc::Register::GP(Rq::RDX))
             }
             yksmp::Location::Register(2, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RCX))
@@ -795,6 +864,9 @@ impl<'a> Assemble<'a> {
             }
             yksmp::Location::Register(10, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::R10))
+            }
+            yksmp::Location::Register(11, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::R11))
             }
             yksmp::Location::Register(12, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::R12))
@@ -822,6 +894,18 @@ impl<'a> Assemble<'a> {
                 frame_off: u32::try_from(*off * -1).unwrap(),
                 size: usize::from(*size),
             },
+            yksmp::Location::Constant(v) => {
+                // FIXME: This isn't fine-grained enough, as there may be constants of any
+                // bit-size.
+                let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                match size {
+                    4 => VarLocation::ConstInt {
+                        bits: 32,
+                        v: u64::from(*v),
+                    },
+                    _ => todo!(),
+                }
+            }
             e => {
                 todo!("{:?}", e);
             }
@@ -842,7 +926,10 @@ impl<'a> Assemble<'a> {
                 self.ra
                     .force_assign_inst_indirect(iidx, i32::try_from(frame_off).unwrap());
             }
-            _ => panic!(),
+            VarLocation::ConstInt { bits, v } => {
+                self.ra.assign_const(iidx, bits, v);
+            }
+            e => panic!("{:?}", e),
         }
     }
 
@@ -1357,6 +1444,149 @@ impl<'a> Assemble<'a> {
         }
     }
 
+    fn cg_rootjump(&mut self, addr: *const libc::c_void) {
+        // The end of a side-trace. Map live variables of this side-trace to the entry variables of
+        // the root parent trace, then jump to it.
+        // FIXME: This shares a lot of code with `cg_traceloopjump`.
+        for (i, op) in self.m.loop_jump_vars().iter().enumerate() {
+            let (iidx, src) = match op {
+                Operand::Var(iidx) => (*iidx, self.ra.var_location(*iidx)),
+                _ => panic!(),
+            };
+            let dst = *self.m.root_entry_vars().get(i).unwrap();
+            if dst == src {
+                // The value is already in the correct place, so there's nothing we need to
+                // do.
+                continue;
+            }
+            match dst {
+                VarLocation::Stack {
+                    frame_off: off_dst,
+                    size: size_dst,
+                } => {
+                    match src {
+                        VarLocation::Register(reg_alloc::Register::GP(reg)) => match size_dst {
+                            8 => dynasm!(self.asm;
+                                mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
+                            ),
+                            _ => todo!(),
+                        },
+                        VarLocation::ConstInt { bits, v } => match bits {
+                            32 => dynasm!(self.asm;
+                                mov DWORD [rbp - i32::try_from(off_dst).unwrap()], v as i32
+                            ),
+                            _ => todo!(),
+                        },
+                        VarLocation::Stack {
+                            frame_off: off_src,
+                            size: size_src,
+                        } => match size_src {
+                            // FIXME: Better to ask register allocator for a free register
+                            // rather than pushing/popping RAX here?
+                            8 => dynasm!(self.asm;
+                                push rax;
+                                mov rax, QWORD [rbp - i32::try_from(off_src).unwrap()];
+                                mov QWORD [rbp - i32::try_from(off_dst).unwrap()], rax;
+                                pop rax
+                            ),
+                            _ => todo!(),
+                        },
+                        e => todo!("{:?}", e),
+                    }
+                }
+                VarLocation::Direct { .. } => {
+                    // Direct locations are read-only, so it doesn't make sense to write to
+                    // them. This is likely a case where the direct value has been moved
+                    // somewhere else (register/normal stack) so dst and src no longer
+                    // match. But since the value can't change we can safely ignore this.
+                }
+                VarLocation::Register(reg) => {
+                    // Copy the value into a register. We can ask the register allocator to
+                    // this for us, but telling it to load the source operand into the
+                    // target register.
+                    match reg {
+                        reg_alloc::Register::GP(r) => {
+                            let [_] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::InputIntoReg(op.clone(), r)],
+                            );
+                        }
+                        _ => todo!(),
+                    }
+                }
+                e => todo!("{:?}", e),
+            }
+        }
+        self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
+        // Get the interpreter frame size, so we can subtract it from the current stack size (we
+        // only want to reset things to the state before the root trace, but the stack size
+        // includes the interpreter frame too).
+        // FIXME: Pass this in rather than computing it. Once we have multiple control points this
+        // will be incorrect.
+        let (rec, pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(0);
+        let loopsize = if pinfo.hasfp {
+            // The frame size includes the pushed RBP, but since we only care about the size of
+            // the local variables we need to subtract it again.
+            rec.size - u64::try_from(REG64_SIZE).unwrap()
+        } else {
+            rec.size
+        };
+
+        // The call to `__yk_reenter_jit" has the potential to clobber most of our registers, so
+        // save and restore them here.
+        dynasm!(self.asm
+            ; push rax
+            ; push rcx
+            ; push rdx
+            ; push rsi
+            ; push rdi
+            ; push r8
+            ; push r9
+            ; push r10
+            ; push r11
+        );
+
+        for reg in lsregalloc::FP_REGS.iter() {
+            dynasm!(self.asm
+                ; movq rcx, Rx(reg.code())
+                ; push rcx
+            );
+        }
+
+        // Set the current executed trace in MT.
+        #[allow(clippy::fn_to_numeric_cast)]
+        {
+            dynasm!(self.asm
+                ; mov rdi, QWORD __yk_reenter_jit as i64
+                ; call rdi
+            );
+        }
+
+        // Restore saved registers.
+        for reg in lsregalloc::FP_REGS.iter().rev() {
+            dynasm!(self.asm
+                ; pop rcx
+                ; movq Rx(reg.code()), rcx
+            );
+        }
+        dynasm!(self.asm
+            ; pop r11
+            ; pop r10
+            ; pop r9
+            ; pop r8
+            ; pop rdi
+            ; pop rsi
+            ; pop rdx
+            ; pop rcx
+            ; pop rax
+            ; add rsp, i32::try_from(self.ra.stack_size() - usize::try_from(loopsize).unwrap()).unwrap()
+            ; mov rdi, QWORD addr as i64
+            // We can safely use RDI here, since the root trace won't expect live variables in this
+            // register since it's being used as an argument to the control point.
+            ; jmp rdi);
+    }
+
     fn cg_traceloopstart(&mut self) {
         debug_assert_eq!(self.loop_start_locs.len(), 0);
         // Remember the locations of the live variables at the beginning of the trace. When we loop
@@ -1369,6 +1599,7 @@ impl<'a> Assemble<'a> {
             self.loop_start_locs.push(loc);
         }
         // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
+        // When doing so, update the jump target inside side-traces.
         dynasm!(self.asm; ->tloop_start:);
     }
 
@@ -1614,6 +1845,7 @@ impl<'a> Assemble<'a> {
         let fail_label = self.asm.new_dynamic_label();
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let deoptinfo = DeoptInfo {
+            bid: gi.bid().clone(),
             fail_label,
             live_vars: lives,
             inlined_frames: gi.inlined_frames().to_vec(),
@@ -1637,6 +1869,8 @@ impl<'a> Assemble<'a> {
 /// Information required by deoptimisation.
 #[derive(Debug)]
 struct DeoptInfo {
+    /// The AOT block that the failing guard originated from.
+    bid: aot_ir::BBlockId,
     fail_label: DynamicLabel,
     /// Live variables, mapping AOT vars to JIT vars.
     live_vars: Vec<(aot_ir::InstID, VarLocation)>,
@@ -1659,6 +1893,12 @@ pub(super) struct X64CompiledTrace {
     /// GuardInfoIdx (which are effectively the same thing, just defined differently and in
     /// different places -- can/should we merge them?)
     deoptinfo: HashMap<usize, DeoptInfo>,
+    /// Stack pointer offset from the base pointer of interpreter frame as defined in
+    /// [YkSideTraceInfo::sp_offset].
+    sp_offset: usize,
+    /// The locations of live variables this trace expects to exist upon entering. These are the
+    /// live variables at the time of the control point.
+    entry_vars: Vec<VarLocation>,
     /// Reference to the HotLocation, required for side tracing.
     hl: Weak<Mutex<HotLocation>>,
     /// Comments to be shown when printing the compiled trace using `AsmPrinter`.
@@ -1672,22 +1912,53 @@ pub(super) struct X64CompiledTrace {
     gdb_ctx: GdbCtx,
 }
 
+impl X64CompiledTrace {
+    /// Return the locations of the live variables this trace expects as input.
+    fn entry_vars(&self) -> &[VarLocation] {
+        &self.entry_vars
+    }
+}
+
 impl CompiledTrace for X64CompiledTrace {
     fn entry(&self) -> *const libc::c_void {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
 
     fn sidetraceinfo(&self, gidx: GuardIdx) -> Arc<dyn SideTraceInfo> {
-        // FIXME: Can we reference these instead of copying them?
-        let aotlives = self.deoptinfo[&usize::from(gidx)]
+        // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
+        // the `CompiledTrace` and `gidx` or better a reference to `DeoptInfo`?
+        let deoptinfo = &self.deoptinfo[&usize::from(gidx)];
+        let lives = deoptinfo
             .live_vars
             .iter()
-            .map(|(iid, _)| iid.clone())
+            .map(|(a, l)| (a.clone(), l.into()))
             .collect();
-        let callframes = self.deoptinfo[&usize::from(gidx)].inlined_frames.clone();
+        let callframes = deoptinfo.inlined_frames.clone();
+
+        // Get the root trace from the HotLocation.
+        // FIXME: It might be better if we had a consistent mechanism for doing this rather than
+        // fishing it out of the HotLocationKind`.
+        let hlarc = self.hl.upgrade().unwrap();
+        let hl = hlarc.lock();
+        let root_ctr = match &hl.kind {
+            HotLocationKind::Compiled(root_ctr) => Arc::clone(root_ctr)
+                .as_any()
+                .downcast::<X64CompiledTrace>()
+                .unwrap(),
+            HotLocationKind::SideTracing { root_ctr, .. } => Arc::clone(root_ctr)
+                .as_any()
+                .downcast::<X64CompiledTrace>()
+                .unwrap(),
+            _ => panic!("Unexpected HotLocationKind"),
+        };
+
         Arc::new(YkSideTraceInfo {
-            aotlives,
+            bid: deoptinfo.bid.clone(),
+            lives,
             callframes,
+            root_addr: RootTracePtr(root_ctr.entry()),
+            entry_vars: root_ctr.entry_vars().to_vec(),
+            sp_offset: self.sp_offset,
         })
     }
 
@@ -1948,9 +2219,9 @@ mod tests {
             tracecompilation_errors: 0,
         };
         match_asm(
-            Assemble::new(&m)
+            Assemble::new(&m, None)
                 .unwrap()
-                .codegen(mt, Arc::new(Mutex::new(hl)))
+                .codegen(mt, Arc::new(Mutex::new(hl)), false)
                 .unwrap()
                 .as_any()
                 .downcast::<X64CompiledTrace>()
