@@ -109,6 +109,7 @@ handle_arg() {
             # Use software-tracer pass
             if [ "${YKB_TRACER}" = "swt" ]; then
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
+                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"
             fi
             # Disable backend optimisations that Yk can't handle by adding the
             # `optnone` attribute onto every function after high-level IR
