@@ -1885,13 +1885,7 @@ pub(super) struct X64CompiledTrace {
     mt: Arc<MT>,
     /// The executable code itself.
     buf: ExecutableBuffer,
-    /// Deoptimisation info: maps a deoptimisation ID to it's information.
-    ///
-    /// Tracked here so they can be freed when the compiled trace is dropped.
-    ///
-    /// FIXME: The key of this shouldn't be a raw integer. I think it should be either GuardIdx or
-    /// GuardInfoIdx (which are effectively the same thing, just defined differently and in
-    /// different places -- can/should we merge them?)
+    /// Deoptimisation info: maps a [GuardIdx] to [DeoptInfo].
     deoptinfo: HashMap<usize, DeoptInfo>,
     /// Stack pointer offset from the base pointer of interpreter frame as defined in
     /// [YkSideTraceInfo::sp_offset].
