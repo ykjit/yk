@@ -1956,8 +1956,8 @@ impl CompiledTrace for X64CompiledTrace {
         })
     }
 
-    fn guard(&self, gid: GuardIdx) -> &crate::compile::Guard {
-        &self.deoptinfo[&usize::from(gid)].guard
+    fn guard(&self, gidx: GuardIdx) -> &crate::compile::Guard {
+        &self.deoptinfo[&usize::from(gidx)].guard
     }
 
     fn hl(&self) -> &std::sync::Weak<parking_lot::Mutex<crate::location::HotLocation>> {
