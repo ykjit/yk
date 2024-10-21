@@ -325,6 +325,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         match self.m.type_(type_) {
                             Ty::Void => unreachable!(),
                             Ty::Integer(_) | Ty::Ptr | Ty::Func(_) => {
+                                if gp_reg_off == 15 {
+                                    panic!("out of gp registers");
+                                }
                                 self.m.push_tiloc(yksmp::Location::Register(
                                     gp_reg_off,
                                     u16::try_from(size).unwrap(),
@@ -332,8 +335,15 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                     vec![],
                                 ));
                                 gp_reg_off += 1;
+                                // FIXME: gross hack to avoid allocating RBP/RSP.
+                                while gp_reg_off == 6 || gp_reg_off == 7 {
+                                    gp_reg_off += 1;
+                                }
                             }
                             Ty::Float(_) => {
+                                if fp_reg_off == 32 {
+                                    panic!("out of fp regisers");
+                                }
                                 self.m.push_tiloc(yksmp::Location::Register(
                                     fp_reg_off,
                                     u16::try_from(size).unwrap(),
