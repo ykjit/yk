@@ -812,7 +812,7 @@ impl TraceBuilder {
                 self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )
             .into(),
-            aot_ir::CastKind::ZeroExtend => jit_ir::ZeroExtendInst::new(
+            aot_ir::CastKind::ZeroExtend => jit_ir::ZExtInst::new(
                 &self.handle_operand(val)?,
                 self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )

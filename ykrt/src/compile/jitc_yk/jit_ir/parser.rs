@@ -12,7 +12,7 @@ use super::super::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst, FPExtInst,
         FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst,
         Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PackedOperand, PtrAddInst,
-        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZeroExtendInst,
+        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZExtInst,
     },
 };
 use fm::FMBuilder;
@@ -396,10 +396,8 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::ZExt { assign, type_, val } => {
-                        let inst = ZeroExtendInst::new(
-                            &self.process_operand(val)?,
-                            self.process_type(type_)?,
-                        );
+                        let inst =
+                            ZExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::SIToFP { assign, type_, val } => {

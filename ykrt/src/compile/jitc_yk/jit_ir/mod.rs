@@ -1411,7 +1411,7 @@ pub(crate) enum Inst {
     RootJump,
 
     SExt(SExtInst),
-    ZeroExtend(ZeroExtendInst),
+    ZExt(ZExtInst),
     Trunc(TruncInst),
     Select(SelectInst),
     SIToFP(SIToFPInst),
@@ -1461,7 +1461,7 @@ impl Inst {
             Self::TraceLoopJump => m.void_tyidx(),
             Self::RootJump => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
-            Self::ZeroExtend(si) => si.dest_tyidx(),
+            Self::ZExt(si) => si.dest_tyidx(),
             Self::Trunc(t) => t.dest_tyidx(),
             Self::Select(s) => s.trueval(m).tyidx(m),
             Self::SIToFP(i) => i.dest_tyidx(),
@@ -1498,7 +1498,7 @@ impl Inst {
             Inst::TraceLoopJump => true,
             Inst::RootJump => true,
             Inst::SExt(_) => false,
-            Inst::ZeroExtend(_) => false,
+            Inst::ZExt(_) => false,
             Inst::Trunc(_) => false,
             Inst::Select(_) => false,
             Inst::SIToFP(_) => false,
@@ -1583,7 +1583,7 @@ impl Inst {
                 }
             }
             Inst::SExt(SExtInst { val, .. }) => val.unpack(m).map_iidx(f),
-            Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::ZExt(ZExtInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::Select(SelectInst {
                 cond,
@@ -1692,7 +1692,7 @@ impl Inst {
                 }
             }
             Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
-            Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.map_iidx(f),
+            Inst::ZExt(ZExtInst { val, .. }) => val.map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
             Inst::Select(SelectInst {
                 cond,
@@ -1893,7 +1893,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::SExt(i) => {
                 write!(f, "sext {}", i.val(self.m).display(self.m),)
             }
-            Inst::ZeroExtend(i) => {
+            Inst::ZExt(i) => {
                 write!(f, "zext {}", i.val(self.m).display(self.m),)
             }
             Inst::Trunc(i) => {
@@ -1943,7 +1943,7 @@ inst!(DynPtrAdd, DynPtrAddInst);
 inst!(ICmp, ICmpInst);
 inst!(Guard, GuardInst);
 inst!(SExt, SExtInst);
-inst!(ZeroExtend, ZeroExtendInst);
+inst!(ZExt, ZExtInst);
 inst!(Trunc, TruncInst);
 inst!(Select, SelectInst);
 inst!(SIToFP, SIToFPInst);
@@ -2590,14 +2590,14 @@ impl SExtInst {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ZeroExtendInst {
+pub struct ZExtInst {
     /// The value to extend.
     val: PackedOperand,
     /// The type to extend to.
     dest_tyidx: TyIdx,
 }
 
-impl ZeroExtendInst {
+impl ZExtInst {
     pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),

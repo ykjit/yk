@@ -414,7 +414,7 @@ impl<'a> Assemble<'a> {
             jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
             jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
             jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
-            jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(iidx, i),
+            jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
             jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
             jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
             jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
@@ -1770,7 +1770,7 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_zeroextend(&mut self, iidx: InstIdx, i: &jit_ir::ZeroExtendInst) {
+    fn cg_zext(&mut self, iidx: InstIdx, i: &jit_ir::ZExtInst) {
         let [reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
