@@ -1909,25 +1909,6 @@ impl<'a> Assemble<'a> {
 
         // This instruction takes an integer and truncates it to a smaller one. We do nothing,
         // other than assume that the now-unused higher-order bits are undefined.
-
-        // FIXME: What follows are just assertions that should be moved to the well-formedness
-        // checker.
-        let from_val = i.val(self.m);
-        let from_type = self.m.type_(from_val.tyidx(self.m));
-        let from_size = from_type.byte_size().unwrap();
-
-        let to_type = self.m.type_(i.dest_tyidx());
-        let to_size = to_type.byte_size().unwrap();
-
-        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
-        debug_assert!(
-            matches!(from_type, jit_ir::Ty::Integer(_)) || matches!(from_type, jit_ir::Ty::Ptr)
-        );
-        // You can only truncate a bigger integer to a smaller integer.
-        debug_assert!(from_size > to_size);
-
-        // FIXME: assumes the input and output fit in a register.
-        debug_assert!(to_size <= REG64_BYTESIZE);
     }
 
     fn cg_select(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {

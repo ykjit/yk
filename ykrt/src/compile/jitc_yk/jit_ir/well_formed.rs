@@ -166,6 +166,22 @@ impl Module {
                         );
                     }
                 }
+                Inst::Trunc(x) => {
+                    let Ty::Integer(val_bitsize) = self.type_(x.val(self).tyidx(self)) else {
+                        panic!("Instruction at position {iidx} trying to convert from a non-integer type\n  {}",
+                            self.inst_no_copies(iidx).display(iidx, self));
+                    };
+                    let Ty::Integer(dest_bitsize) = self.type_(x.dest_tyidx()) else {
+                        panic!("Instruction at position {iidx} trying to convert to a non-integer type\n  {}",
+                            self.inst_no_copies(iidx).display(iidx, self));
+                    };
+                    if dest_bitsize >= val_bitsize {
+                        panic!(
+                            "Instruction at position {iidx} trying to truncate to an equal-or-larger-than type\n  {}",
+                            self.inst_no_copies(iidx).display(iidx, self)
+                        );
+                    }
+                }
                 Inst::SIToFP(x) => {
                     let from_type = self.type_(x.val(self).tyidx(self));
                     let to_type = self.type_(x.dest_tyidx());
@@ -335,6 +351,46 @@ mod tests {
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = sext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to convert from a non-integer type"
+    )]
+    fn trunc_from_non_int() {
+        Module::from_str(
+            "
+              entry:
+                %0: float = load_ti 0
+                %1: i8 = trunc %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 trying to convert to a non-integer type")]
+    fn trunc_to_non_int() {
+        Module::from_str(
+            "
+              entry:
+                %0: i64 = load_ti 0
+                %1: float = trunc %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to truncate to an equal-or-larger-than type"
+    )]
+    fn trunc_to_larger() {
+        Module::from_str(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i16 = trunc %0
             ",
         );
     }

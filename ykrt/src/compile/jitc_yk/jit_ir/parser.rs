@@ -916,7 +916,7 @@ mod tests {
               %32: i32 = load_ti 7
               %33: i64 = load_ti 8
               %48: i32 = load_ti 9
-              %1: i32 = trunc %0
+              %1: i32 = trunc %33
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
               tloop_start [%0, %5]
