@@ -25,6 +25,7 @@
 //!   * [super::Inst] operands refer to values which have been previously defined.
 
 use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
+use std::{ffi::c_void, mem};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
@@ -162,6 +163,55 @@ impl Module {
                     if val_bitsize >= dest_bitsize {
                         panic!(
                             "Instruction at position {iidx} trying to sign extend from an equal-or-larger-than integer type\n  {}",
+                            self.inst_no_copies(iidx).display(iidx, self)
+                        );
+                    }
+                }
+                Inst::ZExt(x) => {
+                    let val_bitsize = match self.type_(x.val(self).tyidx(self)) {
+                        Ty::Integer(bits) => *bits,
+                        Ty::Ptr => {
+                            // FIXME: In theory pointers to different types could be of different
+                            // sizes. We should really ask LLVM how big the pointer was when it
+                            // codegenned the interpreter, and on a per-pointer basis.
+                            //
+                            // For now we assume (and ykllvm asserts this) that all pointers are
+                            // void pointer-sized and a multiple of 8 bits.
+                            u32::try_from(mem::size_of::<*const c_void>() * 8).unwrap()
+                        }
+                        _ => {
+                            panic!(
+                                "Instruction at position {iidx} trying to zero extend from a non-integer-or-ptr type\n  {}",
+                                self.inst_no_copies(iidx).display(iidx, self)
+                            );
+                        }
+                    };
+                    let dest_bitsize = match self.type_(x.dest_tyidx()) {
+                        Ty::Integer(bits) => *bits,
+                        Ty::Ptr => {
+                            // FIXME: In theory pointers to different types could be of different
+                            // sizes. We should really ask LLVM how big the pointer was when it
+                            // codegenned the interpreter, and on a per-pointer basis.
+                            //
+                            // For now we assume (and ykllvm asserts this) that all pointers are
+                            // void pointer-sized and a multiple of 8 bits.
+                            u32::try_from(mem::size_of::<*const c_void>() * 8).unwrap()
+                        }
+                        _ => {
+                            panic!(
+                                "Instruction at position {iidx} trying to zero extend to a non-integer-or-ptr type\n  {}",
+                                self.inst_no_copies(iidx).display(iidx, self)
+                            );
+                        }
+                    };
+
+                    // FIXME: strictly this should be >= to be in line with LLVM semantics, but the
+                    // way we lower LLVM `ptrtoint` to `zext` means that pointer to integer
+                    // conversions (i.e. converting from and to the same pointer-size thing) comes
+                    // through here. Maybe it was a bad idea to piggy back on `zext` after all.
+                    if val_bitsize > dest_bitsize {
+                        panic!(
+                            "Instruction at position {iidx} trying to zero extend to a smaller integer type\n  {}",
                             self.inst_no_copies(iidx).display(iidx, self)
                         );
                     }
@@ -351,6 +401,48 @@ mod tests {
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = sext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to zero extend to a smaller integer type"
+    )]
+    fn zero_extend_wrong_size() {
+        Module::from_str(
+            "
+              entry:
+                %0: i16 = load_ti 0
+                %1: i8 = zext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to zero extend to a non-integer-or-ptr type"
+    )]
+    fn zero_extend_to_wrong_type() {
+        Module::from_str(
+            "
+              entry:
+                %0: i16 = load_ti 0
+                %1: float = zext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to zero extend from a non-integer-or-ptr type"
+    )]
+    fn zero_extend_from_wrong_type() {
+        Module::from_str(
+            "
+              entry:
+                %0: float = load_ti 0
+                %1: i64 = zext %0
             ",
         );
     }
