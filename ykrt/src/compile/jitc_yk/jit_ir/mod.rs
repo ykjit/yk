@@ -967,6 +967,9 @@ pub(crate) enum Ty {
 
 impl Ty {
     /// Returns the size of the type in bytes, or `None` if asking the size makes no sense.
+    ///
+    /// To get the size in *bits*, use [Self::bit_size] instead. Multiplying the result of
+    /// `byte_size()` by 8 is not correct.
     pub(crate) fn byte_size(&self) -> Option<usize> {
         // u16/u32 -> usize conversions could theoretically fail on some arches (which we probably
         // won't ever support).
@@ -986,6 +989,24 @@ impl Ty {
             Self::Float(ft) => Some(match ft {
                 FloatTy::Float => mem::size_of::<f32>(),
                 FloatTy::Double => mem::size_of::<f64>(),
+            }),
+            Self::Unimplemented(_) => None,
+        }
+    }
+
+    /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
+    pub(crate) fn bit_size(&self) -> Option<usize> {
+        match self {
+            Self::Void => Some(0),
+            Self::Integer(bits) => Some(usize::try_from(*bits).unwrap()),
+            Self::Ptr => {
+                // We make the same assumptions about pointer size as in Self::byte_size().
+                Some(mem::size_of::<*const c_void>() * 8)
+            }
+            Self::Func(_) => None,
+            Self::Float(ft) => Some(match ft {
+                FloatTy::Float => mem::size_of::<f32>() * 8,
+                FloatTy::Double => mem::size_of::<f64>() * 8,
             }),
             Self::Unimplemented(_) => None,
         }

@@ -25,7 +25,6 @@
 //!   * [super::Inst] operands refer to values which have been previously defined.
 
 use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
-use std::{ffi::c_void, mem};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
@@ -168,42 +167,23 @@ impl Module {
                     }
                 }
                 Inst::ZExt(x) => {
-                    let val_bitsize = match self.type_(x.val(self).tyidx(self)) {
-                        Ty::Integer(bits) => *bits,
-                        Ty::Ptr => {
-                            // FIXME: In theory pointers to different types could be of different
-                            // sizes. We should really ask LLVM how big the pointer was when it
-                            // codegenned the interpreter, and on a per-pointer basis.
-                            //
-                            // For now we assume (and ykllvm asserts this) that all pointers are
-                            // void pointer-sized and a multiple of 8 bits.
-                            u32::try_from(mem::size_of::<*const c_void>() * 8).unwrap()
-                        }
-                        _ => {
-                            panic!(
-                                "Instruction at position {iidx} trying to zero extend from a non-integer-or-ptr type\n  {}",
-                                self.inst_no_copies(iidx).display(iidx, self)
-                            );
-                        }
-                    };
-                    let dest_bitsize = match self.type_(x.dest_tyidx()) {
-                        Ty::Integer(bits) => *bits,
-                        Ty::Ptr => {
-                            // FIXME: In theory pointers to different types could be of different
-                            // sizes. We should really ask LLVM how big the pointer was when it
-                            // codegenned the interpreter, and on a per-pointer basis.
-                            //
-                            // For now we assume (and ykllvm asserts this) that all pointers are
-                            // void pointer-sized and a multiple of 8 bits.
-                            u32::try_from(mem::size_of::<*const c_void>() * 8).unwrap()
-                        }
-                        _ => {
-                            panic!(
-                                "Instruction at position {iidx} trying to zero extend to a non-integer-or-ptr type\n  {}",
-                                self.inst_no_copies(iidx).display(iidx, self)
-                            );
-                        }
-                    };
+                    let val_ty = self.type_(x.val(self).tyidx(self));
+                    if !matches!(val_ty, Ty::Integer(_)) && !matches!(val_ty, Ty::Ptr) {
+                        panic!(
+                            "Instruction at position {iidx} trying to zero extend from a non-integer-or-ptr type\n  {}",
+                            self.inst_no_copies(iidx).display(iidx, self)
+                        );
+                    }
+                    let val_bitsize = val_ty.bit_size().unwrap();
+
+                    let dest_ty = self.type_(x.dest_tyidx());
+                    if !matches!(dest_ty, Ty::Integer(_)) && !matches!(dest_ty, Ty::Ptr) {
+                        panic!(
+                            "Instruction at position {iidx} trying to zero extend to a non-integer-or-ptr type\n  {}",
+                            self.inst_no_copies(iidx).display(iidx, self)
+                        );
+                    }
+                    let dest_bitsize = dest_ty.bit_size().unwrap();
 
                     // FIXME: strictly this should be >= to be in line with LLVM semantics, but the
                     // way we lower LLVM `ptrtoint` to `zext` means that pointer to integer
