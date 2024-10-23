@@ -24,12 +24,15 @@ pub(crate) trait CodeGen: Send + Sync {
     ///
     /// * `sp_offset` - Stack pointer offset from the base pointer of the interpreter frame as
     ///   defined in [super::YkSideTraceInfo::sp_offset].
+    /// * `root_offset` - Stack pointer offset of the root trace as defined in
+    ///   [super::YkSideTraceInfo::sp_offset].
     fn codegen(
         &self,
         m: Module,
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
         sp_offset: Option<usize>,
+        root_offset: Option<usize>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
