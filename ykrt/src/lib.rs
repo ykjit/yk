@@ -5,7 +5,6 @@
 #![feature(int_roundings)]
 #![feature(naked_functions)]
 #![feature(ptr_sub_ptr)]
-#![feature(strict_provenance)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::upper_case_acronyms)]
 #![allow(clippy::comparison_chain)]
