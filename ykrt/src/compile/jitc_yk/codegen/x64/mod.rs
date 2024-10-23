@@ -159,8 +159,9 @@ impl CodeGen for X64CodeGen {
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
         sp_offset: Option<usize>,
+        root_offset: Option<usize>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        Assemble::new(&m, sp_offset)?.codegen(mt, hl, sp_offset.is_some())
+        Assemble::new(&m, sp_offset, root_offset)?.codegen(mt, hl, sp_offset.is_some())
     }
 }
 
@@ -190,12 +191,16 @@ struct Assemble<'a> {
     /// trace it's initialised to the size of the interpreter frame. Otherwise its value is passed
     /// in via [YkSideTraceInfo::sp_offset].
     sp_offset: usize,
+    /// The stack pointer offset of the root trace's frame from the base pointer of the interpreter
+    /// frame. If this is the root trace, this will be None.
+    root_offset: Option<usize>,
 }
 
 impl<'a> Assemble<'a> {
     fn new(
         m: &'a jit_ir::Module,
         sp_offset: Option<usize>,
+        root_offset: Option<usize>,
     ) -> Result<Box<Assemble<'a>>, CompilationError> {
         #[cfg(debug_assertions)]
         m.assert_well_formed();
@@ -244,6 +249,7 @@ impl<'a> Assemble<'a> {
             deoptinfo: HashMap::new(),
             comments: Cell::new(IndexMap::new()),
             sp_offset,
+            root_offset,
         }))
     }
 
@@ -272,6 +278,11 @@ impl<'a> Assemble<'a> {
         }
 
         let alloc_off = self.emit_prologue();
+        // The instruction offset after we've emitted the prologue (i.e. updated the stack
+        // pointer). We will later adjust this offset to also include one iteration of the trace
+        // so we can jump directly to the peeled loop.
+        let prologue_offset = self.asm.offset();
+
         self.cg_insts()?;
 
         if !self.deoptinfo.is_empty() {
@@ -393,6 +404,7 @@ impl<'a> Assemble<'a> {
             buf,
             deoptinfo: self.deoptinfo,
             sp_offset: self.ra.stack_size(),
+            prologue_offset: prologue_offset.0,
             entry_vars: self.loop_start_locs.clone(),
             hl: Arc::downgrade(&hl),
             comments: self.comments.take(),
@@ -1972,19 +1984,6 @@ impl<'a> Assemble<'a> {
         // the root parent trace, then jump to it.
         self.write_jump_vars(Some(self.m.root_entry_vars()));
         self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
-        // Get the interpreter frame size, so we can subtract it from the current stack size (we
-        // only want to reset things to the state before the root trace, but the stack size
-        // includes the interpreter frame too).
-        // FIXME: Pass this in rather than computing it. Once we have multiple control points this
-        // will be incorrect.
-        let (rec, pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(0);
-        let loopsize = if pinfo.hasfp {
-            // The frame size includes the pushed RBP, but since we only care about the size of
-            // the local variables we need to subtract it again.
-            rec.size - u64::try_from(REG64_BYTESIZE).unwrap()
-        } else {
-            rec.size
-        };
 
         // The call to `__yk_reenter_jit" has the potential to clobber most of our registers, so
         // save and restore them here.
@@ -2033,7 +2032,9 @@ impl<'a> Assemble<'a> {
             ; pop rdx
             ; pop rcx
             ; pop rax
-            ; add rsp, i32::try_from(self.ra.stack_size() - usize::try_from(loopsize).unwrap()).unwrap()
+            // Reset rsp to the root trace's frame.
+            ; mov rsp, rbp
+            ; sub rsp, i32::try_from(self.root_offset.unwrap()).unwrap()
             ; mov rdi, QWORD addr as i64
             // We can safely use RDI here, since the root trace won't expect live variables in this
             // register since it's being used as an argument to the control point.
@@ -2301,6 +2302,9 @@ pub(super) struct X64CompiledTrace {
     /// Stack pointer offset from the base pointer of interpreter frame as defined in
     /// [YkSideTraceInfo::sp_offset].
     sp_offset: usize,
+    /// The instruction offset after the trace's prologue. Later this will also include one
+    /// iteration of the trace.
+    prologue_offset: usize,
     /// The locations of live variables this trace expects to exist upon entering. These are the
     /// live variables at the time of the control point.
     entry_vars: Vec<VarLocation>,
@@ -2357,11 +2361,16 @@ impl CompiledTrace for X64CompiledTrace {
             _ => panic!("Unexpected HotLocationKind"),
         };
 
+        // Calculate the address inside the root trace we want side-traces to jump to. Currently
+        // this is directly after the prologue. Later we will change this to jump to after the
+        // preamble and before the peeled loop.
+        let root_addr = unsafe { root_ctr.entry().add(root_ctr.prologue_offset) };
         Arc::new(YkSideTraceInfo {
             bid: deoptinfo.bid.clone(),
             lives,
             callframes,
-            root_addr: RootTracePtr(root_ctr.entry()),
+            root_addr: RootTracePtr(root_addr),
+            root_offset: root_ctr.sp_offset,
             entry_vars: root_ctr.entry_vars().to_vec(),
             sp_offset: self.sp_offset,
         })
@@ -2631,7 +2640,7 @@ mod tests {
             tracecompilation_errors: 0,
         };
         match_asm(
-            Assemble::new(&m, None)
+            Assemble::new(&m, None, None)
                 .unwrap()
                 .codegen(mt, Arc::new(Mutex::new(hl)), false)
                 .unwrap()

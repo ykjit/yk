@@ -59,6 +59,9 @@ struct YkSideTraceInfo {
     /// The address of the root trace. This is where the side-trace needs to jump back to after it
     /// finished its execution.
     root_addr: RootTracePtr,
+    /// Stack pointer offset of the root trace from the interpreter frame. Required to reset RSP to
+    /// the root trace's frame, before jumping back to it.
+    root_offset: usize,
     /// The live variables at the entry point of the root trace.
     entry_vars: Vec<VarLocation>,
     /// Stack pointer offset from the base pointer of the interpreter frame including the
@@ -120,6 +123,7 @@ impl Compiler for JITCYk {
 
         let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo>().unwrap());
         let sp_offset = sti.as_ref().map(|x| x.sp_offset);
+        let root_offset = sti.as_ref().map(|x| x.root_offset);
 
         let mut jit_mod = trace_builder::build(
             mt.next_compiled_trace_id(),
@@ -145,7 +149,9 @@ impl Compiler for JITCYk {
         }
 
         // FIXME: This needs to be the combined stacksize of all parent traces.
-        let ct = self.codegen.codegen(jit_mod, mt, hl, sp_offset)?;
+        let ct = self
+            .codegen
+            .codegen(jit_mod, mt, hl, sp_offset, root_offset)?;
 
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
