@@ -485,10 +485,47 @@ impl TraceBuilder {
                 match op {
                     aot_ir::Operand::LocalVariable(iid) => {
                         match self.local_map[iid] {
-                            jit_ir::Operand::Var(liidx) => live_vars.push((
-                                iid.clone(),
-                                PackedOperand::new(&jit_ir::Operand::Var(liidx)),
-                            )),
+                            jit_ir::Operand::Var(liidx) => {
+                                // If, as often happens, a guard has in its live set the boolean
+                                // variable used as the condition, we can convert this into a
+                                // constant. For example if we have e.g.:
+                                //
+                                // ```
+                                // %10: i1 = ...
+                                // guard true, %10 [...: %10]
+                                // ```
+                                //
+                                // then if the guard fails we know %10 was false and the guard is
+                                // therefore equivalent to:
+                                //
+                                // ```
+                                // %10: i1 = ...
+                                // guard true, %10 [...: 0i1]
+                                // ```
+                                //
+                                // Rewriting it in this form makes code further down the chain
+                                // simpler, because it means it doesn't have to be clever when
+                                // analysing a guard's live variables.
+                                match cond {
+                                    Operand::Var(cond_idx) if *cond_idx == liidx => {
+                                        let cidx = if expect {
+                                            self.jit_mod.false_constidx()
+                                        } else {
+                                            self.jit_mod.true_constidx()
+                                        };
+                                        live_vars.push((
+                                            iid.clone(),
+                                            PackedOperand::new(&jit_ir::Operand::Const(cidx)),
+                                        ));
+                                    }
+                                    _ => {
+                                        live_vars.push((
+                                            iid.clone(),
+                                            PackedOperand::new(&jit_ir::Operand::Var(liidx)),
+                                        ));
+                                    }
+                                }
+                            }
                             jit_ir::Operand::Const(_) => {
                                 // Since we are forcing constants into `Inst::Const`s during
                                 // inlining, this case should never happen. If you see this panic,

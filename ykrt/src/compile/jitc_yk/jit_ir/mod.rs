@@ -2149,7 +2149,7 @@ impl LoadInst {
 #[derive(Clone, Copy, Debug)]
 #[repr(packed)]
 pub struct LoadTraceInputInst {
-    /// The VarLocation of this input.
+    /// The [yksmp::Location] of this input.
     locidx: u32,
     /// The type of the resulting local variable.
     tyidx: TyIdx,
@@ -2168,6 +2168,7 @@ impl LoadTraceInputInst {
         self.tyidx
     }
 
+    /// The [yksmp::Location] of this input.
     pub(crate) fn locidx(&self) -> u32 {
         self.locidx
     }
