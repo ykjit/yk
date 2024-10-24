@@ -120,11 +120,41 @@ impl Opt {
                 }
                 _ => (),
             }
+            self.cse(iidx);
         }
         // FIXME: When code generation supports backwards register allocation, we won't need to
         // explicitly perform dead code elimination and this function can be made `#[cfg(test)]` only.
         self.m.dead_code_elimination();
         Ok(self.m)
+    }
+
+    /// Attempt common subexpression elimination on `iidx`, replacing it with a `Copy` if possible.
+    fn cse(&mut self, iidx: InstIdx) {
+        // If this instruction is already a `Copy`, then there is nothing for CSE to do.
+        let Some(inst) = self.m.inst_nocopy(iidx) else {
+            return;
+        };
+        // There's no point in trying CSE on a `Tombstone`.
+        if let Inst::Tombstone = inst {
+            return;
+        }
+        // FIXME: This is O(n), but most instructions can't possibly be CSE candidates.
+        for back_iidx in (0..usize::from(iidx)).rev() {
+            let back_iidx = InstIdx::unchecked_from(back_iidx);
+            // Only examine non-`Copy` instructions, to avoid us continually checking the same
+            // (subset of) instructions over and over again.
+            let Some(back) = self.m.inst_nocopy(back_iidx) else {
+                continue;
+            };
+            if !inst.has_store_effect(&self.m)
+                && !inst.has_load_effect(&self.m)
+                && !inst.is_barrier(&self.m)
+                && inst.decopy_eq(&self.m, back)
+            {
+                self.m.replace(iidx, Inst::Copy(back_iidx));
+                return;
+            }
+        }
     }
 
     /// Optimise an [ICmpInst].
@@ -296,9 +326,8 @@ mod test {
           entry:
             %1: i8 = load_ti ...
             %3: i8 = add %1, 0i8
-            %5: i8 = add %1, 0i8
             black_box %3
-            black_box %5
+            black_box %3
         ",
         );
     }
@@ -313,7 +342,7 @@ mod test {
             %2: i8 = mul %0, 1i8
             %3: i8 = add %1, %2
             %4: i8 = mul 1i8, %0
-            %5: i8 = add %1, %2
+            %5: i8 = add %1, %4
             black_box %3
             black_box %5
         ",
@@ -324,9 +353,8 @@ mod test {
             %0: i8 = load_ti ...
             %1: i8 = load_ti ...
             %3: i8 = add %1, %0
-            %5: i8 = add %1, %0
             black_box %3
-            black_box %5
+            black_box %3
         ",
         );
     }
