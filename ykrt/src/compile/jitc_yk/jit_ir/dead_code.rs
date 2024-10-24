@@ -12,7 +12,10 @@ impl Module {
         let mut used = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
         for iidx in self.iter_all_inst_idxs().rev() {
             let inst = self.inst_raw(iidx);
-            if used.get(usize::from(iidx)).unwrap() || inst.has_side_effect(self) {
+            if used.get(usize::from(iidx)).unwrap()
+                || inst.has_store_effect(self)
+                || inst.is_barrier(self)
+            {
                 used.set(usize::from(iidx), true);
                 inst.map_packed_operand_locals(self, &mut |x| {
                     used.set(usize::from(x), true);

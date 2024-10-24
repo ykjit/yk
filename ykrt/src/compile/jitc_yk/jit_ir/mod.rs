@@ -310,6 +310,14 @@ impl Module {
         }
     }
 
+    /// Return the instruction at the specified index or `None` if it is a `Copy` instruction.
+    pub(crate) fn inst_nocopy(&self, iidx: InstIdx) -> Option<Inst> {
+        match self.insts[usize::from(iidx)] {
+            Inst::Copy(_) => None,
+            x => Some(x),
+        }
+    }
+
     /// Return the instruction at the specified index "raw", that is without decopying.
     ///
     /// This function has very few uses and unless you explicitly know why you're using it, you
@@ -1395,7 +1403,7 @@ impl InlinedFrame {
 
 /// An IR instruction.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum Inst {
     // "Internal" IR instructions: these don't correspond to IR that a user interpreter can
     // express, but are used either for efficient representation of the IR or testing.
@@ -1492,40 +1500,38 @@ impl Inst {
         }
     }
 
-    /// Does this instruction have a "side effect" that means that removing it would change the
-    /// behaviour of later instructions even if they do not have a direct dependency on this
-    /// instruction? "Side effects" are:
-    ///   * Stores to memory locations.
-    ///   * Guards.
-    fn has_side_effect(&self, m: &Module) -> bool {
+    /// Does this instruction have a load side effect?
+    pub(crate) fn has_load_effect(&self, m: &Module) -> bool {
+        match self {
+            Inst::Copy(x) => m.inst_raw(*x).has_load_effect(m),
+            Inst::Load(_) => true,
+            Inst::Call(_) | Inst::IndirectCall(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Does this instruction have a store side effect?
+    pub(crate) fn has_store_effect(&self, m: &Module) -> bool {
+        match self {
+            Inst::Copy(x) => m.inst_raw(*x).has_store_effect(m),
+            Inst::Store(_) => true,
+            Inst::Call(_) | Inst::IndirectCall(_) => false,
+            _ => false,
+        }
+    }
+
+    /// Is this instruction a compiler barrier / fence? Our simple semantics are that barriers
+    /// cannot be reordered at all. Note that load/store effects are not considered
+    /// barriers.
+    pub(crate) fn is_barrier(&self, m: &Module) -> bool {
         match self {
             #[cfg(test)]
             Inst::BlackBox(_) => true,
-            Inst::Const(_) => false,
-            Inst::Copy(x) => m.inst_raw(*x).has_side_effect(m),
-            Inst::Tombstone => false,
-            Inst::BinOp(_) => false,
-            Inst::Load(_) => false,
-            Inst::LookupGlobal(_) => false,
-            Inst::LoadTraceInput(_) => false,
-            Inst::Call(_) => true,
-            Inst::IndirectCall(_) => true,
-            Inst::PtrAdd(_) => false,
-            Inst::DynPtrAdd(_) => false,
-            Inst::Store(_) => true,
-            Inst::ICmp(_) => false,
+            Inst::Copy(x) => m.inst_raw(*x).is_barrier(m),
             Inst::Guard(_) => true,
-            Inst::TraceLoopStart => true,
-            Inst::TraceLoopJump => true,
-            Inst::RootJump => true,
-            Inst::SExt(_) => false,
-            Inst::ZExt(_) => false,
-            Inst::Trunc(_) => false,
-            Inst::Select(_) => false,
-            Inst::SIToFP(_) => false,
-            Inst::FPExt(_) => false,
-            Inst::FCmp(_) => false,
-            Inst::FPToSI(_) => false,
+            Inst::Call(_) | Inst::IndirectCall(_) => true,
+            Inst::TraceLoopStart | Inst::TraceLoopJump | Inst::RootJump => true,
+            _ => false,
         }
     }
 
@@ -1750,6 +1756,47 @@ impl Inst {
             }
         } else {
             panic!()
+        }
+    }
+
+    /// Is this instruction "equal" to `other` modulo `Copy` instructions? For example, given:
+    ///
+    /// ```text
+    /// %0: ...
+    /// %1: add %0, %0
+    /// %2: add %0, %0
+    /// %3: %2
+    /// %4: add %0, %1
+    /// ```
+    ///
+    /// `%1`, `%2`, and `%3` are all "decopy equal" to each other, but `%4` is not "decopy equal"
+    /// to any other instruction.
+    pub(crate) fn decopy_eq(&self, m: &Module, other: Inst) -> bool {
+        if std::mem::discriminant(self) != std::mem::discriminant(&other) {
+            return false;
+        }
+        match (*self, other) {
+            #[cfg(test)]
+            (Self::BlackBox(x), Self::BlackBox(y)) => x.decopy_eq(m, y),
+            (Self::Const(x), Self::Const(y)) => x == y,
+            (Self::BinOp(x), Self::BinOp(y)) => x.decopy_eq(m, y),
+            (Self::Load(x), Self::Load(y)) => x.decopy_eq(m, y),
+            (Self::Store(x), Self::Store(y)) => x.decopy_eq(m, y),
+            (Self::LookupGlobal(x), Self::LookupGlobal(y)) => x.decopy_eq(y),
+            (Self::LoadTraceInput(x), Self::LoadTraceInput(y)) => x.decopy_eq(y),
+            (Self::PtrAdd(x), Self::PtrAdd(y)) => x.decopy_eq(m, y),
+            (Self::DynPtrAdd(x), Self::DynPtrAdd(y)) => x.decopy_eq(m, y),
+            (Self::ICmp(x), Self::ICmp(y)) => x.decopy_eq(m, y),
+            (Self::Guard(x), Self::Guard(y)) => x.decopy_eq(m, y),
+            (Self::SExt(x), Self::SExt(y)) => x.decopy_eq(m, y),
+            (Self::ZExt(x), Self::ZExt(y)) => x.decopy_eq(m, y),
+            (Self::Trunc(x), Self::Trunc(y)) => x.decopy_eq(m, y),
+            (Self::Select(x), Self::Select(y)) => x.decopy_eq(m, y),
+            (Self::SIToFP(x), Self::SIToFP(y)) => x.decopy_eq(m, y),
+            (Self::FPExt(x), Self::FPExt(y)) => x.decopy_eq(m, y),
+            (Self::FCmp(x), Self::FCmp(y)) => x.decopy_eq(m, y),
+            (Self::FPToSI(x), Self::FPToSI(y)) => x.decopy_eq(m, y),
+            (x, y) => todo!("{x:?} {y:?}"),
         }
     }
 
@@ -1980,7 +2027,7 @@ inst!(FPToSI, FPToSIInst);
 ///
 /// The naming convention used is based on infix notation, e.g. in `2 + 3`, "2" is the left-hand
 /// side (`lhs`), "+" is the binary operator (`binop`), and "3" is the right-hand side (`rhs`).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct BinOpInst {
     /// The left-hand side of the operation.
     pub(crate) lhs: PackedOperand,
@@ -1997,6 +2044,10 @@ impl BinOpInst {
             binop,
             rhs: PackedOperand::new(&rhs),
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.lhs(m) == other.lhs(m) && self.binop == other.binop && self.rhs(m) == other.rhs(m)
     }
 
     pub(crate) fn lhs(&self, m: &Module) -> Operand {
@@ -2021,7 +2072,7 @@ impl BinOpInst {
 /// value". This is useful to make clear in a test that an operand is used at a certain point,
 /// which prevents optimisations removing some or all of the things that relate to this operand.
 #[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct BlackBoxInst {
     op: PackedOperand,
 }
@@ -2032,6 +2083,10 @@ impl BlackBoxInst {
         Self {
             op: PackedOperand::new(&op),
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.operand(m) == other.operand(m)
     }
 
     pub(crate) fn operand(&self, m: &Module) -> Operand {
@@ -2045,7 +2100,7 @@ impl BlackBoxInst {
 ///
 /// Loads a value from a given pointer operand.
 ///
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct LoadInst {
     /// The pointer to load from.
     op: PackedOperand,
@@ -2063,6 +2118,12 @@ impl LoadInst {
             tyidx,
             volatile,
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.op.unpack(m) == other.op.unpack(m)
+            && self.tyidx == other.tyidx
+            && self.volatile == other.volatile
     }
 
     /// Return the pointer operand.
@@ -2085,7 +2146,7 @@ impl LoadInst {
 ///
 /// FIXME (maybe): If we added a third `TraceInput` storage class to the register allocator, could
 /// we kill this instruction kind entirely?
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 #[repr(packed)]
 pub struct LoadTraceInputInst {
     /// The VarLocation of this input.
@@ -2097,6 +2158,10 @@ pub struct LoadTraceInputInst {
 impl LoadTraceInputInst {
     pub(crate) fn new(locidx: u32, tyidx: TyIdx) -> LoadTraceInputInst {
         Self { locidx, tyidx }
+    }
+
+    pub(crate) fn decopy_eq(&self, other: Self) -> bool {
+        self.locidx == other.locidx && self.tyidx == other.tyidx
     }
 
     pub(crate) fn tyidx(&self) -> TyIdx {
@@ -2129,7 +2194,7 @@ impl LoadTraceInputInst {
 /// to implement a special global version for each instruction, e.g. LoadGlobal/StoreGlobal/etc).
 /// The easiest way to do this is to make globals a subclass of constants, similarly to what LLVM
 /// does.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct LookupGlobalInst {
     /// The pointer to load from.
     global_decl_idx: GlobalDeclIdx,
@@ -2144,6 +2209,10 @@ impl LookupGlobalInst {
     #[cfg(test)]
     pub(crate) fn new(_global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
         panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
+    }
+
+    fn decopy_eq(&self, other: Self) -> bool {
+        self.global_decl_idx == other.global_decl_idx
     }
 
     #[cfg(not(test))]
@@ -2163,7 +2232,7 @@ impl LookupGlobalInst {
 /// # Semantics
 ///
 /// Perform an indirect call to an external or AOT function.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct IndirectCallInst {
     /// The callee.
     target: PackedOperand,
@@ -2234,7 +2303,7 @@ impl IndirectCallInst {
 /// # Semantics
 ///
 /// Perform a call to an external or AOT function.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 #[repr(packed)]
 pub struct DirectCallInst {
     /// The callee.
@@ -2297,7 +2366,7 @@ impl DirectCallInst {
 /// # Semantics
 ///
 /// Stores a value into a pointer.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct StoreInst {
     /// The target pointer that we will store `val` into.
     tgt: PackedOperand,
@@ -2317,6 +2386,12 @@ impl StoreInst {
         }
     }
 
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.tgt(m) == other.tgt(m)
+            && self.val(m) == other.val(m)
+            && self.volatile == other.volatile
+    }
+
     /// Returns the value operand: i.e. the thing that is going to be stored.
     pub(crate) fn val(&self, m: &Module) -> Operand {
         self.val.unpack(m)
@@ -2333,7 +2408,7 @@ impl StoreInst {
 /// # Semantics
 ///
 /// Selects from two values depending on a condition.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct SelectInst {
     cond: PackedOperand,
     trueval: PackedOperand,
@@ -2347,6 +2422,12 @@ impl SelectInst {
             trueval: PackedOperand::new(&trueval),
             falseval: PackedOperand::new(&falseval),
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.cond(m) == other.cond(m)
+            && self.trueval(m) == other.trueval(m)
+            && self.falseval(m) == other.falseval(m)
     }
 
     /// Returns the condition.
@@ -2374,7 +2455,7 @@ impl SelectInst {
 ///
 /// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
 /// in the LLVM pointer indexing type.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 #[repr(packed)]
 pub struct PtrAddInst {
     /// The pointer to offset
@@ -2393,6 +2474,10 @@ impl PtrAddInst {
             ptr: PackedOperand::new(&ptr),
             off,
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.ptr(m) == other.ptr(m) && self.off == other.off
     }
 
     pub(crate) fn ptr(&self, m: &Module) -> Operand {
@@ -2417,7 +2502,7 @@ impl PtrAddInst {
 ///
 /// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
 /// in the LLVM pointer indexing type.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 #[repr(packed)]
 pub struct DynPtrAddInst {
     /// The pointer to offset
@@ -2439,6 +2524,12 @@ impl DynPtrAddInst {
             elem_size,
             num_elems: PackedOperand::new(&num_elems),
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.ptr(m) == other.ptr(m)
+            && self.num_elems(m) == other.num_elems(m)
+            && self.elem_size() == other.elem_size()
     }
 
     pub(crate) fn ptr(&self, m: &Module) -> Operand {
@@ -2463,7 +2554,7 @@ impl DynPtrAddInst {
 /// Compares two integer operands according to a predicate (e.g. greater-than). Defines a local
 /// variable that dictates the truth of the comparison.
 ///
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct ICmpInst {
     pub(crate) lhs: PackedOperand,
     pub(crate) pred: Predicate,
@@ -2477,6 +2568,10 @@ impl ICmpInst {
             pred,
             rhs: PackedOperand::new(&rhs),
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.lhs(m) == other.lhs(m) && self.pred == other.pred && self.rhs(m) == other.rhs(m)
     }
 
     /// Returns the left-hand-side of the comparison.
@@ -2507,7 +2602,7 @@ impl ICmpInst {
 ///
 /// Compares two floating point operands according to a predicate (e.g. greater-than). Defines a
 /// local variable that dictates the truth of the comparison.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct FCmpInst {
     pub(crate) lhs: PackedOperand,
     pub(crate) pred: FloatPredicate,
@@ -2521,6 +2616,10 @@ impl FCmpInst {
             pred,
             rhs: PackedOperand::new(&rhs),
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.lhs(m) == other.lhs(m) && self.pred == other.pred && self.rhs(m) == other.rhs(m)
     }
 
     /// Returns the left-hand-side of the comparison.
@@ -2553,7 +2652,7 @@ impl FCmpInst {
 /// the assumption that (at runtime) the guard condition is true. If the guard condition is false,
 /// then execution may not continue, and deoptimisation must occur.
 ///
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct GuardInst {
     /// The condition to guard against.
     pub(crate) cond: PackedOperand,
@@ -2572,6 +2671,12 @@ impl GuardInst {
         }
     }
 
+    fn decopy_eq(&self, m: &Module, other: GuardInst) -> bool {
+        self.cond.unpack(m) == other.cond.unpack(m)
+            && self.expect == other.expect
+            && self.gidx == other.gidx
+    }
+
     pub(crate) fn cond(&self, m: &Module) -> Operand {
         self.cond.unpack(m)
     }
@@ -2585,7 +2690,7 @@ impl GuardInst {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct SExtInst {
     /// The value to extend.
     val: PackedOperand,
@@ -2601,6 +2706,10 @@ impl SExtInst {
         }
     }
 
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m) && self.dest_tyidx == other.dest_tyidx
+    }
+
     pub(crate) fn val(&self, m: &Module) -> Operand {
         self.val.unpack(m)
     }
@@ -2610,7 +2719,7 @@ impl SExtInst {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct ZExtInst {
     /// The value to extend.
     val: PackedOperand,
@@ -2626,6 +2735,10 @@ impl ZExtInst {
         }
     }
 
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m) && self.dest_tyidx == other.dest_tyidx
+    }
+
     pub(crate) fn val(&self, m: &Module) -> Operand {
         self.val.unpack(m)
     }
@@ -2635,7 +2748,7 @@ impl ZExtInst {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct TruncInst {
     /// The value to extend.
     val: PackedOperand,
@@ -2651,6 +2764,10 @@ impl TruncInst {
         }
     }
 
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m) && self.dest_tyidx == other.dest_tyidx
+    }
+
     pub(crate) fn val(&self, m: &Module) -> Operand {
         self.val.unpack(m)
     }
@@ -2660,7 +2777,7 @@ impl TruncInst {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct SIToFPInst {
     /// The value to convert.
     val: PackedOperand,
@@ -2674,6 +2791,10 @@ impl SIToFPInst {
             val: PackedOperand::new(val),
             dest_tyidx,
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m) && self.dest_tyidx == other.dest_tyidx
     }
 
     pub(crate) fn val(&self, m: &Module) -> Operand {
@@ -2693,7 +2814,7 @@ impl SIToFPInst {
 ///
 /// The source float and destination integer need not be the same width, but if the resulting
 /// numeric value does not fit, the result is undefined.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct FPToSIInst {
     /// The value to convert. Must be of floating point type.
     val: PackedOperand,
@@ -2709,6 +2830,10 @@ impl FPToSIInst {
         }
     }
 
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m) && self.dest_tyidx == other.dest_tyidx
+    }
+
     pub(crate) fn val(&self, m: &Module) -> Operand {
         self.val.unpack(m)
     }
@@ -2718,7 +2843,7 @@ impl FPToSIInst {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct FPExtInst {
     /// The value to convert.
     val: PackedOperand,
@@ -2732,6 +2857,10 @@ impl FPExtInst {
             val: PackedOperand::new(val),
             dest_tyidx,
         }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m) && self.dest_tyidx == other.dest_tyidx
     }
 
     pub(crate) fn val(&self, m: &Module) -> Operand {
