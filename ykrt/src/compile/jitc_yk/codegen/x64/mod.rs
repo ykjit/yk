@@ -53,12 +53,9 @@ use dynasmrt::{
 };
 use indexmap::IndexMap;
 use parking_lot::Mutex;
+use std::sync::{Arc, Weak};
 use std::{cell::Cell, slice};
-use std::{collections::HashMap, error::Error, ffi::c_void};
-use std::{
-    mem,
-    sync::{Arc, Weak},
-};
+use std::{collections::HashMap, error::Error};
 use ykaddr::addr::symbol_to_ptr;
 use yksmp;
 
@@ -414,7 +411,7 @@ impl<'a> Assemble<'a> {
             jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
             jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
             jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
-            jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(iidx, i),
+            jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
             jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
             jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
             jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
@@ -1338,19 +1335,7 @@ impl<'a> Assemble<'a> {
 
     fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
-        let bit_size = match self.m.type_(lhs.tyidx(self.m)) {
-            Ty::Integer(bits) => *bits,
-            Ty::Ptr => {
-                // FIXME: In theory pointers to different types could be of different sizes. We
-                // should really ask LLVM how big the pointer was when it codegenned the
-                // interpreter, and on a per-pointer basis.
-                //
-                // For now we assume (and ykllvm assserts this) that all pointers are void
-                // pointer-sized and a multiple of 8 bits.
-                u32::try_from(mem::size_of::<*const c_void>() * 8).unwrap()
-            }
-            _ => unreachable!(),
-        };
+        let bit_size = self.m.type_(lhs.tyidx(self.m)).bit_size().unwrap();
         let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
@@ -1770,7 +1755,7 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_zeroextend(&mut self, iidx: InstIdx, i: &jit_ir::ZeroExtendInst) {
+    fn cg_zext(&mut self, iidx: InstIdx, i: &jit_ir::ZExtInst) {
         let [reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
@@ -1778,37 +1763,11 @@ impl<'a> Assemble<'a> {
         );
 
         let src_type = self.m.type_(i.val(self.m).tyidx(self.m));
-        // FIXME: this chunk of code is duplicated in a few places.
-        let src_bitsize = match src_type {
-            Ty::Integer(bits) => *bits,
-            Ty::Ptr => {
-                // FIXME: In theory pointers to different types could be of different sizes. We
-                // should really ask LLVM how big the pointer was when it codegenned the
-                // interpreter, and on a per-pointer basis.
-                //
-                // For now we assume (and ykllvm assserts this) that all pointers are void
-                // pointer-sized and a multiple of 8 bits.
-                u32::try_from(mem::size_of::<*const c_void>() * 8).unwrap()
-            }
-            _ => unreachable!(),
-        };
-
+        let src_bitsize = src_type.bit_size().unwrap();
         let dest_type = self.m.type_(i.dest_tyidx());
-        let dest_bitsize = match dest_type {
-            Ty::Integer(bits) => *bits,
-            Ty::Ptr => {
-                // FIXME: In theory pointers to different types could be of different sizes. We
-                // should really ask LLVM how big the pointer was when it codegenned the
-                // interpreter, and on a per-pointer basis.
-                //
-                // For now we assume (and ykllvm assserts this) that all pointers are void
-                // pointer-sized and a multiple of 8 bits.
-                u32::try_from(mem::size_of::<*const c_void>() * 8).unwrap()
-            }
-            _ => unreachable!(),
-        };
+        let dest_bitsize = dest_type.bit_size().unwrap();
 
-        if dest_bitsize <= u32::try_from(REG64_BITSIZE).unwrap() {
+        if dest_bitsize <= REG64_BITSIZE {
             // If it fits in a register, we can just sign extend up to the entire register width.
             self.zero_extend_to_reg64(reg, u8::try_from(src_bitsize).unwrap());
         } else {
@@ -1909,25 +1868,6 @@ impl<'a> Assemble<'a> {
 
         // This instruction takes an integer and truncates it to a smaller one. We do nothing,
         // other than assume that the now-unused higher-order bits are undefined.
-
-        // FIXME: What follows are just assertions that should be moved to the well-formedness
-        // checker.
-        let from_val = i.val(self.m);
-        let from_type = self.m.type_(from_val.tyidx(self.m));
-        let from_size = from_type.byte_size().unwrap();
-
-        let to_type = self.m.type_(i.dest_tyidx());
-        let to_size = to_type.byte_size().unwrap();
-
-        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
-        debug_assert!(
-            matches!(from_type, jit_ir::Ty::Integer(_)) || matches!(from_type, jit_ir::Ty::Ptr)
-        );
-        // You can only truncate a bigger integer to a smaller integer.
-        debug_assert!(from_size > to_size);
-
-        // FIXME: assumes the input and output fit in a register.
-        debug_assert!(to_size <= REG64_BYTESIZE);
     }
 
     fn cg_select(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {

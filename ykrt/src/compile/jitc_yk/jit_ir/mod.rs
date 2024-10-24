@@ -967,6 +967,9 @@ pub(crate) enum Ty {
 
 impl Ty {
     /// Returns the size of the type in bytes, or `None` if asking the size makes no sense.
+    ///
+    /// To get the size in *bits*, use [Self::bit_size] instead. Multiplying the result of
+    /// `byte_size()` by 8 is not correct.
     pub(crate) fn byte_size(&self) -> Option<usize> {
         // u16/u32 -> usize conversions could theoretically fail on some arches (which we probably
         // won't ever support).
@@ -986,6 +989,24 @@ impl Ty {
             Self::Float(ft) => Some(match ft {
                 FloatTy::Float => mem::size_of::<f32>(),
                 FloatTy::Double => mem::size_of::<f64>(),
+            }),
+            Self::Unimplemented(_) => None,
+        }
+    }
+
+    /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
+    pub(crate) fn bit_size(&self) -> Option<usize> {
+        match self {
+            Self::Void => Some(0),
+            Self::Integer(bits) => Some(usize::try_from(*bits).unwrap()),
+            Self::Ptr => {
+                // We make the same assumptions about pointer size as in Self::byte_size().
+                Some(mem::size_of::<*const c_void>() * 8)
+            }
+            Self::Func(_) => None,
+            Self::Float(ft) => Some(match ft {
+                FloatTy::Float => mem::size_of::<f32>() * 8,
+                FloatTy::Double => mem::size_of::<f64>() * 8,
             }),
             Self::Unimplemented(_) => None,
         }
@@ -1411,7 +1432,7 @@ pub(crate) enum Inst {
     RootJump,
 
     SExt(SExtInst),
-    ZeroExtend(ZeroExtendInst),
+    ZExt(ZExtInst),
     Trunc(TruncInst),
     Select(SelectInst),
     SIToFP(SIToFPInst),
@@ -1461,7 +1482,7 @@ impl Inst {
             Self::TraceLoopJump => m.void_tyidx(),
             Self::RootJump => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
-            Self::ZeroExtend(si) => si.dest_tyidx(),
+            Self::ZExt(si) => si.dest_tyidx(),
             Self::Trunc(t) => t.dest_tyidx(),
             Self::Select(s) => s.trueval(m).tyidx(m),
             Self::SIToFP(i) => i.dest_tyidx(),
@@ -1498,7 +1519,7 @@ impl Inst {
             Inst::TraceLoopJump => true,
             Inst::RootJump => true,
             Inst::SExt(_) => false,
-            Inst::ZeroExtend(_) => false,
+            Inst::ZExt(_) => false,
             Inst::Trunc(_) => false,
             Inst::Select(_) => false,
             Inst::SIToFP(_) => false,
@@ -1583,7 +1604,7 @@ impl Inst {
                 }
             }
             Inst::SExt(SExtInst { val, .. }) => val.unpack(m).map_iidx(f),
-            Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::ZExt(ZExtInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::Select(SelectInst {
                 cond,
@@ -1692,7 +1713,7 @@ impl Inst {
                 }
             }
             Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
-            Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.map_iidx(f),
+            Inst::ZExt(ZExtInst { val, .. }) => val.map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
             Inst::Select(SelectInst {
                 cond,
@@ -1893,7 +1914,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::SExt(i) => {
                 write!(f, "sext {}", i.val(self.m).display(self.m),)
             }
-            Inst::ZeroExtend(i) => {
+            Inst::ZExt(i) => {
                 write!(f, "zext {}", i.val(self.m).display(self.m),)
             }
             Inst::Trunc(i) => {
@@ -1943,7 +1964,7 @@ inst!(DynPtrAdd, DynPtrAddInst);
 inst!(ICmp, ICmpInst);
 inst!(Guard, GuardInst);
 inst!(SExt, SExtInst);
-inst!(ZeroExtend, ZeroExtendInst);
+inst!(ZExt, ZExtInst);
 inst!(Trunc, TruncInst);
 inst!(Select, SelectInst);
 inst!(SIToFP, SIToFPInst);
@@ -2590,14 +2611,14 @@ impl SExtInst {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ZeroExtendInst {
+pub struct ZExtInst {
     /// The value to extend.
     val: PackedOperand,
     /// The type to extend to.
     dest_tyidx: TyIdx,
 }
 
-impl ZeroExtendInst {
+impl ZExtInst {
     pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),

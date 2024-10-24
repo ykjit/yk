@@ -12,7 +12,7 @@ use super::super::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst, FPExtInst,
         FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst,
         Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PackedOperand, PtrAddInst,
-        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZeroExtendInst,
+        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZExtInst,
     },
 };
 use fm::FMBuilder;
@@ -396,10 +396,8 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::ZExt { assign, type_, val } => {
-                        let inst = ZeroExtendInst::new(
-                            &self.process_operand(val)?,
-                            self.process_type(type_)?,
-                        );
+                        let inst =
+                            ZExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::SIToFP { assign, type_, val } => {
@@ -918,7 +916,7 @@ mod tests {
               %32: i32 = load_ti 7
               %33: i64 = load_ti 8
               %48: i32 = load_ti 9
-              %1: i32 = trunc %0
+              %1: i32 = trunc %33
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
               tloop_start [%0, %5]
@@ -930,7 +928,7 @@ mod tests {
               *%9 = %8
               %10: i32 = load %9
               %11: i64 = sext %10
-              %111: i16 = zext %10
+              %111: i64 = zext %10
               %12: i32 = add %0, %1
               %13: i32 = sub %0, %1
               %14: i32 = mul %0, %1
