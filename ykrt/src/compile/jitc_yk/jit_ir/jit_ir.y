@@ -119,6 +119,9 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "SEXT" Operand {
       Ok(ASTInst::SExt{assign: $1?.span(), type_: $3?, val: $6? })
     }
+  | "LOCAL_OPERAND" ":" Type "=" "ZEXT" Operand {
+      Ok(ASTInst::ZExt{assign: $1?.span(), type_: $3?, val: $6? })
+    }
   | "LOCAL_OPERAND" ":" Type "=" "SI_TO_FP" Operand {
       Ok(ASTInst::SIToFP{assign: $1?.span(), type_: $3?, val: $6? })
     }

@@ -153,9 +153,13 @@ impl Module {
                     }
                 }
                 Inst::SExt(x) => {
-                    if self.type_(x.val(self).tyidx(self)).byte_size()
-                        >= self.type_(x.dest_tyidx()).byte_size()
-                    {
+                    let Ty::Integer(val_bitsize) = self.type_(x.val(self).tyidx(self)) else {
+                        panic!();
+                    };
+                    let Ty::Integer(dest_bitsize) = self.type_(x.dest_tyidx()) else {
+                        panic!();
+                    };
+                    if val_bitsize >= dest_bitsize {
                         panic!(
                             "Instruction at position {iidx} trying to sign extend from an equal-or-larger-than integer type\n  {}",
                             self.inst_no_copies(iidx).display(iidx, self)

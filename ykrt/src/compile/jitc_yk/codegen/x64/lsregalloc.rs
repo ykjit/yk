@@ -31,6 +31,7 @@ use crate::compile::jitc_yk::{
     codegen::{
         abs_stack::AbstractStack,
         reg_alloc::{self, VarLocation},
+        x64::REG64_BYTESIZE,
     },
     jit_ir::{Const, ConstIdx, FloatTy, Inst, InstIdx, Module, Operand, Ty},
 };
@@ -484,6 +485,9 @@ impl LSRegAlloc<'_> {
 
     /// Load the value for `iidx` from the stack into `reg`.
     ///
+    /// If the register is larger than the type being loaded the unused high-order bits are
+    /// undefined.
+    ///
     /// # Panics
     ///
     /// If `iidx` has not previously been spilled.
@@ -511,13 +515,7 @@ impl LSRegAlloc<'_> {
                     .unwrap();
                 let cur_reg = GP_REGS[reg_i];
                 if cur_reg != reg {
-                    match size {
-                        1 => dynasm!(asm ; movzx Rq(reg.code()), Rb(cur_reg.code())),
-                        2 => dynasm!(asm ; movzx Rq(reg.code()), Rw(cur_reg.code())),
-                        4 => dynasm!(asm ; mov Rd(reg.code()), Rd(cur_reg.code())),
-                        8 => dynasm!(asm ; mov Rq(reg.code()), Rq(cur_reg.code())),
-                        _ => todo!("{}", size),
-                    }
+                    dynasm!(asm; mov Rq(reg.code()), Rq(cur_reg.code()));
                 }
             }
             SpillState::Stack(off) => {
@@ -546,21 +544,17 @@ impl LSRegAlloc<'_> {
     }
 
     /// Load the constant from `cidx` into `reg`.
+    ///
+    /// If the register is larger than the constant, the unused high-order bits are undefined.
     fn load_const_into_gp_reg(&mut self, asm: &mut Assembler, cidx: ConstIdx, reg: Rq) {
         match self.m.const_(cidx) {
             Const::Float(_tyidx, _x) => todo!(),
             Const::Int(tyidx, x) => {
-                let Ty::Integer(width) = self.m.type_(*tyidx) else {
-                    panic!()
-                };
-                // The `as`s are all safe because the IR guarantees that no more than `width` bits
-                // are set in the integer i.e. we are only ever truncating zeros.
-                match width {
-                    1 | 8 => dynasm!(asm; mov Rb(reg.code()), BYTE *x as i8),
-                    16 => dynasm!(asm; mov Rw(reg.code()), WORD *x as i16),
-                    32 => dynasm!(asm; mov Rd(reg.code()), DWORD *x as i32),
-                    64 => dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64),
-                    _ => todo!(),
+                // `unwrap` cannot fail, integers are sized.
+                if self.m.type_(*tyidx).byte_size().unwrap() <= REG64_BYTESIZE {
+                    dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64);
+                } else {
+                    todo!();
                 }
             }
             Const::Ptr(x) => {
