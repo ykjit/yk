@@ -248,11 +248,7 @@ impl<'a> Assemble<'a> {
         }
 
         let alloc_off = self.emit_prologue();
-
-        for (iidx, inst) in self.m.iter_skipping_insts() {
-            self.ra.expire_regs(iidx);
-            self.cg_inst(iidx, inst)?;
-        }
+        self.cg_insts()?;
 
         if !self.deoptinfo.is_empty() {
             // We now have to construct the "full" deopt points. Inside the trace itself, are just
@@ -382,42 +378,41 @@ impl<'a> Assemble<'a> {
     }
 
     /// Codegen an instruction.
-    fn cg_inst(
-        &mut self,
-        iidx: jit_ir::InstIdx,
-        inst: &jit_ir::Inst,
-    ) -> Result<(), CompilationError> {
-        self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
+    fn cg_insts(&mut self) -> Result<(), CompilationError> {
+        for (iidx, inst) in self.m.iter_skipping_insts() {
+            self.ra.expire_regs(iidx);
+            self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
 
-        match inst {
-            #[cfg(test)]
-            jit_ir::Inst::BlackBox(_) => unreachable!(),
-            jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
-                unreachable!();
+            match inst {
+                #[cfg(test)]
+                jit_ir::Inst::BlackBox(_) => unreachable!(),
+                jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
+                    unreachable!();
+                }
+
+                jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
+                jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
+                jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+                jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(iidx, i),
+                jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
+                jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
+                jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
+                jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
+                jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
+                jit_ir::Inst::ICmp(i) => self.cg_icmp(iidx, i),
+                jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
+                jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
+                jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
+                jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
+                jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
+                jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
+                jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
+                jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
+                jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
+                jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
+                jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
+                jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
             }
-
-            jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
-            jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
-            jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
-            jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(iidx, i),
-            jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
-            jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
-            jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
-            jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
-            jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
-            jit_ir::Inst::ICmp(i) => self.cg_icmp(iidx, i),
-            jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
-            jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
-            jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
-            jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
-            jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
-            jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
-            jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
-            jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
-            jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
-            jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
-            jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
-            jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
         }
         Ok(())
     }
