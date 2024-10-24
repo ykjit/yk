@@ -8,7 +8,7 @@ license = "Apache-2.0 OR MIT"
 [dependencies]
 byteorder = "1.4.3"
 deku = { version = "0.16.0", features = ["std"] }
-dynasmrt = "2.0.0"
+dynasmrt = "3.0.0"
 indexmap = "2.2.6"
 libc = "0.2.148"
 memmap2 = "0.9"
