@@ -118,6 +118,17 @@ impl Opt {
                         self.m.replace(iidx, Inst::Const(dst_cidx));
                     }
                 }
+                Inst::LoadTraceInput(x) => {
+                    // FIXME: This feels like it should be handled by trace_builder, but we can't
+                    // do so yet because of https://github.com/ykjit/yk/issues/1435.
+                    let locidx = x.locidx();
+                    if let yksmp::Location::Constant(v) =
+                        self.m.tilocs()[usize::try_from(locidx).unwrap()]
+                    {
+                        let cidx = self.m.insert_const(Const::Int(x.tyidx(), v.into()))?;
+                        self.an.set_value(iidx, Value::Const(cidx));
+                    }
+                }
                 _ => (),
             }
             self.cse(iidx);

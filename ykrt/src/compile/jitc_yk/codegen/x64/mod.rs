@@ -23,7 +23,7 @@
 use super::{
     super::{
         int_signs::{SignExtend, Truncate},
-        jit_ir::{self, BinOp, FloatTy, InstIdx, Module, Operand, Ty},
+        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, Ty},
         CompilationError,
     },
     reg_alloc::{self, StackDirection, VarLocation},
@@ -248,11 +248,7 @@ impl<'a> Assemble<'a> {
         }
 
         let alloc_off = self.emit_prologue();
-
-        for (iidx, inst) in self.m.iter_skipping_insts() {
-            self.ra.expire_regs(iidx);
-            self.cg_inst(iidx, inst)?;
-        }
+        self.cg_insts()?;
 
         if !self.deoptinfo.is_empty() {
             // We now have to construct the "full" deopt points. Inside the trace itself, are just
@@ -382,42 +378,60 @@ impl<'a> Assemble<'a> {
     }
 
     /// Codegen an instruction.
-    fn cg_inst(
-        &mut self,
-        iidx: jit_ir::InstIdx,
-        inst: &jit_ir::Inst,
-    ) -> Result<(), CompilationError> {
-        self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
+    fn cg_insts(&mut self) -> Result<(), CompilationError> {
+        let mut iter = self.m.iter_skipping_insts();
+        let mut next = iter.next();
+        while let Some((iidx, inst)) = next {
+            self.ra.expire_regs(iidx);
+            self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
 
-        match inst {
-            #[cfg(test)]
-            jit_ir::Inst::BlackBox(_) => unreachable!(),
-            jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
-                unreachable!();
+            match inst {
+                #[cfg(test)]
+                jit_ir::Inst::BlackBox(_) => unreachable!(),
+                jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
+                    unreachable!();
+                }
+
+                jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
+                jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
+                jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+                jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(iidx, i),
+                jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
+                jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
+                jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
+                jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
+                jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
+                jit_ir::Inst::ICmp(ic_inst) => {
+                    next = iter.next();
+                    // We have a special optimisation for `ICmp`s iff they're immediately followed
+                    // by a `Guard`.
+                    if let Some((next_iidx, Inst::Guard(g_inst))) = next {
+                        if let Operand::Var(cond_idx) = g_inst.cond(self.m) {
+                            if cond_idx == iidx {
+                                self.cg_icmp_guard(iidx, ic_inst, next_iidx, g_inst);
+                                next = iter.next();
+                                continue;
+                            }
+                        }
+                    }
+                    self.cg_icmp(iidx, ic_inst);
+                    continue;
+                }
+                jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
+                jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
+                jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
+                jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
+                jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
+                jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
+                jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
+                jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
+                jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
+                jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
+                jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
+                jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
             }
 
-            jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
-            jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
-            jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
-            jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(iidx, i),
-            jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
-            jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
-            jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
-            jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
-            jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
-            jit_ir::Inst::ICmp(i) => self.cg_icmp(iidx, i),
-            jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
-            jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
-            jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
-            jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
-            jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
-            jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
-            jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
-            jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
-            jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
-            jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
-            jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
-            jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
+            next = iter.next();
         }
         Ok(())
     }
@@ -558,45 +572,17 @@ impl<'a> Assemble<'a> {
                     (Operand::Const(cidx), Operand::Var(_))
                     | (Operand::Var(_), Operand::Const(cidx)) => {
                         // Addition involves a constant. We may be able to emit more optimal code.
-                        let Const::Int(ctyidx, v) = self.m.const_(*cidx) else {
-                            unreachable!()
-                        };
-                        let Ty::Integer(bit_size) = self.m.type_(*ctyidx) else {
-                            unreachable!()
-                        };
-                        // If it's a 64-bit add and the numeric value of the constant can be
-                        // expressed in 32-bits...
-                        //
-                        // We are only optimising (exactly) 64-bit add operations for now, but
-                        // there is certainly oppertunity to optimised other cases later.
-                        //
-                        // We could have used Rust `as` casts to truncate and sign-extend here,
-                        // since we are currently only dealing with i32s and i64s, but if/when we
-                        // want to cover operations on other "odd-bit-size" integers we will need
-                        // these custom implementations.
-                        //
-                        // FIXME/OPT: This can be simplified/optimised.
-                        if *bit_size == 64 && v.truncate(32).sign_extend(32, 64) == *v {
-                            let v32 = v.truncate(32);
+                        if let Some(v) = self.op_to_i32(&Operand::Const(*cidx)) {
                             let [lhs_reg] = self.ra.assign_gp_regs(
                                 &mut self.asm,
                                 iidx,
                                 [RegConstraint::InputOutput(lhs)],
                             );
-                            dynasm!(self.asm; add Rq(lhs_reg.code()), v32 as i32);
-                            return;
-                        }
-                        // Same optimisation, but for 32-bit add.
-                        //
-                        // This time the constant fits by definition.
-                        if *bit_size == 32 {
-                            let v32 = v.truncate(32);
-                            let [lhs_reg] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::InputOutput(lhs)],
-                            );
-                            dynasm!(self.asm; add Rd(lhs_reg.code()), v32 as i32);
+                            match byte_size {
+                                8 => dynasm!(self.asm; add Rq(lhs_reg.code()), v),
+                                1..=4 => dynasm!(self.asm; add Rd(lhs_reg.code()), v),
+                                _ => unreachable!(),
+                            }
                             return;
                         }
                     }
@@ -1017,13 +1003,11 @@ impl<'a> Assemble<'a> {
             yksmp::Location::Constant(v) => {
                 // FIXME: This isn't fine-grained enough, as there may be constants of any
                 // bit-size.
-                let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
-                match size {
-                    4 => VarLocation::ConstInt {
-                        bits: 32,
-                        v: u64::from(*v),
-                    },
-                    _ => todo!(),
+                let byte_size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                debug_assert!(byte_size <= 8);
+                VarLocation::ConstInt {
+                    bits: u32::try_from(byte_size).unwrap() * 8,
+                    v: u64::from(*v),
                 }
             }
             e => {
@@ -1333,14 +1317,41 @@ impl<'a> Assemble<'a> {
         Ok(())
     }
 
-    fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
-        let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
-        let bit_size = self.m.type_(lhs.tyidx(self.m)).bit_size().unwrap();
-        let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-        );
+    /// If an `Operand` refers to a constant integer that can be represented as an `i32`, return
+    /// it, otherwise return `None`.
+    fn op_to_i32(&self, op: &Operand) -> Option<i32> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
+                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                if *bit_size <= 32 {
+                    return Some(v.sign_extend(*bit_size, 32) as i32);
+                } else if v.truncate(32).sign_extend(32, 64) == *v {
+                    return Some(v.truncate(32) as i32);
+                }
+            }
+        }
+        None
+    }
+
+    fn cg_cmp_const(&mut self, bit_size: usize, pred: jit_ir::Predicate, lhs_reg: Rq, rhs: i32) {
+        match bit_size {
+            0 => unreachable!(),
+            32 => dynasm!(self.asm; cmp Rd(lhs_reg.code()), rhs),
+            1..=64 => {
+                if pred.signed() {
+                    self.sign_extend_to_reg64(lhs_reg, u8::try_from(bit_size).unwrap());
+                } else {
+                    self.zero_extend_to_reg64(lhs_reg, u8::try_from(bit_size).unwrap());
+                }
+                dynasm!(self.asm; cmp Rq(lhs_reg.code()), rhs);
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn cg_cmp_regs(&mut self, bit_size: usize, pred: jit_ir::Predicate, lhs_reg: Rq, rhs_reg: Rq) {
         match bit_size {
             0 => unreachable!(),
             32 => dynasm!(self.asm; cmp Rd(lhs_reg.code()), Rd(rhs_reg.code())),
@@ -1356,6 +1367,84 @@ impl<'a> Assemble<'a> {
             }
             _ => todo!(),
         }
+    }
+
+    /// Optimise an `ICmpInst` iff it's immediately followed by a `GuardInst`. Calling this
+    /// function in any other situation will lead to undefined results.
+    fn cg_icmp_guard(
+        &mut self,
+        ic_iidx: InstIdx,
+        ic_inst: &jit_ir::ICmpInst,
+        g_iidx: InstIdx,
+        g_inst: &jit_ir::GuardInst,
+    ) {
+        // Codegen ICmp
+        let (lhs, pred, rhs) = (
+            ic_inst.lhs(self.m),
+            ic_inst.predicate(),
+            ic_inst.rhs(self.m),
+        );
+        let bit_size = self.m.type_(lhs.tyidx(self.m)).bit_size().unwrap();
+        if let Some(v) = self.op_to_i32(&rhs) {
+            let [lhs_reg] =
+                self.ra
+                    .assign_gp_regs(&mut self.asm, ic_iidx, [RegConstraint::Input(lhs)]);
+            self.cg_cmp_const(bit_size, pred, lhs_reg, v);
+        } else {
+            let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                ic_iidx,
+                [RegConstraint::Input(lhs), RegConstraint::Input(rhs)],
+            );
+            self.cg_cmp_regs(bit_size, pred, lhs_reg, rhs_reg);
+        }
+
+        // Codegen guard
+        self.ra.expire_regs(g_iidx);
+        self.comment(
+            self.asm.offset(),
+            Inst::Guard(*g_inst).display(g_iidx, self.m).to_string(),
+        );
+        let fail_label = self.guard_to_deopt(g_inst);
+
+        if g_inst.expect() {
+            match pred {
+                jit_ir::Predicate::Equal => dynasm!(self.asm; jne => fail_label),
+                jit_ir::Predicate::NotEqual => dynasm!(self.asm; je => fail_label),
+                jit_ir::Predicate::UnsignedGreater => dynasm!(self.asm; jna => fail_label),
+                jit_ir::Predicate::UnsignedGreaterEqual => dynasm!(self.asm; jnae => fail_label),
+                jit_ir::Predicate::UnsignedLess => dynasm!(self.asm; jnb => fail_label),
+                jit_ir::Predicate::UnsignedLessEqual => dynasm!(self.asm; jnbe => fail_label),
+                jit_ir::Predicate::SignedGreater => dynasm!(self.asm; jng => fail_label),
+                jit_ir::Predicate::SignedGreaterEqual => dynasm!(self.asm; jnge => fail_label),
+                jit_ir::Predicate::SignedLess => dynasm!(self.asm; jnl => fail_label),
+                jit_ir::Predicate::SignedLessEqual => dynasm!(self.asm; jnle => fail_label),
+            }
+        } else {
+            match pred {
+                jit_ir::Predicate::Equal => dynasm!(self.asm; je => fail_label),
+                jit_ir::Predicate::NotEqual => dynasm!(self.asm; jne => fail_label),
+                jit_ir::Predicate::UnsignedGreater => dynasm!(self.asm; ja => fail_label),
+                jit_ir::Predicate::UnsignedGreaterEqual => dynasm!(self.asm; jae => fail_label),
+                jit_ir::Predicate::UnsignedLess => dynasm!(self.asm; jb => fail_label),
+                jit_ir::Predicate::UnsignedLessEqual => dynasm!(self.asm; jbe => fail_label),
+                jit_ir::Predicate::SignedGreater => dynasm!(self.asm; jg => fail_label),
+                jit_ir::Predicate::SignedGreaterEqual => dynasm!(self.asm; jge => fail_label),
+                jit_ir::Predicate::SignedLess => dynasm!(self.asm; jl => fail_label),
+                jit_ir::Predicate::SignedLessEqual => dynasm!(self.asm; jle => fail_label),
+            }
+        }
+    }
+
+    fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
+        let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
+        let bit_size = self.m.type_(lhs.tyidx(self.m)).bit_size().unwrap();
+        let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
+        );
+        self.cg_cmp_regs(bit_size, pred, lhs_reg, rhs_reg);
 
         // Interpret the flags assignment WRT the predicate.
         //
@@ -1372,7 +1461,7 @@ impl<'a> Assemble<'a> {
             jit_ir::Predicate::UnsignedGreater => dynasm!(self.asm; seta Rb(lhs_reg.code())),
             jit_ir::Predicate::UnsignedGreaterEqual => dynasm!(self.asm; setae Rb(lhs_reg.code())),
             jit_ir::Predicate::UnsignedLess => dynasm!(self.asm; setb Rb(lhs_reg.code())),
-            jit_ir::Predicate::UnsignedLessEqual => dynasm!(self.asm; setb Rb(lhs_reg.code())),
+            jit_ir::Predicate::UnsignedLessEqual => dynasm!(self.asm; setbe Rb(lhs_reg.code())),
             jit_ir::Predicate::SignedGreater => dynasm!(self.asm; setg Rb(lhs_reg.code())),
             jit_ir::Predicate::SignedGreaterEqual => dynasm!(self.asm; setge Rb(lhs_reg.code())),
             jit_ir::Predicate::SignedLess => dynasm!(self.asm; setl Rb(lhs_reg.code())),
@@ -1886,7 +1975,7 @@ impl<'a> Assemble<'a> {
         dynasm!(self.asm ; cmove Rq(true_reg.code()), Rq(false_reg.code()));
     }
 
-    fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
+    fn guard_to_deopt(&mut self, inst: &jit_ir::GuardInst) -> DynamicLabel {
         // Convert the guard info into deopt info and store it on the heap.
         let mut lives = Vec::new();
         let gi = inst.guard_info(self.m);
@@ -1929,7 +2018,11 @@ impl<'a> Assemble<'a> {
             guard: Guard::new(),
         };
         self.deoptinfo.insert(inst.gidx.into(), deoptinfo);
+        fail_label
+    }
 
+    fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
+        let fail_label = self.guard_to_deopt(inst);
         let cond = inst.cond(self.m);
         // ICmp instructions evaluate to a one-byte zero/one value.
         debug_assert_eq!(cond.byte_size(self.m), 1);
@@ -3252,6 +3345,27 @@ mod tests {
     }
 
     #[test]
+    fn cg_icmp_guard() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                %2: i1 = eq %0, 3i8
+                guard true, %2, []
+            ",
+            "
+                ...
+                ; %1: i1 = eq %0, 3i8
+                {{_}} {{_}}: movzx r.64.x, r.8._
+                {{_}} {{_}}: cmp r.64.x, 0x03
+                ; guard true, %1, []
+                {{_}} {{_}}: jnz 0x...
+                ...
+            ",
+        );
+    }
+
+    #[test]
     fn unterminated_trace() {
         codegen_and_test(
             "
@@ -3406,8 +3520,7 @@ mod tests {
                 ...
                 ; %2: i8 = add %0, 1i8
                 ......
-                {{_}} {{_}}: mov r.64.x, 0x01
-                {{_}} {{_}}: add r.64.y, r.64.x
+                {{_}} {{_}}: add r.32.y, 0x01
                 ...
             ",
         );
