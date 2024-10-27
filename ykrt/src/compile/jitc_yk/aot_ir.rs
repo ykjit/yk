@@ -408,6 +408,7 @@ pub(crate) enum BinOp {
     /// The canonicalised form of `Add` in JIT IR is (Var, Var) or (Var, Const).
     Add = 0,
     Sub,
+    /// The canonicalised form of `Mul` in JIT IR is (Var, Var) or (Var, Const).
     Mul,
     Or,
     And,

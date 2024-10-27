@@ -62,16 +62,16 @@ impl Opt {
                         self.an.op_map(&self.m, x.lhs(&self.m)),
                         self.an.op_map(&self.m, x.rhs(&self.m)),
                     ) {
-                        (Operand::Const(cidx), Operand::Var(copy_iidx))
-                        | (Operand::Var(copy_iidx), Operand::Const(cidx)) => {
-                            match self.m.const_(cidx) {
+                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                            match self.m.const_(op_cidx) {
                                 Const::Int(_, 0) => {
                                     // Replace `x * 0` with `0`.
-                                    self.m.replace(iidx, Inst::Const(cidx));
+                                    self.m.replace(iidx, Inst::Const(op_cidx));
                                 }
                                 Const::Int(_, 1) => {
                                     // Replace `x * 1` with `x`.
-                                    self.m.replace(iidx, Inst::Copy(copy_iidx));
+                                    self.m.replace(iidx, Inst::Copy(op_iidx));
                                 }
                                 Const::Int(ty_idx, x) if x.is_power_of_two() => {
                                     // Replace `x * y` with `x << ...`.
@@ -80,11 +80,22 @@ impl Opt {
                                         self.m.insert_const(Const::Int(*ty_idx, shl))?,
                                     );
                                     let new_inst =
-                                        BinOpInst::new(Operand::Var(copy_iidx), BinOp::Shl, shl_op)
+                                        BinOpInst::new(Operand::Var(op_iidx), BinOp::Shl, shl_op)
                                             .into();
                                     self.m.replace(iidx, new_inst);
                                 }
-                                _ => (),
+                                _ => {
+                                    // Canonicalise to (Var, Const).
+                                    self.m.replace(
+                                        iidx,
+                                        BinOpInst::new(
+                                            Operand::Var(op_iidx),
+                                            BinOp::Mul,
+                                            Operand::Const(op_cidx),
+                                        )
+                                        .into(),
+                                    );
+                                }
                             }
                         }
                         (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
