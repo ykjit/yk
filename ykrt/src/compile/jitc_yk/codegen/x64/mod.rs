@@ -53,9 +53,13 @@ use dynasmrt::{
 };
 use indexmap::IndexMap;
 use parking_lot::Mutex;
-use std::sync::{Arc, Weak};
-use std::{cell::Cell, slice};
-use std::{collections::HashMap, error::Error};
+use std::{
+    cell::Cell,
+    collections::HashMap,
+    error::Error,
+    slice,
+    sync::{Arc, Weak},
+};
 use ykaddr::addr::symbol_to_ptr;
 use yksmp;
 
