@@ -405,6 +405,7 @@ fn map_to_lineinfo(v: Vec<RawLineInfoRec>) -> Result<HashMap<InstID, LineInfoLoc
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[deku(type = "u8")]
 pub(crate) enum BinOp {
+    /// The canonicalised form of `Add` in JIT IR is (Var, Var) or (Var, Const).
     Add = 0,
     Sub,
     Mul,

@@ -36,7 +36,28 @@ impl Opt {
                 Inst::BlackBox(_) => (),
                 Inst::Const(cidx) => self.an.set_value(iidx, Value::Const(cidx)),
                 Inst::BinOp(x) => match x.binop() {
-                    BinOp::Add => (),
+                    BinOp::Add => {
+                        match (
+                            self.an.op_map(&self.m, x.lhs(&self.m)),
+                            self.an.op_map(&self.m, x.rhs(&self.m)),
+                        ) {
+                            (Operand::Const(_), Operand::Const(_)) => (),
+                            (Operand::Var(_), Operand::Var(_)) => (),
+                            (Operand::Var(op_iidx), Operand::Const(op_cidx))
+                            | (Operand::Const(op_cidx), Operand::Var(op_iidx)) => {
+                                // Canonicalise to (Var, Const).
+                                self.m.replace(
+                                    iidx,
+                                    BinOpInst::new(
+                                        Operand::Var(op_iidx),
+                                        BinOp::Add,
+                                        Operand::Const(op_cidx),
+                                    )
+                                    .into(),
+                                );
+                            }
+                        }
+                    }
                     BinOp::Mul => match (
                         self.an.op_map(&self.m, x.lhs(&self.m)),
                         self.an.op_map(&self.m, x.rhs(&self.m)),

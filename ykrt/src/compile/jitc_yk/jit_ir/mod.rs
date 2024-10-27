@@ -73,6 +73,14 @@
 //!  1. they implement [std::fmt::Display] directly.
 //!  2. or, when they need extra information, they expose a `display()` method, which returns an
 //!     object which implements [std::fmt::Display].
+//!
+//!
+//! ## Canonicalisation
+//!
+//! JIT IR has a canonicalised form: that is the "shape" that later stages can weakly assume the IR
+//! will be in. Canonicalisation is a weak promise, not a guarantee: later stages still have to
+//! deal with the other cases, but since they're mostly expected not to occur, they may be handled
+//! suboptimally if that makes the code easier.
 
 mod dead_code;
 #[cfg(test)]
