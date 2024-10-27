@@ -1037,6 +1037,37 @@ impl<'a> Assemble<'a> {
     fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
+                let op = inst.operand(self.m);
+                if let Operand::Var(op_iidx) = op {
+                    if self.ra.is_inst_var_still_used_after(iidx, op_iidx) {
+                        // If the operand value is still live after the current instruction, avoid
+                        // clobbering it, in the hope that it can be reused.
+                        let [in_reg, out_reg] = self.ra.assign_gp_regs(
+                            &mut self.asm,
+                            iidx,
+                            [
+                                RegConstraint::Input(inst.operand(self.m)),
+                                RegConstraint::Output,
+                            ],
+                        );
+                        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                        debug_assert!(size <= REG64_BYTESIZE);
+                        match size {
+                            1 => {
+                                dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code())])
+                            }
+                            2 => {
+                                dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code())])
+                            }
+                            4 => dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code())]),
+                            8 => dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code())]),
+                            _ => todo!("{}", size),
+                        };
+                        return;
+                    }
+                }
+                // The input operand is dead after this instruction, so reuse the same register for
+                // input and output.
                 let [reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
@@ -2341,8 +2372,7 @@ mod tests {
             "
                 ...
                 ; %1: ptr = load %0
-                {{_}} {{_}}: mov [rbp-0x08], r.64.x
-                {{_}} {{_}}: mov r.64.x, [r.64.x]
+                {{_}} {{_}}: mov r.64.x, [rbx]
                 ...
                 ",
         );
@@ -2359,8 +2389,7 @@ mod tests {
             "
                 ...
                 ; %1: i8 = load %0
-                {{_}} {{_}}: mov [rbp-0x01], r.8.x
-                {{_}} {{_}}: movzx r.64.x, byte ptr [r.64.x]
+                {{_}} {{_}}: movzx r.64.x, byte ptr [rbx]
                 ...
                 ",
         );
@@ -2377,7 +2406,6 @@ mod tests {
             "
                 ...
                 ; %1: i32 = Load %0
-                {{_}} {{_}}: mov [rbp-0x04], r.32.x
                 {{_}} {{_}}: mov r.32.x, [r.64.x]
                 ...
                 ",
