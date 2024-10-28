@@ -1576,12 +1576,21 @@ impl<'a> Assemble<'a> {
     fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
         let bit_size = self.m.type_(lhs.tyidx(self.m)).bit_size().unwrap();
-        let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-        );
-        self.cg_cmp_regs(bit_size, pred, lhs_reg, rhs_reg);
+        let lhs_reg = if let Some(v) = self.op_to_i32(&rhs) {
+            let [lhs_reg] =
+                self.ra
+                    .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::InputOutput(lhs)]);
+            self.cg_cmp_const(bit_size, pred, lhs_reg, v);
+            lhs_reg
+        } else {
+            let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                iidx,
+                [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
+            );
+            self.cg_cmp_regs(bit_size, pred, lhs_reg, rhs_reg);
+            lhs_reg
+        };
 
         // Interpret the flags assignment WRT the predicate.
         //
@@ -3440,6 +3449,26 @@ mod tests {
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
+            ",
+        );
+    }
+
+    #[test]
+    fn cg_icmp_const() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                %2: i1 = eq %0, 3i8
+            ",
+            "
+                ...
+                ; %1: i1 = eq %0, 3i8
+                ...
+                {{_}} {{_}}: movzx r.64.x, r.8._
+                {{_}} {{_}}: cmp r.64.x, 0x03
+                {{_}} {{_}}: setz r.8.x
+                ...
             ",
         );
     }
