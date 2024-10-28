@@ -570,7 +570,7 @@ impl<'a> Assemble<'a> {
         let rhs = inst.rhs(self.m);
 
         match inst.binop() {
-            BinOp::Add => {
+            BinOp::Add | BinOp::And | BinOp::Or | BinOp::Xor => {
                 let byte_size = lhs.byte_size(self.m);
                 // We only optimise the canonicalised case.
                 if let Some(v) = self.op_to_i32(&rhs) {
@@ -579,9 +579,27 @@ impl<'a> Assemble<'a> {
                         iidx,
                         [RegConstraint::InputOutput(lhs)],
                     );
-                    match byte_size {
-                        8 => dynasm!(self.asm; add Rq(lhs_reg.code()), v),
-                        1..=4 => dynasm!(self.asm; add Rd(lhs_reg.code()), v),
+                    match inst.binop() {
+                        BinOp::Add => match byte_size {
+                            8 => dynasm!(self.asm; add Rq(lhs_reg.code()), v),
+                            1..=4 => dynasm!(self.asm; add Rd(lhs_reg.code()), v),
+                            _ => unreachable!(),
+                        },
+                        BinOp::And => match byte_size {
+                            8 => dynasm!(self.asm; and Rq(lhs_reg.code()), v),
+                            1..=4 => dynasm!(self.asm; and Rd(lhs_reg.code()), v),
+                            _ => unreachable!(),
+                        },
+                        BinOp::Or => match byte_size {
+                            8 => dynasm!(self.asm; or Rq(lhs_reg.code()), v),
+                            1..=4 => dynasm!(self.asm; or Rd(lhs_reg.code()), v),
+                            _ => unreachable!(),
+                        },
+                        BinOp::Xor => match byte_size {
+                            8 => dynasm!(self.asm; xor Rq(lhs_reg.code()), v),
+                            1..=4 => dynasm!(self.asm; xor Rd(lhs_reg.code()), v),
+                            _ => unreachable!(),
+                        },
                         _ => unreachable!(),
                     }
                 } else {
@@ -590,30 +608,49 @@ impl<'a> Assemble<'a> {
                         iidx,
                         [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                     );
-                    match byte_size {
-                        0 => unreachable!(),
-                        1..=8 => {
-                            // OK to ignore any undefined high-order bits here.
-                            dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                    match inst.binop() {
+                        BinOp::Add => {
+                            match byte_size {
+                                0 => unreachable!(),
+                                1..=8 => {
+                                    // OK to ignore any undefined high-order bits here.
+                                    dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                                }
+                                _ => todo!(),
+                            }
                         }
-                        _ => todo!(),
+                        BinOp::And => {
+                            match byte_size {
+                                0 => unreachable!(),
+                                1..=8 => {
+                                    // OK to ignore any undefined high-order bits here.
+                                    dynasm!(self.asm; and Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        BinOp::Or => {
+                            match byte_size {
+                                0 => unreachable!(),
+                                1..=8 => {
+                                    // OK to ignore any undefined high-order bits here.
+                                    dynasm!(self.asm; or Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        BinOp::Xor => {
+                            match byte_size {
+                                0 => unreachable!(),
+                                1..=8 => {
+                                    // OK to ignore any undefined high-order bits here.
+                                    dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        _ => unreachable!(),
                     }
-                }
-            }
-            BinOp::And => {
-                let byte_size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-                );
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; and Rq(lhs_reg.code()), Rq(rhs_reg.code()))
-                    }
-                    _ => todo!(),
                 }
             }
             BinOp::AShr => {
@@ -721,22 +758,6 @@ impl<'a> Assemble<'a> {
                 // Note that because we are code-genning an unchecked multiply, the higher-order part of
                 // the result in RDX is entirely ignored.
             }
-            BinOp::Or => {
-                let byte_size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-                );
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; or Rq(lhs_reg.code()), Rq(rhs_reg.code()));
-                    }
-                    _ => todo!(),
-                }
-            }
             BinOp::SDiv => {
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
@@ -823,22 +844,6 @@ impl<'a> Assemble<'a> {
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm; sub Rq(lhs_reg.code()), Rq(rhs_reg.code()));
-                    }
-                    _ => todo!(),
-                }
-            }
-            BinOp::Xor => {
-                let byte_size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-                );
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code()));
                     }
                     _ => todo!(),
                 }
