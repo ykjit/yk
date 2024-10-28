@@ -1180,7 +1180,47 @@ impl<'a> Assemble<'a> {
         let val = inst.val(self.m);
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
-                let size = val.byte_size(self.m);
+                let byte_size = val.byte_size(self.m);
+                match byte_size {
+                    1 => {
+                        if let Some(v) = self.op_to_i8(&val) {
+                            let [tgt_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::Input(inst.tgt(self.m))],
+                            );
+                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code())], v);
+                            return;
+                        }
+                    }
+                    2 => {
+                        if let Some(v) = self.op_to_i16(&val) {
+                            let [tgt_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::Input(inst.tgt(self.m))],
+                            );
+                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code())], v);
+                            return;
+                        }
+                    }
+                    4 | 8 => {
+                        if let Some(v) = self.op_to_i32(&val) {
+                            let [tgt_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::Input(inst.tgt(self.m))],
+                            );
+                            match byte_size {
+                                4 => dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code())], v),
+                                8 => dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code())], v),
+                                _ => unreachable!(),
+                            }
+                            return;
+                        }
+                    }
+                    _ => (),
+                }
                 let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
@@ -1189,7 +1229,7 @@ impl<'a> Assemble<'a> {
                         RegConstraint::Input(val),
                     ],
                 );
-                match size {
+                match byte_size {
                     1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rb(val_reg.code())),
                     2 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rw(val_reg.code())),
                     4 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rd(val_reg.code())),
@@ -1390,6 +1430,24 @@ impl<'a> Assemble<'a> {
                     return Some(v.sign_extend(*bit_size, 8) as i8);
                 } else if v.truncate(8).sign_extend(8, 64) == *v {
                     return Some(v.truncate(8) as i8);
+                }
+            }
+        }
+        None
+    }
+    ///
+    /// If an `Operand` refers to a constant integer that can be represented as an `i16`, return
+    /// it, otherwise return `None`.
+    fn op_to_i16(&self, op: &Operand) -> Option<i16> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
+                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                if *bit_size <= 16 {
+                    return Some(v.sign_extend(*bit_size, 16) as i16);
+                } else if v.truncate(16).sign_extend(16, 64) == *v {
+                    return Some(v.truncate(16) as i16);
                 }
             }
         }
@@ -2534,6 +2592,33 @@ mod tests {
                 ; %1: ptr = load_ti ...
                 ; *%1 = %0
                 {{_}} {{_}}: mov [r.64.x], r.64.y
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_store_consts() {
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = load_ti 0
+                *%0 = 1i8
+                *%0 = 2i16
+                *%0 = 3i32
+                *%0 = 4i64
+            ",
+            "
+                ...
+                ; %0: ptr = load_ti ...
+                ; *%0 = 1i8
+                {{_}} {{_}}: mov byte ptr [r.64.x], 0x01
+                ; *%0 = 2i16
+                {{_}} {{_}}: mov word ptr [r.64.x], 0x02
+                ; *%0 = 3i32
+                {{_}} {{_}}: mov dword ptr [r.64.x], 0x03
+                ; *%0 = 4i64
+                {{_}} {{_}}: mov qword ptr [r.64.x], 0x04
                 ...
                 ",
         );
