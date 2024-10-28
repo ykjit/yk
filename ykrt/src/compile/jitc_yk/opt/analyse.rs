@@ -70,7 +70,9 @@ impl Analyse {
                     }
                     (&Operand::Var(iidx), &Operand::Const(cidx))
                     | (&Operand::Const(cidx), &Operand::Var(iidx)) => {
-                        if pred == Predicate::Equal {
+                        if (g_inst.expect && pred == Predicate::Equal)
+                            || (!g_inst.expect && pred == Predicate::NotEqual)
+                        {
                             self.set_value(iidx, Value::Const(cidx));
                         }
                     }
