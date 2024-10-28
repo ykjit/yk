@@ -1165,15 +1165,33 @@ impl<'a> Assemble<'a> {
         // LLVM semantics dictate that the element size and number of elements should be
         // sign-extended/truncated up/down to the size of the LLVM pointer index type. For address
         // space zero on x86_64, truncation can't happen, and when an immediate third operand is
-        // used for x86_64 `mul`, it is implicitly sign extended.
-        dynasm!(self.asm
-            // multiply the element size by the number of elements.
-            ; imul Rq(num_elems_reg.code()), Rq(num_elems_reg.code()), i32::from(inst.elem_size())
-            // add the result to the pointer. We make use of addition's commutative property to
-            // reverse the "obvious" ordering of registers: doing so allows us not to overwrite
-            // ptr_reg.
-            ; add Rq(num_elems_reg.code()), Rq(ptr_reg.code())
-        );
+        // used, that also isn't a worry.
+        match inst.elem_size() {
+            1 => {
+                dynasm!(self.asm; lea Rq(num_elems_reg.code()), [Rq(ptr_reg.code()) + Rq(num_elems_reg.code())])
+            }
+            2 => {
+                dynasm!(self.asm; lea Rq(num_elems_reg.code()), [Rq(ptr_reg.code()) + Rq(num_elems_reg.code()) * 2])
+            }
+            4 => {
+                dynasm!(self.asm; lea Rq(num_elems_reg.code()), [Rq(ptr_reg.code()) + Rq(num_elems_reg.code()) * 4])
+            }
+            8 => {
+                dynasm!(self.asm; lea Rq(num_elems_reg.code()), [Rq(ptr_reg.code()) + Rq(num_elems_reg.code()) * 8])
+            }
+            _ => {
+                if inst.elem_size().is_power_of_two() {
+                    let v = i8::try_from(inst.elem_size().ilog2()).unwrap();
+                    dynasm!(self.asm; shl Rq(num_elems_reg.code()), v);
+                } else {
+                    dynasm!(self.asm; imul Rq(num_elems_reg.code()), Rq(num_elems_reg.code()), i32::from(inst.elem_size()));
+                }
+                // Add the result to the pointer. We make use of addition's commutative property to
+                // reverse the "obvious" ordering of registers: doing so allows us not to overwrite
+                // ptr_reg.
+                dynasm!(self.asm; add Rq(num_elems_reg.code()), Rq(ptr_reg.code()));
+            }
+        }
     }
 
     fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
@@ -2573,14 +2591,36 @@ mod tests {
               entry:
                 %0: ptr = load_ti 0
                 %1: i32 = load_ti 1
-                %2: ptr = dyn_ptr_add %0, %1, 32
+                %2: ptr = dyn_ptr_add %0, %1, 1
+                %3: ptr = dyn_ptr_add %0, %1, 2
+                %4: ptr = dyn_ptr_add %0, %1, 4
+                %5: ptr = dyn_ptr_add %0, %1, 5
+                %6: ptr = dyn_ptr_add %0, %1, 16
+                %7: ptr = dyn_ptr_add %0, %1, 77
             ",
             "
                 ...
-                ; %2: ptr = dyn_ptr_add %0, %1, 32
-                {{_}} {{_}}: mov [rbp-{{_}}], r.32.x
-                {{_}} {{_}}: imul r.64.x, r.64.x, 0x20
-                {{_}} {{_}}: add r.64.x, r.64.y
+                ; %2: ptr = dyn_ptr_add %0, %1, 1
+                {{_}} {{_}}: mov [rbp-{{_}}], r.32.x1
+                {{_}} {{_}}: lea r.64.x1, [r.64._+r.64.x1*1]
+                ; %3: ptr = dyn_ptr_add %0, %1, 2
+                {{_}} {{_}}: mov r.32.x2, [rbp-{{_}}]
+                {{_}} {{_}}: lea r.64.x2, [r.64._+r.64.x2*2]
+                ; %4: ptr = dyn_ptr_add %0, %1, 4
+                {{_}} {{_}}: mov r.32.x3, [rbp-{{_}}]
+                {{_}} {{_}}: lea r.64.x3, [r.64._+r.64.x3*4]
+                ; %5: ptr = dyn_ptr_add %0, %1, 5
+                {{_}} {{_}}: mov r.32.x4, [rbp-{{_}}]
+                {{_}} {{_}}: imul r.64.x4, r.64.x4, 0x05
+                {{_}} {{_}}: add r.64.x4, r.64._
+                ; %6: ptr = dyn_ptr_add %0, %1, 16
+                {{_}} {{_}}: mov r.32.x5, [rbp-{{_}}]
+                {{_}} {{_}}: shl r.64.x5, 0x04
+                {{_}} {{_}}: add r.64.x5, r.64._
+                ; %7: ptr = dyn_ptr_add %0, %1, 77
+                {{_}} {{_}}: mov r.32.x6, [rbp-{{_}}]
+                {{_}} {{_}}: imul r.64.x6, r.64.x6, 0x4d
+                {{_}} {{_}}: add r.64.x6, r.64._
                 ...
                 ",
         );
