@@ -36,21 +36,63 @@ impl Opt {
                 Inst::BlackBox(_) => (),
                 Inst::Const(cidx) => self.an.set_value(iidx, Value::Const(cidx)),
                 Inst::BinOp(x) => match x.binop() {
-                    BinOp::Add => (),
+                    BinOp::Add => match (
+                        self.an.op_map(&self.m, x.lhs(&self.m)),
+                        self.an.op_map(&self.m, x.rhs(&self.m)),
+                    ) {
+                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                            match self.m.const_(op_cidx) {
+                                Const::Int(_, 0) => {
+                                    // Replace `x + 0` with `x`.
+                                    self.m.replace(iidx, Inst::Copy(op_iidx));
+                                }
+                                _ => {
+                                    // Canonicalise to (Var, Const).
+                                    self.m.replace(
+                                        iidx,
+                                        BinOpInst::new(
+                                            Operand::Var(op_iidx),
+                                            BinOp::Add,
+                                            Operand::Const(op_cidx),
+                                        )
+                                        .into(),
+                                    );
+                                }
+                            }
+                        }
+                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                        panic!()
+                                    };
+                                    let cidx = self.m.insert_const_int(
+                                        *lhs_tyidx,
+                                        (lhs_v + rhs_v).truncate(*bits),
+                                    )?;
+                                    self.m.replace(iidx, Inst::Const(cidx));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        (Operand::Var(_), Operand::Var(_)) => (),
+                    },
                     BinOp::Mul => match (
                         self.an.op_map(&self.m, x.lhs(&self.m)),
                         self.an.op_map(&self.m, x.rhs(&self.m)),
                     ) {
-                        (Operand::Const(cidx), Operand::Var(copy_iidx))
-                        | (Operand::Var(copy_iidx), Operand::Const(cidx)) => {
-                            match self.m.const_(cidx) {
+                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                            match self.m.const_(op_cidx) {
                                 Const::Int(_, 0) => {
                                     // Replace `x * 0` with `0`.
-                                    self.m.replace(iidx, Inst::Const(cidx));
+                                    self.m.replace(iidx, Inst::Const(op_cidx));
                                 }
                                 Const::Int(_, 1) => {
                                     // Replace `x * 1` with `x`.
-                                    self.m.replace(iidx, Inst::Copy(copy_iidx));
+                                    self.m.replace(iidx, Inst::Copy(op_iidx));
                                 }
                                 Const::Int(ty_idx, x) if x.is_power_of_two() => {
                                     // Replace `x * y` with `x << ...`.
@@ -59,25 +101,35 @@ impl Opt {
                                         self.m.insert_const(Const::Int(*ty_idx, shl))?,
                                     );
                                     let new_inst =
-                                        BinOpInst::new(Operand::Var(copy_iidx), BinOp::Shl, shl_op)
+                                        BinOpInst::new(Operand::Var(op_iidx), BinOp::Shl, shl_op)
                                             .into();
                                     self.m.replace(iidx, new_inst);
                                 }
-                                _ => (),
+                                _ => {
+                                    // Canonicalise to (Var, Const).
+                                    self.m.replace(
+                                        iidx,
+                                        BinOpInst::new(
+                                            Operand::Var(op_iidx),
+                                            BinOp::Mul,
+                                            Operand::Const(op_cidx),
+                                        )
+                                        .into(),
+                                    );
+                                }
                             }
                         }
                         (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
-                            let lhs_c = self.m.const_(lhs_cidx);
-                            let rhs_c = self.m.const_(rhs_cidx);
-                            match (lhs_c, rhs_c) {
-                                (Const::Int(lhs_ty, lhs_v), Const::Int(rhs_ty, rhs_v)) => {
-                                    debug_assert_eq!(lhs_ty, rhs_ty);
-                                    let Ty::Integer(bits) = self.m.type_(*lhs_ty) else {
+                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
                                         panic!()
                                     };
-                                    let mul: u64 = lhs_v.truncate(*bits) * rhs_v.truncate(*bits);
-                                    let trun = mul.truncate(*bits);
-                                    let cidx = self.m.insert_const(lhs_c.u64_to_int(trun))?;
+                                    let cidx = self.m.insert_const_int(
+                                        *lhs_tyidx,
+                                        (lhs_v * rhs_v).truncate(*bits),
+                                    )?;
                                     self.m.replace(iidx, Inst::Const(cidx));
                                 }
                                 _ => todo!(),
@@ -318,6 +370,44 @@ mod test {
     }
 
     #[test]
+    fn opt_add_zero() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = add %0, 0i8
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = load_ti ...
+            black_box %0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_add_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = 0i8
+            %1: i8 = add %0, 1i8
+            %2: i8 = add %1, 1i8
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 2i8
+        ",
+        );
+    }
+
+    #[test]
     fn opt_mul_zero() {
         Module::assert_ir_transform_eq(
             "
@@ -336,9 +426,8 @@ mod test {
           ...
           entry:
             %1: i8 = load_ti ...
-            %3: i8 = add %1, 0i8
-            black_box %3
-            black_box %3
+            black_box %1
+            black_box %1
         ",
         );
     }

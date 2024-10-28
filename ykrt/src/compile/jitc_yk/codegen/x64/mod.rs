@@ -53,9 +53,13 @@ use dynasmrt::{
 };
 use indexmap::IndexMap;
 use parking_lot::Mutex;
-use std::sync::{Arc, Weak};
-use std::{cell::Cell, slice};
-use std::{collections::HashMap, error::Error};
+use std::{
+    cell::Cell,
+    collections::HashMap,
+    error::Error,
+    slice,
+    sync::{Arc, Weak},
+};
 use ykaddr::addr::symbol_to_ptr;
 use yksmp;
 
@@ -566,113 +570,171 @@ impl<'a> Assemble<'a> {
         let rhs = inst.rhs(self.m);
 
         match inst.binop() {
-            BinOp::Add => {
+            BinOp::Add | BinOp::And | BinOp::Or | BinOp::Xor => {
                 let byte_size = lhs.byte_size(self.m);
-                match (&lhs, &rhs) {
-                    (Operand::Const(cidx), Operand::Var(_))
-                    | (Operand::Var(_), Operand::Const(cidx)) => {
-                        // Addition involves a constant. We may be able to emit more optimal code.
-                        if let Some(v) = self.op_to_i32(&Operand::Const(*cidx)) {
-                            let [lhs_reg] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::InputOutput(lhs)],
-                            );
+                // We only optimise the canonicalised case.
+                if let Some(v) = self.op_to_i32(&rhs) {
+                    let [lhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::InputOutput(lhs)],
+                    );
+                    match inst.binop() {
+                        BinOp::Add => match byte_size {
+                            8 => dynasm!(self.asm; add Rq(lhs_reg.code()), v),
+                            1..=4 => dynasm!(self.asm; add Rd(lhs_reg.code()), v),
+                            _ => unreachable!(),
+                        },
+                        BinOp::And => match byte_size {
+                            8 => dynasm!(self.asm; and Rq(lhs_reg.code()), v),
+                            1..=4 => dynasm!(self.asm; and Rd(lhs_reg.code()), v),
+                            _ => unreachable!(),
+                        },
+                        BinOp::Or => match byte_size {
+                            8 => dynasm!(self.asm; or Rq(lhs_reg.code()), v),
+                            1..=4 => dynasm!(self.asm; or Rd(lhs_reg.code()), v),
+                            _ => unreachable!(),
+                        },
+                        BinOp::Xor => match byte_size {
+                            8 => dynasm!(self.asm; xor Rq(lhs_reg.code()), v),
+                            1..=4 => dynasm!(self.asm; xor Rd(lhs_reg.code()), v),
+                            _ => unreachable!(),
+                        },
+                        _ => unreachable!(),
+                    }
+                } else {
+                    let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
+                    );
+                    match inst.binop() {
+                        BinOp::Add => {
                             match byte_size {
-                                8 => dynasm!(self.asm; add Rq(lhs_reg.code()), v),
-                                1..=4 => dynasm!(self.asm; add Rd(lhs_reg.code()), v),
-                                _ => unreachable!(),
+                                0 => unreachable!(),
+                                1..=8 => {
+                                    // OK to ignore any undefined high-order bits here.
+                                    dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                                }
+                                _ => todo!(),
                             }
-                            return;
                         }
+                        BinOp::And => {
+                            match byte_size {
+                                0 => unreachable!(),
+                                1..=8 => {
+                                    // OK to ignore any undefined high-order bits here.
+                                    dynasm!(self.asm; and Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        BinOp::Or => {
+                            match byte_size {
+                                0 => unreachable!(),
+                                1..=8 => {
+                                    // OK to ignore any undefined high-order bits here.
+                                    dynasm!(self.asm; or Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        BinOp::Xor => {
+                            match byte_size {
+                                0 => unreachable!(),
+                                1..=8 => {
+                                    // OK to ignore any undefined high-order bits here.
+                                    dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        _ => unreachable!(),
                     }
-                    _ => (),
-                }
-
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-                );
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code()));
-                    }
-                    _ => todo!(),
                 }
             }
-            BinOp::And => {
-                let byte_size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-                );
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; and Rq(lhs_reg.code()), Rq(rhs_reg.code()))
-                    }
-                    _ => todo!(),
-                }
-            }
-            BinOp::AShr => {
+            BinOp::AShr | BinOp::LShr => {
                 // We inherit from LLVM the following semantics: a poison value is computed if you
                 // shift by >= the bit width of the first operand. We can ignore this, since we are
                 // free to compute any value in place of a poison value.
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
-                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [
-                        RegConstraint::InputOutput(lhs),
-                        // When using a register second operand, it has to be passed in CL.
-                        RegConstraint::InputIntoReg(rhs, Rq::RCX),
-                    ],
-                );
-                debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match bit_size {
-                    0 => unreachable!(),
-                    32 => dynasm!(self.asm; sar Rd(lhs_reg.code()), cl),
-                    1..=64 => {
-                        // Ensure we shift in the correct most-significant bits.
-                        self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        dynasm!(self.asm; sar Rq(lhs_reg.code()), cl);
+                if let Some(v) = self.op_to_i8(&rhs) {
+                    let [lhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::InputOutput(lhs)],
+                    );
+                    match inst.binop() {
+                        BinOp::AShr => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; sar Rd(lhs_reg.code()), v),
+                            1..=64 => {
+                                // Ensure we shift in zeros at the most-significant bits.
+                                self.sign_extend_to_reg64(
+                                    lhs_reg,
+                                    u8::try_from(*bit_size).unwrap(),
+                                );
+                                dynasm!(self.asm; sar Rq(lhs_reg.code()), v);
+                            }
+                            _ => todo!(),
+                        },
+                        BinOp::LShr => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; shr Rd(lhs_reg.code()), v),
+                            1..=64 => {
+                                // Ensure we shift in zeros at the most-significant bits.
+                                self.zero_extend_to_reg64(
+                                    lhs_reg,
+                                    u8::try_from(*bit_size).unwrap(),
+                                );
+                                dynasm!(self.asm; shr Rq(lhs_reg.code()), v);
+                            }
+                            _ => todo!(),
+                        },
+                        _ => unreachable!(),
                     }
-                    _ => todo!(),
-                }
-            }
-            BinOp::LShr => {
-                // We inherit from LLVM the following semantics: a poison value is computed if you
-                // shift by >= the bit width of the first operand. We can ignore this, since we are
-                // free to compute any value in place of a poison value.
-                let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
-                    unreachable!()
-                };
-                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [
-                        RegConstraint::InputOutput(lhs),
-                        // When using a register second operand, it has to be passed in CL.
-                        RegConstraint::InputIntoReg(rhs, Rq::RCX),
-                    ],
-                );
-                debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match bit_size {
-                    0 => unreachable!(),
-                    32 => dynasm!(self.asm; shr Rd(lhs_reg.code()), cl),
-                    1..=64 => {
-                        // Ensure we shift in zeros at the most-significant bits.
-                        self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        dynasm!(self.asm; shr Rq(lhs_reg.code()), cl);
+                } else {
+                    let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [
+                            RegConstraint::InputOutput(lhs),
+                            // When using a register second operand, it has to be passed in CL.
+                            RegConstraint::InputIntoReg(rhs, Rq::RCX),
+                        ],
+                    );
+                    debug_assert_eq!(_rhs_reg, Rq::RCX);
+                    match inst.binop() {
+                        BinOp::AShr => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; sar Rd(lhs_reg.code()), cl),
+                            1..=64 => {
+                                // Ensure we shift in zeros at the most-significant bits.
+                                self.sign_extend_to_reg64(
+                                    lhs_reg,
+                                    u8::try_from(*bit_size).unwrap(),
+                                );
+                                dynasm!(self.asm; sar Rq(lhs_reg.code()), cl);
+                            }
+                            _ => todo!(),
+                        },
+                        BinOp::LShr => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; shr Rd(lhs_reg.code()), cl),
+                            1..=64 => {
+                                // Ensure we shift in zeros at the most-significant bits.
+                                self.zero_extend_to_reg64(
+                                    lhs_reg,
+                                    u8::try_from(*bit_size).unwrap(),
+                                );
+                                dynasm!(self.asm; shr Rq(lhs_reg.code()), cl);
+                            }
+                            _ => todo!(),
+                        },
+                        _ => unreachable!(),
                     }
-                    _ => todo!(),
                 }
             }
             BinOp::Shl => {
@@ -723,22 +785,6 @@ impl<'a> Assemble<'a> {
                 }
                 // Note that because we are code-genning an unchecked multiply, the higher-order part of
                 // the result in RDX is entirely ignored.
-            }
-            BinOp::Or => {
-                let byte_size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-                );
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; or Rq(lhs_reg.code()), Rq(rhs_reg.code()));
-                    }
-                    _ => todo!(),
-                }
             }
             BinOp::SDiv => {
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
@@ -826,22 +872,6 @@ impl<'a> Assemble<'a> {
                         self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
                         self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
                         dynasm!(self.asm; sub Rq(lhs_reg.code()), Rq(rhs_reg.code()));
-                    }
-                    _ => todo!(),
-                }
-            }
-            BinOp::Xor => {
-                let byte_size = lhs.byte_size(self.m);
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-                );
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; xor Rq(lhs_reg.code()), Rq(rhs_reg.code()));
                     }
                     _ => todo!(),
                 }
@@ -1040,6 +1070,37 @@ impl<'a> Assemble<'a> {
     fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
+                let op = inst.operand(self.m);
+                if let Operand::Var(op_iidx) = op {
+                    if self.ra.is_inst_var_still_used_after(iidx, op_iidx) {
+                        // If the operand value is still live after the current instruction, avoid
+                        // clobbering it, in the hope that it can be reused.
+                        let [in_reg, out_reg] = self.ra.assign_gp_regs(
+                            &mut self.asm,
+                            iidx,
+                            [
+                                RegConstraint::Input(inst.operand(self.m)),
+                                RegConstraint::Output,
+                            ],
+                        );
+                        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                        debug_assert!(size <= REG64_BYTESIZE);
+                        match size {
+                            1 => {
+                                dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code())])
+                            }
+                            2 => {
+                                dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code())])
+                            }
+                            4 => dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code())]),
+                            8 => dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code())]),
+                            _ => todo!("{}", size),
+                        };
+                        return;
+                    }
+                }
+                // The input operand is dead after this instruction, so reuse the same register for
+                // input and output.
                 let [reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
@@ -1119,7 +1180,47 @@ impl<'a> Assemble<'a> {
         let val = inst.val(self.m);
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
-                let size = val.byte_size(self.m);
+                let byte_size = val.byte_size(self.m);
+                match byte_size {
+                    1 => {
+                        if let Some(v) = self.op_to_i8(&val) {
+                            let [tgt_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::Input(inst.tgt(self.m))],
+                            );
+                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code())], v);
+                            return;
+                        }
+                    }
+                    2 => {
+                        if let Some(v) = self.op_to_i16(&val) {
+                            let [tgt_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::Input(inst.tgt(self.m))],
+                            );
+                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code())], v);
+                            return;
+                        }
+                    }
+                    4 | 8 => {
+                        if let Some(v) = self.op_to_i32(&val) {
+                            let [tgt_reg] = self.ra.assign_gp_regs(
+                                &mut self.asm,
+                                iidx,
+                                [RegConstraint::Input(inst.tgt(self.m))],
+                            );
+                            match byte_size {
+                                4 => dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code())], v),
+                                8 => dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code())], v),
+                                _ => unreachable!(),
+                            }
+                            return;
+                        }
+                    }
+                    _ => (),
+                }
                 let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
@@ -1128,7 +1229,7 @@ impl<'a> Assemble<'a> {
                         RegConstraint::Input(val),
                     ],
                 );
-                match size {
+                match byte_size {
                     1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rb(val_reg.code())),
                     2 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rw(val_reg.code())),
                     4 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rd(val_reg.code())),
@@ -1317,6 +1418,42 @@ impl<'a> Assemble<'a> {
         Ok(())
     }
 
+    /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
+    /// it, otherwise return `None`.
+    fn op_to_i8(&self, op: &Operand) -> Option<i8> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
+                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                if *bit_size <= 8 {
+                    return Some(v.sign_extend(*bit_size, 8) as i8);
+                } else if v.truncate(8).sign_extend(8, 64) == *v {
+                    return Some(v.truncate(8) as i8);
+                }
+            }
+        }
+        None
+    }
+    ///
+    /// If an `Operand` refers to a constant integer that can be represented as an `i16`, return
+    /// it, otherwise return `None`.
+    fn op_to_i16(&self, op: &Operand) -> Option<i16> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
+                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                if *bit_size <= 16 {
+                    return Some(v.sign_extend(*bit_size, 16) as i16);
+                } else if v.truncate(16).sign_extend(16, 64) == *v {
+                    return Some(v.truncate(16) as i16);
+                }
+            }
+        }
+        None
+    }
+
     /// If an `Operand` refers to a constant integer that can be represented as an `i32`, return
     /// it, otherwise return `None`.
     fn op_to_i32(&self, op: &Operand) -> Option<i32> {
@@ -1439,12 +1576,21 @@ impl<'a> Assemble<'a> {
     fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
         let bit_size = self.m.type_(lhs.tyidx(self.m)).bit_size().unwrap();
-        let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-        );
-        self.cg_cmp_regs(bit_size, pred, lhs_reg, rhs_reg);
+        let lhs_reg = if let Some(v) = self.op_to_i32(&rhs) {
+            let [lhs_reg] =
+                self.ra
+                    .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::InputOutput(lhs)]);
+            self.cg_cmp_const(bit_size, pred, lhs_reg, v);
+            lhs_reg
+        } else {
+            let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                iidx,
+                [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
+            );
+            self.cg_cmp_regs(bit_size, pred, lhs_reg, rhs_reg);
+            lhs_reg
+        };
 
         // Interpret the flags assignment WRT the predicate.
         //
@@ -2344,8 +2490,7 @@ mod tests {
             "
                 ...
                 ; %1: ptr = load %0
-                {{_}} {{_}}: mov [rbp-0x08], r.64.x
-                {{_}} {{_}}: mov r.64.x, [r.64.x]
+                {{_}} {{_}}: mov r.64.x, [rbx]
                 ...
                 ",
         );
@@ -2362,8 +2507,7 @@ mod tests {
             "
                 ...
                 ; %1: i8 = load %0
-                {{_}} {{_}}: mov [rbp-0x01], r.8.x
-                {{_}} {{_}}: movzx r.64.x, byte ptr [r.64.x]
+                {{_}} {{_}}: movzx r.64.x, byte ptr [rbx]
                 ...
                 ",
         );
@@ -2380,7 +2524,6 @@ mod tests {
             "
                 ...
                 ; %1: i32 = Load %0
-                {{_}} {{_}}: mov [rbp-0x04], r.32.x
                 {{_}} {{_}}: mov r.32.x, [r.64.x]
                 ...
                 ",
@@ -2458,6 +2601,33 @@ mod tests {
                 ; %1: ptr = load_ti ...
                 ; *%1 = %0
                 {{_}} {{_}}: mov [r.64.x], r.64.y
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_store_consts() {
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = load_ti 0
+                *%0 = 1i8
+                *%0 = 2i16
+                *%0 = 3i32
+                *%0 = 4i64
+            ",
+            "
+                ...
+                ; %0: ptr = load_ti ...
+                ; *%0 = 1i8
+                {{_}} {{_}}: mov byte ptr [r.64.x], 0x01
+                ; *%0 = 2i16
+                {{_}} {{_}}: mov word ptr [r.64.x], 0x02
+                ; *%0 = 3i32
+                {{_}} {{_}}: mov dword ptr [r.64.x], 0x03
+                ; *%0 = 4i64
+                {{_}} {{_}}: mov qword ptr [r.64.x], 0x04
                 ...
                 ",
         );
@@ -2659,15 +2829,15 @@ mod tests {
                 ; %3: i16 = ashr %0, 1i16
                 ...
                 {{_}} {{_}}: movsx r.64.a, r.16.a
-                {{_}} {{_}}: sar r.64.a, r.8.b
+                {{_}} {{_}}: sar r.64.a, 0x01
                 ; %4: i32 = ashr %1, 2i32
                 ...
-                {{_}} {{_}}: sar r.32.c, r.8.b
+                {{_}} {{_}}: sar r.32.c, 0x02
                 ; %5: i63 = ashr %2, 3i63
                 ...
                 {{_}} {{_}}: shl r.64.e, 0x01
                 {{_}} {{_}}: sar r.64.e, 0x01
-                {{_}} {{_}}: sar r.64.e, r.8.b
+                {{_}} {{_}}: sar r.64.e, 0x03
                 ...
                 ",
         );
@@ -2690,15 +2860,15 @@ mod tests {
                 ; %3: i16 = lshr %0, 1i16
                 ...
                 {{_}} {{_}}: movzx r.64.a, r.16.a
-                {{_}} {{_}}: shr r.64.a, r.8.b
+                {{_}} {{_}}: shr r.64.a, 0x01
                 ; %4: i32 = lshr %1, 2i32
                 ...
-                {{_}} {{_}}: shr r.32.c, r.8.b
+                {{_}} {{_}}: shr r.32.c, 0x02
                 ; %5: i63 = lshr %2, 3i63
                 ...
                 {{_}} {{_}}: shl r.64.e, 0x01
                 {{_}} {{_}}: shr r.64.e, 0x01
-                {{_}} {{_}}: shr r.64.e, r.8.b
+                {{_}} {{_}}: shr r.64.e, 0x03
                 ...
                 ",
         );
@@ -3279,6 +3449,26 @@ mod tests {
                 ... mov rax, 0x...
                 ... sub rsp, 0x08
                 ... call rax
+            ",
+        );
+    }
+
+    #[test]
+    fn cg_icmp_const() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                %2: i1 = eq %0, 3i8
+            ",
+            "
+                ...
+                ; %1: i1 = eq %0, 3i8
+                ...
+                {{_}} {{_}}: movzx r.64.x, r.8._
+                {{_}} {{_}}: cmp r.64.x, 0x03
+                {{_}} {{_}}: setz r.8.x
+                ...
             ",
         );
     }

@@ -73,6 +73,14 @@
 //!  1. they implement [std::fmt::Display] directly.
 //!  2. or, when they need extra information, they expose a `display()` method, which returns an
 //!     object which implements [std::fmt::Display].
+//!
+//!
+//! ## Canonicalisation
+//!
+//! JIT IR has a canonicalised form: that is the "shape" that later stages can weakly assume the IR
+//! will be in. Canonicalisation is a weak promise, not a guarantee: later stages still have to
+//! deal with the other cases, but since they're mostly expected not to occur, they may be handled
+//! suboptimally if that makes the code easier.
 
 mod dead_code;
 #[cfg(test)]
@@ -80,6 +88,8 @@ mod parser;
 #[cfg(any(debug_assertions, test))]
 mod well_formed;
 
+#[cfg(debug_assertions)]
+use super::int_signs::Truncate;
 use super::{aot_ir, codegen::reg_alloc::VarLocation};
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
@@ -465,9 +475,26 @@ impl Module {
 
     /// Add a constant to the pool and return its index. If the constant already exists, an
     /// existing index will be returned.
-    pub fn insert_const(&mut self, c: Const) -> Result<ConstIdx, CompilationError> {
+    pub(crate) fn insert_const(&mut self, c: Const) -> Result<ConstIdx, CompilationError> {
         let (i, _) = self.consts.insert_full(ConstIndexSetWrapper(c));
         ConstIdx::try_from(i)
+    }
+
+    /// Convenience method for adding a `Const::Int` to the constant pool and, in debug mode,
+    /// checking that its bit size is not execeeded. See [Self::insert_const] for the return value.
+    pub(crate) fn insert_const_int(
+        &mut self,
+        tyidx: TyIdx,
+        v: u64,
+    ) -> Result<ConstIdx, CompilationError> {
+        #[cfg(debug_assertions)]
+        {
+            let Ty::Integer(bits) = self.type_(tyidx) else {
+                panic!()
+            };
+            assert_eq!(v.truncate(*bits), v);
+        }
+        self.insert_const(Const::Int(tyidx, v))
     }
 
     /// Return the const for the specified index.
@@ -1240,19 +1267,6 @@ impl Const {
             Const::Float(tyidx, _) => *tyidx,
             Const::Int(tyidx, _) => *tyidx,
             Const::Ptr(_) => m.ptr_tyidx,
-        }
-    }
-
-    /// Create an integer of the same underlying type and with the value `x`.
-    ///
-    /// # Panics
-    ///
-    /// If `x` doesn't fit into the underlying integer type.
-    pub(crate) fn u64_to_int(&self, x: u64) -> Const {
-        match self {
-            Const::Float(_, _) => panic!(),
-            Const::Int(tyidx, _) => Const::Int(*tyidx, x),
-            Const::Ptr(_) => panic!(),
         }
     }
 
