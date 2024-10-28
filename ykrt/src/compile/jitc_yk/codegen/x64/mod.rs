@@ -653,60 +653,88 @@ impl<'a> Assemble<'a> {
                     }
                 }
             }
-            BinOp::AShr => {
+            BinOp::AShr | BinOp::LShr => {
                 // We inherit from LLVM the following semantics: a poison value is computed if you
                 // shift by >= the bit width of the first operand. We can ignore this, since we are
                 // free to compute any value in place of a poison value.
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
-                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [
-                        RegConstraint::InputOutput(lhs),
-                        // When using a register second operand, it has to be passed in CL.
-                        RegConstraint::InputIntoReg(rhs, Rq::RCX),
-                    ],
-                );
-                debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match bit_size {
-                    0 => unreachable!(),
-                    32 => dynasm!(self.asm; sar Rd(lhs_reg.code()), cl),
-                    1..=64 => {
-                        // Ensure we shift in the correct most-significant bits.
-                        self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        dynasm!(self.asm; sar Rq(lhs_reg.code()), cl);
+                if let Some(v) = self.op_to_i8(&rhs) {
+                    let [lhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::InputOutput(lhs)],
+                    );
+                    match inst.binop() {
+                        BinOp::AShr => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; sar Rd(lhs_reg.code()), v),
+                            1..=64 => {
+                                // Ensure we shift in zeros at the most-significant bits.
+                                self.sign_extend_to_reg64(
+                                    lhs_reg,
+                                    u8::try_from(*bit_size).unwrap(),
+                                );
+                                dynasm!(self.asm; sar Rq(lhs_reg.code()), v);
+                            }
+                            _ => todo!(),
+                        },
+                        BinOp::LShr => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; shr Rd(lhs_reg.code()), v),
+                            1..=64 => {
+                                // Ensure we shift in zeros at the most-significant bits.
+                                self.zero_extend_to_reg64(
+                                    lhs_reg,
+                                    u8::try_from(*bit_size).unwrap(),
+                                );
+                                dynasm!(self.asm; shr Rq(lhs_reg.code()), v);
+                            }
+                            _ => todo!(),
+                        },
+                        _ => unreachable!(),
                     }
-                    _ => todo!(),
-                }
-            }
-            BinOp::LShr => {
-                // We inherit from LLVM the following semantics: a poison value is computed if you
-                // shift by >= the bit width of the first operand. We can ignore this, since we are
-                // free to compute any value in place of a poison value.
-                let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
-                    unreachable!()
-                };
-                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [
-                        RegConstraint::InputOutput(lhs),
-                        // When using a register second operand, it has to be passed in CL.
-                        RegConstraint::InputIntoReg(rhs, Rq::RCX),
-                    ],
-                );
-                debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match bit_size {
-                    0 => unreachable!(),
-                    32 => dynasm!(self.asm; shr Rd(lhs_reg.code()), cl),
-                    1..=64 => {
-                        // Ensure we shift in zeros at the most-significant bits.
-                        self.zero_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        dynasm!(self.asm; shr Rq(lhs_reg.code()), cl);
+                } else {
+                    let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [
+                            RegConstraint::InputOutput(lhs),
+                            // When using a register second operand, it has to be passed in CL.
+                            RegConstraint::InputIntoReg(rhs, Rq::RCX),
+                        ],
+                    );
+                    debug_assert_eq!(_rhs_reg, Rq::RCX);
+                    match inst.binop() {
+                        BinOp::AShr => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; sar Rd(lhs_reg.code()), cl),
+                            1..=64 => {
+                                // Ensure we shift in zeros at the most-significant bits.
+                                self.sign_extend_to_reg64(
+                                    lhs_reg,
+                                    u8::try_from(*bit_size).unwrap(),
+                                );
+                                dynasm!(self.asm; sar Rq(lhs_reg.code()), cl);
+                            }
+                            _ => todo!(),
+                        },
+                        BinOp::LShr => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; shr Rd(lhs_reg.code()), cl),
+                            1..=64 => {
+                                // Ensure we shift in zeros at the most-significant bits.
+                                self.zero_extend_to_reg64(
+                                    lhs_reg,
+                                    u8::try_from(*bit_size).unwrap(),
+                                );
+                                dynasm!(self.asm; shr Rq(lhs_reg.code()), cl);
+                            }
+                            _ => todo!(),
+                        },
+                        _ => unreachable!(),
                     }
-                    _ => todo!(),
                 }
             }
             BinOp::Shl => {
@@ -1348,6 +1376,24 @@ impl<'a> Assemble<'a> {
         }
 
         Ok(())
+    }
+
+    /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
+    /// it, otherwise return `None`.
+    fn op_to_i8(&self, op: &Operand) -> Option<i8> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
+                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                if *bit_size <= 8 {
+                    return Some(v.sign_extend(*bit_size, 8) as i8);
+                } else if v.truncate(8).sign_extend(8, 64) == *v {
+                    return Some(v.truncate(8) as i8);
+                }
+            }
+        }
+        None
     }
 
     /// If an `Operand` refers to a constant integer that can be represented as an `i32`, return
@@ -2689,15 +2735,15 @@ mod tests {
                 ; %3: i16 = ashr %0, 1i16
                 ...
                 {{_}} {{_}}: movsx r.64.a, r.16.a
-                {{_}} {{_}}: sar r.64.a, r.8.b
+                {{_}} {{_}}: sar r.64.a, 0x01
                 ; %4: i32 = ashr %1, 2i32
                 ...
-                {{_}} {{_}}: sar r.32.c, r.8.b
+                {{_}} {{_}}: sar r.32.c, 0x02
                 ; %5: i63 = ashr %2, 3i63
                 ...
                 {{_}} {{_}}: shl r.64.e, 0x01
                 {{_}} {{_}}: sar r.64.e, 0x01
-                {{_}} {{_}}: sar r.64.e, r.8.b
+                {{_}} {{_}}: sar r.64.e, 0x03
                 ...
                 ",
         );
@@ -2720,15 +2766,15 @@ mod tests {
                 ; %3: i16 = lshr %0, 1i16
                 ...
                 {{_}} {{_}}: movzx r.64.a, r.16.a
-                {{_}} {{_}}: shr r.64.a, r.8.b
+                {{_}} {{_}}: shr r.64.a, 0x01
                 ; %4: i32 = lshr %1, 2i32
                 ...
-                {{_}} {{_}}: shr r.32.c, r.8.b
+                {{_}} {{_}}: shr r.32.c, 0x02
                 ; %5: i63 = lshr %2, 3i63
                 ...
                 {{_}} {{_}}: shl r.64.e, 0x01
                 {{_}} {{_}}: shr r.64.e, 0x01
-                {{_}} {{_}}: shr r.64.e, r.8.b
+                {{_}} {{_}}: shr r.64.e, 0x03
                 ...
                 ",
         );
