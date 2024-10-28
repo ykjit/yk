@@ -57,12 +57,12 @@ impl Analyse {
     }
 
     /// Use the guard `inst` to update our knowledge about the variable used as its condition.
-    pub(super) fn guard(&mut self, m: &Module, inst: GuardInst) {
-        if let Operand::Var(iidx) = inst.cond(m) {
-            if let (_, Inst::ICmp(inst)) = m.inst_decopy(iidx) {
-                let lhs = self.op_map(m, inst.lhs(m));
-                let pred = inst.predicate();
-                let rhs = self.op_map(m, inst.rhs(m));
+    pub(super) fn guard(&mut self, m: &Module, g_inst: GuardInst) {
+        if let Operand::Var(iidx) = g_inst.cond(m) {
+            if let (_, Inst::ICmp(ic_inst)) = m.inst_decopy(iidx) {
+                let lhs = self.op_map(m, ic_inst.lhs(m));
+                let pred = ic_inst.predicate();
+                let rhs = self.op_map(m, ic_inst.rhs(m));
                 match (&lhs, &rhs) {
                     (&Operand::Const(_), &Operand::Const(_)) => {
                         // This will have been handled by icmp/guard optimisations.
