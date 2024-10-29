@@ -6,7 +6,7 @@
 use crate::mt::MTThread;
 use std::ffi::{c_int, c_longlong};
 
-/// Promote a `usize` during trace recording.
+/// Promote a `c_int` during trace recording.
 #[no_mangle]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
