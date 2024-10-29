@@ -310,6 +310,26 @@ impl Opt {
                         self.an.set_value(iidx, Value::Const(cidx));
                     }
                 }
+                Inst::ZExt(x) => {
+                    if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
+                        let Const::Int(_src_ty, src_val) = self.m.const_(cidx) else {
+                            unreachable!()
+                        };
+                        #[cfg(debug_assertions)]
+                        {
+                            let src_ty = self.m.type_(*_src_ty);
+                            let dst_ty = self.m.type_(x.dest_tyidx());
+                            let (Ty::Integer(src_bits), Ty::Integer(dst_bits)) = (src_ty, dst_ty)
+                            else {
+                                unreachable!()
+                            };
+                            debug_assert!(src_bits <= dst_bits);
+                            debug_assert!(*dst_bits <= 64);
+                        }
+                        let dst_cidx = self.m.insert_const(Const::Int(x.dest_tyidx(), *src_val))?;
+                        self.m.replace(iidx, Inst::Const(dst_cidx));
+                    }
+                }
                 _ => (),
             }
             self.cse(iidx);
@@ -851,6 +871,29 @@ mod test {
             black_box 1i1
             black_box 0i1
             black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_zext_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i16 = zext 1i8
+            %1: i32 = zext 4294967295i32
+            %2: i64 = zext 4294967295i32
+            black_box %0
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 1i16
+            black_box 4294967295i32
+            black_box 4294967295i64
         ",
         );
     }
