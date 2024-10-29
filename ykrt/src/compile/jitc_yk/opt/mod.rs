@@ -9,7 +9,8 @@
 use super::{
     int_signs::{SignExtend, Truncate},
     jit_ir::{
-        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate, Ty,
+        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate,
+        PtrAddInst, Ty,
     },
 };
 use crate::compile::CompilationError;
@@ -268,6 +269,26 @@ impl Opt {
                     },
                     _ => (),
                 },
+                Inst::DynPtrAdd(x) => {
+                    if let Operand::Const(cidx) = self.an.op_map(&self.m, x.num_elems(&self.m)) {
+                        let Const::Int(_, v) = self.m.const_(cidx) else {
+                            panic!()
+                        };
+                        // LLVM IR allows `off` to be an `i64` but our IR currently allows only an
+                        // `i32`. On that basis, we can hit our limits before the program has
+                        // itself hit UB, at which point we can't go any further.
+                        let off = i32::try_from(*v)
+                            .map_err(|_| ())
+                            .and_then(|v| v.checked_mul(i32::from(x.elem_size())).ok_or(()))
+                            .map_err(|_| {
+                                CompilationError::LimitExceeded(
+                                    "`DynPtrAdd` offset exceeded `i32` bounds".into(),
+                                )
+                            })?;
+                        self.m
+                            .replace(iidx, Inst::PtrAdd(PtrAddInst::new(x.ptr(&self.m), off)));
+                    }
+                }
                 Inst::ICmp(x) => {
                     self.icmp(iidx, x);
                 }
@@ -589,6 +610,26 @@ mod test {
           ...
           entry:
             black_box 2i8
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dyn_ptr_add_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = load_ti 0
+            %1: ptr = dyn_ptr_add %0, 2i8, 3
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = load_ti ...
+            %1: ptr = ptr_add %0, 6
+            black_box %1
         ",
         );
     }
