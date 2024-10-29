@@ -4,15 +4,26 @@
 //! right method in this module to call.
 
 use crate::mt::MTThread;
-use std::ffi::{c_int, c_longlong};
+use std::ffi::{c_int, c_longlong, c_uint};
 
-/// Promote a `usize` during trace recording.
+/// Promote a `c_int` during trace recording.
 #[no_mangle]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
     MTThread::with(|mtt| {
         // We ignore the return value as we can't really cancel tracing from this function.
         mtt.promote_i32(val);
+    });
+    val
+}
+
+/// Promote a `c_uint` during trace recording.
+#[no_mangle]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+pub extern "C" fn __yk_promote_c_unsigned_int(val: c_uint) -> c_uint {
+    MTThread::with(|mtt| {
+        // We ignore the return value as we can't really cancel tracing from this function.
+        mtt.promote_u32(val);
     });
     val
 }

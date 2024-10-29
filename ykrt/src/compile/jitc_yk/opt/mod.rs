@@ -9,7 +9,8 @@
 use super::{
     int_signs::{SignExtend, Truncate},
     jit_ir::{
-        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate, Ty,
+        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate,
+        PtrAddInst, Ty,
     },
 };
 use crate::compile::CompilationError;
@@ -79,6 +80,92 @@ impl Opt {
                         }
                         (Operand::Var(_), Operand::Var(_)) => (),
                     },
+                    BinOp::And => match (
+                        self.an.op_map(&self.m, x.lhs(&self.m)),
+                        self.an.op_map(&self.m, x.rhs(&self.m)),
+                    ) {
+                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                            match self.m.const_(op_cidx) {
+                                Const::Int(_, 0) => {
+                                    // Replace `x & 0` with `0`.
+                                    self.m.replace(iidx, Inst::Const(op_cidx));
+                                }
+                                _ => {
+                                    // Canonicalise to (Var, Const).
+                                    self.m.replace(
+                                        iidx,
+                                        BinOpInst::new(
+                                            Operand::Var(op_iidx),
+                                            BinOp::And,
+                                            Operand::Const(op_cidx),
+                                        )
+                                        .into(),
+                                    );
+                                }
+                            }
+                        }
+                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                        panic!()
+                                    };
+                                    let cidx = self.m.insert_const_int(
+                                        *lhs_tyidx,
+                                        (lhs_v & rhs_v).truncate(*bits),
+                                    )?;
+                                    self.m.replace(iidx, Inst::Const(cidx));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        (Operand::Var(_), Operand::Var(_)) => (),
+                    },
+                    BinOp::LShr => match (
+                        self.an.op_map(&self.m, x.lhs(&self.m)),
+                        self.an.op_map(&self.m, x.rhs(&self.m)),
+                    ) {
+                        (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                            match self.m.const_(op_cidx) {
+                                Const::Int(_, 0) => {
+                                    // Replace `x >> 0` with `x`.
+                                    self.m.replace(iidx, Inst::Copy(op_iidx));
+                                }
+                                _ => {
+                                    // Canonicalise to (Var, Const).
+                                    self.m.replace(
+                                        iidx,
+                                        BinOpInst::new(
+                                            Operand::Var(op_iidx),
+                                            BinOp::LShr,
+                                            Operand::Const(op_cidx),
+                                        )
+                                        .into(),
+                                    );
+                                }
+                            }
+                        }
+                        (Operand::Const(_), Operand::Var(_)) => (),
+                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                        panic!()
+                                    };
+                                    let cidx = self.m.insert_const_int(
+                                        *lhs_tyidx,
+                                        (lhs_v >> rhs_v).truncate(*bits),
+                                    )?;
+                                    self.m.replace(iidx, Inst::Const(cidx));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        (Operand::Var(_), Operand::Var(_)) => (),
+                    },
                     BinOp::Mul => match (
                         self.an.op_map(&self.m, x.lhs(&self.m)),
                         self.an.op_map(&self.m, x.rhs(&self.m)),
@@ -137,8 +224,71 @@ impl Opt {
                         }
                         (Operand::Var(_), Operand::Var(_)) => (),
                     },
+                    BinOp::Or => match (
+                        self.an.op_map(&self.m, x.lhs(&self.m)),
+                        self.an.op_map(&self.m, x.rhs(&self.m)),
+                    ) {
+                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                            match self.m.const_(op_cidx) {
+                                Const::Int(_, 0) => {
+                                    // Replace `x | 0` with `x`.
+                                    self.m.replace(iidx, Inst::Copy(op_iidx));
+                                }
+                                _ => {
+                                    // Canonicalise to (Var, Const).
+                                    self.m.replace(
+                                        iidx,
+                                        BinOpInst::new(
+                                            Operand::Var(op_iidx),
+                                            BinOp::Or,
+                                            Operand::Const(op_cidx),
+                                        )
+                                        .into(),
+                                    );
+                                }
+                            }
+                        }
+                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                        panic!()
+                                    };
+                                    let cidx = self.m.insert_const_int(
+                                        *lhs_tyidx,
+                                        (lhs_v | rhs_v).truncate(*bits),
+                                    )?;
+                                    self.m.replace(iidx, Inst::Const(cidx));
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        (Operand::Var(_), Operand::Var(_)) => (),
+                    },
                     _ => (),
                 },
+                Inst::DynPtrAdd(x) => {
+                    if let Operand::Const(cidx) = self.an.op_map(&self.m, x.num_elems(&self.m)) {
+                        let Const::Int(_, v) = self.m.const_(cidx) else {
+                            panic!()
+                        };
+                        // LLVM IR allows `off` to be an `i64` but our IR currently allows only an
+                        // `i32`. On that basis, we can hit our limits before the program has
+                        // itself hit UB, at which point we can't go any further.
+                        let off = i32::try_from(*v)
+                            .map_err(|_| ())
+                            .and_then(|v| v.checked_mul(i32::from(x.elem_size())).ok_or(()))
+                            .map_err(|_| {
+                                CompilationError::LimitExceeded(
+                                    "`DynPtrAdd` offset exceeded `i32` bounds".into(),
+                                )
+                            })?;
+                        self.m
+                            .replace(iidx, Inst::PtrAdd(PtrAddInst::new(x.ptr(&self.m), off)));
+                    }
+                }
                 Inst::ICmp(x) => {
                     self.icmp(iidx, x);
                 }
@@ -179,6 +329,26 @@ impl Opt {
                     {
                         let cidx = self.m.insert_const(Const::Int(x.tyidx(), v.into()))?;
                         self.an.set_value(iidx, Value::Const(cidx));
+                    }
+                }
+                Inst::ZExt(x) => {
+                    if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
+                        let Const::Int(_src_ty, src_val) = self.m.const_(cidx) else {
+                            unreachable!()
+                        };
+                        #[cfg(debug_assertions)]
+                        {
+                            let src_ty = self.m.type_(*_src_ty);
+                            let dst_ty = self.m.type_(x.dest_tyidx());
+                            let (Ty::Integer(src_bits), Ty::Integer(dst_bits)) = (src_ty, dst_ty)
+                            else {
+                                unreachable!()
+                            };
+                            debug_assert!(src_bits <= dst_bits);
+                            debug_assert!(*dst_bits <= 64);
+                        }
+                        let dst_cidx = self.m.insert_const(Const::Int(x.dest_tyidx(), *src_val))?;
+                        self.m.replace(iidx, Inst::Const(dst_cidx));
                     }
                 }
                 _ => (),
@@ -408,6 +578,142 @@ mod test {
     }
 
     #[test]
+    fn opt_and_zero() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = and %0, 0i8
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 0i8
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_and_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = 2i8
+            %1: i8 = 3i8
+            %2: i8 = and %0, %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 2i8
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dyn_ptr_add_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = load_ti 0
+            %1: ptr = dyn_ptr_add %0, 2i8, 3
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = load_ti ...
+            %1: ptr = ptr_add %0, 6
+            black_box %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_lshr_zero() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = lshr %0, 0i8
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = load_ti ...
+            black_box %0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_lshr_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = 2i8
+            %1: i8 = 1i8
+            %2: i8 = lshr %0, %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 1i8
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_or_zero() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = or %0, 0i8
+            %2: i8 = or 0i8, %0
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = load_ti ...
+            black_box %0
+            black_box %0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_or_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = 2i8
+            %1: i8 = 1i8
+            %2: i8 = or %0, %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 3i8
+        ",
+        );
+    }
+
+    #[test]
     fn opt_mul_zero() {
         Module::assert_ir_transform_eq(
             "
@@ -606,6 +912,29 @@ mod test {
             black_box 1i1
             black_box 0i1
             black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_zext_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i16 = zext 1i8
+            %1: i32 = zext 4294967295i32
+            %2: i64 = zext 4294967295i32
+            black_box %0
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 1i16
+            black_box 4294967295i32
+            black_box 4294967295i64
         ",
         );
     }

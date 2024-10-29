@@ -860,20 +860,37 @@ impl<'a> Assemble<'a> {
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
-                );
-                match bit_size {
-                    0 => unreachable!(),
-                    32 => dynasm!(self.asm; sub Rd(lhs_reg.code()), Rd(rhs_reg.code())),
-                    1..=64 => {
-                        self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
-                        self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
-                        dynasm!(self.asm; sub Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                if let Some(0) = self.op_to_i32(&lhs) {
+                    let [rhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::InputOutput(rhs)],
+                    );
+                    match bit_size {
+                        0 => unreachable!(),
+                        32 => dynasm!(self.asm; neg Rd(rhs_reg.code())),
+                        1..=64 => {
+                            self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                            dynasm!(self.asm; neg Rq(rhs_reg.code()));
+                        }
+                        _ => todo!(),
                     }
-                    _ => todo!(),
+                } else {
+                    let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
+                    );
+                    match bit_size {
+                        0 => unreachable!(),
+                        32 => dynasm!(self.asm; sub Rd(lhs_reg.code()), Rd(rhs_reg.code())),
+                        1..=64 => {
+                            self.sign_extend_to_reg64(lhs_reg, u8::try_from(*bit_size).unwrap());
+                            self.sign_extend_to_reg64(rhs_reg, u8::try_from(*bit_size).unwrap());
+                            dynasm!(self.asm; sub Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                        }
+                        _ => todo!(),
+                    }
                 }
             }
             BinOp::UDiv => {
@@ -1728,7 +1745,10 @@ impl<'a> Assemble<'a> {
         let tgt_vars = tgt_vars.unwrap_or(self.loop_start_locs.as_slice());
         for (i, op) in self.m.loop_jump_vars().iter().enumerate() {
             let (iidx, src) = match op {
-                Operand::Var(iidx) => (*iidx, self.ra.var_location(*iidx)),
+                Operand::Var(iidx) => {
+                    let iidx = self.m.inst_decopy(*iidx).0;
+                    (iidx, self.ra.var_location(iidx))
+                }
                 _ => panic!(),
             };
             let dst = tgt_vars[i];
@@ -3100,6 +3120,7 @@ mod tests {
                 %6: i16 = sub %0, %1
                 %7: i32 = sub %2, %3
                 %8: i63 = sub %4, %5
+                %9: i32 = sub 0i32, %7
             ",
             "
                 ...
@@ -3119,6 +3140,9 @@ mod tests {
                 {{_}} {{_}}: sar r.64.f, 0x01
                 {{_}} {{_}}: sub r.64.e, r.64.f
                 ...
+                ; %9: i32 = sub 0i32, %7
+                ......
+                {{_}} {{_}}: neg r.32.c
                 ",
         );
     }
