@@ -234,8 +234,8 @@ impl<'a> LSRegAlloc<'a> {
         self.stack.size()
     }
 
-    // Is the value produced by instruction `query_iidx` used after (but not including!)
-    // instruction `cur_idx`?
+    /// Is the value produced by instruction `query_iidx` used after (but not including!)
+    /// instruction `cur_idx`?
     pub(crate) fn is_inst_var_still_used_after(
         &self,
         cur_iidx: InstIdx,
