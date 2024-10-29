@@ -1745,7 +1745,10 @@ impl<'a> Assemble<'a> {
         let tgt_vars = tgt_vars.unwrap_or(self.loop_start_locs.as_slice());
         for (i, op) in self.m.loop_jump_vars().iter().enumerate() {
             let (iidx, src) = match op {
-                Operand::Var(iidx) => (*iidx, self.ra.var_location(*iidx)),
+                Operand::Var(iidx) => {
+                    let iidx = self.m.inst_decopy(*iidx).0;
+                    (iidx, self.ra.var_location(iidx))
+                }
                 _ => panic!(),
             };
             let dst = tgt_vars[i];
