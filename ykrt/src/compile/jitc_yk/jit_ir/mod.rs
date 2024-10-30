@@ -645,18 +645,6 @@ impl Module {
             });
         }
 
-        // FIXME: this is a hack.
-        for (iidx, inst) in self.iter_skipping_insts() {
-            if let Inst::TraceLoopStart = inst {
-                break;
-            }
-            // FIXME: this `unwrap` *could* fail, but only because we haven't properly implemented
-            // backward jumps. When we do so, we will have implicitly guaranteed that every
-            // `InstIdx` is representable without the `unwrap` failing.
-            alives[usize::from(iidx)] =
-                InstIdx::try_from(usize::from(self.last_inst_idx()) + 1).unwrap();
-        }
-
         alives
     }
 }
@@ -3119,7 +3107,7 @@ mod tests {
         );
         assert_eq!(
             m.inst_vals_alive_until(),
-            vec![4, 0, 0, 0]
+            vec![3, 0, 0, 0]
                 .iter()
                 .map(|x: &usize| InstIdx::try_from(*x).unwrap())
                 .collect::<Vec<_>>()
@@ -3138,7 +3126,7 @@ mod tests {
         );
         assert_eq!(
             m.inst_vals_alive_until(),
-            vec![6, 0, 5, 0, 0, 0]
+            vec![3, 0, 5, 0, 0, 0]
                 .iter()
                 .map(|x: &usize| InstIdx::try_from(*x).unwrap())
                 .collect::<Vec<_>>()
