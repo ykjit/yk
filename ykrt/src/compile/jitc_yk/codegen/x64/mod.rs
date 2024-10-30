@@ -399,7 +399,24 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
                 jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
                 jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
-                jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(iidx, i),
+                jit_ir::Inst::PtrAdd(pa_inst) => {
+                    next = iter.next();
+                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
+                    // by a `load` *and* the result of the `PtrAdd` isn't used again.
+                    if let Some((next_iidx, Inst::Load(l_inst))) = next {
+                        if let Operand::Var(op_iidx) = l_inst.operand(self.m) {
+                            if op_iidx == iidx
+                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
+                            {
+                                self.cg_ptradd_load(iidx, pa_inst, next_iidx, l_inst);
+                                next = iter.next();
+                                continue;
+                            }
+                        }
+                    }
+                    self.cg_ptradd(iidx, pa_inst);
+                    continue;
+                }
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
                 jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
                 jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
@@ -1152,6 +1169,49 @@ impl<'a> Assemble<'a> {
                 }
             }
             x => todo!("{x:?}"),
+        }
+    }
+
+    /// Optimise `PtrAdd` followed by `Load`. This has the following preconditions:
+    ///   1. The `Load` must consume the result of the `PtrAdd`.
+    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Load` is the sole
+    ///      consumer of the `PtrAdd`s result).
+    fn cg_ptradd_load(
+        &mut self,
+        pa_iidx: InstIdx,
+        pa_inst: &jit_ir::PtrAddInst,
+        l_iidx: InstIdx,
+        l_inst: &jit_ir::LoadInst,
+    ) {
+        let [_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            pa_iidx,
+            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
+        );
+        self.ra.expire_regs(l_iidx);
+        self.comment(
+            self.asm.offset(),
+            Inst::Load(*l_inst).display(l_iidx, self.m).to_string(),
+        );
+        let [reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            l_iidx,
+            [RegConstraint::InputOutput(l_inst.operand(self.m))],
+        );
+        debug_assert_eq!(_reg, reg);
+
+        let byte_size = self.m.inst_no_copies(l_iidx).def_byte_size(self.m);
+        debug_assert!(byte_size <= REG64_BYTESIZE);
+        match byte_size {
+            1 => {
+                dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + pa_inst.off()])
+            }
+            2 => {
+                dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code()) + pa_inst.off()])
+            }
+            4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code()) + pa_inst.off()]),
+            8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code()) + pa_inst.off()]),
+            _ => todo!("{}", byte_size),
         }
     }
 
@@ -2598,6 +2658,33 @@ mod tests {
                 ...
                 ; %1: ptr = ptr_add %0, 64
                 {{_}} {{_}}: add r.64.x, 0x40
+                ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_ptradd_load() {
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = load_ti 0
+                %1: ptr = load_ti 1
+                %2: ptr = ptr_add %0, 64
+                %3: i64 = load %2
+                %4: ptr = ptr_add %1, 32
+                %5: i64 = load %4
+                %6: ptr = ptr_add %4, 1
+            ",
+            "
+                ...
+                ; %2: ptr = ptr_add %0, 64
+                ; %3: i64 = load %2
+                {{_}} {{_}}: mov r.64.x, [rbx+{{_}}]
+                ; %4: ptr = ptr_add %1, 32
+                {{_}} {{_}}: add r.64.y, 0x20
+                ; %5: i64 = load %4
+                {{_}} {{_}}: mov r.64._, [r.64.y]
                 ...
                 ",
         );
