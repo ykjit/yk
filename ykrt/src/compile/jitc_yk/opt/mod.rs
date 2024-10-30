@@ -71,7 +71,7 @@ impl Opt {
                                     };
                                     let cidx = self.m.insert_const_int(
                                         *lhs_tyidx,
-                                        (lhs_v + rhs_v).truncate(*bits),
+                                        (lhs_v.wrapping_add(*rhs_v)).truncate(*bits),
                                     )?;
                                     self.m.replace(iidx, Inst::Const(cidx));
                                 }
@@ -215,7 +215,7 @@ impl Opt {
                                     };
                                     let cidx = self.m.insert_const_int(
                                         *lhs_tyidx,
-                                        (lhs_v * rhs_v).truncate(*bits),
+                                        (lhs_v.wrapping_mul(*rhs_v)).truncate(*bits),
                                     )?;
                                     self.m.replace(iidx, Inst::Const(cidx));
                                 }
@@ -565,14 +565,17 @@ mod test {
           entry:
             %0: i8 = 0i8
             %1: i8 = add %0, 1i8
-            %2: i8 = add %1, 1i8
-            black_box %2
+            %3: i64 = 18446744073709551614i64
+            %4: i64 = add %3, 4i64
+            black_box %1
+            black_box %4
         ",
             |m| opt(m).unwrap(),
             "
           ...
           entry:
-            black_box 2i8
+            black_box 1i8
+            black_box 2i64
         ",
         );
     }
@@ -770,17 +773,23 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = mul %0, 0i8
-            %2: i8 = mul %0, 0i8
-            %3: i8 = mul %1, %2
+            %0: i8 = 0i8
+            %1: i8 = mul %0, 1i8
+            %2: i8 = 1i8
+            %3: i8 = mul %2, 1i8
+            %4: i64 = 9223372036854775809i64
+            %5: i64 = mul %4, 2i64
+            black_box %1
             black_box %3
+            black_box %5
         ",
             |m| opt(m).unwrap(),
             "
           ...
           entry:
             black_box 0i8
+            black_box 1i8
+            black_box 2i64
         ",
         );
     }
