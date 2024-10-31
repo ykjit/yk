@@ -1276,60 +1276,43 @@ impl<'a> Assemble<'a> {
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
                 let byte_size = val.byte_size(self.m);
-                match byte_size {
-                    1 => {
-                        if let Some(v) = self.op_to_i8(&val) {
-                            let [tgt_reg] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::Input(inst.tgt(self.m))],
-                            );
-                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code())], v);
-                            return;
+                if let Some(imm) = self.op_to_immediate(&val) {
+                    let [tgt_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::Input(inst.tgt(self.m))],
+                    );
+                    match (imm, byte_size) {
+                        (Immediate::I8(v), 1) => {
+                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code())], v)
                         }
-                    }
-                    2 => {
-                        if let Some(v) = self.op_to_i16(&val) {
-                            let [tgt_reg] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::Input(inst.tgt(self.m))],
-                            );
-                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code())], v);
-                            return;
+                        (Immediate::I16(v), 2) => {
+                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code())], v)
                         }
-                    }
-                    4 | 8 => {
-                        if let Some(v) = self.op_to_i32(&val) {
-                            let [tgt_reg] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::Input(inst.tgt(self.m))],
-                            );
-                            match byte_size {
-                                4 => dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code())], v),
-                                8 => dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code())], v),
-                                _ => unreachable!(),
-                            }
-                            return;
+                        (Immediate::I32(v), 4) => {
+                            dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code())], v)
                         }
+                        (Immediate::I32(v), 8) => {
+                            dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code())], v)
+                        }
+                        _ => todo!(),
                     }
-                    _ => (),
-                }
-                let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [
-                        RegConstraint::Input(inst.tgt(self.m)),
-                        RegConstraint::Input(val),
-                    ],
-                );
-                match byte_size {
-                    1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rb(val_reg.code())),
-                    2 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rw(val_reg.code())),
-                    4 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rd(val_reg.code())),
-                    8 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rq(val_reg.code())),
-                    _ => todo!(),
+                } else {
+                    let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [
+                            RegConstraint::Input(inst.tgt(self.m)),
+                            RegConstraint::Input(val),
+                        ],
+                    );
+                    match byte_size {
+                        1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rb(val_reg.code())),
+                        2 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rw(val_reg.code())),
+                        4 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rd(val_reg.code())),
+                        8 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rq(val_reg.code())),
+                        _ => todo!(),
+                    }
                 }
             }
             Ty::Float(fty) => {
@@ -1565,6 +1548,30 @@ impl<'a> Assemble<'a> {
             }
         }
         None
+    }
+
+    /// Return an [Immediate] if `op` is a constant and is representable as an x64 immediate. Note
+    /// this embeds the follow assumptions:
+    ///   1. 1 byte constants map to Immediate::I8.
+    ///   2. 2 byte constants map to Immediate::I16.
+    ///   3. 3 byte constants map to Immediate::I32.
+    ///   4. 4 byte constants map to Immediate::I32.
+    ///
+    /// Note that number (4) breaks the pattern of the (1-3)!
+    fn op_to_immediate(&self, op: &Operand) -> Option<Immediate> {
+        match op {
+            Operand::Const(cidx) => match self.m.const_(*cidx) {
+                Const::Float(_, _) => todo!(),
+                Const::Int(_, _) => match op.byte_size(self.m) {
+                    1 => self.op_to_i8(op).map(Immediate::I8),
+                    2 => self.op_to_i16(op).map(Immediate::I16),
+                    4 | 8 => self.op_to_i32(op).map(Immediate::I32),
+                    _ => todo!(),
+                },
+                Const::Ptr(_) => self.op_to_i32(op).map(Immediate::I32),
+            },
+            Operand::Var(_) => None,
+        }
     }
 
     fn cg_cmp_const(&mut self, bit_size: usize, pred: jit_ir::Predicate, lhs_reg: Rq, rhs: i32) {
@@ -2362,6 +2369,13 @@ impl<'a> AsmPrinter<'a> {
         }
         Ok(out.join("\n"))
     }
+}
+
+/// A representation of an x64 immediate, suitable for use in x64 instructions.
+enum Immediate {
+    I8(i8),
+    I16(i16),
+    I32(i32),
 }
 
 /// x64 tests. These use an unusual form of pattern matching. Instead of using concrete register
