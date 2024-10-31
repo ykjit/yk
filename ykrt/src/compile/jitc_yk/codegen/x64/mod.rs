@@ -414,11 +414,24 @@ impl<'a> Assemble<'a> {
                             }
                         }
                     }
+                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
+                    // by a `store` *and* the result of the `PtrAdd` isn't used again.
+                    if let Some((next_iidx, Inst::Store(s_inst))) = next {
+                        if let Operand::Var(tgt_iidx) = s_inst.tgt(self.m) {
+                            if tgt_iidx == iidx
+                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
+                            {
+                                self.cg_ptradd_store(iidx, pa_inst, next_iidx, s_inst);
+                                next = iter.next();
+                                continue;
+                            }
+                        }
+                    }
                     self.cg_ptradd(iidx, pa_inst);
                     continue;
                 }
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
-                jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
+                jit_ir::Inst::Store(i) => self.cg_store(iidx, i, 0),
                 jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
                 jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
                 jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
@@ -1215,6 +1228,30 @@ impl<'a> Assemble<'a> {
         }
     }
 
+    /// Optimise `PtrAdd` followed by `Store`. This has the following preconditions:
+    ///   1. The `Load` must consume the result of the `PtrAdd`.
+    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Store` is the sole
+    ///      consumer of the `PtrAdd`s result).
+    fn cg_ptradd_store(
+        &mut self,
+        pa_iidx: InstIdx,
+        pa_inst: &jit_ir::PtrAddInst,
+        s_iidx: InstIdx,
+        s_inst: &jit_ir::StoreInst,
+    ) {
+        let [_ptr_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            pa_iidx,
+            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
+        );
+        self.ra.expire_regs(s_iidx);
+        self.comment(
+            self.asm.offset(),
+            Inst::Store(*s_inst).display(s_iidx, self.m).to_string(),
+        );
+        self.cg_store(s_iidx, s_inst, pa_inst.off());
+    }
+
     fn cg_ptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         // LLVM semantics dictate that the offset should be sign-extended/truncated up/down to the
         // size of the LLVM pointer index type. For address space zero on x86, truncation can't
@@ -1271,7 +1308,9 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
+    /// Generate code for a [StoreInst], storing it at a `register + off`. `off` should only be
+    /// non-zero if the [StoreInst] references a [PtrAddInst].
+    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst, off: i32) {
         let val = inst.val(self.m);
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
@@ -1284,16 +1323,16 @@ impl<'a> Assemble<'a> {
                     );
                     match (imm, byte_size) {
                         (Immediate::I8(v), 1) => {
-                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code())], v)
+                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code()) + off], v)
                         }
                         (Immediate::I16(v), 2) => {
-                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code())], v)
+                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code()) + off], v)
                         }
                         (Immediate::I32(v), 4) => {
-                            dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code())], v)
+                            dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code()) + off], v)
                         }
                         (Immediate::I32(v), 8) => {
-                            dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code())], v)
+                            dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code()) + off], v)
                         }
                         _ => todo!(),
                     }
@@ -1307,10 +1346,10 @@ impl<'a> Assemble<'a> {
                         ],
                     );
                     match byte_size {
-                        1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rb(val_reg.code())),
-                        2 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rw(val_reg.code())),
-                        4 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rd(val_reg.code())),
-                        8 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rq(val_reg.code())),
+                        1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rb(val_reg.code())),
+                        2 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rw(val_reg.code())),
+                        4 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rd(val_reg.code())),
+                        8 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rq(val_reg.code())),
                         _ => todo!(),
                     }
                 }
@@ -1326,10 +1365,10 @@ impl<'a> Assemble<'a> {
                         .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(val)]);
                 match fty {
                     FloatTy::Float => {
-                        dynasm!(self.asm ; movss [Rq(tgt_reg.code())], Rx(val_reg.code()));
+                        dynasm!(self.asm ; movss [Rq(tgt_reg.code()) + off], Rx(val_reg.code()));
                     }
                     FloatTy::Double => {
-                        dynasm!(self.asm ; movsd [Rq(tgt_reg.code())], Rx(val_reg.code()));
+                        dynasm!(self.asm ; movsd [Rq(tgt_reg.code()) + off], Rx(val_reg.code()));
                     }
                 }
             }
@@ -2700,6 +2739,33 @@ mod tests {
                 ; %5: i64 = load %4
                 {{_}} {{_}}: mov r.64._, [r.64.y]
                 ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_ptradd_store() {
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = load_ti 0
+                %1: ptr = load_ti 1
+                %2: ptr = ptr_add %0, 64
+                *%2 = 1i8
+                %4: ptr = ptr_add %1, 32
+                %5: i64 = load %4
+                *%4 = 2i8
+            ",
+            "
+                ...
+                ; *%2 = 1i8
+                {{_}} {{_}}: mov byte ptr [rbx+{{_}}], 0x01
+                ; %4: ptr = ptr_add %1, 32
+                {{_}} {{_}}: add r.64.x, 0x20
+                ; %5: i64 = load %4
+                {{_}} {{_}}: mov r.64.y, [r.64.x]
+                ; *%4 = 2i8
+                {{_}} {{_}}: mov byte ptr [r.64.x], 0x02
                 ",
         );
     }
