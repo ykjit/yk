@@ -301,6 +301,14 @@ impl Opt {
                         self.an.guard(&self.m, x);
                     }
                 }
+                Inst::PtrAdd(x) => match self.an.op_map(&self.m, x.ptr(&self.m)) {
+                    Operand::Const(_) => todo!(),
+                    Operand::Var(op_iidx) => {
+                        if x.off() == 0 {
+                            self.m.replace(iidx, Inst::Copy(op_iidx));
+                        }
+                    }
+                },
                 Inst::SExt(x) => {
                     if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
                         let Const::Int(src_ty, src_val) = self.m.const_(cidx) else {
@@ -944,6 +952,25 @@ mod test {
             black_box 1i16
             black_box 4294967295i32
             black_box 4294967295i64
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ptradd_zero() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = load_ti 0
+            %1: ptr = ptr_add %0, 0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = load_ti ...
+            black_box %0
         ",
         );
     }
