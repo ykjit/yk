@@ -398,7 +398,7 @@ impl<'a> Assemble<'a> {
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
                 jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
-                jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+                jit_ir::Inst::Load(i) => self.cg_load(iidx, i, 0),
                 jit_ir::Inst::PtrAdd(pa_inst) => {
                     next = iter.next();
                     // We have a special optimisation for `PtrAdd`s iff they're immediately followed
@@ -1114,7 +1114,9 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+    /// Generate code for a [LoadInst], loading from a `register + off`. `off` should only be
+    /// non-zero if the [LoadInst] references a [PtrAddInst].
+    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst, off: i32) {
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
                 let op = inst.operand(self.m);
@@ -1134,13 +1136,17 @@ impl<'a> Assemble<'a> {
                         debug_assert!(size <= REG64_BYTESIZE);
                         match size {
                             1 => {
-                                dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code())])
+                                dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code()) + off])
                             }
                             2 => {
-                                dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code())])
+                                dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code()) + off])
                             }
-                            4 => dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code())]),
-                            8 => dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code())]),
+                            4 => {
+                                dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code()) + off])
+                            }
+                            8 => {
+                                dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code()) + off])
+                            }
                             _ => todo!("{}", size),
                         };
                         return;
@@ -1156,10 +1162,10 @@ impl<'a> Assemble<'a> {
                 let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_BYTESIZE);
                 match size {
-                    1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code())]),
-                    2 => dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code())]),
-                    4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code())]),
-                    8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code())]),
+                    1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + off]),
+                    2 => dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code()) + off]),
+                    4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code()) + off]),
+                    8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code()) + off]),
                     _ => todo!("{}", size),
                 };
             }
@@ -1174,10 +1180,10 @@ impl<'a> Assemble<'a> {
                         .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
                 match fty {
                     FloatTy::Float => {
-                        dynasm!(self.asm; movss Rx(tgt_reg.code()), [Rq(src_reg.code())])
+                        dynasm!(self.asm; movss Rx(tgt_reg.code()), [Rq(src_reg.code()) + off])
                     }
                     FloatTy::Double => {
-                        dynasm!(self.asm; movsd Rx(tgt_reg.code()), [Rq(src_reg.code())])
+                        dynasm!(self.asm; movsd Rx(tgt_reg.code()), [Rq(src_reg.code()) + off])
                     }
                 }
             }
@@ -1206,26 +1212,7 @@ impl<'a> Assemble<'a> {
             self.asm.offset(),
             Inst::Load(*l_inst).display(l_iidx, self.m).to_string(),
         );
-        let [reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            l_iidx,
-            [RegConstraint::InputOutput(l_inst.operand(self.m))],
-        );
-        debug_assert_eq!(_reg, reg);
-
-        let byte_size = self.m.inst_no_copies(l_iidx).def_byte_size(self.m);
-        debug_assert!(byte_size <= REG64_BYTESIZE);
-        match byte_size {
-            1 => {
-                dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + pa_inst.off()])
-            }
-            2 => {
-                dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code()) + pa_inst.off()])
-            }
-            4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code()) + pa_inst.off()]),
-            8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code()) + pa_inst.off()]),
-            _ => todo!("{}", byte_size),
-        }
+        self.cg_load(l_iidx, l_inst, pa_inst.off());
     }
 
     /// Optimise `PtrAdd` followed by `Store`. This has the following preconditions:
