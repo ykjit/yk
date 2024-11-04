@@ -398,7 +398,7 @@ impl<'a> Assemble<'a> {
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
                 jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
-                jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+                jit_ir::Inst::Load(i) => self.cg_load(iidx, i, 0),
                 jit_ir::Inst::PtrAdd(pa_inst) => {
                     next = iter.next();
                     // We have a special optimisation for `PtrAdd`s iff they're immediately followed
@@ -414,11 +414,24 @@ impl<'a> Assemble<'a> {
                             }
                         }
                     }
+                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
+                    // by a `store` *and* the result of the `PtrAdd` isn't used again.
+                    if let Some((next_iidx, Inst::Store(s_inst))) = next {
+                        if let Operand::Var(tgt_iidx) = s_inst.tgt(self.m) {
+                            if tgt_iidx == iidx
+                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
+                            {
+                                self.cg_ptradd_store(iidx, pa_inst, next_iidx, s_inst);
+                                next = iter.next();
+                                continue;
+                            }
+                        }
+                    }
                     self.cg_ptradd(iidx, pa_inst);
                     continue;
                 }
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
-                jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
+                jit_ir::Inst::Store(i) => self.cg_store(iidx, i, 0),
                 jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
                 jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
                 jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
@@ -1101,7 +1114,9 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+    /// Generate code for a [LoadInst], loading from a `register + off`. `off` should only be
+    /// non-zero if the [LoadInst] references a [PtrAddInst].
+    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst, off: i32) {
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
                 let op = inst.operand(self.m);
@@ -1121,13 +1136,17 @@ impl<'a> Assemble<'a> {
                         debug_assert!(size <= REG64_BYTESIZE);
                         match size {
                             1 => {
-                                dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code())])
+                                dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code()) + off])
                             }
                             2 => {
-                                dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code())])
+                                dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code()) + off])
                             }
-                            4 => dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code())]),
-                            8 => dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code())]),
+                            4 => {
+                                dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code()) + off])
+                            }
+                            8 => {
+                                dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code()) + off])
+                            }
                             _ => todo!("{}", size),
                         };
                         return;
@@ -1143,10 +1162,10 @@ impl<'a> Assemble<'a> {
                 let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_BYTESIZE);
                 match size {
-                    1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code())]),
-                    2 => dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code())]),
-                    4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code())]),
-                    8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code())]),
+                    1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + off]),
+                    2 => dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code()) + off]),
+                    4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code()) + off]),
+                    8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code()) + off]),
                     _ => todo!("{}", size),
                 };
             }
@@ -1161,10 +1180,10 @@ impl<'a> Assemble<'a> {
                         .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
                 match fty {
                     FloatTy::Float => {
-                        dynasm!(self.asm; movss Rx(tgt_reg.code()), [Rq(src_reg.code())])
+                        dynasm!(self.asm; movss Rx(tgt_reg.code()), [Rq(src_reg.code()) + off])
                     }
                     FloatTy::Double => {
-                        dynasm!(self.asm; movsd Rx(tgt_reg.code()), [Rq(src_reg.code())])
+                        dynasm!(self.asm; movsd Rx(tgt_reg.code()), [Rq(src_reg.code()) + off])
                     }
                 }
             }
@@ -1193,26 +1212,31 @@ impl<'a> Assemble<'a> {
             self.asm.offset(),
             Inst::Load(*l_inst).display(l_iidx, self.m).to_string(),
         );
-        let [reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            l_iidx,
-            [RegConstraint::InputOutput(l_inst.operand(self.m))],
-        );
-        debug_assert_eq!(_reg, reg);
+        self.cg_load(l_iidx, l_inst, pa_inst.off());
+    }
 
-        let byte_size = self.m.inst_no_copies(l_iidx).def_byte_size(self.m);
-        debug_assert!(byte_size <= REG64_BYTESIZE);
-        match byte_size {
-            1 => {
-                dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + pa_inst.off()])
-            }
-            2 => {
-                dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code()) + pa_inst.off()])
-            }
-            4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code()) + pa_inst.off()]),
-            8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code()) + pa_inst.off()]),
-            _ => todo!("{}", byte_size),
-        }
+    /// Optimise `PtrAdd` followed by `Store`. This has the following preconditions:
+    ///   1. The `Load` must consume the result of the `PtrAdd`.
+    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Store` is the sole
+    ///      consumer of the `PtrAdd`s result).
+    fn cg_ptradd_store(
+        &mut self,
+        pa_iidx: InstIdx,
+        pa_inst: &jit_ir::PtrAddInst,
+        s_iidx: InstIdx,
+        s_inst: &jit_ir::StoreInst,
+    ) {
+        let [_ptr_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            pa_iidx,
+            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
+        );
+        self.ra.expire_regs(s_iidx);
+        self.comment(
+            self.asm.offset(),
+            Inst::Store(*s_inst).display(s_iidx, self.m).to_string(),
+        );
+        self.cg_store(s_iidx, s_inst, pa_inst.off());
     }
 
     fn cg_ptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
@@ -1271,65 +1295,50 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
+    /// Generate code for a [StoreInst], storing it at a `register + off`. `off` should only be
+    /// non-zero if the [StoreInst] references a [PtrAddInst].
+    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst, off: i32) {
         let val = inst.val(self.m);
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
                 let byte_size = val.byte_size(self.m);
-                match byte_size {
-                    1 => {
-                        if let Some(v) = self.op_to_i8(&val) {
-                            let [tgt_reg] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::Input(inst.tgt(self.m))],
-                            );
-                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code())], v);
-                            return;
+                if let Some(imm) = self.op_to_immediate(&val) {
+                    let [tgt_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::Input(inst.tgt(self.m))],
+                    );
+                    match (imm, byte_size) {
+                        (Immediate::I8(v), 1) => {
+                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code()) + off], v)
                         }
-                    }
-                    2 => {
-                        if let Some(v) = self.op_to_i16(&val) {
-                            let [tgt_reg] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::Input(inst.tgt(self.m))],
-                            );
-                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code())], v);
-                            return;
+                        (Immediate::I16(v), 2) => {
+                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code()) + off], v)
                         }
-                    }
-                    4 | 8 => {
-                        if let Some(v) = self.op_to_i32(&val) {
-                            let [tgt_reg] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::Input(inst.tgt(self.m))],
-                            );
-                            match byte_size {
-                                4 => dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code())], v),
-                                8 => dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code())], v),
-                                _ => unreachable!(),
-                            }
-                            return;
+                        (Immediate::I32(v), 4) => {
+                            dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code()) + off], v)
                         }
+                        (Immediate::I32(v), 8) => {
+                            dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code()) + off], v)
+                        }
+                        _ => todo!(),
                     }
-                    _ => (),
-                }
-                let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [
-                        RegConstraint::Input(inst.tgt(self.m)),
-                        RegConstraint::Input(val),
-                    ],
-                );
-                match byte_size {
-                    1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rb(val_reg.code())),
-                    2 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rw(val_reg.code())),
-                    4 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rd(val_reg.code())),
-                    8 => dynasm!(self.asm ; mov [Rq(tgt_reg.code())], Rq(val_reg.code())),
-                    _ => todo!(),
+                } else {
+                    let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [
+                            RegConstraint::Input(inst.tgt(self.m)),
+                            RegConstraint::Input(val),
+                        ],
+                    );
+                    match byte_size {
+                        1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rb(val_reg.code())),
+                        2 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rw(val_reg.code())),
+                        4 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rd(val_reg.code())),
+                        8 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rq(val_reg.code())),
+                        _ => todo!(),
+                    }
                 }
             }
             Ty::Float(fty) => {
@@ -1343,10 +1352,10 @@ impl<'a> Assemble<'a> {
                         .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(val)]);
                 match fty {
                     FloatTy::Float => {
-                        dynasm!(self.asm ; movss [Rq(tgt_reg.code())], Rx(val_reg.code()));
+                        dynasm!(self.asm ; movss [Rq(tgt_reg.code()) + off], Rx(val_reg.code()));
                     }
                     FloatTy::Double => {
-                        dynasm!(self.asm ; movsd [Rq(tgt_reg.code())], Rx(val_reg.code()));
+                        dynasm!(self.asm ; movsd [Rq(tgt_reg.code()) + off], Rx(val_reg.code()));
                     }
                 }
             }
@@ -1565,6 +1574,30 @@ impl<'a> Assemble<'a> {
             }
         }
         None
+    }
+
+    /// Return an [Immediate] if `op` is a constant and is representable as an x64 immediate. Note
+    /// this embeds the follow assumptions:
+    ///   1. 1 byte constants map to Immediate::I8.
+    ///   2. 2 byte constants map to Immediate::I16.
+    ///   3. 3 byte constants map to Immediate::I32.
+    ///   4. 4 byte constants map to Immediate::I32.
+    ///
+    /// Note that number (4) breaks the pattern of the (1-3)!
+    fn op_to_immediate(&self, op: &Operand) -> Option<Immediate> {
+        match op {
+            Operand::Const(cidx) => match self.m.const_(*cidx) {
+                Const::Float(_, _) => todo!(),
+                Const::Int(_, _) => match op.byte_size(self.m) {
+                    1 => self.op_to_i8(op).map(Immediate::I8),
+                    2 => self.op_to_i16(op).map(Immediate::I16),
+                    4 | 8 => self.op_to_i32(op).map(Immediate::I32),
+                    _ => todo!(),
+                },
+                Const::Ptr(_) => self.op_to_i32(op).map(Immediate::I32),
+            },
+            Operand::Var(_) => None,
+        }
     }
 
     fn cg_cmp_const(&mut self, bit_size: usize, pred: jit_ir::Predicate, lhs_reg: Rq, rhs: i32) {
@@ -2367,6 +2400,13 @@ impl<'a> AsmPrinter<'a> {
     }
 }
 
+/// A representation of an x64 immediate, suitable for use in x64 instructions.
+enum Immediate {
+    I8(i8),
+    I16(i16),
+    I32(i32),
+}
+
 /// x64 tests. These use an unusual form of pattern matching. Instead of using concrete register
 /// names, one can refer to a class of registers e.g. `r.8` is all 8-bit registers. To match a
 /// register name but ignore its value uses `r.8._`: to match a register name use `r.8.x`.
@@ -2689,6 +2729,33 @@ mod tests {
                 ; %5: i64 = load %4
                 {{_}} {{_}}: mov r.64._, [r.64.y]
                 ...
+                ",
+        );
+    }
+
+    #[test]
+    fn cg_ptradd_store() {
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = load_ti 0
+                %1: ptr = load_ti 1
+                %2: ptr = ptr_add %0, 64
+                *%2 = 1i8
+                %4: ptr = ptr_add %1, 32
+                %5: i64 = load %4
+                *%4 = 2i8
+            ",
+            "
+                ...
+                ; *%2 = 1i8
+                {{_}} {{_}}: mov byte ptr [rbx+{{_}}], 0x01
+                ; %4: ptr = ptr_add %1, 32
+                {{_}} {{_}}: add r.64.x, 0x20
+                ; %5: i64 = load %4
+                {{_}} {{_}}: mov r.64.y, [r.64.x]
+                ; *%4 = 2i8
+                {{_}} {{_}}: mov byte ptr [r.64.x], 0x02
                 ",
         );
     }
