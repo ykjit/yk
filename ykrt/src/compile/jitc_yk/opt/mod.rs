@@ -379,7 +379,7 @@ impl Opt {
         if let Inst::Tombstone = inst {
             return;
         }
-        // FIXME: This is O(n), but most instructions can't possibly be CSE candidates.
+        // OPT: This is O(n), but most instructions can't possibly be CSE candidates.
         for back_iidx in (0..usize::from(iidx)).rev() {
             let back_iidx = InstIdx::unchecked_from(back_iidx);
             // Only examine non-`Copy` instructions, to avoid us continually checking the same
