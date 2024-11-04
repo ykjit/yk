@@ -379,6 +379,14 @@ impl Opt {
         if let Inst::Tombstone = inst {
             return;
         }
+        // We don't perform CSE on instructions that have / enforce effects.
+        if inst.has_store_effect(&self.m)
+            || inst.has_load_effect(&self.m)
+            || inst.is_barrier(&self.m)
+        {
+            return;
+        }
+
         // OPT: This is O(n), but most instructions can't possibly be CSE candidates.
         for back_iidx in (0..usize::from(iidx)).rev() {
             let back_iidx = InstIdx::unchecked_from(back_iidx);
@@ -387,11 +395,8 @@ impl Opt {
             let Some(back) = self.m.inst_nocopy(back_iidx) else {
                 continue;
             };
-            if !inst.has_store_effect(&self.m)
-                && !inst.has_load_effect(&self.m)
-                && !inst.is_barrier(&self.m)
-                && inst.decopy_eq(&self.m, back)
-            {
+
+            if inst.decopy_eq(&self.m, back) {
                 self.m.replace(iidx, Inst::Copy(back_iidx));
                 return;
             }
