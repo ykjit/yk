@@ -298,7 +298,27 @@ impl Opt {
                         // doesn't affect future analyses.
                         self.m.replace(iidx, Inst::Tombstone);
                     } else {
-                        self.an.guard(&self.m, x);
+                        // Remove guards that reference the same i1 variable: if the earlier guard
+                        // succeeded, then this guard must also succeed, by definition.
+                        let mut removed = false;
+                        // OPT: This is O(n), but most instructions can't possibly be guards.
+                        for back_iidx in (0..usize::from(iidx)).rev() {
+                            let back_iidx = InstIdx::unchecked_from(back_iidx);
+                            // Only examine non-`Copy` instructions, to avoid us continually checking the same
+                            // (subset of) instructions over and over again.
+                            let Some(Inst::Guard(y)) = self.m.inst_nocopy(back_iidx) else {
+                                continue;
+                            };
+                            if x.cond(&self.m) == y.cond(&self.m) {
+                                debug_assert_eq!(x.expect, y.expect);
+                                self.m.replace(iidx, Inst::Tombstone);
+                                removed = true;
+                                break;
+                            }
+                        }
+                        if !removed {
+                            self.an.guard(&self.m, x);
+                        }
                     }
                 }
                 Inst::PtrAdd(x) => match self.an.op_map(&self.m, x.ptr(&self.m)) {
@@ -976,6 +996,29 @@ mod test {
           entry:
             %0: ptr = load_ti ...
             black_box %0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_guard_dup() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = load_ti 1
+            %2: i1 = eq %0, %1
+            guard true, %2, [%0, %1]
+            guard true, %2, [%0, %1]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = load_ti ...
+            %1: i8 = load_ti ...
+            %2: i1 = eq %0, %1
+            guard true, %2, ...
         ",
         );
     }
