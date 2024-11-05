@@ -67,12 +67,12 @@ mod deopt;
 mod lsregalloc;
 
 use deopt::{__yk_deopt, __yk_guardcheck, __yk_reenter_jit};
-use lsregalloc::{LSRegAlloc, RegConstraint, RegSet};
+use lsregalloc::{LSRegAlloc, RegConstraint};
 
 /// General purpose argument registers as defined by the x64 SysV ABI.
 static ARG_GP_REGS: [Rq; 6] = [Rq::RDI, Rq::RSI, Rq::RDX, Rq::RCX, Rq::R8, Rq::R9];
 
-/// The registers clobbered by a function call in the x64 SysV ABI.
+/// The GP registers clobbered by a function call in the x64 SysV ABI.
 static CALLER_CLOBBER_REGS: [Rq; 9] = [
     Rq::RAX,
     Rq::RCX,
@@ -95,6 +95,26 @@ static ARG_FP_REGS: [Rx; 8] = [
     Rx::XMM5,
     Rx::XMM6,
     Rx::XMM7,
+];
+
+/// The FP registers clobbered by a function call in the x64 SysV ABI.
+static CALLER_FP_CLOBBER_REGS: [Rx; 16] = [
+    Rx::XMM0,
+    Rx::XMM1,
+    Rx::XMM2,
+    Rx::XMM3,
+    Rx::XMM4,
+    Rx::XMM5,
+    Rx::XMM6,
+    Rx::XMM7,
+    Rx::XMM8,
+    Rx::XMM9,
+    Rx::XMM10,
+    Rx::XMM11,
+    Rx::XMM12,
+    Rx::XMM13,
+    Rx::XMM14,
+    Rx::XMM15,
 ];
 
 /// Registers used by stackmaps to store live variables.
@@ -793,16 +813,14 @@ impl<'a> Assemble<'a> {
             }
             BinOp::Mul => {
                 let byte_size = lhs.byte_size(self.m);
-                self.ra
-                    .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
-                let [_lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
+                let [_lhs_reg, rhs_reg, _] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
                         RegConstraint::InputOutputIntoReg(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
+                        RegConstraint::Clobber(Rq::RDX),
                     ],
-                    RegSet::from(Rq::RDX),
                 );
                 debug_assert_eq!(_lhs_reg, Rq::RAX);
                 match byte_size {
@@ -820,9 +838,7 @@ impl<'a> Assemble<'a> {
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
-                self.ra
-                    .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
+                let [lhs_reg, rhs_reg, _] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
@@ -831,8 +847,8 @@ impl<'a> Assemble<'a> {
                         // stored into RDX (EDX).
                         RegConstraint::InputOutputIntoReg(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
+                        RegConstraint::Clobber(Rq::RDX),
                     ],
-                    RegSet::from(Rq::RDX),
                 );
                 match bit_size {
                     0 => unreachable!(),
@@ -927,9 +943,7 @@ impl<'a> Assemble<'a> {
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
-                self.ra
-                    .clobber_gp_regs_hack(&mut self.asm, iidx, &[Rq::RDX]);
-                let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs_avoiding(
+                let [lhs_reg, rhs_reg, _] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
                     [
@@ -938,8 +952,8 @@ impl<'a> Assemble<'a> {
                         // put into RDX (EDX).
                         RegConstraint::InputOutputIntoReg(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
+                        RegConstraint::Clobber(Rq::RDX),
                     ],
-                    RegSet::from(Rq::RDX),
                 );
                 debug_assert_eq!(lhs_reg, Rq::RAX);
                 match bit_size {
@@ -1424,44 +1438,44 @@ impl<'a> Assemble<'a> {
         callee_op: Option<Operand>,
         args: &[Operand],
     ) -> Result<(), CompilationError> {
-        // OPT: We clobber more than we need to.
-        self.ra
-            .clobber_gp_regs_hack(&mut self.asm, iidx, &CALLER_CLOBBER_REGS);
-        self.ra.clobber_fp_regs(&mut self.asm, iidx);
+        // Calls on x64 with the SysV ABI have complex requirements, and GP registers and FP
+        // registers are not treated the same. In essence, we build up constraints for every GP
+        // register that's part of the ABI and all FP registers. We start by assuming those
+        // registers are clobbered, and gradually refine them with more precise constraints as
+        // needed.
 
-        // Arrange arguments according to the ABI.
+        let mut gp_cnstrs = CALLER_CLOBBER_REGS
+            .iter()
+            .map(|reg| RegConstraint::Clobber(*reg))
+            .collect::<Vec<_>>();
+        let mut fp_cnstrs = CALLER_FP_CLOBBER_REGS
+            .iter()
+            .map(|reg| RegConstraint::Clobber(*reg))
+            .collect::<Vec<_>>();
+
+        // Deal with inputs.
         let mut gp_regs = ARG_GP_REGS.iter();
         let mut fp_regs = ARG_FP_REGS.iter();
         let mut num_float_args = 0;
         for arg in args.iter() {
             match self.m.type_(arg.tyidx(self.m)) {
                 Ty::Float(_) => {
-                    let Some(reg) = fp_regs.next() else {
-                        todo!("ran out of fp regs");
-                    };
-                    let [_] = self.ra.assign_fp_regs(
-                        &mut self.asm,
-                        iidx,
-                        [RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg)],
-                    );
+                    let reg = fp_regs.next().unwrap();
+                    fp_cnstrs[num_float_args] =
+                        RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg);
                     num_float_args += 1;
                 }
                 _ => {
-                    let Some(reg) = gp_regs.next() else {
-                        todo!("ran out of gp regs");
-                    };
-                    let [_] = self.ra.assign_gp_regs(
-                        &mut self.asm,
-                        iidx,
-                        [RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg)],
-                    );
+                    let reg = gp_regs.next().unwrap();
+                    let gp_i = CALLER_CLOBBER_REGS.iter().position(|x| x == reg).unwrap();
+                    gp_cnstrs[gp_i] = RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg);
                 }
             }
         }
-        // If the function we called has a return value, then store it into a local variable.
-        //
-        // FIXME: We only support up to register-sized return values at the moment.
+
+        // Deal with outputs.
         let ret_ty = fty.ret_type(self.m);
+        // FIXME: We only support up to register-sized return values at the moment.
         #[cfg(debug_assertions)]
         if !matches!(ret_ty, Ty::Void) {
             debug_assert!(ret_ty.byte_size().unwrap() <= REG64_BYTESIZE);
@@ -1469,52 +1483,60 @@ impl<'a> Assemble<'a> {
         match ret_ty {
             Ty::Void => (),
             Ty::Float(_) => {
-                let [_] = self.ra.assign_fp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::OutputFromReg(Rx::XMM0)],
-                );
+                let cnstr = match &fp_cnstrs[0] {
+                    RegConstraint::InputIntoRegAndClobber(op, _) => {
+                        RegConstraint::InputOutputIntoReg(op.clone(), Rx::XMM0)
+                    }
+                    RegConstraint::Clobber(_) => RegConstraint::OutputFromReg(Rx::XMM0),
+                    _ => unreachable!(),
+                };
+                fp_cnstrs[0] = cnstr;
             }
             Ty::Integer(_) | Ty::Ptr => {
-                let [_] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::OutputFromReg(Rq::RAX)],
-                );
+                let rax_i = CALLER_CLOBBER_REGS
+                    .iter()
+                    .position(|x| *x == Rq::RAX)
+                    .unwrap();
+                gp_cnstrs[rax_i] = RegConstraint::OutputFromReg(Rq::RAX)
             }
             Ty::Func(_) => todo!(),
             Ty::Unimplemented(_) => todo!(),
         }
 
-        if fty.is_vararg() {
-            // SysV x64 ABI says "rax is used to indicate the number of vector arguments passed
-            // to a function requiring a variable number of arguments". Float arguments are passed
-            // in vector registers.
-            dynasm!(self.asm; mov rax, num_float_args);
-        }
+        // We now have all the FP constraints, so assign those.
+        let _: [Rx; 16] =
+            self.ra
+                .assign_fp_regs(&mut self.asm, iidx, fp_cnstrs.try_into().unwrap());
+        let num_float_args = i32::try_from(num_float_args).unwrap();
 
-        // Actually perform the call.
+        // We now have most of the GP constraints, except the call target. We have to handle that
+        // differently, depending on whether this is a direct or indirect call.
         match (callee, callee_op) {
             (Some(p), None) => {
-                let [reg] = self.ra.assign_gp_regs_avoiding(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::Temporary],
-                    RegSet::from_vec(&CALLER_CLOBBER_REGS),
-                );
+                // Direct call
+                gp_cnstrs.push(RegConstraint::Temporary);
+                let [_, _, _, _, _, _, _, _, _, tmp_reg] =
+                    self.ra
+                        .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+
+                if fty.is_vararg() {
+                    dynasm!(self.asm; mov rax, num_float_args); // SysV x64 ABI
+                }
                 dynasm!(self.asm
-                    ; mov Rq(reg.code()), QWORD p as i64
-                    ; call Rq(reg.code())
+                    ; mov Rq(tmp_reg.code()), QWORD p as i64
+                    ; call Rq(tmp_reg.code())
                 );
             }
             (None, Some(op)) => {
-                let [reg] = self.ra.assign_gp_regs_avoiding(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::Input(op)],
-                    RegSet::from_vec(&CALLER_CLOBBER_REGS),
-                );
-                dynasm!(self.asm; call Rq(reg.code()));
+                // Indirect call
+                gp_cnstrs.push(RegConstraint::Input(op));
+                let [_, _, _, _, _, _, _, _, _, op_reg] =
+                    self.ra
+                        .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+                if fty.is_vararg() {
+                    dynasm!(self.asm; mov rax, num_float_args); // SysV x64 ABI
+                }
+                dynasm!(self.asm; call Rq(op_reg.code()));
             }
             _ => unreachable!(),
         }
@@ -3446,9 +3468,8 @@ mod tests {
                 ...
                 ; call @puts(%0, %1, %2)
                 ...
-                {{{{_}}}} {{{{_}}}}: mov rdi, ...
-                {{{{_}}}} {{{{_}}}}: mov esi, ...
-                {{{{_}}}} {{{{_}}}}: mov edx, ...
+                {{{{_}}}} {{{{_}}}}: mov rdx, r.64.x
+                {{{{_}}}} {{{{_}}}}: mov rdi, r.64.y
                 {{{{_}}}} {{{{_}}}}: mov r.64.tgt, 0x{sym_addr:X}
                 {{{{_}}}} {{{{_}}}}: call r.64.tgt
                 ...
@@ -3475,9 +3496,8 @@ mod tests {
                 ...
                 ; call @puts(%0, %1, %2)
                 ...
-                {{{{_}}}} {{{{_}}}}: mov rdi, ...
-                {{{{_}}}} {{{{_}}}}: movzx rsi, ...
-                {{{{_}}}} {{{{_}}}}: mov rdx, ...
+                {{{{_}}}} {{{{_}}}}: mov rdx, r.64.x
+                {{{{_}}}} {{{{_}}}}: mov rdi, r.64.y
                 {{{{_}}}} {{{{_}}}}: mov r.64.tgt, 0x{sym_addr:X}
                 {{{{_}}}} {{{{_}}}}: call r.64.tgt
                 ...
