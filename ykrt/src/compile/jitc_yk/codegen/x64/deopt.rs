@@ -9,7 +9,7 @@ use crate::{
 };
 use dynasmrt::Register as _;
 use libc::c_void;
-use std::{ptr, sync::Arc};
+use std::{ptr, slice, sync::Arc};
 use yksmp::Location as SMLocation;
 
 use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_BYTESIZE};
@@ -31,54 +31,51 @@ const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 ///
 /// # Arguments
 ///
-/// * gidx - The [GuardIdx] of the failing guard.
+/// * gidx - The [GuardIdx] of the current failing guard.
+/// * gptr - Pointer to a list of previous [GuardIdx]'s leading up to the current guard failure.
+/// * glen - Length for list in `gptr`.
 #[no_mangle]
-pub(crate) extern "C" fn __yk_guardcheck(gidx: u64) -> *const libc::c_void {
-    let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
-    // The currently executed trace.
-    let (ctr, root) = MTThread::with(|mtt| mtt.running_trace());
-    let ctr = ctr
-        .unwrap()
-        .as_any()
-        .downcast::<X64CompiledTrace>()
-        .unwrap();
-    let info = &ctr.deoptinfo[&usize::from(gidx)];
+pub(crate) extern "C" fn __yk_guardcheck(
+    gidx: usize,
+    gptr: *const usize,
+    glen: usize,
+) -> *const libc::c_void {
+    let v = unsafe { slice::from_raw_parts(gptr, glen) };
+    let ctr = running_trace(v);
+    let info = &ctr.deoptinfo[&gidx];
     if let Some(st) = info.guard.ctr() {
         let staddr = st.entry();
         let mt = Arc::clone(&ctr.mt);
         mt.log.log(Verbosity::JITEvent, "execute-side-trace");
-
-        // If `root` is Some, then this is the side-trace of a side-trace, so we need to pass in
-        // the root instead of the immediate parent.
-        if root.is_some() {
-            MTThread::with(|mtt| {
-                mtt.set_running_trace(Some(st), root);
-            });
-        } else {
-            MTThread::with(|mtt| {
-                mtt.set_running_trace(Some(st), Some(ctr));
-            });
-        };
-
         return staddr;
     }
     std::ptr::null()
 }
 
-/// Informs the meta-tracer that we have looped back from a side-trace into the root trace.
-pub(crate) extern "C" fn __yk_reenter_jit() {
-    // Get the root trace and set it as the new running trace.
-    let (_, root) = MTThread::with(|mtt| mtt.running_trace());
-    let root = root
+/// Get the actual running trace by walking down the guards from the root trace using the
+/// [GuardIdx]'s passed in via `gidxs`.
+///
+/// # Arguments
+///
+/// * gidxs - List of [GuardIdx]'s for previous guard failures.
+fn running_trace(gidxs: &[usize]) -> Arc<X64CompiledTrace> {
+    let (ctr, _) = MTThread::with(|mtt| mtt.running_trace());
+    let mut ctr = ctr
+        .clone()
         .unwrap()
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
-    let mt = Arc::clone(&root.mt);
-    mt.log.log(Verbosity::JITEvent, "re-enter-jit-code");
-    MTThread::with(|mtt| {
-        mtt.set_running_trace(Some(root), None);
-    });
+    for gidx in gidxs {
+        ctr = ctr.deoptinfo[gidx]
+            .guard
+            .ctr()
+            .unwrap()
+            .as_any()
+            .downcast::<X64CompiledTrace>()
+            .unwrap();
+    }
+    ctr
 }
 
 /// Deoptimise back to the interpreter. This function is called from a failing guard (see
@@ -88,23 +85,23 @@ pub(crate) extern "C" fn __yk_reenter_jit() {
 ///
 /// * `frameaddr` - the RBP value for main interpreter loop (and also the JIT since the trace
 ///   executes on the same frame)
-/// * `gidx` - the [GuardIdx] of the failing guard
+/// * `gidx` - the [GuardIdx] of the current failing guard
 /// * `gp_regs` - a pointer to the saved values of the 16 general purpose registers in the same
 ///   order as [crate::compile::jitc_yk::codegen::x64::lsregalloc::GP_REGS]
+/// * gptr - Pointer to a list of previous [GuardIdx]'s leading up to the current guard failure.
+/// * glen - Length for list in `gptr`.
 #[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
     frameaddr: *const c_void,
     gidx: u64,
     gp_regs: &[u64; 16],
     fp_regs: &[u64; 16],
+    gptr: *const usize,
+    glen: usize,
 ) -> *const libc::c_void {
+    let v = unsafe { slice::from_raw_parts(gptr, glen) };
+    let ctr = running_trace(v);
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
-    let (ctr, _) = MTThread::with(|mtt| mtt.running_trace());
-    let ctr = ctr
-        .unwrap()
-        .as_any()
-        .downcast::<X64CompiledTrace>()
-        .unwrap();
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
     let info = &ctr.deoptinfo[&usize::from(gidx)];
     let mt = Arc::clone(&ctr.mt);
