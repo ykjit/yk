@@ -1815,7 +1815,9 @@ impl<'a> Assemble<'a> {
             jit_ir::FloatPredicate::UnorderedNotEqual => {
                 dynasm!(self.asm; setne Rb(tgt_reg.code()))
             }
-            jit_ir::FloatPredicate::OrderedGreater => dynasm!(self.asm; seta Rb(tgt_reg.code())),
+            jit_ir::FloatPredicate::OrderedGreater | jit_ir::FloatPredicate::UnorderedGreater => {
+                dynasm!(self.asm; seta Rb(tgt_reg.code()))
+            }
             jit_ir::FloatPredicate::OrderedGreaterEqual => {
                 dynasm!(self.asm; setae Rb(tgt_reg.code()))
             }
@@ -1825,7 +1827,6 @@ impl<'a> Assemble<'a> {
             | jit_ir::FloatPredicate::OrderedNotEqual
             | jit_ir::FloatPredicate::Ordered
             | jit_ir::FloatPredicate::Unordered
-            | jit_ir::FloatPredicate::UnorderedGreater
             | jit_ir::FloatPredicate::UnorderedGreaterEqual
             | jit_ir::FloatPredicate::UnorderedLess
             | jit_ir::FloatPredicate::UnorderedLessEqual
@@ -4167,12 +4168,18 @@ mod tests {
                 %0: float = load_ti 0
                 %1: float = load_ti 1
                 %2: i1 = f_ueq %0, %1
+                %3: i1 = f_ugt %0, %1
             ",
             "
                 ...
                 ; %2: i1 = f_ueq %0, %1
                 {{_}} {{_}}: ucomiss fp.128.x, fp.128.y
                 {{_}} {{_}}: setz r.8.x
+                {{_}} {{_}}: setnp r.8.y
+                {{_}} {{_}}: and r.8.x, r.8.y
+                ; %3: i1 = f_ugt %0, %1
+                {{_}} {{_}}: ucomiss fp.128.x, fp.128.y
+                {{_}} {{_}}: setnbe r.8.x
                 {{_}} {{_}}: setnp r.8.y
                 {{_}} {{_}}: and r.8.x, r.8.y
                 ...
@@ -4188,12 +4195,18 @@ mod tests {
                 %0: double = load_ti 0
                 %1: double = load_ti 1
                 %2: i1 = f_ueq %0, %1
+                %3: i1 = f_ugt %0, %1
             ",
             "
                 ...
                 ; %2: i1 = f_ueq %0, %1
                 {{_}} {{_}}: ucomisd fp.128.x, fp.128.y
                 {{_}} {{_}}: setz r.8.x
+                {{_}} {{_}}: setnp r.8.y
+                {{_}} {{_}}: and r.8.x, r.8.y
+                ; %3: i1 = f_ugt %0, %1
+                {{_}} {{_}}: ucomisd fp.128.x, fp.128.y
+                {{_}} {{_}}: setnbe r.8.x
                 {{_}} {{_}}: setnp r.8.y
                 {{_}} {{_}}: and r.8.x, r.8.y
                 ...
