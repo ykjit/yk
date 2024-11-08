@@ -1136,9 +1136,12 @@ impl LSRegAlloc<'_> {
 }
 
 /// What constraints are there on registers for an instruction?
+///
+/// In the following `R` is a fixed register specified inside the variant, whereas *x* is an
+/// unspecified register determined by the allocator.
 #[derive(Debug)]
 pub(crate) enum RegConstraint<R: Register> {
-    /// Make sure `Operand` is loaded into a register *R* on entry; its value must be unchanged
+    /// Make sure `Operand` is loaded into a register *x* on entry; its value must be unchanged
     /// after the instruction is executed.
     Input(Operand),
     /// Make sure `Operand` is loaded into register `R` on entry; its value must be unchanged
@@ -1156,7 +1159,7 @@ pub(crate) enum RegConstraint<R: Register> {
     Output,
     /// The result of this instruction will be stored in register `R`.
     OutputFromReg(R),
-    /// The register *r* will be clobbered.
+    /// The register `R` will be clobbered.
     Clobber(R),
     /// A temporary register *x* that the instruction will clobber.
     Temporary,
