@@ -489,6 +489,7 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
                 jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
                 jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
+                jit_ir::Inst::BitCast(i) => self.cg_bitcast(iidx, i),
                 jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
                 jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
                 jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
@@ -2107,6 +2108,37 @@ impl<'a> Assemble<'a> {
         }
     }
 
+    fn cg_bitcast(&mut self, iidx: InstIdx, inst: &jit_ir::BitCastInst) {
+        let src_type = self.m.type_(inst.val(self.m).tyidx(self.m));
+        let dest_type = self.m.type_(inst.dest_tyidx());
+
+        match (src_type, dest_type) {
+            (jit_ir::Ty::Float(_), jit_ir::Ty::Float(_)) => {
+                todo!();
+            }
+            (jit_ir::Ty::Float(_), _gp_ty) => {
+                todo!();
+            }
+            (gp_ty, jit_ir::Ty::Float(_)) => {
+                let [src_reg] = self.ra.assign_gp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::Input(inst.val(self.m))],
+                );
+                let [tgt_reg] =
+                    self.ra
+                        .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+                // unwrap safe: IR would be invalid otherwise.
+                match gp_ty.byte_size().unwrap() {
+                    4 => dynasm!(self.asm; cvtsi2ss Rx(tgt_reg.code()), Rd(src_reg.code())),
+                    8 => dynasm!(self.asm; cvtsi2sd Rx(tgt_reg.code()), Rq(src_reg.code())),
+                    _ => todo!(),
+                }
+            }
+            (_gp_ty1, _gp_ty2) => todo!(),
+        }
+    }
+
     fn cg_sitofp(&mut self, iidx: InstIdx, inst: &jit_ir::SIToFPInst) {
         let [src_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
@@ -3637,6 +3669,26 @@ mod tests {
                 {{_}} {{_}}: shl r.64.c, 0x01
                 {{_}} {{_}}: shr r.64.c, 0x01
                 ",
+        );
+    }
+
+    #[test]
+    fn cg_bitcast() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = load_ti 0
+                %1: i32 = load_ti 1
+                %2: double = bitcast %0
+                %3: float = bitcast %1
+                ",
+            "
+            ...
+            ; %2: double = bitcast %0
+            {{_}} {{_}}: cvtsi2sd fp.128.x, r.64.x
+            ; %3: float = bitcast %1
+            {{_}} {{_}}: cvtsi2ss fp.128.x, r.32.x
+            ",
         );
     }
 

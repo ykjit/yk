@@ -9,10 +9,11 @@ use crate::compile::jitc_yk::aot_ir;
 use super::super::{
     aot_ir::{BinOp, FloatPredicate, InstID, Predicate},
     jit_ir::{
-        BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst, FPExtInst,
-        FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst,
-        Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PackedOperand, PtrAddInst,
-        SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZExtInst,
+        BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
+        FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
+        IndirectCallInst, Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand,
+        PackedOperand, PtrAddInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty,
+        TyIdx, ZExtInst,
     },
 };
 use fm::FMBuilder;
@@ -398,6 +399,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::ZExt { assign, type_, val } => {
                         let inst =
                             ZExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::BitCast { assign, type_, val } => {
+                        let inst = BitCastInst::new(
+                            &self.process_operand(val)?,
+                            self.process_type(type_)?,
+                        );
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::SIToFP { assign, type_, val } => {
@@ -786,6 +794,12 @@ enum ASTInst {
         type_: ASTType,
         val: ASTOperand,
     },
+    BitCast {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        val: ASTOperand,
+    },
     SIToFP {
         assign: Span,
         type_: ASTType,
@@ -969,6 +983,7 @@ mod tests {
               %52: float = fadd 1float, 2.345float
               %53: i64 = icall<ft1> %9(%5, %7, %0)
               tloop_jump [%12, %6]
+              %54: float = bitcast %7
         ",
         );
     }

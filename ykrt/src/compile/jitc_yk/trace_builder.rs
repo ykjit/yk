@@ -874,6 +874,11 @@ impl TraceBuilder {
                 self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )
             .into(),
+            aot_ir::CastKind::BitCast => jit_ir::BitCastInst::new(
+                &self.handle_operand(val)?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
+            )
+            .into(),
         };
         self.copy_inst(inst, bid, aot_inst_idx)
     }

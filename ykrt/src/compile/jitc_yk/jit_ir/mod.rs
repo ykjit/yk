@@ -1449,6 +1449,7 @@ pub(crate) enum Inst {
     FPExt(FPExtInst),
     FCmp(FCmpInst),
     FPToSI(FPToSIInst),
+    BitCast(BitCastInst),
 }
 
 impl Inst {
@@ -1493,6 +1494,7 @@ impl Inst {
             Self::RootJump => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
             Self::ZExt(si) => si.dest_tyidx(),
+            Self::BitCast(i) => i.dest_tyidx(),
             Self::Trunc(t) => t.dest_tyidx(),
             Self::Select(s) => s.trueval(m).tyidx(m),
             Self::SIToFP(i) => i.dest_tyidx(),
@@ -1613,6 +1615,7 @@ impl Inst {
             }
             Inst::SExt(SExtInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::ZExt(ZExtInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::BitCast(BitCastInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::Select(SelectInst {
                 cond,
@@ -1722,6 +1725,7 @@ impl Inst {
             }
             Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
             Inst::ZExt(ZExtInst { val, .. }) => val.map_iidx(f),
+            Inst::BitCast(BitCastInst { val, .. }) => val.map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
             Inst::Select(SelectInst {
                 cond,
@@ -1792,6 +1796,7 @@ impl Inst {
             (Self::Guard(x), Self::Guard(y)) => x.decopy_eq(m, y),
             (Self::SExt(x), Self::SExt(y)) => x.decopy_eq(m, y),
             (Self::ZExt(x), Self::ZExt(y)) => x.decopy_eq(m, y),
+            (Self::BitCast(x), Self::BitCast(y)) => x.decopy_eq(m, y),
             (Self::Trunc(x), Self::Trunc(y)) => x.decopy_eq(m, y),
             (Self::Select(x), Self::Select(y)) => x.decopy_eq(m, y),
             (Self::SIToFP(x), Self::SIToFP(y)) => x.decopy_eq(m, y),
@@ -1966,6 +1971,9 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::ZExt(i) => {
                 write!(f, "zext {}", i.val(self.m).display(self.m),)
             }
+            Inst::BitCast(i) => {
+                write!(f, "bitcast {}", i.val(self.m).display(self.m),)
+            }
             Inst::Trunc(i) => {
                 write!(f, "trunc {}", i.val(self.m).display(self.m))
             }
@@ -2020,6 +2028,7 @@ inst!(SIToFP, SIToFPInst);
 inst!(FPExt, FPExtInst);
 inst!(FCmp, FCmpInst);
 inst!(FPToSI, FPToSIInst);
+inst!(BitCast, BitCastInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -2702,6 +2711,35 @@ pub struct SExtInst {
 }
 
 impl SExtInst {
+    pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
+        Self {
+            val: PackedOperand::new(val),
+            dest_tyidx,
+        }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m) && self.dest_tyidx == other.dest_tyidx
+    }
+
+    pub(crate) fn val(&self, m: &Module) -> Operand {
+        self.val.unpack(m)
+    }
+
+    pub(crate) fn dest_tyidx(&self) -> TyIdx {
+        self.dest_tyidx
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BitCastInst {
+    /// The value to extend.
+    val: PackedOperand,
+    /// The type to extend to.
+    dest_tyidx: TyIdx,
+}
+
+impl BitCastInst {
     pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
