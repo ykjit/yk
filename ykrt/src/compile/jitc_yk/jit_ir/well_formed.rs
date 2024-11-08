@@ -196,6 +196,28 @@ impl Module {
                         );
                     }
                 }
+                Inst::BitCast(x) => {
+                    let val_ty = self.type_(x.val(self).tyidx(self));
+                    let dest_ty = self.type_(x.dest_tyidx());
+                    // LLVM semantics: "If the source type is a pointer, the destination type must
+                    // also be a pointer of the same size"
+                    if matches!(val_ty, Ty::Ptr) && !matches!(dest_ty, Ty::Ptr) {
+                        panic!(
+                            "Instruction at position {iidx} trying to bitcast from a pointer type to a non-pointer type\n  {}",
+                            self.inst_no_copies(iidx).display(iidx, self)
+                        );
+                    }
+                    // LLVM semantics: "The bit sizes of [source] value and the destination type
+                    // must be identical"
+                    let val_bitsize = val_ty.bit_size().unwrap();
+                    let dest_bitsize = dest_ty.bit_size().unwrap();
+                    if val_bitsize != dest_bitsize {
+                        panic!(
+                            "Instruction at position {iidx} trying to bitcast to a differently-sized type\n  {}",
+                            self.inst_no_copies(iidx).display(iidx, self)
+                        );
+                    }
+                }
                 Inst::Trunc(x) => {
                     let Ty::Integer(val_bitsize) = self.type_(x.val(self).tyidx(self)) else {
                         panic!("Instruction at position {iidx} trying to convert from a non-integer type\n  {}",
@@ -614,6 +636,34 @@ mod tests {
                 %0: i32 = load_ti 0
                 %1: i32 = add %0, %0
                 %2: i32 = load_ti 1
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to bitcast from a pointer type to a non-pointer type"
+    )]
+    fn bitcast_invalid_ptrcast() {
+        Module::from_str(
+            "
+              entry:
+                %0: ptr = load_ti 0
+                %1: i64 = bitcast %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to bitcast to a differently-sized type"
+    )]
+    fn bitcast_invalid_bitsize() {
+        Module::from_str(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i64 = bitcast %0
             ",
         );
     }

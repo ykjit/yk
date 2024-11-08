@@ -79,9 +79,24 @@ impl From<&VarLocation> for yksmp::Location {
                         Rq::R15 => 15,
                         e => todo!("{:?}", e),
                     },
-                    Register::FP(_reg) => {
-                        todo!()
-                    }
+                    Register::FP(reg) => match reg {
+                        Rx::XMM0 => 17,
+                        Rx::XMM1 => 18,
+                        Rx::XMM2 => 19,
+                        Rx::XMM3 => 20,
+                        Rx::XMM4 => 21,
+                        Rx::XMM5 => 22,
+                        Rx::XMM6 => 23,
+                        Rx::XMM7 => 24,
+                        Rx::XMM8 => 25,
+                        Rx::XMM9 => 26,
+                        Rx::XMM10 => 27,
+                        Rx::XMM11 => 28,
+                        Rx::XMM12 => 29,
+                        Rx::XMM13 => 30,
+                        Rx::XMM14 => 31,
+                        Rx::XMM15 => 32,
+                    },
                 };
                 // We currently only use 8 byte registers, so the size is constant. Since these are
                 // JIT values there are no extra locations we need to worry about.

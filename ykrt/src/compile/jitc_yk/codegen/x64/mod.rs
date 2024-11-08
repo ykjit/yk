@@ -489,6 +489,7 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
                 jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
                 jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
+                jit_ir::Inst::BitCast(i) => self.cg_bitcast(iidx, i),
                 jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
                 jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
                 jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
@@ -1815,7 +1816,9 @@ impl<'a> Assemble<'a> {
             jit_ir::FloatPredicate::UnorderedNotEqual => {
                 dynasm!(self.asm; setne Rb(tgt_reg.code()))
             }
-            jit_ir::FloatPredicate::OrderedGreater => dynasm!(self.asm; seta Rb(tgt_reg.code())),
+            jit_ir::FloatPredicate::OrderedGreater | jit_ir::FloatPredicate::UnorderedGreater => {
+                dynasm!(self.asm; seta Rb(tgt_reg.code()))
+            }
             jit_ir::FloatPredicate::OrderedGreaterEqual => {
                 dynasm!(self.asm; setae Rb(tgt_reg.code()))
             }
@@ -1825,7 +1828,6 @@ impl<'a> Assemble<'a> {
             | jit_ir::FloatPredicate::OrderedNotEqual
             | jit_ir::FloatPredicate::Ordered
             | jit_ir::FloatPredicate::Unordered
-            | jit_ir::FloatPredicate::UnorderedGreater
             | jit_ir::FloatPredicate::UnorderedGreaterEqual
             | jit_ir::FloatPredicate::UnorderedLess
             | jit_ir::FloatPredicate::UnorderedLessEqual
@@ -2103,6 +2105,37 @@ impl<'a> Assemble<'a> {
             self.zero_extend_to_reg64(reg, u8::try_from(src_bitsize).unwrap());
         } else {
             todo!("{} {}", src_bitsize, dest_bitsize);
+        }
+    }
+
+    fn cg_bitcast(&mut self, iidx: InstIdx, inst: &jit_ir::BitCastInst) {
+        let src_type = self.m.type_(inst.val(self.m).tyidx(self.m));
+        let dest_type = self.m.type_(inst.dest_tyidx());
+
+        match (src_type, dest_type) {
+            (jit_ir::Ty::Float(_), jit_ir::Ty::Float(_)) => {
+                todo!();
+            }
+            (jit_ir::Ty::Float(_), _gp_ty) => {
+                todo!();
+            }
+            (gp_ty, jit_ir::Ty::Float(_)) => {
+                let [src_reg] = self.ra.assign_gp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::Input(inst.val(self.m))],
+                );
+                let [tgt_reg] =
+                    self.ra
+                        .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+                // unwrap safe: IR would be invalid otherwise.
+                match gp_ty.byte_size().unwrap() {
+                    4 => dynasm!(self.asm; cvtsi2ss Rx(tgt_reg.code()), Rd(src_reg.code())),
+                    8 => dynasm!(self.asm; cvtsi2sd Rx(tgt_reg.code()), Rq(src_reg.code())),
+                    _ => todo!(),
+                }
+            }
+            (_gp_ty1, _gp_ty2) => todo!(),
         }
     }
 
@@ -3640,6 +3673,26 @@ mod tests {
     }
 
     #[test]
+    fn cg_bitcast() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = load_ti 0
+                %1: i32 = load_ti 1
+                %2: double = bitcast %0
+                %3: float = bitcast %1
+                ",
+            "
+            ...
+            ; %2: double = bitcast %0
+            {{_}} {{_}}: cvtsi2sd fp.128.x, r.64.x
+            ; %3: float = bitcast %1
+            {{_}} {{_}}: cvtsi2ss fp.128.x, r.32.x
+            ",
+        );
+    }
+
+    #[test]
     fn cg_guard_true() {
         codegen_and_test(
             "
@@ -4167,12 +4220,18 @@ mod tests {
                 %0: float = load_ti 0
                 %1: float = load_ti 1
                 %2: i1 = f_ueq %0, %1
+                %3: i1 = f_ugt %0, %1
             ",
             "
                 ...
                 ; %2: i1 = f_ueq %0, %1
                 {{_}} {{_}}: ucomiss fp.128.x, fp.128.y
                 {{_}} {{_}}: setz r.8.x
+                {{_}} {{_}}: setnp r.8.y
+                {{_}} {{_}}: and r.8.x, r.8.y
+                ; %3: i1 = f_ugt %0, %1
+                {{_}} {{_}}: ucomiss fp.128.x, fp.128.y
+                {{_}} {{_}}: setnbe r.8.x
                 {{_}} {{_}}: setnp r.8.y
                 {{_}} {{_}}: and r.8.x, r.8.y
                 ...
@@ -4188,12 +4247,18 @@ mod tests {
                 %0: double = load_ti 0
                 %1: double = load_ti 1
                 %2: i1 = f_ueq %0, %1
+                %3: i1 = f_ugt %0, %1
             ",
             "
                 ...
                 ; %2: i1 = f_ueq %0, %1
                 {{_}} {{_}}: ucomisd fp.128.x, fp.128.y
                 {{_}} {{_}}: setz r.8.x
+                {{_}} {{_}}: setnp r.8.y
+                {{_}} {{_}}: and r.8.x, r.8.y
+                ; %3: i1 = f_ugt %0, %1
+                {{_}} {{_}}: ucomisd fp.128.x, fp.128.y
+                {{_}} {{_}}: setnbe r.8.x
                 {{_}} {{_}}: setnp r.8.y
                 {{_}} {{_}}: and r.8.x, r.8.y
                 ...
