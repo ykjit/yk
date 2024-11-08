@@ -293,6 +293,14 @@ impl LSRegAlloc<'_> {
         iidx: InstIdx,
         constraints: [RegConstraint<Rq>; N],
     ) -> [Rq; N] {
+        // No constraint operands should be float-typed.
+        #[cfg(debug_assertions)]
+        for c in &constraints {
+            if let Some(o) = c.operand() {
+                debug_assert!(!matches!(self.m.type_(o.tyidx(self.m)), Ty::Float(_)));
+            }
+        }
+
         // There must be at most 1 output register.
         debug_assert!(
             constraints
@@ -801,6 +809,14 @@ impl LSRegAlloc<'_> {
         iidx: InstIdx,
         constraints: [RegConstraint<Rx>; N],
     ) -> [Rx; N] {
+        // All constraint operands should be float-typed.
+        #[cfg(debug_assertions)]
+        for c in &constraints {
+            if let Some(o) = c.operand() {
+                debug_assert!(matches!(self.m.type_(o.tyidx(self.m)), Ty::Float(_)));
+            }
+        }
+
         let mut avoid = RegSet::blank();
         let mut found_output = false; // Check that there aren't multiple output regs
         let mut out = [None; N];
@@ -1163,6 +1179,21 @@ pub(crate) enum RegConstraint<R: Register> {
     Clobber(R),
     /// A temporary register *x* that the instruction will clobber.
     Temporary,
+}
+
+#[cfg(debug_assertions)]
+impl<R: dynasmrt::Register> RegConstraint<R> {
+    /// Return a reference to the inner [Operand], if there is one.
+    fn operand(&self) -> Option<&Operand> {
+        match self {
+            Self::Input(o)
+            | Self::InputIntoReg(o, _)
+            | Self::InputIntoRegAndClobber(o, _)
+            | Self::InputOutput(o)
+            | Self::InputOutputIntoReg(o, _) => Some(o),
+            Self::Output | Self::OutputFromReg(_) | Self::Clobber(_) | Self::Temporary => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
