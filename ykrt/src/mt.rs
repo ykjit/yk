@@ -31,6 +31,9 @@ use crate::{
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
 };
 
+use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP};
+use dynasmrt;
+
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
 // users rather than having them try to use (say) u64::max() on a 64 bit machine and get a run-time
@@ -384,6 +387,12 @@ impl MT {
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
+                // execute asm
+                let func: unsafe fn() =
+                    unsafe { std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr()) };
+                unsafe {
+                    func();
+                }
             }
             TransitionControlPoint::StopTracing => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -411,6 +420,11 @@ impl MT {
                         self.log
                             .log(Verbosity::Warning, &format!("stop-tracing-aborted: {e}"));
                     }
+                }
+                // execute asm
+                let func: unsafe fn() = unsafe { std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr()) };
+                unsafe {
+                    func();
                 }
             }
             TransitionControlPoint::StopSideTracing {
