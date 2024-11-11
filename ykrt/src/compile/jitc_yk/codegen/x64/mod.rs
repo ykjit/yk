@@ -496,6 +496,7 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
                 jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
                 jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
+                jit_ir::Inst::FNeg(i) => self.cg_fneg(iidx, i),
             }
 
             next = iter.next();
@@ -2294,6 +2295,43 @@ impl<'a> Assemble<'a> {
         };
         self.deoptinfo.insert(inst.gidx.into(), deoptinfo);
         fail_label
+    }
+
+    fn cg_fneg(&mut self, iidx: InstIdx, inst: &jit_ir::FNegInst) {
+        let val = inst.val(self.m);
+        let ty = self.m.type_(val.tyidx(self.m));
+
+        // There is no dedicated instruction for negating the value in an XMM register, so we flip
+        // the sign bit manually. It's a bit of a dance since you can't XORPS with an immediate
+        // float.
+        let [tmpi_reg] = self
+            .ra
+            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Temporary]);
+        let [io_reg, tmpf_reg] = self.ra.assign_fp_regs(
+            &mut self.asm,
+            iidx,
+            [RegConstraint::InputOutput(val), RegConstraint::Temporary],
+        );
+        match ty {
+            jit_ir::Ty::Float(jit_ir::FloatTy::Float) => {
+                dynasm!(self.asm
+                    ; mov Rd(tmpi_reg.code()), DWORD 0x80000000u32 as i32 // cast intentional
+                    ; movd Rx(tmpf_reg.code()), Rd(tmpi_reg.code())
+                    ; xorps Rx(io_reg.code()), Rx(tmpf_reg.code())
+                );
+            }
+            jit_ir::Ty::Float(jit_ir::FloatTy::Double) => {
+                dynasm!(self.asm
+                    ; mov Rq(tmpi_reg.code()), QWORD 0x8000000000000000u64 as i64 // cast intentional
+                    ; movq Rx(tmpf_reg.code()), Rq(tmpi_reg.code())
+                    ; xorpd Rx(io_reg.code()), Rx(tmpf_reg.code())
+                );
+            }
+            _ => {
+                // This bytecode only operates on floating point values.
+                panic!();
+            }
+        }
     }
 
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
@@ -4326,6 +4364,30 @@ mod tests {
                 ; tloop_jump [42i8]:
                 {{_}} {{_}}: mov r.64.x, 0x2a
                 {{_}} {{_}}: jmp ...
+            ",
+        );
+    }
+
+    #[test]
+    fn cg_fneg() {
+        codegen_and_test(
+            "
+              entry:
+                %0: float = load_ti 0
+                %1: double = load_ti 1
+                %2: float = fneg %0
+                %3: double = fneg %1
+            ",
+            "
+                ...
+                ; %2: float = fneg %0
+                {{_}} {{_}}: mov r.32.x, 0x80000000
+                {{_}} {{_}}: movd fp.128.y, r.32.x
+                {{_}} {{_}}: xorps fp.128.z, fp.128.y
+                ; %3: double = fneg %1
+                {{_}} {{_}}: mov r.64.x, 0x8000000000000000
+                {{_}} {{_}}: movq fp.128.y, r.64.x
+                {{_}} {{_}}: xorpd fp.128.a, fp.128.y
             ",
         );
     }

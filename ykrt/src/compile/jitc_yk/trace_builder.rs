@@ -263,6 +263,7 @@ impl TraceBuilder {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_promote(bid, iidx, val, safepoint, tyidx, nextinst)
                 }
+                aot_ir::Inst::FNeg { val } => self.handle_fneg(bid, iidx, val),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -1096,6 +1097,16 @@ impl TraceBuilder {
             }
             jit_ir::Operand::Const(_cidx) => todo!(),
         }
+    }
+
+    fn handle_fneg(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        val: &aot_ir::Operand,
+    ) -> Result<(), CompilationError> {
+        let inst = jit_ir::FNegInst::new(self.handle_operand(val)?).into();
+        self.copy_inst(inst, bid, aot_inst_idx)
     }
 
     /// Entry point for building an IR trace.
