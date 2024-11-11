@@ -4,7 +4,11 @@
 #![allow(dead_code)]
 
 use super::CompilationError;
-use crate::{compile::jitc_yk::jit_ir::Module, compile::CompiledTrace, location::HotLocation, MT};
+use crate::{
+    compile::{jitc_yk::jit_ir::Module, CompiledTrace, GuardIdx},
+    location::HotLocation,
+    MT,
+};
 use parking_lot::Mutex;
 use std::{error::Error, sync::Arc};
 
@@ -26,6 +30,7 @@ pub(crate) trait CodeGen: Send + Sync {
     ///   defined in [super::YkSideTraceInfo::sp_offset].
     /// * `root_offset` - Stack pointer offset of the root trace as defined in
     ///   [super::YkSideTraceInfo::sp_offset].
+    /// * `prevguards` - List of [GuardIdx]'s of previous guards failures leading up to this trace.
     fn codegen(
         &self,
         m: Module,
@@ -33,6 +38,7 @@ pub(crate) trait CodeGen: Send + Sync {
         hl: Arc<Mutex<HotLocation>>,
         sp_offset: Option<usize>,
         root_offset: Option<usize>,
+        prevguards: Option<Vec<GuardIdx>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 

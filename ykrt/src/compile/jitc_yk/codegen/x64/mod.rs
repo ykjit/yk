@@ -66,7 +66,7 @@ use yksmp;
 mod deopt;
 mod lsregalloc;
 
-use deopt::{__yk_deopt, __yk_guardcheck, __yk_reenter_jit};
+use deopt::{__yk_deopt, __yk_guardcheck};
 use lsregalloc::{LSRegAlloc, RegConstraint};
 
 /// General purpose argument registers as defined by the x64 SysV ABI.
@@ -160,8 +160,9 @@ impl CodeGen for X64CodeGen {
         hl: Arc<Mutex<HotLocation>>,
         sp_offset: Option<usize>,
         root_offset: Option<usize>,
+        prevguards: Option<Vec<GuardIdx>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        Assemble::new(&m, sp_offset, root_offset)?.codegen(mt, hl, sp_offset.is_some())
+        Assemble::new(&m, sp_offset, root_offset)?.codegen(mt, hl, prevguards)
     }
 }
 
@@ -257,9 +258,9 @@ impl<'a> Assemble<'a> {
         mut self: Box<Self>,
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
-        issidetrace: bool,
+        prevguards: Option<Vec<GuardIdx>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        if issidetrace {
+        if prevguards.is_some() {
             // Recover registers.
             for reg in lsregalloc::FP_REGS.iter() {
                 dynasm!(self.asm
@@ -347,14 +348,47 @@ impl<'a> Assemble<'a> {
                 }
                 dynasm!(self.asm; mov rcx, rsp);
 
+                // Push [GuardIdx]'s of previous guard failures.
+                if let Some(ref guards) = prevguards {
+                    for gidx in guards.iter().rev() {
+                        let g = i64::try_from(usize::from(*gidx)).unwrap();
+                        dynasm!(self.asm
+                            ; mov r9, QWORD g
+                            ; push r9
+                        );
+                    }
+                }
+                // Save the pointer to this list.
+                dynasm!(self.asm
+                    ; mov r8, rsp
+                );
+
+                let len = i64::try_from(prevguards.as_ref().map_or(0, |v| v.len())).unwrap();
+                // Total alignment caused by pushing the parent guards.
+                let mut totalalign = len * 8;
+
+                // Pushing RSI above mis-aligned the stack to 8 bytes, but the calling convetion
+                // requires us to be 16 bytes aligned. Unless we accidentally re-aligned it by
+                // pushing an uneven amount of previous [GuardIdx]'s, we need to re-align it here.
+                if len % 2 == 0 {
+                    dynasm!(self.asm
+                        ; sub rsp, 8
+                    );
+                    totalalign += 8;
+                }
+
                 // Check whether we need to deoptimise or jump into a side-trace.
                 dynasm!(self.asm
                     ; push rsi  // Save `deoptid`.
                     ; push rdx  // Save `gp_regs` pointer.
                     ; push rcx  // Save `fp_regs` pointer.
-                    ; mov rdi, rsi
+                    ; push r8   // Save parent guards pointer.
+                    ; mov rdi, rsi // Pass `deoptid`.
+                    ; mov rsi, r8  // Pass pointer to parent guards.
+                    ; mov rdx, QWORD len  // Pass length of parent guards.
                     ; mov rax, QWORD __yk_guardcheck as i64
                     ; call rax
+                    ; pop r8
                     ; pop rcx
                     ; pop rdx
                     ; pop rsi
@@ -365,6 +399,8 @@ impl<'a> Assemble<'a> {
                 // Jump into side-trace. The side-trace takes care of recovering the saved
                 // registers.
                 dynasm!(self.asm
+                    // Remove pushed [GuardIdx]'s from the stack as they are no longer needed.
+                    ; add rsp, i32::try_from(totalalign).unwrap()
                     ; jmp rax
                 );
 
@@ -372,8 +408,8 @@ impl<'a> Assemble<'a> {
                 dynasm!(self.asm; => deopt_label);
                 dynasm!(self.asm
                     ; mov rdi, rbp
+                    ; mov r9, QWORD len
                     ; mov rax, QWORD __yk_deopt as i64
-                    ; sub rsp, 8 // Align the stack
                     ; call rax
                 );
             }
@@ -403,6 +439,7 @@ impl<'a> Assemble<'a> {
             mt,
             buf,
             deoptinfo: self.deoptinfo,
+            prevguards,
             sp_offset: self.ra.stack_size(),
             prologue_offset: prologue_offset.0,
             entry_vars: self.loop_start_locs.clone(),
@@ -1987,53 +2024,7 @@ impl<'a> Assemble<'a> {
         self.write_jump_vars(Some(self.m.root_entry_vars()));
         self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
 
-        // The call to `__yk_reenter_jit" has the potential to clobber most of our registers, so
-        // save and restore them here.
         dynasm!(self.asm
-            ; push rax
-            ; push rcx
-            ; push rdx
-            ; push rsi
-            ; push rdi
-            ; push r8
-            ; push r9
-            ; push r10
-            ; push r11
-        );
-
-        for reg in lsregalloc::FP_REGS.iter() {
-            dynasm!(self.asm
-                ; movq rcx, Rx(reg.code())
-                ; push rcx
-            );
-        }
-
-        // Set the current executed trace in MT.
-        #[allow(clippy::fn_to_numeric_cast)]
-        {
-            dynasm!(self.asm
-                ; mov rdi, QWORD __yk_reenter_jit as i64
-                ; call rdi
-            );
-        }
-
-        // Restore saved registers.
-        for reg in lsregalloc::FP_REGS.iter().rev() {
-            dynasm!(self.asm
-                ; pop rcx
-                ; movq Rx(reg.code()), rcx
-            );
-        }
-        dynasm!(self.asm
-            ; pop r11
-            ; pop r10
-            ; pop r9
-            ; pop r8
-            ; pop rdi
-            ; pop rsi
-            ; pop rdx
-            ; pop rcx
-            ; pop rax
             // Reset rsp to the root trace's frame.
             ; mov rsp, rbp
             ; sub rsp, i32::try_from(self.root_offset.unwrap()).unwrap()
@@ -2332,6 +2323,8 @@ pub(super) struct X64CompiledTrace {
     buf: ExecutableBuffer,
     /// Deoptimisation info: maps a [GuardIdx] to [DeoptInfo].
     deoptinfo: HashMap<usize, DeoptInfo>,
+    /// [GuardIdx]'s of all failing guards leading up to this trace.
+    prevguards: Option<Vec<GuardIdx>>,
     /// Stack pointer offset from the base pointer of interpreter frame as defined in
     /// [YkSideTraceInfo::sp_offset].
     sp_offset: usize,
@@ -2398,8 +2391,20 @@ impl CompiledTrace for X64CompiledTrace {
         // this is directly after the prologue. Later we will change this to jump to after the
         // preamble and before the peeled loop.
         let root_addr = unsafe { root_ctr.entry().add(root_ctr.prologue_offset) };
+
+        // Pass along [GuardIdx]'s of previous guard failures and add this guard failure's
+        // [GuardIdx] to the list.
+        let guards = if let Some(v) = &self.prevguards {
+            let mut v = v.clone();
+            v.push(gidx);
+            v
+        } else {
+            vec![gidx]
+        };
+
         Arc::new(YkSideTraceInfo {
             bid: deoptinfo.bid.clone(),
+            guards,
             lives,
             callframes,
             root_addr: RootTracePtr(root_addr),
@@ -2675,7 +2680,7 @@ mod tests {
         match_asm(
             Assemble::new(&m, None, None)
                 .unwrap()
-                .codegen(mt, Arc::new(Mutex::new(hl)), false)
+                .codegen(mt, Arc::new(Mutex::new(hl)), None)
                 .unwrap()
                 .as_any()
                 .downcast::<X64CompiledTrace>()
@@ -3713,8 +3718,8 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 ... mov rdi, rbp
+                ... mov r9, 0x...
                 ... mov rax, 0x...
-                ... sub rsp, 0x08
                 ... call rax
             ",
         );
@@ -3741,8 +3746,8 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 ... mov rdi, rbp
+                ... mov r9, 0x...
                 ... mov rax, 0x...
-                ... sub rsp, 0x08
                 ... call rax
             ",
         );
@@ -3772,8 +3777,8 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 ... mov rdi, rbp
+                ... mov r9, 0x...
                 ... mov rax, 0x...
-                ... sub rsp, 0x08
                 ... call rax
             ",
         );
