@@ -199,5 +199,5 @@ fn main() {
     // sooner (Windows suggests that if a process leaves it to the OS to do the unlocking
     // automatically, it might not be particularly speedy) and allow parallel runs to advance
     // quicker.
-    lock_file.unlock().unwrap();
+    FileExt::unlock(&lock_file).unwrap();
 }
