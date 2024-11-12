@@ -210,9 +210,20 @@ for tracer in $TRACERS; do
     echo "===> Running ${tracer} tests"
     RUST_TEST_SHUFFLE=1 cargo test --release
 
-    # test yklua/hwt in release mode.
     if [ "${tracer}" = "hwt" ]; then
+        # test yklua/hwt in release mode.
         PATH=$(pwd)/bin:${PATH} YK_BUILD_TYPE=release YKB_TRACER=hwt test_yklua
+
+        # Do a quick run of the benchmark suite as a smoke test.
+        pipx install rebench
+        git clone https://github.com/ykjit/yk-benchmarks
+        cd yk-benchmarks
+        ln -s ../yklua .
+        sed -e 's/executions: \[Lua, YkLua\]/executions: [YkLua]/' \
+            -e 's/executable: yklua/executable: lua/' \
+            rebench.conf > rebench2.conf
+        ~/.local/bin/rebench --quick --no-denoise -c rebench2.conf
+        cd ..
     fi
 done
 
