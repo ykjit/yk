@@ -1000,6 +1000,8 @@ pub(crate) enum Inst {
         val: Operand,
         safepoint: DeoptSafepoint,
     },
+    #[deku(id = "20")]
+    FNeg { val: Operand },
     #[deku(id = "255")]
     Unimplemented {
         tyidx: TyIdx,
@@ -1092,6 +1094,7 @@ impl Inst {
             Self::Nop => None,
             Self::FCmp { tyidx, .. } => Some(m.type_(*tyidx)),
             Self::Promote { tyidx, .. } => Some(m.type_(*tyidx)),
+            Self::FNeg { val } => Some(val.type_(m)),
         }
     }
 
@@ -1376,6 +1379,9 @@ impl fmt::Display for DisplayableInst<'_> {
                     val.display(self.m),
                     safepoint.display(self.m)
                 )
+            }
+            Inst::FNeg { val } => {
+                write!(f, "fneg {}", val.display(self.m),)
             }
         }
     }
