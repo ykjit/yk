@@ -261,7 +261,7 @@ impl MT {
         self: &Arc<Self>,
         trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>),
         hl_arc: Arc<Mutex<HotLocation>>,
-        sidetrace: Option<(GuardIdx, Arc<dyn CompiledTrace>)>,
+        sidetrace: Option<(Arc<dyn CompiledTrace>, GuardIdx, Arc<dyn CompiledTrace>)>,
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
@@ -271,8 +271,11 @@ impl MT {
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            let (sti, guardid) = if let Some((guardid, ctr)) = &sidetrace {
-                (Some(ctr.sidetraceinfo(*guardid)), Some(*guardid))
+            let (sti, guardid) = if let Some((root_ctr, guardid, ctr)) = &sidetrace {
+                (
+                    Some(ctr.sidetraceinfo(Arc::clone(root_ctr), *guardid)),
+                    Some(*guardid),
+                )
             } else {
                 (None, None)
             };
@@ -287,7 +290,7 @@ impl MT {
                 trace_iter.1,
             ) {
                 Ok(ct) => {
-                    if let Some((_, parent_ctr)) = sidetrace {
+                    if let Some((_root_ctr, _, parent_ctr)) = sidetrace {
                         parent_ctr.guard(guardid.unwrap()).set_ctr(ct);
                     } else {
                         let mut hl = hl_arc.lock();
@@ -416,6 +419,7 @@ impl MT {
             TransitionControlPoint::StopSideTracing {
                 gidx: guardid,
                 parent_ctr,
+                root_ctr,
             } => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because
                 // `StartSideTracing` will have put a `Some` in the `Rc`.
@@ -438,7 +442,7 @@ impl MT {
                         self.queue_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
-                            Some((guardid, parent_ctr)),
+                            Some((root_ctr, guardid, parent_ctr)),
                         );
                     }
                     Err(e) => {
@@ -572,9 +576,14 @@ impl MT {
                                         // ...and it's this location: we have therefore finished
                                         // tracing the loop.
                                         let parent_ctr = Arc::clone(parent_ctr);
+                                        let root_ctr_cl = Arc::clone(root_ctr);
                                         lk.kind = HotLocationKind::Compiled(Arc::clone(root_ctr));
                                         drop(lk);
-                                        TransitionControlPoint::StopSideTracing { gidx, parent_ctr }
+                                        TransitionControlPoint::StopSideTracing {
+                                            gidx,
+                                            parent_ctr,
+                                            root_ctr: root_ctr_cl,
+                                        }
                                     }
                                 }
                                 _ => {
@@ -899,6 +908,7 @@ enum TransitionControlPoint {
     StopSideTracing {
         gidx: GuardIdx,
         parent_ctr: Arc<dyn CompiledTrace>,
+        root_ctr: Arc<dyn CompiledTrace>,
     },
 }
 

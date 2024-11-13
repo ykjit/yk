@@ -41,7 +41,7 @@ use crate::{
         },
         CompiledTrace, Guard, GuardIdx, SideTraceInfo,
     },
-    location::{HotLocation, HotLocationKind},
+    location::HotLocation,
     mt::MT,
 };
 use dynasmrt::{
@@ -2397,7 +2397,12 @@ impl CompiledTrace for X64CompiledTrace {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
 
-    fn sidetraceinfo(&self, gidx: GuardIdx) -> Arc<dyn SideTraceInfo> {
+    fn sidetraceinfo(
+        &self,
+        root_ctr: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
+    ) -> Arc<dyn SideTraceInfo> {
+        let root_ctr = root_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
         // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
         // the `CompiledTrace` and `gidx` or better a reference to `DeoptInfo`?
         let deoptinfo = &self.deoptinfo[&usize::from(gidx)];
@@ -2407,23 +2412,6 @@ impl CompiledTrace for X64CompiledTrace {
             .map(|(a, l)| (a.clone(), l.into()))
             .collect();
         let callframes = deoptinfo.inlined_frames.clone();
-
-        // Get the root trace from the HotLocation.
-        // FIXME: It might be better if we had a consistent mechanism for doing this rather than
-        // fishing it out of the HotLocationKind`.
-        let hlarc = self.hl.upgrade().unwrap();
-        let hl = hlarc.lock();
-        let root_ctr = match &hl.kind {
-            HotLocationKind::Compiled(root_ctr) => Arc::clone(root_ctr)
-                .as_any()
-                .downcast::<X64CompiledTrace>()
-                .unwrap(),
-            HotLocationKind::SideTracing { root_ctr, .. } => Arc::clone(root_ctr)
-                .as_any()
-                .downcast::<X64CompiledTrace>()
-                .unwrap(),
-            _ => panic!("Unexpected HotLocationKind"),
-        };
 
         // Calculate the address inside the root trace we want side-traces to jump to. Currently
         // this is directly after the prologue. Later we will change this to jump to after the
