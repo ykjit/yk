@@ -29,10 +29,10 @@ use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
         if !self.root_entry_vars.is_empty() {
-            if self.root_entry_vars.len() != self.loop_jump_operands.len() {
+            if self.root_entry_vars.len() != self.trace_header_end.len() {
                 panic!("Loop start/end variables have different lengths.");
             }
-        } else if self.loop_start_vars.len() != self.loop_jump_operands.len() {
+        } else if self.trace_header_start.len() != self.trace_header_end.len() {
             panic!("Loop start/end variables have different lengths.");
         }
 
@@ -279,8 +279,8 @@ impl Module {
                 }
                 Inst::Param(_) => {
                     if let Some(i) = last_inst {
-                        if !matches!(i, Inst::Param(_)) {
-                            panic!("Param instruction may only appear at the beginning of a trace or after another Param instruction\n  {}",
+                        if !matches!(i, Inst::Param(_) | Inst::TraceHeaderEnd) {
+                            panic!("Param instruction may only appear at the beginning of a trace or after another Param instruction, or after the trace header jump\n  {}",
                                 self.inst(iidx).display(iidx, self));
                         }
                     }

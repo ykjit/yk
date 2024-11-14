@@ -81,6 +81,14 @@
 //! will be in. Canonicalisation is a weak promise, not a guarantee: later stages still have to
 //! deal with the other cases, but since they're mostly expected not to occur, they may be handled
 //! suboptimally if that makes the code easier.
+//!
+//! ## Side traces
+//!
+//! While we apply loop peeling to normal traces, this doesn't make sense for side-traces which
+//! thus don't have [Inst::TraceHeaderStart], [Inst::TraceHeaderEnd], [Inst::TraceBodyStart], and
+//! [Inst::TraceBodyEnd] instructions. Instead, side-traces have a single [Inst::SidetraceEnd]
+//! instruction at the end of the trace. The operands for this label are stored in
+//! [Module::trace_header_end].
 
 mod dead_code;
 #[cfg(test)]
@@ -160,11 +168,15 @@ pub(crate) struct Module {
     indirect_calls: Vec<IndirectCallInst>,
     /// Live variables at the beginning of the root trace.
     root_entry_vars: Vec<VarLocation>,
-    /// Live variables at the beginning of the loop.
-    loop_start_vars: Vec<Operand>,
-    /// The ordered sequence of operands at the end of the loop: there will be one per [Operand] at
-    /// the start of the loop.
-    loop_jump_operands: Vec<PackedOperand>,
+    /// Live variables at the beginning of the trace body.
+    trace_body_start: Vec<PackedOperand>,
+    /// The ordered sequence of operands at the end of the trace body: there will be one per
+    /// [Operand] at the start of the loop.
+    trace_body_end: Vec<PackedOperand>,
+    /// Live variables at the beginning the trace header.
+    trace_header_start: Vec<PackedOperand>,
+    /// Live variables at the end of the trace header.
+    trace_header_end: Vec<PackedOperand>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
@@ -256,9 +268,11 @@ impl Module {
             global_decls: IndexSet::new(),
             guard_info: Vec::new(),
             indirect_calls: Vec::new(),
-            loop_start_vars: Vec::new(),
-            loop_jump_operands: Vec::new(),
             root_entry_vars: Vec::new(),
+            trace_body_start: Vec::new(),
+            trace_body_end: Vec::new(),
+            trace_header_start: Vec::new(),
+            trace_header_end: Vec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
         })
@@ -576,12 +590,20 @@ impl Module {
         GuardInfoIdx::try_from(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
     }
 
-    pub(crate) fn loop_start_vars(&self) -> &[Operand] {
-        &self.loop_start_vars
+    pub(crate) fn trace_header_end(&self) -> &[PackedOperand] {
+        &self.trace_header_end
     }
 
-    pub(crate) fn push_loop_start_var(&mut self, op: Operand) {
-        self.loop_start_vars.push(op);
+    pub(crate) fn trace_header_start(&self) -> &[PackedOperand] {
+        &self.trace_header_start
+    }
+
+    pub(crate) fn trace_body_start(&self) -> &[PackedOperand] {
+        &self.trace_body_start
+    }
+
+    pub(crate) fn push_body_start_var(&mut self, op: Operand) {
+        self.trace_header_start.push(PackedOperand::new(&op));
     }
 
     /// Store the entry live variables of the root traces so we can copy this side-trace's live
@@ -591,8 +613,8 @@ impl Module {
     }
 
     /// Return the loop jump operands.
-    pub(crate) fn loop_jump_operands(&self) -> &[PackedOperand] {
-        &self.loop_jump_operands
+    pub(crate) fn trace_body_end(&self) -> &[PackedOperand] {
+        &self.trace_body_end
     }
 
     /// Get the entry live variables of the root trace.
@@ -600,8 +622,8 @@ impl Module {
         &self.root_entry_vars
     }
 
-    pub(crate) fn push_loop_jump_var(&mut self, op: Operand) {
-        self.loop_jump_operands.push(PackedOperand::new(&op));
+    pub(crate) fn push_header_end_var(&mut self, op: Operand) {
+        self.trace_header_end.push(PackedOperand::new(&op));
     }
 
     /// Get the address of the root trace. This is where we need jump to at the end of a
@@ -840,7 +862,7 @@ index_16bit!(ArgsIdx);
 /// A constant index.
 ///
 /// One of these is an index into the [Module::consts].
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub(crate) struct ConstIdx(u16);
 index_16bit!(ConstIdx);
 
@@ -1104,7 +1126,7 @@ impl PackedOperand {
 }
 
 /// An operand.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Operand {
     /// This operand references another SSA variable.
     Var(InstIdx),
@@ -1377,10 +1399,13 @@ pub(crate) enum Inst {
     Store(StoreInst),
     ICmp(ICmpInst),
     Guard(GuardInst),
+    /// Marks the point where side-traces reenter the root trace.
+    TraceHeaderStart,
+    TraceHeaderEnd,
     /// Marks the place to loop back to at the end of the JITted code.
-    TraceLoopStart,
-    TraceLoopJump,
-    RootJump,
+    TraceBodyStart,
+    TraceBodyEnd,
+    SidetraceEnd,
 
     SExt(SExtInst),
     ZExt(ZExtInst),
@@ -1438,9 +1463,11 @@ impl Inst {
             Self::Store(..) => m.void_tyidx(),
             Self::ICmp(_) => m.int1_tyidx(),
             Self::Guard(..) => m.void_tyidx(),
-            Self::TraceLoopStart => m.void_tyidx(),
-            Self::TraceLoopJump => m.void_tyidx(),
-            Self::RootJump => m.void_tyidx(),
+            Self::TraceHeaderStart => m.void_tyidx(),
+            Self::TraceHeaderEnd => m.void_tyidx(),
+            Self::TraceBodyStart => m.void_tyidx(),
+            Self::TraceBodyEnd => m.void_tyidx(),
+            Self::SidetraceEnd => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
             Self::ZExt(si) => si.dest_tyidx(),
             Self::BitCast(i) => i.dest_tyidx(),
@@ -1484,7 +1511,11 @@ impl Inst {
             Inst::Copy(x) => m.inst_raw(*x).is_barrier(m),
             Inst::Guard(_) => true,
             Inst::Call(_) | Inst::IndirectCall(_) => true,
-            Inst::TraceLoopStart | Inst::TraceLoopJump | Inst::RootJump => true,
+            Inst::TraceHeaderStart
+            | Inst::TraceHeaderEnd
+            | Inst::TraceBodyStart
+            | Inst::TraceBodyEnd
+            | Inst::SidetraceEnd => true,
             _ => false,
         }
     }
@@ -1548,18 +1579,28 @@ impl Inst {
                     pop.unpack(m).map_iidx(f);
                 }
             }
-            Inst::TraceLoopStart => {
-                for x in &m.loop_start_vars {
-                    x.map_iidx(f);
-                }
-            }
-            Inst::TraceLoopJump => {
-                for x in &m.loop_jump_operands {
+            Inst::TraceHeaderStart => {
+                for x in &m.trace_header_start {
                     x.unpack(m).map_iidx(f);
                 }
             }
-            Inst::RootJump => {
-                for x in &m.loop_jump_operands {
+            Inst::TraceHeaderEnd => {
+                for x in &m.trace_header_end {
+                    x.unpack(m).map_iidx(f);
+                }
+            }
+            Inst::TraceBodyStart => {
+                for x in &m.trace_body_start {
+                    x.unpack(m).map_iidx(f);
+                }
+            }
+            Inst::TraceBodyEnd => {
+                for x in &m.trace_body_end {
+                    x.unpack(m).map_iidx(f);
+                }
+            }
+            Inst::SidetraceEnd => {
+                for x in &m.trace_header_end {
                     x.unpack(m).map_iidx(f);
                 }
             }
@@ -1585,6 +1626,193 @@ impl Inst {
             Inst::FPToSI(FPToSIInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::FNeg(FNegInst { val }) => val.unpack(m).map_iidx(f),
         }
+    }
+
+    /// Duplicate this [Inst] while applying function `f` to each operand.
+    pub(crate) fn dup_and_remap_locals<F>(
+        &self,
+        m: &mut Module,
+        f: &F,
+    ) -> Result<Self, CompilationError>
+    where
+        F: Fn(InstIdx) -> Operand,
+    {
+        let mapper = |m: &Module, x: &PackedOperand| match x.unpack(m) {
+            Operand::Var(iidx) => PackedOperand::new(&f(iidx)),
+            Operand::Const(_) => *x,
+        };
+        let op_mapper = |x: &Operand| match x {
+            Operand::Var(iidx) => f(*iidx),
+            Operand::Const(c) => Operand::Const(*c),
+        };
+        let inst = match self {
+            #[cfg(test)]
+            Inst::BlackBox(BlackBoxInst { op }) => {
+                Inst::BlackBox(BlackBoxInst { op: mapper(m, op) })
+            }
+            Inst::BinOp(BinOpInst { lhs, binop, rhs }) => Inst::BinOp(BinOpInst {
+                lhs: mapper(m, lhs),
+                binop: *binop,
+                rhs: mapper(m, rhs),
+            }),
+            Inst::Call(dc) => {
+                // Clone and map arguments.
+                let args = dc
+                    .iter_args_idx()
+                    .map(|x| op_mapper(&m.arg(x)))
+                    .collect::<Vec<_>>();
+                let dc = DirectCallInst::new(m, dc.target, args)?;
+                Inst::Call(dc)
+            }
+            Inst::IndirectCall(iidx) => {
+                let ic = m.indirect_call(*iidx);
+                // Clone and map arguments.
+                let args = ic
+                    .iter_args_idx()
+                    .map(|x| op_mapper(&m.arg(x)))
+                    .collect::<Vec<_>>();
+                let icnew = IndirectCallInst::new(m, ic.ftyidx, op_mapper(&ic.target(m)), args)?;
+                let idx = m.push_indirect_call(icnew)?;
+                Inst::IndirectCall(idx)
+            }
+            Inst::Const(c) => Inst::Const(*c),
+            Inst::Copy(iidx) => match f(*iidx) {
+                Operand::Var(iidx) => Inst::Copy(iidx),
+                Operand::Const(cidx) => Inst::Const(cidx),
+            },
+            Inst::DynPtrAdd(inst) => {
+                let ptr = inst.ptr;
+                let num_elems = inst.num_elems;
+                Inst::DynPtrAdd(DynPtrAddInst {
+                    ptr: mapper(m, &ptr),
+                    num_elems: mapper(m, &num_elems),
+                    elem_size: inst.elem_size,
+                })
+            }
+            Inst::FPToSI(FPToSIInst { val, dest_tyidx }) => Inst::FPToSI(FPToSIInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::FPExt(FPExtInst { val, dest_tyidx }) => Inst::FPExt(FPExtInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::FCmp(FCmpInst { lhs, pred, rhs }) => Inst::FCmp(FCmpInst {
+                lhs: mapper(m, lhs),
+                pred: *pred,
+                rhs: mapper(m, rhs),
+            }),
+            Inst::Guard(GuardInst { cond, expect, gidx }) => {
+                let ginfo = &m.guard_info[usize::from(*gidx)];
+                let newlives = ginfo
+                    .live_vars()
+                    .iter()
+                    .map(|(aot, jit)| (aot.clone(), mapper(m, jit)))
+                    .collect();
+                let inlined_frames = ginfo
+                    .inlined_frames()
+                    .iter()
+                    .map(|x| {
+                        InlinedFrame::new(
+                            x.callinst.clone(),
+                            x.funcidx,
+                            x.safepoint,
+                            x.args
+                                .iter()
+                                .map(|x| op_mapper(&x.unpack(m)))
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let newginfo = GuardInfo::new(
+                    ginfo.bid().clone(),
+                    newlives,
+                    inlined_frames,
+                    ginfo.safepoint_id,
+                );
+                let newgidx = m.push_guardinfo(newginfo).unwrap();
+                Inst::Guard(GuardInst {
+                    cond: mapper(m, cond),
+                    expect: *expect,
+                    gidx: newgidx,
+                })
+            }
+            Inst::ICmp(ICmpInst { lhs, pred, rhs }) => Inst::ICmp(ICmpInst {
+                lhs: mapper(m, lhs),
+                pred: *pred,
+                rhs: mapper(m, rhs),
+            }),
+            Inst::Load(LoadInst {
+                op,
+                tyidx,
+                volatile,
+            }) => Inst::Load(LoadInst {
+                op: mapper(m, op),
+                tyidx: *tyidx,
+                volatile: *volatile,
+            }),
+            Inst::Param(x) => Inst::Param(*x),
+            Inst::LookupGlobal(g) => Inst::LookupGlobal(*g),
+            Inst::PtrAdd(inst) => {
+                let ptr = inst.ptr;
+                Inst::PtrAdd(PtrAddInst {
+                    ptr: mapper(m, &ptr),
+                    off: inst.off,
+                })
+            }
+            Inst::SidetraceEnd => {
+                // This instruction only exists in side-traces, which don't have loops we can peel
+                // off.
+                unreachable!()
+            }
+            Inst::Select(SelectInst {
+                cond,
+                trueval,
+                falseval,
+            }) => Inst::Select(SelectInst {
+                cond: mapper(m, cond),
+                trueval: mapper(m, trueval),
+                falseval: mapper(m, falseval),
+            }),
+            Inst::SExt(SExtInst { val, dest_tyidx }) => Inst::SExt(SExtInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::SIToFP(SIToFPInst { val, dest_tyidx }) => Inst::SIToFP(SIToFPInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::Store(StoreInst { tgt, val, volatile }) => Inst::Store(StoreInst {
+                tgt: mapper(m, tgt),
+                val: mapper(m, val),
+                volatile: *volatile,
+            }),
+            Inst::Tombstone => Inst::Tombstone,
+            Inst::TraceHeaderStart => {
+                // Copy the header label into the body while remapping the operands.
+                m.trace_body_start = m
+                    .trace_header_start
+                    .iter()
+                    .map(|op| mapper(m, op))
+                    .collect();
+                Inst::TraceBodyStart
+            }
+            Inst::TraceHeaderEnd => {
+                // Copy the header label into the body while remapping the operands.
+                m.trace_body_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::TraceBodyEnd
+            }
+            Inst::Trunc(TruncInst { val, dest_tyidx }) => Inst::Trunc(TruncInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::ZExt(ZExtInst { val, dest_tyidx }) => Inst::ZExt(ZExtInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            e => todo!("{:?}", e),
+        };
+        Ok(inst)
     }
 
     /// Returns the size of the local variable that this instruction defines (if any).
@@ -1766,37 +1994,59 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Param(x) => {
                 write!(f, "param {:?}", self.m.params[usize::from(x.paramidx())])
             }
-            Inst::TraceLoopStart => {
+            Inst::TraceHeaderStart => {
                 // Just marks a location, so we format it to look like a label.
-                write!(f, "tloop_start [")?;
-                for var in &self.m.loop_start_vars {
-                    write!(f, "{}", var.display(self.m))?;
-                    if var != self.m.loop_start_vars.last().unwrap() {
+                write!(f, "header_start [")?;
+                for var in &self.m.trace_header_start {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if var != self.m.trace_header_start.last().unwrap() {
                         write!(f, ", ")?;
                     }
                 }
-                write!(f, "]:")
+                write!(f, "]")
             }
-            Inst::TraceLoopJump => {
+            Inst::TraceHeaderEnd => {
                 // Just marks a location, so we format it to look like a label.
-                write!(f, "tloop_jump [")?;
-                for var in &self.m.loop_jump_operands {
+                write!(f, "header_end [")?;
+                for var in &self.m.trace_header_end {
                     write!(f, "{}", var.unpack(self.m).display(self.m))?;
-                    if var != self.m.loop_jump_operands.last().unwrap() {
+                    if var != self.m.trace_header_end.last().unwrap() {
                         write!(f, ", ")?;
                     }
                 }
-                write!(f, "]:")
+                write!(f, "]")
             }
-            Inst::RootJump => {
-                write!(f, "parent_jump {:?} [", self.m.root_jump_ptr)?;
-                for var in &self.m.loop_jump_operands {
+            Inst::TraceBodyStart => {
+                // Just marks a location, so we format it to look like a label.
+                write!(f, "body_start [")?;
+                for (i, var) in self.m.trace_body_start.iter().enumerate() {
                     write!(f, "{}", var.unpack(self.m).display(self.m))?;
-                    if var != self.m.loop_jump_operands.last().unwrap() {
+                    if i + 1 < self.m.trace_body_start.len() {
                         write!(f, ", ")?;
                     }
                 }
-                write!(f, "]:")
+                write!(f, "]")
+            }
+            Inst::TraceBodyEnd => {
+                // Just marks a location, so we format it to look like a label.
+                write!(f, "body_end [")?;
+                for (i, var) in self.m.trace_body_end.iter().enumerate() {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if i + 1 < self.m.trace_body_end.len() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")
+            }
+            Inst::SidetraceEnd => {
+                write!(f, "sidetrace_end {:?} [", self.m.root_jump_ptr)?;
+                for (i, var) in self.m.trace_header_end.iter().enumerate() {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if i + 1 < self.m.trace_header_end.len() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")
             }
             Inst::SExt(i) => {
                 write!(f, "sext {}", i.val(self.m).display(self.m),)

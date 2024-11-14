@@ -175,6 +175,26 @@ impl<'a> LSRegAlloc<'a> {
         }
     }
 
+    /// Reset the register allocator. We use this when moving from the trace header into the trace
+    /// body.
+    pub(crate) fn reset(&mut self) {
+        for rs in self.gp_reg_states.iter_mut() {
+            *rs = RegState::Empty;
+        }
+        for reg in RESERVED_GP_REGS {
+            self.gp_reg_states[usize::from(reg.code())] = RegState::Reserved;
+        }
+        self.gp_regset = RegSet::with_gp_reserved();
+
+        for rs in self.fp_reg_states.iter_mut() {
+            *rs = RegState::Empty;
+        }
+        for reg in RESERVED_FP_REGS {
+            self.fp_reg_states[usize::from(reg.code())] = RegState::Reserved;
+        }
+        self.fp_regset = RegSet::with_fp_reserved();
+    }
+
     /// Before generating code for the instruction at `iidx`, see which registers are no longer
     /// needed and mark them as [RegState::Empty]. Calling this allows the register allocator to
     /// use the set of available registers more efficiently.
@@ -379,7 +399,8 @@ impl LSRegAlloc<'_> {
                     | RegConstraint::OutputCanBeSameAsInput(_)
                     | RegConstraint::OutputFromReg(_)
                     | RegConstraint::InputOutput(_) => true,
-                    RegConstraint::Clobber(_) | RegConstraint::Temporary => false,
+                    RegConstraint::Clobber(_) | RegConstraint::Temporary | RegConstraint::None =>
+                        false,
                 })
                 .count()
                 <= 1
@@ -409,7 +430,8 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::Output
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::Input(_)
-                | RegConstraint::Temporary => {}
+                | RegConstraint::Temporary
+                | RegConstraint::None => {}
             }
         }
 
@@ -506,6 +528,9 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::OutputFromReg(_)
                 | RegConstraint::Temporary => (),
+                RegConstraint::None => {
+                    asgn[i] = Some(GP_REGS[0]);
+                }
             }
         }
 
@@ -595,7 +620,8 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::OutputFromReg(_)
                 | RegConstraint::Clobber(_)
-                | RegConstraint::Temporary => (),
+                | RegConstraint::Temporary
+                | RegConstraint::None => (),
             }
         }
 
@@ -641,6 +667,7 @@ impl LSRegAlloc<'_> {
                     self.gp_regset.unset(reg);
                     self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
                 }
+                RegConstraint::None => (),
             }
         }
         asgn.map(|x| x.unwrap())
@@ -891,14 +918,17 @@ impl LSRegAlloc<'_> {
             match inst {
                 Inst::Copy(_) => panic!(),
                 Inst::Const(cidx) => match self.m.const_(cidx) {
-                    Const::Float(_, _) => todo!(),
+                    Const::Float(_, v) => VarLocation::ConstFloat(*v),
                     Const::Int(tyidx, v) => {
                         let Ty::Integer(bits) = self.m.type_(*tyidx) else {
                             panic!()
                         };
                         VarLocation::ConstInt { bits: *bits, v: *v }
                     }
-                    Const::Ptr(_) => todo!(),
+                    Const::Ptr(p) => VarLocation::ConstInt {
+                        bits: 64,
+                        v: u64::try_from(*p).unwrap(),
+                    },
                 },
                 _ => match self.spills[usize::from(iidx)] {
                     SpillState::Empty => panic!(),
@@ -946,7 +976,8 @@ impl LSRegAlloc<'_> {
                     | RegConstraint::OutputCanBeSameAsInput(_)
                     | RegConstraint::OutputFromReg(_)
                     | RegConstraint::InputOutput(_) => true,
-                    RegConstraint::Clobber(_) | RegConstraint::Temporary => false,
+                    RegConstraint::Clobber(_) | RegConstraint::Temporary | RegConstraint::None =>
+                        false,
                 })
                 .count()
                 <= 1
@@ -977,6 +1008,9 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::Output
                 | RegConstraint::Temporary => {}
+                RegConstraint::None => {
+                    asgn[i] = Some(FP_REGS[0]);
+                }
             }
         }
 
@@ -1023,6 +1057,7 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::OutputFromReg(_)
                 | RegConstraint::Temporary => (),
                 RegConstraint::OutputCanBeSameAsInput(_) => todo!(),
+                RegConstraint::None => (),
             }
         }
 
@@ -1113,6 +1148,7 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::Clobber(_)
                 | RegConstraint::Temporary => (),
                 RegConstraint::OutputCanBeSameAsInput(_) => todo!(),
+                RegConstraint::None => (),
             }
         }
 
@@ -1157,6 +1193,7 @@ impl LSRegAlloc<'_> {
                     self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
                 }
                 RegConstraint::OutputCanBeSameAsInput(_) => todo!(),
+                RegConstraint::None => (),
             }
         }
         asgn.map(|x| x.unwrap())
@@ -1400,6 +1437,9 @@ pub(crate) enum RegConstraint<R: Register> {
     Clobber(R),
     /// A temporary register *x* that the instruction will clobber.
     Temporary,
+    /// A no-op register constraint. A random register will be assigned to this: using this
+    /// register for any purposes leads to undefined behaviour.
+    None,
 }
 
 #[cfg(debug_assertions)]
@@ -1416,7 +1456,8 @@ impl<R: dynasmrt::Register> RegConstraint<R> {
             | Self::OutputCanBeSameAsInput(_)
             | Self::OutputFromReg(_)
             | Self::Clobber(_)
-            | Self::Temporary => None,
+            | Self::Temporary
+            | Self::None => None,
         }
     }
 }

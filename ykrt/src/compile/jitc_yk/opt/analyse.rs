@@ -18,7 +18,11 @@ pub(super) struct Analyse {
 impl Analyse {
     pub(super) fn new(m: &Module) -> Analyse {
         Analyse {
-            values: vec![Value::Unknown; m.insts_len()],
+            // When we want to do loop peeling, we don't know actual size of the module at this
+            // point. What we do know is that it is at most two times the size (though since we
+            // don't copy over [Tombstone]s and [Copy]s it will be slightly less than that.
+            // FIXME: Can we calculate this more accurately?
+            values: vec![Value::Unknown; m.insts_len() * 2],
         }
     }
 

@@ -54,8 +54,11 @@ impl<'a> RevAnalyse<'a> {
                             continue;
                         }
                     }
-                    Inst::TraceLoopJump => {
-                        self.an_tloop_jump();
+                    Inst::TraceBodyEnd => {
+                        self.an_body_end();
+                    }
+                    Inst::SidetraceEnd => {
+                        self.an_sidetrace_end();
                     }
                     Inst::SExt(x) => self.an_sext(iidx, x),
                     Inst::ZExt(x) => self.an_zext(iidx, x),
@@ -176,7 +179,7 @@ impl<'a> RevAnalyse<'a> {
         false
     }
 
-    fn an_tloop_jump(&mut self) {
+    fn an_body_end(&mut self) {
         let mut param_vlocs = Vec::new();
         for (iidx, inst) in self.m.iter_skipping_insts() {
             match inst {
@@ -191,11 +194,24 @@ impl<'a> RevAnalyse<'a> {
             }
         }
 
-        debug_assert_eq!(param_vlocs.len(), self.m.loop_jump_operands().len());
+        debug_assert_eq!(param_vlocs.len(), self.m.trace_body_end().len());
 
-        for (param_vloc, jump_op) in param_vlocs.into_iter().zip(self.m.loop_jump_operands()) {
+        for (param_vloc, jump_op) in param_vlocs.into_iter().zip(self.m.trace_body_end()) {
             if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
                 self.vloc_hints[usize::from(op_iidx)] = Some(param_vloc);
+            }
+        }
+    }
+
+    fn an_sidetrace_end(&mut self) {
+        let vlocs = self.m.root_entry_vars();
+        // Side-traces don't have a trace body since we don't apply loop peeling and thus use
+        // `trace_header_end` to store the jump variables.
+        debug_assert_eq!(vlocs.len(), self.m.trace_header_end().len());
+
+        for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
+            if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
+                self.vloc_hints[usize::from(op_iidx)] = Some(*vloc);
             }
         }
     }
@@ -272,9 +288,9 @@ mod test {
             "
             entry:
               %0: i8 = param 0
-              tloop_start [%0]
+              body_start [%0]
               %2: i8 = %0
-              tloop_jump [%2]
+              body_end [%2]
             ",
         );
         let alives = rev_analyse(&m).unwrap().0;
@@ -290,11 +306,11 @@ mod test {
             "
             entry:
               %0: i8 = param 0
-              tloop_start [%0]
+              body_start [%0]
               %2: i8 = add %0, %0
               %3: i8 = add %0, %0
               %4: i8 = %2
-              tloop_jump [%4]
+              body_end [%4]
             ",
         );
         let alives = rev_analyse(&m).unwrap().0;
