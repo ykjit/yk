@@ -1285,7 +1285,6 @@ impl TraceBuilder {
                             // data and haven't messed up the mapping.
                             #[cfg(tracer_hwt)]
                             {
-                                last_blk_is_return = self.aot_mod.bblock(&bid).is_return();
                                 // Due to hardware tracing we see the same block twice whenever
                                 // there is a call. We only need to process one of them. We can
                                 // skip the block if:
@@ -1293,9 +1292,11 @@ impl TraceBuilder {
                                 //  b) The previous block is unmappable and the current block isn't
                                 //  an entry block.
                                 if last_blk_is_return {
+                                    last_blk_is_return = self.aot_mod.bblock(&bid).is_return();
                                     prev_bid = Some(bid);
                                     continue;
                                 }
+                                last_blk_is_return = self.aot_mod.bblock(&bid).is_return();
                                 if prev_bid.is_none() && !bid.is_entry() {
                                     prev_bid = Some(bid);
                                     continue;
@@ -1350,10 +1351,6 @@ impl TraceBuilder {
                 }
                 None => {
                     // Unmappable block
-                    #[cfg(tracer_hwt)]
-                    {
-                        last_blk_is_return = false;
-                    }
                     prev_bid = None;
                 }
             }
