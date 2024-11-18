@@ -326,6 +326,21 @@ impl Opt {
                     Operand::Var(op_iidx) => {
                         if x.off() == 0 {
                             self.m.replace(iidx, Inst::Copy(op_iidx));
+                        } else {
+                            // Skip intermediate `PtrAdds`. For example given:
+                            //   %7: ptr = ptr_add %0, 2
+                            //   %8: ptr = ptr_add %7, 3
+                            // we can replace the latter with:
+                            //   %8: ptr = ptr_add %0, 5
+                            if let Some(Inst::PtrAdd(back_inst)) = self.m.inst_nocopy(op_iidx) {
+                                self.m.replace(
+                                    iidx,
+                                    Inst::PtrAdd(PtrAddInst::new(
+                                        back_inst.ptr(&self.m),
+                                        back_inst.off().checked_add(x.off()).unwrap(),
+                                    )),
+                                );
+                            }
                         }
                     }
                 },
@@ -1019,6 +1034,30 @@ mod test {
             %1: i8 = load_ti ...
             %2: i1 = eq %0, %1
             guard true, %2, ...
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ptr_adds() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = load_ti 0
+            %1: ptr = ptr_add %0, 2
+            %2: ptr = ptr_add %1, 3
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = load_ti ...
+            %1: ptr = ptr_add %0, 2
+            %2: ptr = ptr_add %0, 5
+            black_box %1
+            black_box %2
         ",
         );
     }
