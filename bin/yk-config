@@ -46,6 +46,10 @@ handle_arg() {
             OUTPUT="${OUTPUT} -fyk-noinline-funcs-with-loops"
             # Don't optimise functions by changing their calling convention.
             OUTPUT="${OUTPUT} -mllvm -yk-dont-opt-func-abi"
+            # Ensure any jump threading pass that may run at pre-link time
+            # doesn't interfere with control points that will be added at
+            # link-time (the functionalities are guarded by the same flag).
+            OUTPUT="${OUTPUT} -mllvm -yk-patch-control-point"
             ;;
         --cppflags)
             # Path to yk.h

@@ -274,10 +274,13 @@ impl Opt {
                         let Const::Int(_, v) = self.m.const_(cidx) else {
                             panic!()
                         };
+                        // DynPtrAdd indices are signed, so we have to be careful to interpret the
+                        // constant as such.
+                        let v = *v as i64;
                         // LLVM IR allows `off` to be an `i64` but our IR currently allows only an
                         // `i32`. On that basis, we can hit our limits before the program has
                         // itself hit UB, at which point we can't go any further.
-                        let off = i32::try_from(*v)
+                        let off = i32::try_from(v)
                             .map_err(|_| ())
                             .and_then(|v| v.checked_mul(i32::from(x.elem_size())).ok_or(()))
                             .map_err(|_| {
@@ -996,6 +999,34 @@ mod test {
           entry:
             %0: ptr = load_ti ...
             black_box %0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dynptradd_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = load_ti 0
+            %1: ptr = dyn_ptr_add %0, 2i64, 8
+            black_box %1
+            %3: ptr = dyn_ptr_add %0, -1i64, 8
+            black_box %3
+            %5: ptr = dyn_ptr_add %0, -8i64, 16
+            black_box %5
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = load_ti...
+            %1: ptr = ptr_add %0, 16
+            black_box %1
+            %3: ptr = ptr_add %0, -8
+            black_box %3
+            %5: ptr = ptr_add %0, -128
+            black_box %5
         ",
         );
     }
