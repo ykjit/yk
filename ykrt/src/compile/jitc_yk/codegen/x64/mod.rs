@@ -755,9 +755,11 @@ impl<'a> Assemble<'a> {
                 }
             }
             BinOp::AShr | BinOp::LShr | BinOp::Shl => {
-                // We inherit from LLVM the following semantics: a poison value is computed if you
-                // shift by >= the bit width of the first operand. We can ignore this, since we are
-                // free to compute any value in place of a poison value.
+                // LLVM defines that a poison value is computed if one shifts by >= the bit width
+                // of the first operand. This allows us to ignore a lot of seemingly necessary
+                // checks in the below. For example we get away with using the 8-bit register `cl`
+                // because we don't support any types bigger than 64 bits. If at runtime someone
+                // tries to shift a value bigger than `cl` can express, then that's their problem!
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
