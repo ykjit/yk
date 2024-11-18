@@ -754,10 +754,12 @@ impl<'a> Assemble<'a> {
                     }
                 }
             }
-            BinOp::AShr | BinOp::LShr => {
-                // We inherit from LLVM the following semantics: a poison value is computed if you
-                // shift by >= the bit width of the first operand. We can ignore this, since we are
-                // free to compute any value in place of a poison value.
+            BinOp::AShr | BinOp::LShr | BinOp::Shl => {
+                // LLVM defines that a poison value is computed if one shifts by >= the bit width
+                // of the first operand. This allows us to ignore a lot of seemingly necessary
+                // checks in the below. For example we get away with using the 8-bit register `cl`
+                // because we don't support any types bigger than 64 bits. If at runtime someone
+                // tries to shift a value bigger than `cl` can express, then that's their problem!
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
@@ -791,6 +793,14 @@ impl<'a> Assemble<'a> {
                                     u8::try_from(*bit_size).unwrap(),
                                 );
                                 dynasm!(self.asm; shr Rq(lhs_reg.code()), v);
+                            }
+                            _ => todo!(),
+                        },
+                        BinOp::Shl => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; shl Rd(lhs_reg.code()), v),
+                            1..=64 => {
+                                dynasm!(self.asm; shl Rq(lhs_reg.code()), v);
                             }
                             _ => todo!(),
                         },
@@ -834,32 +844,16 @@ impl<'a> Assemble<'a> {
                             }
                             _ => todo!(),
                         },
+                        BinOp::Shl => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; shl Rd(lhs_reg.code()), cl),
+                            1..=64 => {
+                                dynasm!(self.asm; shl Rq(lhs_reg.code()), cl);
+                            }
+                            _ => todo!(),
+                        },
                         _ => unreachable!(),
                     }
-                }
-            }
-            BinOp::Shl => {
-                // We inherit from LLVM the following semantics: a poison value is computed if you
-                // shift by >= the bit width of the first operand. We can ignore this, since we are
-                // free to compute any value in place of a poison value.
-                let byte_size = lhs.byte_size(self.m);
-                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [
-                        RegConstraint::InputOutput(lhs),
-                        // When using a register second operand, it has to be passed in CL.
-                        RegConstraint::InputIntoReg(rhs, Rq::RCX),
-                    ],
-                );
-                debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; shl Rq(lhs_reg.code()), cl);
-                    }
-                    _ => todo!(),
                 }
             }
             BinOp::Mul => {
@@ -3239,19 +3233,22 @@ mod tests {
                 %3: i16 = shl %0, 1i16
                 %4: i32 = shl %1, 2i32
                 %5: i63 = shl %2, 3i63
+                %6: i32 = shl %1, %4
             ",
             "
                 ...
                 ; %3: i16 = shl %0, 1i16
                 ...
-                {{_}} {{_}}: shl r.64.a, r.8.b
+                {{_}} {{_}}: shl r.64.a, 0x01
                 ; %4: i32 = shl %1, 2i32
                 ...
-                {{_}} {{_}}: shl r.64.c, r.8.b
+                {{_}} {{_}}: shl r.32.a, 0x02
                 ; %5: i63 = shl %2, 3i63
                 ...
-                {{_}} {{_}}: shl r.64.e, r.8.b
-                ...
+                {{_}} {{_}}: shl r.64.b, 0x03
+                ; %6: i32 = shl %1, %4
+                ......
+                {{_}} {{_}}: shl r.32.b, cl
                 ",
         );
     }
