@@ -825,15 +825,13 @@ impl LSRegAlloc<'_> {
             match cnstr {
                 RegConstraint::InputIntoReg(_, reg)
                 | RegConstraint::InputIntoRegAndClobber(_, reg)
+                | RegConstraint::InputOutputIntoReg(_, reg)
                 | RegConstraint::OutputFromReg(reg)
                 | RegConstraint::Clobber(reg) => avoid.set(*reg),
                 RegConstraint::Input(_)
                 | RegConstraint::InputOutput(_)
                 | RegConstraint::Output
                 | RegConstraint::Temporary => {}
-                RegConstraint::InputOutputIntoReg(_, _) => {
-                    panic!();
-                }
             }
         }
 
@@ -870,11 +868,11 @@ impl LSRegAlloc<'_> {
                 },
                 RegConstraint::InputIntoReg(_, _)
                 | RegConstraint::InputIntoRegAndClobber(_, _)
+                | RegConstraint::InputOutputIntoReg(_, _)
                 | RegConstraint::Clobber(_) => {
                     // OPT: do the same trick as Input/InputOutput
                 }
                 RegConstraint::Output | RegConstraint::OutputFromReg(_) => (),
-                RegConstraint::InputOutputIntoReg(_op, _reg) => unreachable!(),
                 RegConstraint::Temporary => (),
             }
         }
@@ -888,19 +886,18 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Input(op)
                 | RegConstraint::InputIntoReg(op, _)
                 | RegConstraint::InputIntoRegAndClobber(op, _)
+                | RegConstraint::InputOutputIntoReg(op, _)
                 | RegConstraint::InputOutput(op) => {
                     let reg = match x {
                         RegConstraint::Input(_) | RegConstraint::InputOutput(_) => {
                             self.assign_empty_fp_reg(asm, iidx, avoid)
                         }
                         RegConstraint::InputIntoReg(_, reg)
-                        | RegConstraint::InputIntoRegAndClobber(_, reg) => {
+                        | RegConstraint::InputIntoRegAndClobber(_, reg)
+                        | RegConstraint::InputOutputIntoReg(_, reg) => {
                             // OPT: Not everything needs spilling
                             self.spill_fp_if_not_already(asm, *reg);
                             *reg
-                        }
-                        RegConstraint::InputOutputIntoReg(_, _) => {
-                            unreachable!()
                         }
                         RegConstraint::Output
                         | RegConstraint::OutputFromReg(_)
@@ -934,14 +931,12 @@ impl LSRegAlloc<'_> {
                             self.fp_regset.unset(reg);
                             RegState::Empty
                         }
-                        RegConstraint::InputOutput(_) => {
+                        RegConstraint::InputOutput(_) | RegConstraint::InputOutputIntoReg(_, _) => {
                             debug_assert!(!found_output);
                             found_output = true;
                             RegState::FromInst(iidx)
                         }
-                        RegConstraint::InputOutputIntoReg(_, _)
-                        | RegConstraint::Output
-                        | RegConstraint::OutputFromReg(_) => {
+                        RegConstraint::Output | RegConstraint::OutputFromReg(_) => {
                             unreachable!()
                         }
                         RegConstraint::Temporary => todo!(),
@@ -971,7 +966,6 @@ impl LSRegAlloc<'_> {
                     avoid.set(*reg);
                     out[i] = Some(*reg);
                 }
-                RegConstraint::InputOutputIntoReg(_, _) => unreachable!(),
                 RegConstraint::Temporary => {
                     let reg = self.assign_empty_fp_reg(asm, iidx, avoid);
                     self.fp_regset.unset(reg);
