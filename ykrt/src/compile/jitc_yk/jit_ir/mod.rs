@@ -1339,7 +1339,6 @@ pub(crate) struct GuardInfo {
     /// Live variables, mapping AOT vars to JIT [Operand]s.
     live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
     // Inlined frames info.
-    // FIXME With this field, the aotlives field is redundant.
     inlined_frames: Vec<InlinedFrame>,
 }
 
