@@ -2446,8 +2446,8 @@ impl CompiledTrace for X64CompiledTrace {
         self
     }
 
-    fn disassemble(&self) -> Result<String, Box<dyn Error>> {
-        AsmPrinter::new(&self.buf, &self.comments).to_string()
+    fn disassemble(&self, with_addrs: bool) -> Result<String, Box<dyn Error>> {
+        AsmPrinter::new(&self.buf, &self.comments, with_addrs).to_string()
     }
 }
 
@@ -2455,11 +2455,21 @@ impl CompiledTrace for X64CompiledTrace {
 struct AsmPrinter<'a> {
     buf: &'a ExecutableBuffer,
     comments: &'a IndexMap<usize, Vec<String>>,
+    /// When true, instruction offset and address are included in the output.
+    with_addrs: bool,
 }
 
 impl<'a> AsmPrinter<'a> {
-    fn new(buf: &'a ExecutableBuffer, comments: &'a IndexMap<usize, Vec<String>>) -> Self {
-        Self { buf, comments }
+    fn new(
+        buf: &'a ExecutableBuffer,
+        comments: &'a IndexMap<usize, Vec<String>>,
+        with_addrs: bool,
+    ) -> Self {
+        Self {
+            buf,
+            comments,
+            with_addrs,
+        }
     }
 
     /// Returns the disassembled trace.
@@ -2478,12 +2488,16 @@ impl<'a> AsmPrinter<'a> {
                 }
             }
             let istr = fmt.format(Some(off), &insn).unwrap();
-            out.push(format!(
-                "{:016x} {:08x}: {}",
-                (bptr as u64) + off,
-                off,
-                istr
-            ));
+            if self.with_addrs {
+                out.push(format!(
+                    "{:016x} {:08x}: {}",
+                    (bptr as u64) + off,
+                    off,
+                    istr
+                ));
+            } else {
+                out.push(istr.to_string());
+            }
         }
         Ok(out.join("\n"))
     }
@@ -2677,8 +2691,8 @@ mod tests {
     }
 
     /// Test helper to use `fm` to match a disassembled trace.
-    fn match_asm(cgo: Arc<X64CompiledTrace>, ptn: &str) {
-        let dis = cgo.disassemble().unwrap();
+    fn match_asm(cgo: Arc<X64CompiledTrace>, ptn: &str, full_asm: bool) {
+        let dis = cgo.disassemble(full_asm).unwrap();
 
         // The disassembler alternates between upper- and lowercase hex, making matching addresses
         // difficult. So just lowercase both pattern and text to avoid tests randomly breaking when
@@ -2690,7 +2704,7 @@ mod tests {
         }
     }
 
-    fn codegen_and_test(mod_str: &str, patt_lines: &str) {
+    fn codegen_and_test(mod_str: &str, patt_lines: &str, full_asm: bool) {
         let m = Module::from_str(mod_str);
         let mt = MT::new().unwrap();
         let hl = HotLocation {
@@ -2706,6 +2720,7 @@ mod tests {
                 .downcast::<X64CompiledTrace>()
                 .unwrap(),
             patt_lines,
+            full_asm,
         );
     }
 
@@ -2720,9 +2735,10 @@ mod tests {
             "
                 ...
                 ; %1: ptr = load %0
-                {{_}} {{_}}: mov r.64.x, [rbx]
+                mov r.64.x, [rbx]
                 ...
                 ",
+            false,
         );
     }
 
@@ -2737,9 +2753,10 @@ mod tests {
             "
                 ...
                 ; %1: i8 = load %0
-                {{_}} {{_}}: movzx r.64.x, byte ptr [rbx]
+                movzx r.64.x, byte ptr [rbx]
                 ...
                 ",
+            false,
         );
     }
 
@@ -2754,9 +2771,10 @@ mod tests {
             "
                 ...
                 ; %1: i32 = Load %0
-                {{_}} {{_}}: mov r.32.x, [r.64.x]
+                mov r.32.x, [r.64.x]
                 ...
                 ",
+            false,
         );
     }
 
@@ -2771,10 +2789,11 @@ mod tests {
             "
                 ...
                 ; *%0 = 0x0
-                {{_}} {{_}}: mov r.64.x, 0x00
-                {{_}} {{_}}: mov [r.64.y], r.64.x
+                mov r.64.x, 0x00
+                mov [r.64.y], r.64.x
                 ...
                 ",
+            false,
         );
     }
 
@@ -2789,9 +2808,10 @@ mod tests {
             "
                 ...
                 ; %1: ptr = ptr_add %0, 64
-                {{_}} {{_}}: add r.64.x, 0x40
+                add r.64.x, 0x40
                 ...
                 ",
+            false,
         );
     }
 
@@ -2812,13 +2832,14 @@ mod tests {
                 ...
                 ; %2: ptr = ptr_add %0, 64
                 ; %3: i64 = load %2
-                {{_}} {{_}}: mov r.64.x, [rbx+{{_}}]
+                mov r.64.x, [rbx+{{_}}]
                 ; %4: ptr = ptr_add %1, 32
-                {{_}} {{_}}: add r.64.y, 0x20
+                add r.64.y, 0x20
                 ; %5: i64 = load %4
-                {{_}} {{_}}: mov r.64._, [r.64.y]
+                mov r.64._, [r.64.y]
                 ...
                 ",
+            false,
         );
     }
 
@@ -2838,14 +2859,15 @@ mod tests {
             "
                 ...
                 ; *%2 = 1i8
-                {{_}} {{_}}: mov byte ptr [rbx+{{_}}], 0x01
+                mov byte ptr [rbx+{{_}}], 0x01
                 ; %4: ptr = ptr_add %1, 32
-                {{_}} {{_}}: add r.64.x, 0x20
+                add r.64.x, 0x20
                 ; %5: i64 = load %4
-                {{_}} {{_}}: mov r.64.y, [r.64.x]
+                mov r.64.y, [r.64.x]
                 ; *%4 = 2i8
-                {{_}} {{_}}: mov byte ptr [r.64.x], 0x02
+                mov byte ptr [r.64.x], 0x02
                 ",
+            false,
         );
     }
 
@@ -2861,9 +2883,10 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 1
-                {{_}} {{_}}: lea r.64.x, [r.64._+r.64.x*1]
+                lea r.64.x, [r.64._+r.64.x*1]
                 ...
                 ",
+            false,
         );
 
         codegen_and_test(
@@ -2876,9 +2899,10 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 2
-                {{_}} {{_}}: lea r.64.x, [r.64._+r.64.x*2]
+                lea r.64.x, [r.64._+r.64.x*2]
                 ...
                 ",
+            false,
         );
 
         codegen_and_test(
@@ -2891,9 +2915,10 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 4
-                {{_}} {{_}}: lea r.64.x, [r.64._+r.64.x*4]
+                lea r.64.x, [r.64._+r.64.x*4]
                 ...
                 ",
+            false,
         );
 
         codegen_and_test(
@@ -2906,10 +2931,11 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 5
-                {{_}} {{_}}: imul r.64.x, r.64.x, 0x05
-                {{_}} {{_}}: add r.64.x, r.64._
+                imul r.64.x, r.64.x, 0x05
+                add r.64.x, r.64._
                 ...
                 ",
+            false,
         );
 
         codegen_and_test(
@@ -2922,10 +2948,11 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 16
-                {{_}} {{_}}: shl r.64.x, 0x04
-                {{_}} {{_}}: add r.64.x, r.64._
+                shl r.64.x, 0x04
+                add r.64.x, r.64._
                 ...
                 ",
+            false,
         );
 
         codegen_and_test(
@@ -2938,10 +2965,11 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 77
-                {{_}} {{_}}: imul r.64.x, r.64.x, 0x4d
-                {{_}} {{_}}: add r.64.x, r.64._
+                imul r.64.x, r.64.x, 0x4d
+                add r.64.x, r.64._
                 ...
                 ",
+            false,
         );
     }
 
@@ -2959,9 +2987,10 @@ mod tests {
                 ; %0: ptr = load_ti ...
                 ; %1: ptr = load_ti ...
                 ; *%1 = %0
-                {{_}} {{_}}: mov [r.64.x], r.64.y
+                mov [r.64.x], r.64.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -2980,15 +3009,16 @@ mod tests {
                 ...
                 ; %0: ptr = load_ti ...
                 ; *%0 = 1i8
-                {{_}} {{_}}: mov byte ptr [r.64.x], 0x01
+                mov byte ptr [r.64.x], 0x01
                 ; *%0 = 2i16
-                {{_}} {{_}}: mov word ptr [r.64.x], 0x02
+                mov word ptr [r.64.x], 0x02
                 ; *%0 = 3i32
-                {{_}} {{_}}: mov dword ptr [r.64.x], 0x03
+                mov dword ptr [r.64.x], 0x03
                 ; *%0 = 4i64
-                {{_}} {{_}}: mov qword ptr [r.64.x], 0x04
+                mov qword ptr [r.64.x], 0x04
                 ...
                 ",
+            false,
         );
     }
 
@@ -3004,9 +3034,10 @@ mod tests {
             "
                 ...
                 ; %2: i16 = add %0, %1
-                {{_}} {{_}}: add r.64.x, r.64.y
+                add r.64.x, r.64.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -3022,9 +3053,10 @@ mod tests {
             "
                 ...
                 ; %2: i64 = add %0, %1
-                {{_}} {{_}}: add r.64.x, r.64.y
+                add r.64.x, r.64.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -3039,9 +3071,10 @@ mod tests {
             "
                 ...
                 ; %1: i64 = add %0, 1i64
-                {{_}} {{_}}: add r.64.x, 0x01
+                add r.64.x, 0x01
                 ...
                 ",
+            false,
         );
     }
 
@@ -3056,9 +3089,10 @@ mod tests {
             "
                 ...
                 ; %1: i64 = add %0, 18446744073709551615i64
-                {{_}} {{_}}: add r.64.x, 0xffffffffffffffff
+                add r.64.x, 0xffffffffffffffff
                 ...
                 ",
+            false,
         );
         // note: disassembler sign-extended the immediate when displaying it.
     }
@@ -3074,9 +3108,10 @@ mod tests {
             "
                 ...
                 ; %1: i64 = add %0, 2147483647i64
-                {{_}} {{_}}: add r.64.x, 0x7fffffff
+                add r.64.x, 0x7fffffff
                 ...
                 ",
+            false,
         );
     }
 
@@ -3091,10 +3126,11 @@ mod tests {
             "
                 ...
                 ; %1: i64 = add %0, 2147483648i64
-                {{_}} {{_}}: mov r.64.x, 0x80000000
-                {{_}} {{_}}: add r.64.y, r.64.x
+                mov r.64.x, 0x80000000
+                add r.64.y, r.64.x
                 ...
                 ",
+            false,
         );
     }
 
@@ -3109,9 +3145,10 @@ mod tests {
             "
                 ...
                 ; %1: i32 = add %0, 1i32
-                {{_}} {{_}}: add r.32.x, 0x01
+                add r.32.x, 0x01
                 ...
                 ",
+            false,
         );
     }
 
@@ -3126,9 +3163,10 @@ mod tests {
             "
                 ...
                 ; %1: i32 = add %0, 4294967295i32
-                {{_}} {{_}}: add r.32.x, 0xffffffff
+                add r.32.x, 0xffffffff
                 ...
                 ",
+            false,
         );
     }
 
@@ -3150,13 +3188,14 @@ mod tests {
             "
                 ...
                 ; %6: i16 = and %0, %1
-                {{_}} {{_}}: and r.64.a, r.64.b
+                and r.64.a, r.64.b
                 ; %7: i32 = and %2, %3
-                {{_}} {{_}}: and r.64.c, r.64.d
+                and r.64.c, r.64.d
                 ; %8: i63 = and %4, %5
-                {{_}} {{_}}: and r.64.e, r.64.f
+                and r.64.e, r.64.f
                 ...
                 ",
+            false,
         );
     }
 
@@ -3176,18 +3215,19 @@ mod tests {
                 ...
                 ; %3: i16 = ashr %0, 1i16
                 ...
-                {{_}} {{_}}: movsx r.64.a, r.16.a
-                {{_}} {{_}}: sar r.64.a, 0x01
+                movsx r.64.a, r.16.a
+                sar r.64.a, 0x01
                 ; %4: i32 = ashr %1, 2i32
                 ...
-                {{_}} {{_}}: sar r.32.c, 0x02
+                sar r.32.c, 0x02
                 ; %5: i63 = ashr %2, 3i63
                 ...
-                {{_}} {{_}}: shl r.64.e, 0x01
-                {{_}} {{_}}: sar r.64.e, 0x01
-                {{_}} {{_}}: sar r.64.e, 0x03
+                shl r.64.e, 0x01
+                sar r.64.e, 0x01
+                sar r.64.e, 0x03
                 ...
                 ",
+            false,
         );
     }
 
@@ -3207,18 +3247,19 @@ mod tests {
                 ...
                 ; %3: i16 = lshr %0, 1i16
                 ...
-                {{_}} {{_}}: movzx r.64.a, r.16.a
-                {{_}} {{_}}: shr r.64.a, 0x01
+                movzx r.64.a, r.16.a
+                shr r.64.a, 0x01
                 ; %4: i32 = lshr %1, 2i32
                 ...
-                {{_}} {{_}}: shr r.32.c, 0x02
+                shr r.32.c, 0x02
                 ; %5: i63 = lshr %2, 3i63
                 ...
-                {{_}} {{_}}: shl r.64.e, 0x01
-                {{_}} {{_}}: shr r.64.e, 0x01
-                {{_}} {{_}}: shr r.64.e, 0x03
+                shl r.64.e, 0x01
+                shr r.64.e, 0x01
+                shr r.64.e, 0x03
                 ...
                 ",
+            false,
         );
     }
 
@@ -3239,17 +3280,18 @@ mod tests {
                 ...
                 ; %3: i16 = shl %0, 1i16
                 ...
-                {{_}} {{_}}: shl r.64.a, 0x01
+                shl r.64.a, 0x01
                 ; %4: i32 = shl %1, 2i32
                 ...
-                {{_}} {{_}}: shl r.32.a, 0x02
+                shl r.32.a, 0x02
                 ; %5: i63 = shl %2, 3i63
                 ...
-                {{_}} {{_}}: shl r.64.b, 0x03
+                shl r.64.b, 0x03
                 ; %6: i32 = shl %1, %4
                 ......
-                {{_}} {{_}}: shl r.32.b, cl
+                shl r.32.b, cl
                 ",
+            false,
         );
     }
 
@@ -3271,18 +3313,19 @@ mod tests {
             "
                 ...
                 ; %6: i16 = mul %0, %1
-                {{_}} {{_}}: mov rax, ...
-                {{_}} {{_}}: mul r.64.a
+                mov rax, ...
+                mul r.64.a
                 ; %7: i32 = mul %2, %3
                 ...
-                {{_}} {{_}}: mov rax, ...
-                {{_}} {{_}}: mul r.64.b
+                mov rax, ...
+                mul r.64.b
                 ; %8: i63 = mul %4, %5
                 ...
-                {{_}} {{_}}: mov rax, ...
-                {{_}} {{_}}: mul r.64.c
+                mov rax, ...
+                mul r.64.c
                 ...
                 ",
+            false,
         );
     }
 
@@ -3304,13 +3347,14 @@ mod tests {
             "
                 ...
                 ; %6: i16 = or %0, %1
-                {{_}} {{_}}: or r.64.a, r.64.b
+                or r.64.a, r.64.b
                 ; %7: i32 = or %2, %3
-                {{_}} {{_}}: or r.64.c, r.64.d
+                or r.64.c, r.64.d
                 ; %8: i63 = or %4, %5
-                {{_}} {{_}}: or r.64.e, r.64.f
+                or r.64.e, r.64.f
                 ...
                 ",
+            false,
         );
     }
 
@@ -3333,24 +3377,25 @@ mod tests {
                 ...
                 ; %6: i16 = sdiv %0, %1
                 ...
-                {{_}} {{_}}: movsx rax, ax
-                {{_}} {{_}}: movsx r.64.a, r.16.a
-                {{_}} {{_}}: cqo
-                {{_}} {{_}}: idiv r.64.a
+                movsx rax, ax
+                movsx r.64.a, r.16.a
+                cqo
+                idiv r.64.a
                 ; %7: i32 = sdiv %2, %3
                 ...
-                {{_}} {{_}}: cdq
-                {{_}} {{_}}: idiv r.32.b
+                cdq
+                idiv r.32.b
                 ; %8: i63 = sdiv %4, %5
                 ...
-                {{_}} {{_}}: shl rax, 0x01
-                {{_}} {{_}}: sar rax, 0x01
-                {{_}} {{_}}: shl r.64.c, 0x01
-                {{_}} {{_}}: sar r.64.c, 0x01
-                {{_}} {{_}}: cqo
-                {{_}} {{_}}: idiv r.64.c
+                shl rax, 0x01
+                sar rax, 0x01
+                shl r.64.c, 0x01
+                sar r.64.c, 0x01
+                cqo
+                idiv r.64.c
                 ...
                 ",
+            false,
         );
     }
 
@@ -3373,24 +3418,25 @@ mod tests {
                 ...
                 ; %6: i16 = srem %0, %1
                 ...
-                {{_}} {{_}}: movsx rax, ax
-                {{_}} {{_}}: movsx r.64.a, r.16.a
-                {{_}} {{_}}: cqo
-                {{_}} {{_}}: idiv r.64.a
+                movsx rax, ax
+                movsx r.64.a, r.16.a
+                cqo
+                idiv r.64.a
                 ; %7: i32 = srem %2, %3
                 ...
-                {{_}} {{_}}: cdq
-                {{_}} {{_}}: idiv r.32.b
+                cdq
+                idiv r.32.b
                 ; %8: i63 = srem %4, %5
                 ...
-                {{_}} {{_}}: shl rax, 0x01
-                {{_}} {{_}}: sar rax, 0x01
-                {{_}} {{_}}: shl r.64.c, 0x01
-                {{_}} {{_}}: sar r.64.c, 0x01
-                {{_}} {{_}}: cqo
-                {{_}} {{_}}: idiv r.64.c
+                shl rax, 0x01
+                sar rax, 0x01
+                shl r.64.c, 0x01
+                sar r.64.c, 0x01
+                cqo
+                idiv r.64.c
                 ...
                 ",
+            false,
         );
     }
 
@@ -3413,20 +3459,21 @@ mod tests {
             "
                 ...
                 ; %6: i16 = sub %0, %1
-                {{_}} {{_}}: movsx r.64.a, r.16.a
-                {{_}} {{_}}: movsx r.64.b, r.16.b
-                {{_}} {{_}}: sub r.64.a, r.64.b
+                movsx r.64.a, r.16.a
+                movsx r.64.b, r.16.b
+                sub r.64.a, r.64.b
                 ; %7: i32 = sub %2, %3
-                {{_}} {{_}}: sub r.32.c, r.32.d
+                sub r.32.c, r.32.d
                 ; %8: i63 = sub %4, %5
-                {{_}} {{_}}: shl r.64.e, 0x01
-                {{_}} {{_}}: sar r.64.e, 0x01
-                {{_}} {{_}}: shl r.64.f, 0x01
-                {{_}} {{_}}: sar r.64.f, 0x01
-                {{_}} {{_}}: sub r.64.e, r.64.f
+                shl r.64.e, 0x01
+                sar r.64.e, 0x01
+                shl r.64.f, 0x01
+                sar r.64.f, 0x01
+                sub r.64.e, r.64.f
                 ; %9: i32 = sub 0i32, %7
-                {{_}} {{_}}: neg r.32.c
+                neg r.32.c
                 ",
+            false,
         );
     }
 
@@ -3448,13 +3495,14 @@ mod tests {
             "
                 ...
                 ; %6: i16 = xor %0, %1
-                {{_}} {{_}}: xor r.64.a, r.64.b
+                xor r.64.a, r.64.b
                 ; %7: i32 = xor %2, %3
-                {{_}} {{_}}: xor r.64.c, r.64.d
+                xor r.64.c, r.64.d
                 ; %8: i63 = xor %4, %5
-                {{_}} {{_}}: xor r.64.e, r.64.f
+                xor r.64.e, r.64.f
                 ...
                 ",
+            false,
         );
     }
 
@@ -3477,24 +3525,25 @@ mod tests {
                 ...
                 ; %6: i16 = udiv %0, %1
                 ...
-                {{_}} {{_}}: movzx rax, ax
-                {{_}} {{_}}: movzx r.64.a, r.16.a
-                {{_}} {{_}}: xor rdx, rdx
-                {{_}} {{_}}: div r.64.a
+                movzx rax, ax
+                movzx r.64.a, r.16.a
+                xor rdx, rdx
+                div r.64.a
                 ; %7: i32 = udiv %2, %3
                 ...
-                {{_}} {{_}}: xor edx, edx
-                {{_}} {{_}}: div r.32.b
+                xor edx, edx
+                div r.32.b
                 ; %8: i63 = udiv %4, %5
                 ...
-                {{_}} {{_}}: shl rax, 0x01
-                {{_}} {{_}}: shr rax, 0x01
-                {{_}} {{_}}: shl r.64.c, 0x01
-                {{_}} {{_}}: shr r.64.c, 0x01
-                {{_}} {{_}}: xor rdx, rdx
-                {{_}} {{_}}: div r.64.c
+                shl rax, 0x01
+                shr rax, 0x01
+                shl r.64.c, 0x01
+                shr r.64.c, 0x01
+                xor rdx, rdx
+                div r.64.c
                 ...
                 ",
+            false,
         );
     }
 
@@ -3512,11 +3561,12 @@ mod tests {
                 "
                 ...
                 ; call @puts()
-                {{{{_}}}} {{{{_}}}}: mov r.64.x, 0x{sym_addr:X}
-                {{{{_}}}} {{{{_}}}}: call r.64.x
+                mov r.64.x, 0x{sym_addr:X}
+                call r.64.x
                 ...
             "
             ),
+            false,
         );
     }
 
@@ -3538,13 +3588,14 @@ mod tests {
                 ...
                 ; call @puts(%0, %1, %2)
                 ...
-                {{{{_}}}} {{{{_}}}}: mov rdx, r.64.x
-                {{{{_}}}} {{{{_}}}}: mov rdi, r.64.y
-                {{{{_}}}} {{{{_}}}}: mov r.64.tgt, 0x{sym_addr:X}
-                {{{{_}}}} {{{{_}}}}: call r.64.tgt
+                mov rdx, r.64.x
+                mov rdi, r.64.y
+                mov r.64.tgt, 0x{sym_addr:X}
+                call r.64.tgt
                 ...
             "
             ),
+            false,
         );
     }
 
@@ -3566,13 +3617,14 @@ mod tests {
                 ...
                 ; call @puts(%0, %1, %2)
                 ...
-                {{{{_}}}} {{{{_}}}}: mov rdx, r.64.x
-                {{{{_}}}} {{{{_}}}}: mov rdi, r.64.y
-                {{{{_}}}} {{{{_}}}}: mov r.64.tgt, 0x{sym_addr:X}
-                {{{{_}}}} {{{{_}}}}: call r.64.tgt
+                mov rdx, r.64.x
+                mov rdi, r.64.y
+                mov r.64.tgt, 0x{sym_addr:X}
+                call r.64.tgt
                 ...
             "
             ),
+            false,
         );
     }
 
@@ -3586,6 +3638,7 @@ mod tests {
                 %1: i32 = call @f(0, 1, 2, 3, 4, 5, 6, 7)
             ",
             "",
+            false,
         );
     }
 
@@ -3600,10 +3653,11 @@ mod tests {
             "
                 ...
                 ; %0: i32 = call @puts()
-                {{_}} {{_}}: mov r.64.x, ...
-                {{_}} {{_}}: call r.64.x
+                mov r.64.x, ...
+                call r.64.x
                 ...
             ",
+            false,
         );
     }
 
@@ -3626,27 +3680,28 @@ mod tests {
                 ; %4: i1 = eq %0, %0
                 ......
                 ......
-                {{_}} {{_}}: movzx r.64.a, r.16.a
-                {{_}} {{_}}: movzx r.64.b, r.16.b
-                {{_}} {{_}}: cmp r.64.a, r.64.b
-                {{_}} {{_}}: setz r.8._
+                movzx r.64.a, r.16.a
+                movzx r.64.b, r.16.b
+                cmp r.64.a, r.64.b
+                setz r.8._
                 ...
                 ; %5: i1 = eq %1, %1
                 ......
                 ......
-                {{_}} {{_}}: cmp r.32.c, r.32.d
-                {{_}} {{_}}: setz r.8._
+                cmp r.32.c, r.32.d
+                setz r.8._
                 ; %6: i1 = eq %2, %2
                 ......
                 ......
-                {{_}} {{_}}: shl r.64.e, 0x01
-                {{_}} {{_}}: shr r.64.e, 0x01
-                {{_}} {{_}}: shl r.64.f, 0x01
-                {{_}} {{_}}: shr r.64.f, 0x01
-                {{_}} {{_}}: cmp r.64.e, r.64.f
-                {{_}} {{_}}: setz r.8._
+                shl r.64.e, 0x01
+                shr r.64.e, 0x01
+                shl r.64.f, 0x01
+                shr r.64.f, 0x01
+                cmp r.64.e, r.64.f
+                setz r.8._
                 ...
             ",
+            false,
         );
     }
 
@@ -3665,13 +3720,14 @@ mod tests {
             "
                 ...
                 ; %3: i32 = sext %0
-                {{_}} {{_}}: movsx r.64.a, r.16.a
+                movsx r.64.a, r.16.a
                 ; %4: i64 = sext %1
-                {{_}} {{_}}: movsxd r.64.b, r.32.b
+                movsxd r.64.b, r.32.b
                 ; %5: i64 = sext %2
-                {{_}} {{_}}: shl r.64.c, 0x01
-                {{_}} {{_}}: sar r.64.c, 0x01
+                shl r.64.c, 0x01
+                sar r.64.c, 0x01
                 ",
+            false,
         );
     }
 
@@ -3690,13 +3746,14 @@ mod tests {
             "
                 ...
                 ; %3: i32 = zext %0
-                {{_}} {{_}}: movzx r.64.a, r.16.a
+                movzx r.64.a, r.16.a
                 ; %4: i64 = zext %1
                 ...
                 ; %5: i64 = zext %2
-                {{_}} {{_}}: shl r.64.c, 0x01
-                {{_}} {{_}}: shr r.64.c, 0x01
+                shl r.64.c, 0x01
+                shr r.64.c, 0x01
                 ",
+            false,
         );
     }
 
@@ -3713,10 +3770,11 @@ mod tests {
             "
             ...
             ; %2: double = bitcast %0
-            {{_}} {{_}}: cvtsi2sd fp.128.x, r.64.x
+            cvtsi2sd fp.128.x, r.64.x
             ; %3: float = bitcast %1
-            {{_}} {{_}}: cvtsi2ss fp.128.x, r.32.x
+            cvtsi2ss fp.128.x, r.32.x
             ",
+            false,
         );
     }
 
@@ -3731,20 +3789,21 @@ mod tests {
             "
                 ...
                 ; guard true, %0, []
-                {{_}} {{_}}: cmp r.8.b, 0x01
-                {{_}} {{_}}: jnz 0x...
+                cmp r.8.b, 0x01
+                jnz 0x...
                 ...
                 ; deopt id for guard 0
-                {{_}} {{_}}: push rsi
-                ... mov rsi, 0x00
-                ... jmp ...
+                push rsi
+                mov rsi, 0x00
+                jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, rbp
-                ... mov r9, 0x...
-                ... mov rax, 0x...
-                ... call rax
+                mov rdi, rbp
+                mov r9, 0x...
+                mov rax, 0x...
+                call rax
             ",
+            false,
         );
     }
 
@@ -3759,20 +3818,21 @@ mod tests {
             "
                 ...
                 ; guard false, %0, []
-                {{_}} {{_}}: cmp r.8.b, 0x00
-                {{_}} {{_}}: jnz 0x...
+                cmp r.8.b, 0x00
+                jnz 0x...
                 ...
                 ; deopt id for guard 0
-                {{_}} {{_}}: push rsi
-                ... mov rsi, 0x00
-                ... jmp ...
+                push rsi
+                mov rsi, 0x00
+                jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, rbp
-                ... mov r9, 0x...
-                ... mov rax, 0x...
-                ... call rax
+                mov rdi, rbp
+                mov r9, 0x...
+                mov rax, 0x...
+                call rax
             ",
+            false,
         );
     }
 
@@ -3790,20 +3850,21 @@ mod tests {
             "
                 ...
                 ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8]
-                {{_}} {{_}}: cmp r.8.b, 0x00
-                {{_}} {{_}}: jnz 0x...
+                cmp r.8.b, 0x00
+                jnz 0x...
                 ...
                 ; deopt id for guard 0
-                {{_}} {{_}}: push rsi
-                ... mov rsi, 0x00
-                ... jmp ...
+                push rsi
+                mov rsi, 0x00
+                jmp ...
                 ; call __yk_deopt
                 ...
-                ... mov rdi, rbp
-                ... mov r9, 0x...
-                ... mov rax, 0x...
-                ... call rax
+                mov rdi, rbp
+                mov r9, 0x...
+                mov rax, 0x...
+                call rax
             ",
+            false,
         );
     }
 
@@ -3819,11 +3880,12 @@ mod tests {
                 ...
                 ; %1: i1 = eq %0, 3i8
                 ...
-                {{_}} {{_}}: movzx r.64.x, r.8._
-                {{_}} {{_}}: cmp r.64.x, 0x03
-                {{_}} {{_}}: setz r.8.x
+                movzx r.64.x, r.8._
+                cmp r.64.x, 0x03
+                setz r.8.x
                 ...
             ",
+            false,
         );
     }
 
@@ -3839,12 +3901,13 @@ mod tests {
             "
                 ...
                 ; %1: i1 = eq %0, 3i8
-                {{_}} {{_}}: movzx r.64.x, r.8._
-                {{_}} {{_}}: cmp r.64.x, 0x03
+                movzx r.64.x, r.8._
+                cmp r.64.x, 0x03
                 ; guard true, %1, []
-                {{_}} {{_}}: jnz 0x...
+                jnz 0x...
                 ...
             ",
+            false,
         );
     }
 
@@ -3857,8 +3920,9 @@ mod tests {
                 ",
             "
                 ...
-                {{_}} {{_}}: ud2
+                ud2
                 ",
+            false,
         );
     }
 
@@ -3876,8 +3940,9 @@ mod tests {
                 ...
                 ; tloop_start []:
                 ; tloop_jump []:
-                {{_}} {{_}}: jmp {{target}}
+                jmp {{target}}
             ",
+            false,
         );
     }
 
@@ -3897,11 +3962,13 @@ mod tests {
                 ...
                 ; tloop_start [%0]:
                 ; %2: i8 = add %0, %0
+                {{_}} {{off}}: ...
                 ...
                 ; tloop_jump [%0]:
                 ...
-                ...: jmp ...
+                {{_}} {{_}}: jmp 0x00000000{{off}}
             ",
+            true,
         );
     }
 
@@ -3917,13 +3984,14 @@ mod tests {
             "
                 ...
                 ; %2: i8 = srem %0, %1
-                {{_}} {{_}}: mov rax, r.64.y
-                {{_}} {{_}}: movsx rax, al
-                {{_}} {{_}}: movsx rsi, sil
-                {{_}} {{_}}: cqo
-                {{_}} {{_}}: idiv r.64.x
+                mov rax, r.64.y
+                movsx rax, al
+                movsx rsi, sil
+                cqo
+                idiv r.64.x
                 ...
             ",
+            false,
         );
     }
 
@@ -3939,15 +4007,16 @@ mod tests {
             "
                 ...
                 ; %2: i56 = srem %0, %1
-                {{_}} {{_}}: mov rax, r.64.y
-                {{_}} {{_}}: shl rax, 0x08
-                {{_}} {{_}}: sar rax, 0x08
-                {{_}} {{_}}: shl rsi, 0x08
-                {{_}} {{_}}: sar rsi, 0x08
-                {{_}} {{_}}: cqo
-                {{_}} {{_}}: idiv r.64.x
+                mov rax, r.64.y
+                shl rax, 0x08
+                sar rax, 0x08
+                shl rsi, 0x08
+                sar rsi, 0x08
+                cqo
+                idiv r.64.x
                 ...
             ",
+            false,
         );
     }
 
@@ -3966,9 +4035,10 @@ mod tests {
                 ; %0: i32 = load_ti ...
                 ...
                 ; %1: i8 = trunc %0
-                {{_}} {{_}}: mov r.64.x, r.64.y
+                mov r.64.x, r.64.y
                 ...
             ",
+            false,
         );
     }
 
@@ -3983,12 +4053,13 @@ mod tests {
             "
                 ...
                 ; %1: i32 = %0 ? 1i32 : 2i32
-                {{_}} {{_}}: mov r.64.x, 0x01
-                {{_}} {{_}}: mov r.64.y, 0x02
-                {{_}} {{_}}: cmp r.8.z, 0x00
-                {{_}} {{_}}: cmovz r.64.x, r.64.y
+                mov r.64.x, 0x01
+                mov r.64.y, 0x02
+                cmp r.8.z, 0x00
+                cmovz r.64.x, r.64.y
                 ...
             ",
+            false,
         );
     }
 
@@ -4004,9 +4075,10 @@ mod tests {
             "
                 ...
                 ; %2: i8 = add %0, 1i8
-                {{_}} {{_}}: add r.32.y, 0x01
+                add r.32.y, 0x01
                 ...
             ",
+            false,
         );
     }
 
@@ -4021,9 +4093,10 @@ mod tests {
             "
                 ...
                 ; %1: float = si_to_fp %0
-                {{_}} {{_}}: cvtsi2ss fp.128.x, r.32.x
+                cvtsi2ss fp.128.x, r.32.x
                 ...
                 ",
+            false,
         );
     }
 
@@ -4038,9 +4111,10 @@ mod tests {
             "
                 ...
                 ; %1: double = si_to_fp %0
-                {{_}} {{_}}: cvtsi2sd fp.128.x, r.32.x
+                cvtsi2sd fp.128.x, r.32.x
                 ...
                 ",
+            false,
         );
     }
 
@@ -4056,9 +4130,10 @@ mod tests {
                 ...
                 ; %0: float = load_ti ...
                 ; %1: double = fp_ext %0
-                {{_}} {{_}}: cvtss2sd fp.128.x, fp.128.x
+                cvtss2sd fp.128.x, fp.128.x
                 ...
                 ",
+            false,
         );
     }
 
@@ -4073,9 +4148,10 @@ mod tests {
             "
                 ...
                 ; %1: i32 = fp_to_si %0
-                {{_}} {{_}}: cvttss2si r.64.x, fp.128.x
+                cvttss2si r.64.x, fp.128.x
                 ...
                 ",
+            false,
         );
     }
 
@@ -4090,9 +4166,10 @@ mod tests {
             "
                 ...
                 ; %1: i32 = fp_to_si %0
-                {{_}} {{_}}: cvttsd2si r.64.x, fp.128.x
+                cvttsd2si r.64.x, fp.128.x
                 ...
                 ",
+            false,
         );
     }
 
@@ -4108,9 +4185,10 @@ mod tests {
             "
                 ...
                 ; %2: float = fdiv %0, %1
-                {{_}} {{_}}: divss fp.128.x, fp.128.y
+                divss fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4126,9 +4204,10 @@ mod tests {
             "
                 ...
                 ; %2: double = fdiv %0, %1
-                {{_}} {{_}}: divsd fp.128.x, fp.128.y
+                divsd fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4144,9 +4223,10 @@ mod tests {
             "
                 ...
                 ; %2: float = fadd %0, %1
-                {{_}} {{_}}: addss fp.128.x, fp.128.y
+                addss fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4162,9 +4242,10 @@ mod tests {
             "
                 ...
                 ; %2: double = fadd %0, %1
-                {{_}} {{_}}: addsd fp.128.x, fp.128.y
+                addsd fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4180,9 +4261,10 @@ mod tests {
             "
                 ...
                 ; %2: float = fsub %0, %1
-                {{_}} {{_}}: subss fp.128.x, fp.128.y
+                subss fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4198,9 +4280,10 @@ mod tests {
             "
                 ...
                 ; %2: double = fsub %0, %1
-                {{_}} {{_}}: subsd fp.128.x, fp.128.y
+                subsd fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4216,9 +4299,10 @@ mod tests {
             "
                 ...
                 ; %2: float = fmul %0, %1
-                {{_}} {{_}}: mulss fp.128.x, fp.128.y
+                mulss fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4234,9 +4318,10 @@ mod tests {
             "
                 ...
                 ; %2: double = fmul %0, %1
-                {{_}} {{_}}: mulsd fp.128.x, fp.128.y
+                mulsd fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4253,17 +4338,18 @@ mod tests {
             "
                 ...
                 ; %2: i1 = f_ueq %0, %1
-                {{_}} {{_}}: ucomiss fp.128.x, fp.128.y
-                {{_}} {{_}}: setz r.8.x
-                {{_}} {{_}}: setnp r.8.y
-                {{_}} {{_}}: and r.8.x, r.8.y
+                ucomiss fp.128.x, fp.128.y
+                setz r.8.x
+                setnp r.8.y
+                and r.8.x, r.8.y
                 ; %3: i1 = f_ugt %0, %1
-                {{_}} {{_}}: ucomiss fp.128.x, fp.128.y
-                {{_}} {{_}}: setnbe r.8.x
-                {{_}} {{_}}: setnp r.8.y
-                {{_}} {{_}}: and r.8.x, r.8.y
+                ucomiss fp.128.x, fp.128.y
+                setnbe r.8.x
+                setnp r.8.y
+                and r.8.x, r.8.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4280,17 +4366,18 @@ mod tests {
             "
                 ...
                 ; %2: i1 = f_ueq %0, %1
-                {{_}} {{_}}: ucomisd fp.128.x, fp.128.y
-                {{_}} {{_}}: setz r.8.x
-                {{_}} {{_}}: setnp r.8.y
-                {{_}} {{_}}: and r.8.x, r.8.y
+                ucomisd fp.128.x, fp.128.y
+                setz r.8.x
+                setnp r.8.y
+                and r.8.x, r.8.y
                 ; %3: i1 = f_ugt %0, %1
-                {{_}} {{_}}: ucomisd fp.128.x, fp.128.y
-                {{_}} {{_}}: setnbe r.8.x
-                {{_}} {{_}}: setnp r.8.y
-                {{_}} {{_}}: and r.8.x, r.8.y
+                ucomisd fp.128.x, fp.128.y
+                setnbe r.8.x
+                setnp r.8.y
+                and r.8.x, r.8.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4305,15 +4392,16 @@ mod tests {
                 ...
                 ; %0: float = fadd 1.2float, 3.4float
                 ...
-                {{_}} {{_}}: mov r.32.x, 0x3f99999a
-                {{_}} {{_}}: movd fp.128.x, r.32.x
+                mov r.32.x, 0x3f99999a
+                movd fp.128.x, r.32.x
                 ...
-                {{_}} {{_}}: mov r.32.x, 0x4059999a
-                {{_}} {{_}}: movd fp.128.y, r.32.x
+                mov r.32.x, 0x4059999a
+                movd fp.128.y, r.32.x
                 ...
-                {{_}} {{_}}: addss fp.128.x, fp.128.y
+                addss fp.128.x, fp.128.y
                 ...
                 ",
+            false,
         );
     }
 
@@ -4328,11 +4416,12 @@ mod tests {
                 ...
                 ; %0: double = fadd 1.2double, 3.4double
                 ...
-                {{_}} {{_}}: mov r.64.x, 0x3ff3333333333333
+                mov r.64.x, 0x3ff3333333333333
                 ...
-                {{_}} {{_}}: mov r.64.x, 0x400b333333333333
+                mov r.64.x, 0x400b333333333333
                 ...
                 ",
+            false,
         );
     }
 
@@ -4352,9 +4441,10 @@ mod tests {
                 ...
                 ; tloop_start [%0]:
                 ; tloop_jump [42i8]:
-                {{_}} {{_}}: mov r.64.x, 0x2a
-                {{_}} {{_}}: jmp ...
+                mov r.64.x, 0x2a
+                jmp ...
             ",
+            false,
         );
     }
 
@@ -4371,14 +4461,15 @@ mod tests {
             "
                 ...
                 ; %2: float = fneg %0
-                {{_}} {{_}}: mov r.32.x, 0x80000000
-                {{_}} {{_}}: movd fp.128.y, r.32.x
-                {{_}} {{_}}: xorps fp.128.z, fp.128.y
+                mov r.32.x, 0x80000000
+                movd fp.128.y, r.32.x
+                xorps fp.128.z, fp.128.y
                 ; %3: double = fneg %1
-                {{_}} {{_}}: mov r.64.x, 0x8000000000000000
-                {{_}} {{_}}: movq fp.128.y, r.64.x
-                {{_}} {{_}}: xorpd fp.128.a, fp.128.y
+                mov r.64.x, 0x8000000000000000
+                movq fp.128.y, r.64.x
+                xorpd fp.128.a, fp.128.y
             ",
+            false,
         );
     }
 }

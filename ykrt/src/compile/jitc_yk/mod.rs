@@ -159,7 +159,13 @@ impl Compiler for JITCYk {
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
                 "--- Begin jit-asm ---\n{}\n--- End jit-asm ---\n",
-                ct.disassemble().unwrap()
+                ct.disassemble(false).unwrap()
+            ));
+        }
+        if should_log_ir(IRPhase::AsmFull) {
+            log_ir(&format!(
+                "--- Begin jit-asm-full ---\n{}\n--- End jit-asm-full ---\n",
+                ct.disassemble(true).unwrap()
             ));
         }
 

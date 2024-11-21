@@ -86,7 +86,7 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     fn hl(&self) -> &Weak<Mutex<HotLocation>>;
 
     /// Disassemble the JITted code into a string, for testing and deubgging.
-    fn disassemble(&self) -> Result<String, Box<dyn Error>>;
+    fn disassemble(&self, with_addrs: bool) -> Result<String, Box<dyn Error>>;
 }
 
 /// Stores information required for compiling a side-trace. Passed down from a (parent) trace
@@ -137,7 +137,7 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn disassemble(&self) -> Result<String, Box<dyn Error>> {
+        fn disassemble(&self, _with_addrs: bool) -> Result<String, Box<dyn Error>> {
             panic!();
         }
     }
@@ -185,7 +185,7 @@ mod compiled_trace_testing {
             &self.hl
         }
 
-        fn disassemble(&self) -> Result<String, Box<dyn Error>> {
+        fn disassemble(&self, _with_addrs: bool) -> Result<String, Box<dyn Error>> {
             panic!();
         }
     }

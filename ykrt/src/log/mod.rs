@@ -102,10 +102,17 @@ impl Log {
 #[derive(Eq, Hash, PartialEq)]
 #[allow(dead_code)]
 pub(crate) enum IRPhase {
+    /// The AOT IR.
     AOT,
+    /// The JIT IR before it has been optimised.
     PreOpt,
+    /// The JIT IR after it has been optimised.
     PostOpt,
+    /// The assembler code of the compiled trace.
     Asm,
+    /// The assembler code of the compiled trace, including instruction offsets and virtual
+    /// addresses.
+    AsmFull,
 }
 
 #[cfg(not(feature = "ykd"))]
@@ -155,6 +162,7 @@ mod internals {
                 "jit-pre-opt" => Ok(Self::PreOpt),
                 "jit-post-opt" => Ok(Self::PostOpt),
                 "jit-asm" => Ok(Self::Asm),
+                "jit-asm-full" => Ok(Self::AsmFull),
                 _ => Err(format!("Invalid YKD_LOG_IR value: {s}").into()),
             }
         }
