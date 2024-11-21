@@ -1,7 +1,7 @@
 // ## crashes ykllvm's BlockDisambiguate pass.
 // ignore-if: true
 // Run-time:
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
+//   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YK_LOG=4
 //   stderr:
 //     FIXME: match some IR/output

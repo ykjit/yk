@@ -122,27 +122,25 @@ mod internals {
     use super::IRPhase;
     use std::{collections::HashSet, env, error::Error, fs::File, io::Write, sync::LazyLock};
 
-    // YKD_LOG_IR
-
     static LOG_IR: LazyLock<Option<(String, HashSet<IRPhase>)>> = LazyLock::new(|| {
         let mut log_phases = HashSet::new();
         if let Ok(x) = env::var("YKD_LOG_IR") {
-            match x.split(':').collect::<Vec<_>>().as_slice() {
-                [p, phases] => {
-                    for x in phases.split(',') {
-                        log_phases.insert(IRPhase::from_str(x).unwrap());
-                    }
-                    if *p != "-" {
-                        // If there's an existing log file, truncate (i.e. empty it), so that later
-                        // appends to the log aren't appending to a previous log run.
-                        File::create(p).ok();
-                    }
-                    Some((p.to_string(), log_phases))
-                }
+            let (path, phases) = match x.split(':').collect::<Vec<_>>().as_slice() {
+                [path, phases] => (*path, *phases),
+                [phases] => ("-", *phases),
                 _ => panic!(
-                    "YKD_LOG_IR must be of the format '<path>:<irstage_1>[,...,<irstage_n>]'"
+                    "YKD_LOG_IR must be of the format '[<path>:]<irstage_1>[,...,<irstage_n>]'"
                 ),
+            };
+            for x in phases.split(',') {
+                log_phases.insert(IRPhase::from_str(x).unwrap());
             }
+            if path != "-" {
+                // If there's an existing log file, truncate (i.e. empty it), so that later
+                // appends to the log aren't appending to a previous log run.
+                File::create(path).ok();
+            }
+            Some((path.to_string(), log_phases))
         } else {
             None
         }
