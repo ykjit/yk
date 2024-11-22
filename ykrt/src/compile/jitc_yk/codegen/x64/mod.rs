@@ -460,47 +460,17 @@ impl<'a> Assemble<'a> {
 
             match inst {
                 #[cfg(test)]
-                jit_ir::Inst::BlackBox(_) => unreachable!(),
+                jit_ir::Inst::BlackBox(_) => (),
                 jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
                     unreachable!();
                 }
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
                 jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
-                jit_ir::Inst::Load(i) => self.cg_load(iidx, i, 0),
-                jit_ir::Inst::PtrAdd(pa_inst) => {
-                    next = iter.next();
-                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
-                    // by a `load` *and* the result of the `PtrAdd` isn't used again.
-                    if let Some((next_iidx, Inst::Load(l_inst))) = next {
-                        if let Operand::Var(op_iidx) = l_inst.operand(self.m) {
-                            if op_iidx == iidx
-                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
-                            {
-                                self.cg_ptradd_load(iidx, pa_inst, next_iidx, l_inst);
-                                next = iter.next();
-                                continue;
-                            }
-                        }
-                    }
-                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
-                    // by a `store` *and* the result of the `PtrAdd` isn't used again.
-                    if let Some((next_iidx, Inst::Store(s_inst))) = next {
-                        if let Operand::Var(tgt_iidx) = s_inst.tgt(self.m) {
-                            if tgt_iidx == iidx
-                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
-                            {
-                                self.cg_ptradd_store(iidx, pa_inst, next_iidx, s_inst);
-                                next = iter.next();
-                                continue;
-                            }
-                        }
-                    }
-                    self.cg_ptradd(iidx, pa_inst);
-                    continue;
-                }
+                jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+                jit_ir::Inst::PtrAdd(pa_inst) => self.cg_ptradd(iidx, pa_inst),
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
-                jit_ir::Inst::Store(i) => self.cg_store(iidx, i, 0),
+                jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
                 jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
                 jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
                 jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
@@ -1175,7 +1145,8 @@ impl<'a> Assemble<'a> {
 
     /// Generate code for a [LoadInst], loading from a `register + off`. `off` should only be
     /// non-zero if the [LoadInst] references a [PtrAddInst].
-    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst, off: i32) {
+    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+        let off = inst.off();
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
                 let op = inst.operand(self.m);
@@ -1250,54 +1221,6 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    /// Optimise `PtrAdd` followed by `Load`. This has the following preconditions:
-    ///   1. The `Load` must consume the result of the `PtrAdd`.
-    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Load` is the sole
-    ///      consumer of the `PtrAdd`s result).
-    fn cg_ptradd_load(
-        &mut self,
-        pa_iidx: InstIdx,
-        pa_inst: &jit_ir::PtrAddInst,
-        l_iidx: InstIdx,
-        l_inst: &jit_ir::LoadInst,
-    ) {
-        let [_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            pa_iidx,
-            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
-        );
-        self.ra.expire_regs(l_iidx);
-        self.comment(
-            self.asm.offset(),
-            Inst::Load(*l_inst).display(l_iidx, self.m).to_string(),
-        );
-        self.cg_load(l_iidx, l_inst, pa_inst.off());
-    }
-
-    /// Optimise `PtrAdd` followed by `Store`. This has the following preconditions:
-    ///   1. The `Load` must consume the result of the `PtrAdd`.
-    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Store` is the sole
-    ///      consumer of the `PtrAdd`s result).
-    fn cg_ptradd_store(
-        &mut self,
-        pa_iidx: InstIdx,
-        pa_inst: &jit_ir::PtrAddInst,
-        s_iidx: InstIdx,
-        s_inst: &jit_ir::StoreInst,
-    ) {
-        let [_ptr_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            pa_iidx,
-            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
-        );
-        self.ra.expire_regs(s_iidx);
-        self.comment(
-            self.asm.offset(),
-            Inst::Store(*s_inst).display(s_iidx, self.m).to_string(),
-        );
-        self.cg_store(s_iidx, s_inst, pa_inst.off());
-    }
-
     fn cg_ptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         // LLVM semantics dictate that the offset should be sign-extended/truncated up/down to the
         // size of the LLVM pointer index type. For address space zero on x86, truncation can't
@@ -1356,7 +1279,8 @@ impl<'a> Assemble<'a> {
 
     /// Generate code for a [StoreInst], storing it at a `register + off`. `off` should only be
     /// non-zero if the [StoreInst] references a [PtrAddInst].
-    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst, off: i32) {
+    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
+        let off = inst.off();
         let val = inst.val(self.m);
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
@@ -2510,7 +2434,10 @@ enum Immediate {
 mod tests {
     use super::{Assemble, X64CompiledTrace};
     use crate::compile::{
-        jitc_yk::jit_ir::{self, Module},
+        jitc_yk::{
+            jit_ir::{self, Module},
+            opt::opt,
+        },
         CompiledTrace,
     };
     use crate::location::{HotLocation, HotLocationKind};
@@ -2709,6 +2636,26 @@ mod tests {
         );
     }
 
+    fn opt_codegen_and_test(mod_str: &str, patt_lines: &str) {
+        let m = Module::from_str(mod_str);
+        let mt = MT::new().unwrap();
+        let m = opt(m).unwrap();
+        let hl = HotLocation {
+            kind: HotLocationKind::Tracing,
+            tracecompilation_errors: 0,
+        };
+        match_asm(
+            Assemble::new(&m, None, None)
+                .unwrap()
+                .codegen(mt, Arc::new(Mutex::new(hl)), None)
+                .unwrap()
+                .as_any()
+                .downcast::<X64CompiledTrace>()
+                .unwrap(),
+            patt_lines,
+        );
+    }
+
     #[test]
     fn cg_load_ptr() {
         codegen_and_test(
@@ -2797,7 +2744,7 @@ mod tests {
 
     #[test]
     fn cg_ptradd_load() {
-        codegen_and_test(
+        opt_codegen_and_test(
             "
               entry:
                 %0: ptr = load_ti 0
@@ -2807,24 +2754,28 @@ mod tests {
                 %4: ptr = ptr_add %1, 32
                 %5: i64 = load %4
                 %6: ptr = ptr_add %4, 1
+                %7: i64 = load %4
+                black_box %3
+                black_box %5
+                black_box %7
             ",
             "
                 ...
-                ; %2: ptr = ptr_add %0, 64
-                ; %3: i64 = load %2
-                {{_}} {{_}}: mov r.64.x, [rbx+{{_}}]
-                ; %4: ptr = ptr_add %1, 32
-                {{_}} {{_}}: add r.64.y, 0x20
-                ; %5: i64 = load %4
-                {{_}} {{_}}: mov r.64._, [r.64.y]
-                ...
+                ; %0: ptr = load_ti ...
+                ; %1: ptr = load_ti ...
+                ; %3: i64 = load [%0+64]
+                {{_}} {{_}}: mov r.64._, [r.64.a+0x40]
+                ; %5: i64 = load [%1+32]
+                {{_}} {{_}}: mov r.64._, [r.64.b+0x20]
+                ; %7: i64 = load [%1+32]
+                {{_}} {{_}}: mov r.64._, [r.64.b+0x20]
                 ",
         );
     }
 
     #[test]
     fn cg_ptradd_store() {
-        codegen_and_test(
+        opt_codegen_and_test(
             "
               entry:
                 %0: ptr = load_ti 0
@@ -2837,14 +2788,12 @@ mod tests {
             ",
             "
                 ...
-                ; *%2 = 1i8
-                {{_}} {{_}}: mov byte ptr [rbx+{{_}}], 0x01
-                ; %4: ptr = ptr_add %1, 32
-                {{_}} {{_}}: add r.64.x, 0x20
-                ; %5: i64 = load %4
-                {{_}} {{_}}: mov r.64.y, [r.64.x]
-                ; *%4 = 2i8
-                {{_}} {{_}}: mov byte ptr [r.64.x], 0x02
+                ; %0: ptr = load_ti ...
+                ; %1: ptr = load_ti ...
+                ; *[%0+64] = 1i8
+                {{_}} {{_}}: mov byte ptr [r.64.a+0x40], 0x01
+                ; *[%1+32] = 2i8
+                {{_}} {{_}}: mov byte ptr [r.64.b+0x20], 0x02
                 ",
         );
     }

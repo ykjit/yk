@@ -1843,7 +1843,18 @@ impl fmt::Display for DisplayableInst<'_> {
                 lhs.unpack(self.m).display(self.m),
                 rhs.unpack(self.m).display(self.m)
             ),
-            Inst::Load(x) => write!(f, "load {}", x.operand(self.m).display(self.m)),
+            Inst::Load(x) => {
+                if x.off() == 0 {
+                    write!(f, "load {}", x.operand(self.m).display(self.m))
+                } else {
+                    write!(
+                        f,
+                        "load [{}+{}]",
+                        x.operand(self.m).display(self.m),
+                        x.off()
+                    )
+                }
+            }
             Inst::LookupGlobal(x) => write!(
                 f,
                 "lookup_global @{}",
@@ -1888,12 +1899,24 @@ impl fmt::Display for DisplayableInst<'_> {
                     x.elem_size()
                 )
             }
-            Inst::Store(x) => write!(
-                f,
-                "*{} = {}",
-                x.tgt.unpack(self.m).display(self.m),
-                x.val.unpack(self.m).display(self.m)
-            ),
+            Inst::Store(x) => {
+                if x.off() == 0 {
+                    write!(
+                        f,
+                        "*{} = {}",
+                        x.tgt.unpack(self.m).display(self.m),
+                        x.val.unpack(self.m).display(self.m)
+                    )
+                } else {
+                    write!(
+                        f,
+                        "*[{}+{}] = {}",
+                        x.tgt.unpack(self.m).display(self.m),
+                        x.off(),
+                        x.val.unpack(self.m).display(self.m)
+                    )
+                }
+            }
             Inst::ICmp(x) => write!(
                 f,
                 "{} {}, {}",
@@ -2121,6 +2144,8 @@ impl BlackBoxInst {
 pub struct LoadInst {
     /// The pointer to load from.
     op: PackedOperand,
+    /// The offset relative to `op` to load from.
+    off: i32,
     /// The type of the pointee.
     tyidx: TyIdx,
     /// Is this load volatile?
@@ -2129,9 +2154,10 @@ pub struct LoadInst {
 
 impl LoadInst {
     // FIXME: why do we need to provide a type index? Can't we get that from the operand?
-    pub(crate) fn new(op: Operand, tyidx: TyIdx, volatile: bool) -> LoadInst {
+    pub(crate) fn new(op: Operand, off: i32, tyidx: TyIdx, volatile: bool) -> LoadInst {
         LoadInst {
             op: PackedOperand::new(&op),
+            off,
             tyidx,
             volatile,
         }
@@ -2139,6 +2165,7 @@ impl LoadInst {
 
     fn decopy_eq(&self, m: &Module, other: Self) -> bool {
         self.op.unpack(m) == other.op.unpack(m)
+            && self.off == other.off
             && self.tyidx == other.tyidx
             && self.volatile == other.volatile
     }
@@ -2148,9 +2175,18 @@ impl LoadInst {
         self.op.unpack(m)
     }
 
+    /// The offset relative to [Self::operand()] to load from.
+    pub(crate) fn off(&self) -> i32 {
+        self.off
+    }
+
     /// Returns the type index of the loaded value.
     pub(crate) fn tyidx(&self) -> TyIdx {
         self.tyidx
+    }
+
+    pub(crate) fn is_volatile(&self) -> bool {
+        self.volatile
     }
 }
 
@@ -2388,6 +2424,8 @@ impl DirectCallInst {
 pub struct StoreInst {
     /// The target pointer that we will store `val` into.
     tgt: PackedOperand,
+    /// The offset relative to `tgt` to load from.
+    off: i32,
     /// The value to store.
     val: PackedOperand,
     /// Is this store volatile?
@@ -2395,10 +2433,11 @@ pub struct StoreInst {
 }
 
 impl StoreInst {
-    pub(crate) fn new(tgt: Operand, val: Operand, volatile: bool) -> Self {
+    pub(crate) fn new(tgt: Operand, off: i32, val: Operand, volatile: bool) -> Self {
         // FIXME: assert type of pointer
         Self {
             tgt: PackedOperand::new(&tgt),
+            off,
             val: PackedOperand::new(&val),
             volatile,
         }
@@ -2406,8 +2445,19 @@ impl StoreInst {
 
     fn decopy_eq(&self, m: &Module, other: Self) -> bool {
         self.tgt(m) == other.tgt(m)
+            && self.off == other.off
             && self.val(m) == other.val(m)
             && self.volatile == other.volatile
+    }
+
+    /// Returns the target operand: i.e. where to store [self.val()].
+    pub(crate) fn tgt(&self, m: &Module) -> Operand {
+        self.tgt.unpack(m)
+    }
+
+    /// The offset relative to [Self::tgt()] to store to.
+    pub(crate) fn off(&self) -> i32 {
+        self.off
     }
 
     /// Returns the value operand: i.e. the thing that is going to be stored.
@@ -2415,9 +2465,8 @@ impl StoreInst {
         self.val.unpack(m)
     }
 
-    /// Returns the target operand: i.e. where to store [self.val()].
-    pub(crate) fn tgt(&self, m: &Module) -> Operand {
-        self.tgt.unpack(m)
+    pub(crate) fn is_volatile(&self) -> bool {
+        self.volatile
     }
 }
 
@@ -2957,6 +3006,7 @@ mod tests {
             LoadTraceInputInst::new(8, TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
                 Operand::Var(InstIdx(0)),
+                0,
                 TyIdx(U24::try_from(0).unwrap()),
                 false,
             )
@@ -2964,6 +3014,7 @@ mod tests {
         ];
         prog[2] = LoadInst::new(
             Operand::Var(InstIdx(1)),
+            0,
             TyIdx(U24::try_from(0).unwrap()),
             false,
         )
@@ -2973,7 +3024,7 @@ mod tests {
     /// Ensure that any given instruction fits in 64-bits.
     #[test]
     fn inst_size() {
-        assert!(mem::size_of::<Inst>() <= mem::size_of::<u64>());
+        assert!(mem::size_of::<Inst>() <= 2 * mem::size_of::<u64>());
     }
 
     #[test]

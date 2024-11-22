@@ -639,6 +639,7 @@ impl TraceBuilder {
     ) -> Result<(), CompilationError> {
         let inst = jit_ir::LoadInst::new(
             self.handle_operand(ptr)?,
+            0,
             self.handle_type(self.aot_mod.type_(*tyidx))?,
             volatile,
         )
@@ -801,6 +802,7 @@ impl TraceBuilder {
     ) -> Result<(), CompilationError> {
         let inst = jit_ir::StoreInst::new(
             self.handle_operand(tgt)?,
+            0,
             self.handle_operand(val)?,
             volatile,
         )

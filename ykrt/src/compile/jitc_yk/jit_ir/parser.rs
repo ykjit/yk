@@ -300,6 +300,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     } => {
                         let inst = LoadInst::new(
                             self.process_operand(val)?,
+                            0,
                             self.process_type(type_)?,
                             volatile,
                         );
@@ -430,6 +431,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::Store { tgt, val, volatile } => {
                         let inst = StoreInst::new(
                             self.process_operand(tgt)?,
+                            0,
                             self.process_operand(val)?,
                             volatile,
                         );

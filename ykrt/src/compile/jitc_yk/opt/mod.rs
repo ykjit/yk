@@ -9,8 +9,8 @@
 use super::{
     int_signs::{SignExtend, Truncate},
     jit_ir::{
-        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate,
-        PtrAddInst, Ty,
+        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, LoadInst, Module, Operand,
+        Predicate, PtrAddInst, StoreInst, Ty,
     },
 };
 use crate::compile::CompilationError;
@@ -351,6 +351,21 @@ impl Opt {
                         self.m.replace(iidx, Inst::Const(dst_cidx));
                     }
                 }
+                Inst::Load(x) => {
+                    if let Operand::Var(back_iidx) = x.operand(&self.m) {
+                        if let Inst::PtrAdd(y) = self.m.inst_decopy(back_iidx).1 {
+                            self.m.replace(
+                                iidx,
+                                Inst::Load(LoadInst::new(
+                                    y.ptr(&self.m),
+                                    y.off(),
+                                    x.tyidx(),
+                                    x.is_volatile(),
+                                )),
+                            );
+                        }
+                    }
+                }
                 Inst::LoadTraceInput(x) => {
                     // FIXME: This feels like it should be handled by trace_builder, but we can't
                     // do so yet because of https://github.com/ykjit/yk/issues/1435.
@@ -360,6 +375,21 @@ impl Opt {
                     {
                         let cidx = self.m.insert_const(Const::Int(x.tyidx(), v.into()))?;
                         self.an.set_value(iidx, Value::Const(cidx));
+                    }
+                }
+                Inst::Store(x) => {
+                    if let Operand::Var(back_iidx) = x.tgt(&self.m) {
+                        if let Inst::PtrAdd(y) = self.m.inst_decopy(back_iidx).1 {
+                            self.m.replace(
+                                iidx,
+                                Inst::Store(StoreInst::new(
+                                    y.ptr(&self.m),
+                                    y.off(),
+                                    x.val(&self.m),
+                                    x.is_volatile(),
+                                )),
+                            );
+                        }
                     }
                 }
                 Inst::ZExt(x) => {
