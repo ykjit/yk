@@ -32,7 +32,6 @@ use crate::{
 };
 
 use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP};
-use dynasmrt;
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to

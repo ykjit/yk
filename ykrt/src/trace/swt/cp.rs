@@ -3,7 +3,7 @@ use capstone::prelude::*;
 use dynasmrt::{dynasm, x64::Assembler, DynasmApi, ExecutableBuffer};
 use std::error::Error;
 use std::sync::LazyLock;
-use std::{assert_matches::debug_assert_matches, cell::RefCell, sync::Arc};
+use std::{sync::Arc};
 
 // unoptimised (original functions) control point stack map id
 const UNOPT_CP_SMID: usize = 0;
@@ -89,7 +89,7 @@ fn calc_after_cp_offset(rec_offset: u64) -> Result<i64, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dynasmrt::{dynasm, x64::Assembler, AssemblyOffset};
+    use dynasmrt::{dynasm, x64::Assembler};
     use std::error::Error;
 
     #[test]
