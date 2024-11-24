@@ -4,7 +4,7 @@
 //   env-var: YK_LOG=4
 //   stderr: ...
 
-// Check that basic trace compilation works.
+// Benchmark a large loop to test trace compilation efficiency.
 
 #include <assert.h>
 #include <stdio.h>
@@ -13,27 +13,21 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-int dec(int i) {
-  return i - 1;
-}
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
-  yk_mt_hot_threshold_set(mt, 0);
+  // yk_mt_hot_threshold_set(mt, 1000000); // Set a higher threshold for benchmarking
   YkLocation loc = yk_location_new();
-
-  int res = 9998;
-  int i = 4;
-  NOOPT_VAL(loc);
-  NOOPT_VAL(res);
-  NOOPT_VAL(i);
-  while (i > 0) {
+  char *endptr;
+  long iterations = strtol(argv[1], &endptr, 10);
+  NOOPT_VAL(loc)
+  NOOPT_VAL(iterations);
+  int sum = 0;
+  while (sum < iterations) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
-    i = dec(i);
+    while (sum < iterations) {
+      sum += 1;
+    }
   }
-  fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

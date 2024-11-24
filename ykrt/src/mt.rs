@@ -30,7 +30,7 @@ use crate::{
     },
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
 };
-
+#[cfg(tracer_swt)]
 use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -58,6 +58,8 @@ const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 /// give up trying to trace (or compile...) it?
 const DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD: TraceCompilationErrorThreshold = 5;
 static REG64_SIZE: usize = 8;
+
+static mut swt_jump_flag: bool = false;
 
 thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
@@ -386,12 +388,21 @@ impl MT {
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
-                // execute asm
-                let func: unsafe fn() =
-                    unsafe { std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr()) };
+                #[cfg(tracer_swt)]
                 unsafe {
-                    func();
+                    // println!("about to return into unopt cp");
+                    // execute asm
+                    if !swt_jump_flag {
+                        swt_jump_flag = true;
+                    } else {
+                        let func: unsafe fn() =
+                            unsafe { std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr()) };
+                        unsafe {
+                            func();
+                        }
+                    }
                 }
+                // println!("returned into unopt cp");
             }
             TransitionControlPoint::StopTracing => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -421,9 +432,14 @@ impl MT {
                     }
                 }
                 // execute asm
-                let func: unsafe fn() = unsafe { std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr()) };
+                // println!("about to return into opt cp");
+                #[cfg(tracer_swt)]
                 unsafe {
-                    func();
+                    let func: unsafe fn() = unsafe { std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr()) };
+                    // println!("returned into opt cp");
+                    unsafe {
+                        func();
+                    }
                 }
             }
             TransitionControlPoint::StopSideTracing {
