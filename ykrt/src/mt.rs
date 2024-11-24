@@ -20,6 +20,8 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
 
+#[cfg(tracer_swt)]
+use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP};
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
@@ -30,8 +32,6 @@ use crate::{
     },
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
 };
-#[cfg(tracer_swt)]
-use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
@@ -398,11 +398,8 @@ impl MT {
                     if !swt_jump_flag {
                         swt_jump_flag = true;
                     } else {
-                        let func: unsafe fn() =
-                            unsafe { std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr()) };
-                        unsafe {
-                            func();
-                        }
+                        let func: unsafe fn() = std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr());
+                        func();
                     }
                 }
                 // println!("returned into unopt cp");
@@ -438,11 +435,8 @@ impl MT {
                 // println!("about to return into opt cp");
                 #[cfg(tracer_swt)]
                 unsafe {
-                    let func: unsafe fn() = unsafe { std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr()) };
-                    // println!("returned into opt cp");
-                    unsafe {
-                        func();
-                    }
+                    let func: unsafe fn() = std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr());
+                    func();
                 }
             }
             TransitionControlPoint::StopSideTracing {
