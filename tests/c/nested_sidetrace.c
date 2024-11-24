@@ -42,13 +42,10 @@
 //     yk-jit-event: enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     24
-//     yk-jit-event: re-enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     26
-//     yk-jit-event: re-enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     28
-//     yk-jit-event: re-enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     30
 //     ...
@@ -72,15 +69,12 @@
 //     yk-jit-event: execute-side-trace
 //     yk-jit-event: execute-side-trace
 //     51
-//     yk-jit-event: re-enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     yk-jit-event: execute-side-trace
 //     54
-//     yk-jit-event: re-enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     yk-jit-event: execute-side-trace
 //     57
-//     yk-jit-event: re-enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     yk-jit-event: execute-side-trace
 //     60

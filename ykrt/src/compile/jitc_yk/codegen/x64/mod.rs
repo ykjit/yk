@@ -41,7 +41,7 @@ use crate::{
         },
         CompiledTrace, Guard, GuardIdx, SideTraceInfo,
     },
-    location::{HotLocation, HotLocationKind},
+    location::HotLocation,
     mt::MT,
 };
 use dynasmrt::{
@@ -66,7 +66,7 @@ use yksmp;
 mod deopt;
 mod lsregalloc;
 
-use deopt::{__yk_deopt, __yk_guardcheck, __yk_reenter_jit};
+use deopt::{__yk_deopt, __yk_guardcheck};
 use lsregalloc::{LSRegAlloc, RegConstraint};
 
 /// General purpose argument registers as defined by the x64 SysV ABI.
@@ -160,8 +160,9 @@ impl CodeGen for X64CodeGen {
         hl: Arc<Mutex<HotLocation>>,
         sp_offset: Option<usize>,
         root_offset: Option<usize>,
+        prevguards: Option<Vec<GuardIdx>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        Assemble::new(&m, sp_offset, root_offset)?.codegen(mt, hl, sp_offset.is_some())
+        Assemble::new(&m, sp_offset, root_offset)?.codegen(mt, hl, prevguards)
     }
 }
 
@@ -257,9 +258,9 @@ impl<'a> Assemble<'a> {
         mut self: Box<Self>,
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
-        issidetrace: bool,
+        prevguards: Option<Vec<GuardIdx>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        if issidetrace {
+        if prevguards.is_some() {
             // Recover registers.
             for reg in lsregalloc::FP_REGS.iter() {
                 dynasm!(self.asm
@@ -347,14 +348,47 @@ impl<'a> Assemble<'a> {
                 }
                 dynasm!(self.asm; mov rcx, rsp);
 
+                // Push [GuardIdx]'s of previous guard failures.
+                if let Some(ref guards) = prevguards {
+                    for gidx in guards.iter().rev() {
+                        let g = i64::try_from(usize::from(*gidx)).unwrap();
+                        dynasm!(self.asm
+                            ; mov r9, QWORD g
+                            ; push r9
+                        );
+                    }
+                }
+                // Save the pointer to this list.
+                dynasm!(self.asm
+                    ; mov r8, rsp
+                );
+
+                let len = i64::try_from(prevguards.as_ref().map_or(0, |v| v.len())).unwrap();
+                // Total alignment caused by pushing the parent guards.
+                let mut totalalign = len * 8;
+
+                // Pushing RSI above mis-aligned the stack to 8 bytes, but the calling convetion
+                // requires us to be 16 bytes aligned. Unless we accidentally re-aligned it by
+                // pushing an uneven amount of previous [GuardIdx]'s, we need to re-align it here.
+                if len % 2 == 0 {
+                    dynasm!(self.asm
+                        ; sub rsp, 8
+                    );
+                    totalalign += 8;
+                }
+
                 // Check whether we need to deoptimise or jump into a side-trace.
                 dynasm!(self.asm
                     ; push rsi  // Save `deoptid`.
                     ; push rdx  // Save `gp_regs` pointer.
                     ; push rcx  // Save `fp_regs` pointer.
-                    ; mov rdi, rsi
+                    ; push r8   // Save parent guards pointer.
+                    ; mov rdi, rsi // Pass `deoptid`.
+                    ; mov rsi, r8  // Pass pointer to parent guards.
+                    ; mov rdx, QWORD len  // Pass length of parent guards.
                     ; mov rax, QWORD __yk_guardcheck as i64
                     ; call rax
+                    ; pop r8
                     ; pop rcx
                     ; pop rdx
                     ; pop rsi
@@ -365,6 +399,8 @@ impl<'a> Assemble<'a> {
                 // Jump into side-trace. The side-trace takes care of recovering the saved
                 // registers.
                 dynasm!(self.asm
+                    // Remove pushed [GuardIdx]'s from the stack as they are no longer needed.
+                    ; add rsp, i32::try_from(totalalign).unwrap()
                     ; jmp rax
                 );
 
@@ -372,8 +408,8 @@ impl<'a> Assemble<'a> {
                 dynasm!(self.asm; => deopt_label);
                 dynasm!(self.asm
                     ; mov rdi, rbp
+                    ; mov r9, QWORD len
                     ; mov rax, QWORD __yk_deopt as i64
-                    ; sub rsp, 8 // Align the stack
                     ; call rax
                 );
             }
@@ -403,6 +439,7 @@ impl<'a> Assemble<'a> {
             mt,
             buf,
             deoptinfo: self.deoptinfo,
+            prevguards,
             sp_offset: self.ra.stack_size(),
             prologue_offset: prologue_offset.0,
             entry_vars: self.loop_start_locs.clone(),
@@ -496,6 +533,7 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
                 jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
                 jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
+                jit_ir::Inst::FNeg(i) => self.cg_fneg(iidx, i),
             }
 
             next = iter.next();
@@ -716,10 +754,12 @@ impl<'a> Assemble<'a> {
                     }
                 }
             }
-            BinOp::AShr | BinOp::LShr => {
-                // We inherit from LLVM the following semantics: a poison value is computed if you
-                // shift by >= the bit width of the first operand. We can ignore this, since we are
-                // free to compute any value in place of a poison value.
+            BinOp::AShr | BinOp::LShr | BinOp::Shl => {
+                // LLVM defines that a poison value is computed if one shifts by >= the bit width
+                // of the first operand. This allows us to ignore a lot of seemingly necessary
+                // checks in the below. For example we get away with using the 8-bit register `cl`
+                // because we don't support any types bigger than 64 bits. If at runtime someone
+                // tries to shift a value bigger than `cl` can express, then that's their problem!
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
@@ -753,6 +793,14 @@ impl<'a> Assemble<'a> {
                                     u8::try_from(*bit_size).unwrap(),
                                 );
                                 dynasm!(self.asm; shr Rq(lhs_reg.code()), v);
+                            }
+                            _ => todo!(),
+                        },
+                        BinOp::Shl => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; shl Rd(lhs_reg.code()), v),
+                            1..=64 => {
+                                dynasm!(self.asm; shl Rq(lhs_reg.code()), v);
                             }
                             _ => todo!(),
                         },
@@ -796,32 +844,16 @@ impl<'a> Assemble<'a> {
                             }
                             _ => todo!(),
                         },
+                        BinOp::Shl => match bit_size {
+                            0 => unreachable!(),
+                            32 => dynasm!(self.asm; shl Rd(lhs_reg.code()), cl),
+                            1..=64 => {
+                                dynasm!(self.asm; shl Rq(lhs_reg.code()), cl);
+                            }
+                            _ => todo!(),
+                        },
                         _ => unreachable!(),
                     }
-                }
-            }
-            BinOp::Shl => {
-                // We inherit from LLVM the following semantics: a poison value is computed if you
-                // shift by >= the bit width of the first operand. We can ignore this, since we are
-                // free to compute any value in place of a poison value.
-                let byte_size = lhs.byte_size(self.m);
-                let [lhs_reg, _rhs_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [
-                        RegConstraint::InputOutput(lhs),
-                        // When using a register second operand, it has to be passed in CL.
-                        RegConstraint::InputIntoReg(rhs, Rq::RCX),
-                    ],
-                );
-                debug_assert_eq!(_rhs_reg, Rq::RCX);
-                match byte_size {
-                    0 => unreachable!(),
-                    1..=8 => {
-                        // OK to ignore any undefined high-order bits here.
-                        dynasm!(self.asm; shl Rq(lhs_reg.code()), cl);
-                    }
-                    _ => todo!(),
                 }
             }
             BinOp::Mul => {
@@ -1987,53 +2019,7 @@ impl<'a> Assemble<'a> {
         self.write_jump_vars(Some(self.m.root_entry_vars()));
         self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
 
-        // The call to `__yk_reenter_jit" has the potential to clobber most of our registers, so
-        // save and restore them here.
         dynasm!(self.asm
-            ; push rax
-            ; push rcx
-            ; push rdx
-            ; push rsi
-            ; push rdi
-            ; push r8
-            ; push r9
-            ; push r10
-            ; push r11
-        );
-
-        for reg in lsregalloc::FP_REGS.iter() {
-            dynasm!(self.asm
-                ; movq rcx, Rx(reg.code())
-                ; push rcx
-            );
-        }
-
-        // Set the current executed trace in MT.
-        #[allow(clippy::fn_to_numeric_cast)]
-        {
-            dynasm!(self.asm
-                ; mov rdi, QWORD __yk_reenter_jit as i64
-                ; call rdi
-            );
-        }
-
-        // Restore saved registers.
-        for reg in lsregalloc::FP_REGS.iter().rev() {
-            dynasm!(self.asm
-                ; pop rcx
-                ; movq Rx(reg.code()), rcx
-            );
-        }
-        dynasm!(self.asm
-            ; pop r11
-            ; pop r10
-            ; pop r9
-            ; pop r8
-            ; pop rdi
-            ; pop rsi
-            ; pop rdx
-            ; pop rcx
-            ; pop rax
             // Reset rsp to the root trace's frame.
             ; mov rsp, rbp
             ; sub rsp, i32::try_from(self.root_offset.unwrap()).unwrap()
@@ -2296,6 +2282,43 @@ impl<'a> Assemble<'a> {
         fail_label
     }
 
+    fn cg_fneg(&mut self, iidx: InstIdx, inst: &jit_ir::FNegInst) {
+        let val = inst.val(self.m);
+        let ty = self.m.type_(val.tyidx(self.m));
+
+        // There is no dedicated instruction for negating the value in an XMM register, so we flip
+        // the sign bit manually. It's a bit of a dance since you can't XORPS with an immediate
+        // float.
+        let [tmpi_reg] = self
+            .ra
+            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Temporary]);
+        let [io_reg, tmpf_reg] = self.ra.assign_fp_regs(
+            &mut self.asm,
+            iidx,
+            [RegConstraint::InputOutput(val), RegConstraint::Temporary],
+        );
+        match ty {
+            jit_ir::Ty::Float(jit_ir::FloatTy::Float) => {
+                dynasm!(self.asm
+                    ; mov Rd(tmpi_reg.code()), DWORD 0x80000000u32 as i32 // cast intentional
+                    ; movd Rx(tmpf_reg.code()), Rd(tmpi_reg.code())
+                    ; xorps Rx(io_reg.code()), Rx(tmpf_reg.code())
+                );
+            }
+            jit_ir::Ty::Float(jit_ir::FloatTy::Double) => {
+                dynasm!(self.asm
+                    ; mov Rq(tmpi_reg.code()), QWORD 0x8000000000000000u64 as i64 // cast intentional
+                    ; movq Rx(tmpf_reg.code()), Rq(tmpi_reg.code())
+                    ; xorpd Rx(io_reg.code()), Rx(tmpf_reg.code())
+                );
+            }
+            _ => {
+                // This bytecode only operates on floating point values.
+                panic!();
+            }
+        }
+    }
+
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
         let fail_label = self.guard_to_deopt(inst);
         let cond = inst.cond(self.m);
@@ -2332,6 +2355,8 @@ pub(super) struct X64CompiledTrace {
     buf: ExecutableBuffer,
     /// Deoptimisation info: maps a [GuardIdx] to [DeoptInfo].
     deoptinfo: HashMap<usize, DeoptInfo>,
+    /// [GuardIdx]'s of all failing guards leading up to this trace.
+    prevguards: Option<Vec<GuardIdx>>,
     /// Stack pointer offset from the base pointer of interpreter frame as defined in
     /// [YkSideTraceInfo::sp_offset].
     sp_offset: usize,
@@ -2366,7 +2391,12 @@ impl CompiledTrace for X64CompiledTrace {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
 
-    fn sidetraceinfo(&self, gidx: GuardIdx) -> Arc<dyn SideTraceInfo> {
+    fn sidetraceinfo(
+        &self,
+        root_ctr: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
+    ) -> Arc<dyn SideTraceInfo> {
+        let root_ctr = root_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
         // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
         // the `CompiledTrace` and `gidx` or better a reference to `DeoptInfo`?
         let deoptinfo = &self.deoptinfo[&usize::from(gidx)];
@@ -2377,29 +2407,24 @@ impl CompiledTrace for X64CompiledTrace {
             .collect();
         let callframes = deoptinfo.inlined_frames.clone();
 
-        // Get the root trace from the HotLocation.
-        // FIXME: It might be better if we had a consistent mechanism for doing this rather than
-        // fishing it out of the HotLocationKind`.
-        let hlarc = self.hl.upgrade().unwrap();
-        let hl = hlarc.lock();
-        let root_ctr = match &hl.kind {
-            HotLocationKind::Compiled(root_ctr) => Arc::clone(root_ctr)
-                .as_any()
-                .downcast::<X64CompiledTrace>()
-                .unwrap(),
-            HotLocationKind::SideTracing { root_ctr, .. } => Arc::clone(root_ctr)
-                .as_any()
-                .downcast::<X64CompiledTrace>()
-                .unwrap(),
-            _ => panic!("Unexpected HotLocationKind"),
-        };
-
         // Calculate the address inside the root trace we want side-traces to jump to. Currently
         // this is directly after the prologue. Later we will change this to jump to after the
         // preamble and before the peeled loop.
         let root_addr = unsafe { root_ctr.entry().add(root_ctr.prologue_offset) };
+
+        // Pass along [GuardIdx]'s of previous guard failures and add this guard failure's
+        // [GuardIdx] to the list.
+        let guards = if let Some(v) = &self.prevguards {
+            let mut v = v.clone();
+            v.push(gidx);
+            v
+        } else {
+            vec![gidx]
+        };
+
         Arc::new(YkSideTraceInfo {
             bid: deoptinfo.bid.clone(),
+            guards,
             lives,
             callframes,
             root_addr: RootTracePtr(root_addr),
@@ -2675,7 +2700,7 @@ mod tests {
         match_asm(
             Assemble::new(&m, None, None)
                 .unwrap()
-                .codegen(mt, Arc::new(Mutex::new(hl)), false)
+                .codegen(mt, Arc::new(Mutex::new(hl)), None)
                 .unwrap()
                 .as_any()
                 .downcast::<X64CompiledTrace>()
@@ -3208,19 +3233,22 @@ mod tests {
                 %3: i16 = shl %0, 1i16
                 %4: i32 = shl %1, 2i32
                 %5: i63 = shl %2, 3i63
+                %6: i32 = shl %1, %4
             ",
             "
                 ...
                 ; %3: i16 = shl %0, 1i16
                 ...
-                {{_}} {{_}}: shl r.64.a, r.8.b
+                {{_}} {{_}}: shl r.64.a, 0x01
                 ; %4: i32 = shl %1, 2i32
                 ...
-                {{_}} {{_}}: shl r.64.c, r.8.b
+                {{_}} {{_}}: shl r.32.a, 0x02
                 ; %5: i63 = shl %2, 3i63
                 ...
-                {{_}} {{_}}: shl r.64.e, r.8.b
-                ...
+                {{_}} {{_}}: shl r.64.b, 0x03
+                ; %6: i32 = shl %1, %4
+                ......
+                {{_}} {{_}}: shl r.32.b, cl
                 ",
         );
     }
@@ -3713,8 +3741,8 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 ... mov rdi, rbp
+                ... mov r9, 0x...
                 ... mov rax, 0x...
-                ... sub rsp, 0x08
                 ... call rax
             ",
         );
@@ -3741,8 +3769,8 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 ... mov rdi, rbp
+                ... mov r9, 0x...
                 ... mov rax, 0x...
-                ... sub rsp, 0x08
                 ... call rax
             ",
         );
@@ -3772,8 +3800,8 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 ... mov rdi, rbp
+                ... mov r9, 0x...
                 ... mov rax, 0x...
-                ... sub rsp, 0x08
                 ... call rax
             ",
         );
@@ -4326,6 +4354,30 @@ mod tests {
                 ; tloop_jump [42i8]:
                 {{_}} {{_}}: mov r.64.x, 0x2a
                 {{_}} {{_}}: jmp ...
+            ",
+        );
+    }
+
+    #[test]
+    fn cg_fneg() {
+        codegen_and_test(
+            "
+              entry:
+                %0: float = load_ti 0
+                %1: double = load_ti 1
+                %2: float = fneg %0
+                %3: double = fneg %1
+            ",
+            "
+                ...
+                ; %2: float = fneg %0
+                {{_}} {{_}}: mov r.32.x, 0x80000000
+                {{_}} {{_}}: movd fp.128.y, r.32.x
+                {{_}} {{_}}: xorps fp.128.z, fp.128.y
+                ; %3: double = fneg %1
+                {{_}} {{_}}: mov r.64.x, 0x8000000000000000
+                {{_}} {{_}}: movq fp.128.y, r.64.x
+                {{_}} {{_}}: xorpd fp.128.a, fp.128.y
             ",
         );
     }

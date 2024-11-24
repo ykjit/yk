@@ -10,7 +10,7 @@ use super::super::{
     aot_ir::{BinOp, FloatPredicate, InstID, Predicate},
     jit_ir::{
         BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
-        FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
+        FNegInst, FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
         IndirectCallInst, Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand,
         PackedOperand, PtrAddInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty,
         TyIdx, ZExtInst,
@@ -423,6 +423,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             FPToSIInst::new(&self.process_operand(val)?, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
+                    ASTInst::FNeg { assign, val } => {
+                        let inst = FNegInst::new(self.process_operand(val)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
                     ASTInst::Store { tgt, val, volatile } => {
                         let inst = StoreInst::new(
                             self.process_operand(tgt)?,
@@ -815,6 +819,10 @@ enum ASTInst {
         type_: ASTType,
         val: ASTOperand,
     },
+    FNeg {
+        assign: Span,
+        val: ASTOperand,
+    },
     Store {
         tgt: ASTOperand,
         val: ASTOperand,
@@ -984,6 +992,7 @@ mod tests {
               %53: i64 = icall<ft1> %9(%5, %7, %0)
               tloop_jump [%12, %6]
               %54: float = bitcast %7
+              %55: float = fneg %54
         ",
         );
     }

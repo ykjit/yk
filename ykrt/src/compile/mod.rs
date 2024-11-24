@@ -68,7 +68,11 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// upcasting in Rust is incomplete.
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
 
-    fn sidetraceinfo(&self, gidx: GuardIdx) -> Arc<dyn SideTraceInfo>;
+    fn sidetraceinfo(
+        &self,
+        root_ctr: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
+    ) -> Arc<dyn SideTraceInfo>;
 
     /// Return a reference to the guard `id`.
     fn guard(&self, gidx: GuardIdx) -> &Guard;
@@ -113,7 +117,11 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn sidetraceinfo(&self, _gidx: GuardIdx) -> Arc<dyn SideTraceInfo> {
+        fn sidetraceinfo(
+            &self,
+            _root_ctr: Arc<dyn CompiledTrace>,
+            _gidx: GuardIdx,
+        ) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
 
@@ -156,7 +164,11 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn sidetraceinfo(&self, _gidx: GuardIdx) -> Arc<dyn SideTraceInfo> {
+        fn sidetraceinfo(
+            &self,
+            _root_ctr: Arc<dyn CompiledTrace>,
+            _gidx: GuardIdx,
+        ) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
 

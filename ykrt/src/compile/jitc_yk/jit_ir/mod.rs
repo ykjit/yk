@@ -1450,6 +1450,7 @@ pub(crate) enum Inst {
     FCmp(FCmpInst),
     FPToSI(FPToSIInst),
     BitCast(BitCastInst),
+    FNeg(FNegInst),
 }
 
 impl Inst {
@@ -1501,6 +1502,7 @@ impl Inst {
             Self::FPExt(i) => i.dest_tyidx(),
             Self::FCmp(_) => m.int1_tyidx(),
             Self::FPToSI(i) => i.dest_tyidx(),
+            Self::FNeg(i) => i.val(m).tyidx(m),
         }
     }
 
@@ -1633,6 +1635,7 @@ impl Inst {
                 rhs.unpack(m).map_iidx(f);
             }
             Inst::FPToSI(FPToSIInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::FNeg(FNegInst { val }) => val.unpack(m).map_iidx(f),
         }
     }
 
@@ -1743,6 +1746,7 @@ impl Inst {
                 rhs.map_iidx(f);
             }
             Inst::FPToSI(FPToSIInst { val, .. }) => val.map_iidx(f),
+            Inst::FNeg(FNegInst { val }) => val.map_iidx(f),
         }
     }
 
@@ -1803,6 +1807,7 @@ impl Inst {
             (Self::FPExt(x), Self::FPExt(y)) => x.decopy_eq(m, y),
             (Self::FCmp(x), Self::FCmp(y)) => x.decopy_eq(m, y),
             (Self::FPToSI(x), Self::FPToSI(y)) => x.decopy_eq(m, y),
+            (Self::FNeg(x), Self::FNeg(y)) => x.decopy_eq(m, y),
             (x, y) => todo!("{x:?} {y:?}"),
         }
     }
@@ -1994,6 +1999,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 x.rhs(self.m).display(self.m)
             ),
             Inst::FPToSI(i) => write!(f, "fp_to_si {}", i.val(self.m).display(self.m)),
+            Inst::FNeg(i) => write!(f, "fneg {}", i.val(self.m).display(self.m)),
         }
     }
 }
@@ -2029,6 +2035,7 @@ inst!(FPExt, FPExtInst);
 inst!(FCmp, FCmpInst);
 inst!(FPToSI, FPToSIInst);
 inst!(BitCast, BitCastInst);
+inst!(FNeg, FNegInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -2455,6 +2462,33 @@ impl SelectInst {
     /// Returns the value for when the condition is false.
     pub(crate) fn falseval(&self, m: &Module) -> Operand {
         self.falseval.unpack(m)
+    }
+}
+
+/// The operands for a [Inst::FNeg]
+///
+/// # Semantics
+///
+/// Negates the floating point value.
+#[derive(Clone, Copy, Debug)]
+pub struct FNegInst {
+    val: PackedOperand,
+}
+
+impl FNegInst {
+    pub(crate) fn new(val: Operand) -> Self {
+        Self {
+            val: PackedOperand::new(&val),
+        }
+    }
+
+    /// Returns the value to be negated.
+    pub(crate) fn val(&self, m: &Module) -> Operand {
+        self.val.unpack(m)
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m)
     }
 }
 

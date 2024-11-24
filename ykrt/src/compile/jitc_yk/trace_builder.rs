@@ -138,6 +138,28 @@ impl TraceBuilder {
         Ok(())
     }
 
+    /// Process promotions inside an otherwise outlined block.
+    fn process_promotions_only(&mut self, bid: &aot_ir::BBlockId) -> Result<(), CompilationError> {
+        let blk = self.aot_mod.bblock(bid);
+
+        for inst in blk.insts.iter() {
+            if let aot_ir::Inst::Promote {
+                val: aot_ir::Operand::LocalVariable(_),
+                tyidx,
+                ..
+            } = inst
+            {
+                let width_bits = match self.aot_mod.type_(*tyidx) {
+                    aot_ir::Ty::Integer(it) => it.num_bits(),
+                    _ => unreachable!(),
+                };
+                let width_bytes = usize::try_from(width_bits.div_ceil(8)).unwrap();
+                self.promote_idx += width_bytes;
+            }
+        }
+        Ok(())
+    }
+
     /// Walk over a traced AOT block, translating the constituent instructions into the JIT module.
     fn process_block(
         &mut self,
@@ -263,6 +285,7 @@ impl TraceBuilder {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_promote(bid, iidx, val, safepoint, tyidx, nextinst)
                 }
+                aot_ir::Inst::FNeg { val } => self.handle_fneg(bid, iidx, val),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -1098,6 +1121,16 @@ impl TraceBuilder {
         }
     }
 
+    fn handle_fneg(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        val: &aot_ir::Operand,
+    ) -> Result<(), CompilationError> {
+        let inst = jit_ir::FNegInst::new(self.handle_operand(val)?).into();
+        self.copy_inst(inst, bid, aot_inst_idx)
+    }
+
     /// Entry point for building an IR trace.
     ///
     /// Consumes the trace builder, returning a JIT module.
@@ -1247,7 +1280,29 @@ impl TraceBuilder {
                             // blocks normally.
                             self.outline_target_blk = None;
                         } else {
-                            // We are outlining so just skip this block.
+                            // We are outlining so just skip this block. However, we still need to
+                            // process promoted values to make sure we've processed all promotion
+                            // data and haven't messed up the mapping.
+                            #[cfg(tracer_hwt)]
+                            {
+                                // Due to hardware tracing we see the same block twice whenever
+                                // there is a call. We only need to process one of them. We can
+                                // skip the block if:
+                                //  a) The previous block had a return.
+                                //  b) The previous block is unmappable and the current block isn't
+                                //  an entry block.
+                                if last_blk_is_return {
+                                    last_blk_is_return = self.aot_mod.bblock(&bid).is_return();
+                                    prev_bid = Some(bid);
+                                    continue;
+                                }
+                                last_blk_is_return = self.aot_mod.bblock(&bid).is_return();
+                                if prev_bid.is_none() && !bid.is_entry() {
+                                    prev_bid = Some(bid);
+                                    continue;
+                                }
+                            }
+                            self.process_promotions_only(&bid)?;
                             prev_bid = Some(bid);
                             continue;
                         }
@@ -1295,12 +1350,13 @@ impl TraceBuilder {
                     prev_bid = Some(bid);
                 }
                 None => {
-                    // UnmappableBBlock block
+                    // Unmappable block
                     prev_bid = None;
                 }
             }
         }
 
+        debug_assert_eq!(self.promote_idx, self.promotions.len());
         let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
         let cpcall = blk.insts.iter().rev().nth(1).unwrap();
         debug_assert!(cpcall.is_control_point(self.aot_mod));

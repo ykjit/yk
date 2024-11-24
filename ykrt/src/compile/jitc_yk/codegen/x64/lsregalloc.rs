@@ -827,9 +827,11 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::InputIntoRegAndClobber(_, reg)
                 | RegConstraint::OutputFromReg(reg)
                 | RegConstraint::Clobber(reg) => avoid.set(*reg),
-                RegConstraint::Input(_) | RegConstraint::InputOutput(_) | RegConstraint::Output => {
-                }
-                RegConstraint::InputOutputIntoReg(_, _) | RegConstraint::Temporary => {
+                RegConstraint::Input(_)
+                | RegConstraint::InputOutput(_)
+                | RegConstraint::Output
+                | RegConstraint::Temporary => {}
+                RegConstraint::InputOutputIntoReg(_, _) => {
                     panic!();
                 }
             }
@@ -873,7 +875,7 @@ impl LSRegAlloc<'_> {
                 }
                 RegConstraint::Output | RegConstraint::OutputFromReg(_) => (),
                 RegConstraint::InputOutputIntoReg(_op, _reg) => unreachable!(),
-                RegConstraint::Temporary => todo!(),
+                RegConstraint::Temporary => (),
             }
         }
 
@@ -970,7 +972,13 @@ impl LSRegAlloc<'_> {
                     out[i] = Some(*reg);
                 }
                 RegConstraint::InputOutputIntoReg(_, _) => unreachable!(),
-                RegConstraint::Temporary => todo!(),
+                RegConstraint::Temporary => {
+                    let reg = self.assign_empty_fp_reg(asm, iidx, avoid);
+                    self.fp_regset.unset(reg);
+                    self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                    avoid.set(reg);
+                    out[i] = Some(reg);
+                }
             }
         }
 
