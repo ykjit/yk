@@ -213,25 +213,26 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                 // let dst_reg = reg_num_to_dynasm_reg(dst_reg_num);
 
                 let src_reg = u8::try_from(*src_reg_num).unwrap();
+                let src_offset = reg_num_stack_offset(*src_reg_num);
                 let dst_reg = u8::try_from(*dst_reg_num).unwrap();
 
                 match *src_val_size {
                     1 => dynasm!(asm
                         // ; mov al, BYTE [Rq(src_reg)]
                         // ; mov BYTE [Rq(dst_reg) + *dst_off], al#
-                        ; mov al, BYTE [Rq(src_reg)]
+                        ; mov al, BYTE [rsp + src_offset]
                         ; mov BYTE [Rq(dst_reg) + *dst_off], al
                     ),
                     2 => dynasm!(asm
-                        ; mov ax, WORD [Rq(src_reg)]
+                        ; mov ax, WORD [rsp + src_offset]
                         ; mov WORD [Rq(dst_reg) + *dst_off], ax
                     ),
                     4 => dynasm!(asm
-                        ; mov eax, DWORD [Rq(src_reg)]
+                        ; mov eax, DWORD [rsp + src_offset]
                         ; mov DWORD [Rq(dst_reg) + *dst_off], eax
                     ),
                     8 => dynasm!(asm
-                        ; mov rax, QWORD [Rq(src_reg)]
+                        ; mov rax, QWORD [rsp + src_offset]
                         ; mov QWORD [Rq(dst_reg) + *dst_off], rax
                     ),
                     _ => panic!("Unsupported source value size: {}", src_val_size),
