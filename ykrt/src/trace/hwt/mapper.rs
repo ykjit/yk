@@ -169,7 +169,18 @@ impl Iterator for HWTTraceIterator {
     type Item = Result<TraceAction, AOTTraceIteratorError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.tas_generated == 0 {
-            // The first block contains the control point, which we need to remove.
+            // Remove the first block.
+            //
+            // If we are collecting a top-level trace, this removes the remainder of the block
+            // containing the control point.
+            //
+            // If we are side-tracing then this attempts to remove the block containing the failed
+            // guard, which is captured by the hardware tracer, but which we have already executed
+            // in the parent trace. Note though, that some conditionals (e.g. switches) can span
+            // multiple machine blocks, which are not all removed here. Since we don't have enough
+            // information at this level to remove all of them, there's a workaround in the trace
+            // builder.
+            //
             // As a rough proxy for "check that we removed only the thing we want to remove", we know
             // that the control point will be contained in a single mappable block. The `unwrap` can
             // only fail if our assumption about the block is incorrect (i.e. some part of the system
