@@ -106,15 +106,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
     let (dst_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
 
-    println!("@@ Copy live vars from {} to {}", src_smid, dst_smid);
-    // for live_var in src_rec.live_vars.iter() {
-    //     println!("@@ unopt cp live var: {:?}", live_var);
-    // }
-
-    // for live_var in dst_rec.live_vars.iter() {
-    //     println!("@@ opt cp live var: {:?}", live_var);
-    // }
-
     // Save all the registers to the stack
     dynasm!(asm
         ; .arch x64
@@ -138,10 +129,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
     // TODO: remove this temporary break instruction
     // dynasm!(asm; int3);
 
-    dynasm!(asm
-        ; int3 // breakpoint
-    );
-
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
         let dst_var = &dst_rec.live_vars[index];
         if src_var.len() > 1 || dst_var.len() > 1 {
@@ -150,282 +137,124 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
 
         let src_location = &src_var.get(0).unwrap();
         let dst_location = &dst_var.get(0).unwrap();
-        // copy live vars
-        match (src_location, dst_location) {
-            // Src Register
-            (
-                Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg),
-                Register(dst_reg_num, dst_val_size, dst_add_locs, _dst_add_loc_reg),
-            ) => {
-                println!(
-                    "@@ Register to Register - from {:?} to {:?}",
-                    src_reg_num, dst_reg_num
-                );
-                assert!(
-                    *src_add_locs == 0 && *dst_add_locs == 0,
-                    "deal with additional info"
-                );
-                assert!(
-                    dst_val_size == src_val_size,
-                    "src and dst val size must match"
-                );
-                // skip copying to the same register with the same value size
-                if src_reg_num == dst_reg_num && src_val_size == dst_val_size {
-                    continue;
-                }
-                let src_offset = reg_num_stack_offset(*src_reg_num);
-                let dest_reg = u8::try_from(*dst_reg_num).unwrap();
-                match *src_val_size {
-                    1 => todo!("implement reg to reg 1 byte"),
-                    2 => todo!("implement reg to reg 2 bytes"),
-                    4 => todo!("implement reg to reg 4 bytes"),
-                    8 => {
-                        // println!(
-                        //     "@@ Reg to Reg - moving 8 bytes from {:?} to {:?}",
-                        //     src_reg_num, dst_reg_num
-                        // );
-                        dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]);
-                    }
-                    _ => todo!("implement Register to Register value size {}", src_val_size),
-                }
-            }
-            (
-                Register(_src_num, _src_val_size, _src_add_locs, _src_add_loc_reg),
-                Direct(_dst_reg_num, _dst_off, _dst_val_size),
-            ) => {
-                panic!("direct to register is not expceted and not implemented");
-            }
-            (
-                Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg),
-                Indirect(dst_reg_num, dst_off, dst_val_size),
-            ) => {
-                assert!(
-                    dst_val_size == src_val_size,
-                    "Register to Indirect - src and dst val size must match. got src: {} and dst: {}",
-                    src_val_size, dst_val_size
-                );
-                println!(
-                    "@@ Register to Indirect - from {:?} to {:?}",
-                    src_reg_num, dst_reg_num
-                );
-
-                // let src_reg = reg_num_to_dynasm_reg(src_reg_num);
-                // let dst_reg = reg_num_to_dynasm_reg(dst_reg_num);
-
-                let src_reg = u8::try_from(*src_reg_num).unwrap();
-                let src_offset = reg_num_stack_offset(*src_reg_num);
-                let dst_reg = u8::try_from(*dst_reg_num).unwrap();
-
-                match *src_val_size {
-                    1 => dynasm!(asm
-                        // ; mov al, BYTE [Rq(src_reg)]
-                        // ; mov BYTE [Rq(dst_reg) + *dst_off], al#
-                        ; mov al, BYTE [rsp + src_offset]
-                        ; mov BYTE [Rq(dst_reg) + *dst_off], al
-                    ),
-                    2 => dynasm!(asm
-                        ; mov ax, WORD [rsp + src_offset]
-                        ; mov WORD [Rq(dst_reg) + *dst_off], ax
-                    ),
-                    4 => dynasm!(asm
-                        ; mov eax, DWORD [rsp + src_offset]
-                        ; mov DWORD [Rq(dst_reg) + *dst_off], eax
-                    ),
-                    8 => dynasm!(asm
-                        ; mov rax, QWORD [rsp + src_offset]
-                        ; mov QWORD [Rq(dst_reg) + *dst_off], rax
-                    ),
-                    _ => panic!("Unsupported source value size: {}", src_val_size),
-                }
-            }
-            (
-                Register(_src_num, _src_val_size, _src_add_locs, _src_add_loc_reg),
-                Constant(_val),
-            ) => {
-                // TODO: Is that a valid case?
-                panic!("Constant to register is not expected");
-            }
-            (
-                Register(_src_num, _src_val_size, _src_add_locs, _src_add_loc_reg),
-                LargeConstant(_val),
-            ) => {
-                panic!("Large constant to register is not expected");
-            }
-
-            // src Direct
-            (
-                Direct(_src_reg_num, _src_off, _src_val_size),
-                Register(_dst_num, _dst_val_size, _dst_add_locs, _dst_add_loc_reg),
-            ) => {
-                todo!("implement Direct to Register")
-            }
-            (
-                Direct(src_reg_num, src_off, src_val_size),
-                Direct(dst_reg_num, dst_off, dst_val_size),
-            ) => {
-                assert_eq!(
-                    *src_val_size, *dst_val_size,
-                    "Source and destination value sizes do not match"
-                );
-                println!(
-                    "@@ Direct to Direct - from {:?} to {:?}",
-                    src_reg_num, dst_reg_num
-                );
-
-                let src_reg = u8::try_from(*src_reg_num).unwrap();
-                let dst_reg = u8::try_from(*dst_reg_num).unwrap();
-
-                // Skipping copying to the same register with the same offset
-                if src_reg_num == dst_reg_num && src_off == dst_off {
-                    continue;
-                }
-                match *src_val_size {
-                    1 => dynasm!(asm
-                        ; mov al, BYTE [Rq(src_reg) + *src_off]
-                        ; mov BYTE [Rq(dst_reg) + *dst_off], al
-                    ),
-                    2 => dynasm!(asm
-                        ; mov ax, WORD [Rq(src_reg) + *src_off]
-                        ; mov WORD [Rq(dst_reg) + *dst_off], ax
-                    ),
-                    4 => dynasm!(asm
-                        ; mov eax, DWORD [Rq(src_reg) + *src_off]
-                        ; mov DWORD [Rq(dst_reg) + *dst_off], eax
-                    ),
-                    8 => dynasm!(asm
-                        ; mov rax, QWORD [Rq(src_reg) + *src_off]
-                        ; mov QWORD [Rq(dst_reg) + *dst_off], rax
-                    ),
-                    _ => panic!("Unsupported source value size: {}", src_val_size),
-                }
-            }
-
-            (
-                Direct(_src_reg_num, _src_off, _src_val_size),
-                Indirect(_dst_reg_num, _dst_off, _dst_add_loc_reg),
-            ) => {
-                todo!("implement Direct to Indirect")
-            }
-            (Direct(_src_reg_num, _src_off, _src_val_size), Constant(_val)) => {
-                // TODO: is that expected?
-                todo!("implement Direct to Constant")
-            }
-            (Direct(_src_reg_num, _src_off, _src_val_size), LargeConstant(_val)) => {
-                todo!("implement Direct to LargeConstant")
-            }
-            // src Indirect
-            (
-                Indirect(src_reg_num, src_off, src_val_size),
-                Register(dst_reg_num, dst_val_size, dst_add_locs, _dst_add_loc_reg),
-            ) => {
-                println!(
-                    "@@ Indirect to Register - from {:?} to {:?}",
-                    src_reg_num, dst_reg_num
-                );
-                assert!(*dst_add_locs == 0, "deal with additional info");
-                let src_reg = u8::try_from(*src_reg_num).unwrap();
-                let dst_reg = u8::try_from(*dst_reg_num).unwrap();
-                match *dst_val_size {
-                    1 => todo!("implement Indirect to Register 1 byte"),
-                    2 => todo!("implement Indirect to Register 2 bytes"),
-                    4 => todo!("implement Indirect to Register 4 bytes"),
-                    8 => {
-                        dynasm!(asm
-                            ; mov Rq(dst_reg), QWORD [Rq(src_reg) + *src_off]
+        match dst_location {
+            Indirect(dst_reg_num, dst_off, dst_val_size) => {
+                match src_location {
+                    Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg) => {
+                        assert!(
+                            dst_val_size == src_val_size,
+                            "Register to Indirect - src and dst val size must match. got src: {} and dst: {}",
+                            src_val_size, dst_val_size
                         );
-                    }
-                    _ => panic!("Unsupported destination value size: {}", dst_val_size),
-                }
-            }
-            (
-                Indirect(_src_reg_num, _src_off, _src_add_loc_reg),
-                Direct(_dst_reg_num, _dst_off, _dst_val_size),
-            ) => {
-                todo!("implement Indirect to Direct")
-            }
-            (
-                Indirect(src_reg_num, src_off, src_val_size),
-                Indirect(dst_reg_num, dst_off, dst_val_size),
-            ) => {
-                println!(
-                    "@@ Indirect to Indirect - from {:?} to {:?}",
-                    src_reg_num, dst_reg_num
-                );
-                assert!(
-                    src_val_size == dst_val_size,
-                    "Value sizes must match, got src: {} and dst: {}",
-                    src_val_size,
-                    dst_val_size
-                );
-                let src_reg = u8::try_from(*src_reg_num).unwrap();
-                let dst_reg = u8::try_from(*dst_reg_num).unwrap();
+                        assert!(*src_add_locs == 0, "deal with additional info");
+                        println!(
+                            "@@ Register to Indirect - from {:?} to {:?}",
+                            src_reg_num, dst_reg_num
+                        );
+                        let src_reg = u8::try_from(*src_reg_num).unwrap();
+                        let src_offset = reg_num_stack_offset(*src_reg_num);
+                        let dst_reg = u8::try_from(*dst_reg_num).unwrap();
+                        match *src_val_size {
+                            1 => dynasm!(asm
+                                ; mov al, BYTE [rsp + src_offset]
+                                ; mov BYTE [Rq(dst_reg) + *dst_off], al
+                            ),
+                            2 => dynasm!(asm
+                                ; mov ax, WORD [rsp + src_offset]
+                                ; mov WORD [Rq(dst_reg) + *dst_off], ax
+                            ),
+                            4 => dynasm!(asm
+                                ; mov eax, DWORD [rsp + src_offset]
+                                ; mov DWORD [Rq(dst_reg) + *dst_off], eax
+                            ),
+                            8 => dynasm!(asm
+                                ; mov rax, QWORD [rsp + src_offset]
+                                ; mov QWORD [Rq(dst_reg) + *dst_off], rax
+                            ),
+                            _ => panic!("Unsupported source value size: {}", src_val_size),
+                        }
+                    },
+                    Constant(_val) => {
+                        // copy from constant to indirect
+                    },
+                    Indirect(src_reg_num, src_off, src_val_size) => {
+                        println!(
+                            "@@ Indirect to Indirect - from {:?} to {:?}",
+                            src_reg_num, dst_reg_num
+                        );
+                        assert!(
+                            src_val_size == dst_val_size,
+                            "Value sizes must match, got src: {} and dst: {}",
+                            src_val_size,
+                            dst_val_size
+                        );
+                        let src_reg = u8::try_from(*src_reg_num).unwrap();
+                        let dst_reg = u8::try_from(*dst_reg_num).unwrap();
 
-                // TODO: validate that I am reading from indirect correct!
-                match *src_val_size {
-                    1 => dynasm!(asm
-                        ; mov al, BYTE [Rq(src_reg) + *src_off]
-                        ; mov BYTE [Rq(dst_reg) + *dst_off], al
-                    ),
-                    2 => dynasm!(asm
-                        ; mov ax, WORD [Rq(src_reg) + *src_off]
-                        ; mov WORD [Rq(dst_reg) + *dst_off], ax
-                    ),
-                    4 => dynasm!(asm
-                        ; mov eax, DWORD [Rq(src_reg) + *src_off]
-                        ; mov DWORD [Rq(dst_reg) + *dst_off], eax
-                    ),
-                    8 => dynasm!(asm
-                        ; mov rax, QWORD [Rq(src_reg) + *src_off]
-                        ; mov QWORD [Rq(dst_reg) + *dst_off], rax
-                    ),
-                    _ => panic!("Unsupported source value size: {}", src_val_size),
+                        match *src_val_size {
+                            1 => dynasm!(asm
+                                ; mov al, BYTE [Rq(src_reg) + *src_off]
+                                ; mov BYTE [Rq(dst_reg) + *dst_off], al
+                            ),
+                            2 => dynasm!(asm
+                                ; mov ax, WORD [Rq(src_reg) + *src_off]
+                                ; mov WORD [Rq(dst_reg) + *dst_off], ax
+                            ),
+                            4 => dynasm!(asm
+                                ; mov eax, DWORD [Rq(src_reg) + *src_off]
+                                ; mov DWORD [Rq(dst_reg) + *dst_off], eax
+                            ),
+                            8 => dynasm!(asm
+                                ; mov rax, QWORD [Rq(src_reg) + *src_off]
+                                ; mov QWORD [Rq(dst_reg) + *dst_off], rax
+                            ),
+                            _ => panic!("Unsupported source value size: {}", src_val_size),
+                        }
+                    },
+                    _ => panic!("Unsupported source location: {:?}", src_location),
                 }
             }
-            (Indirect(_src_reg_num, _src_off, _src_add_loc_reg), Constant(_dst_val)) => {
-                todo!("implement Indirect to Constant")
+            Register(dst_reg_num, dst_val_size, dst_add_locs, _dst_add_loc_reg) => {
+                match src_location {
+                    Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg) => {
+                        println!(
+                            "@@ Register to Register - from {:?} to {:?}",
+                            src_reg_num, dst_reg_num
+                        );
+                        assert!(
+                            *src_add_locs == 0 && *dst_add_locs == 0,
+                            "deal with additional info"
+                        );
+                        assert!(
+                            dst_val_size == src_val_size,
+                            "src and dst val size must match"
+                        );
+                        // skip copying to the same register with the same value size
+                        if src_reg_num == dst_reg_num && src_val_size == dst_val_size {
+                            continue;
+                        }
+                        let src_offset = reg_num_stack_offset(*src_reg_num);
+                        let dest_reg = u8::try_from(*dst_reg_num).unwrap();
+                        match *src_val_size {
+                            1 => todo!("implement reg to reg 1 byte"),
+                            2 => todo!("implement reg to reg 2 bytes"),
+                            4 => todo!("implement reg to reg 4 bytes"),
+                            8 => dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]),
+                            _ => todo!("implement Register to Register value size {}", src_val_size),
+                        }
+                    }
+                    _ => panic!("Unsupported source location: {:?}", src_location),
+                }
             }
-            (Indirect(_src_reg_num, _src_off, _src_add_loc_reg), LargeConstant(_dst_val)) => {
-                todo!("implement Indirect to LargeConstant")
+            Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
+                // Direct locations are read-only, so it doesn't make sense to write to
+                // them. This is likely a case where the direct value has been moved
+                // somewhere else (register/normal stack) so dst and src no longer
+                // match. But since the value can't change we can safely ignore this.
             }
-            // src Constant
-            (
-                Constant(_val),
-                Register(_dst_num, _dst_val_size, _dst_add_locs, _dst_add_loc_reg),
-            ) => {
-                todo!("implement Constant to Register")
-            }
-            (Constant(_val), Direct(_dst_reg_num, _dst_off, _dst_val_size)) => {
-                todo!("implement Constant to Direct")
-            }
-            (Constant(_val), Indirect(_dst_reg_num, _dst_off, _dst_val_size)) => {
-                todo!("implement Constant to Indirect")
-            }
-            (Constant(_src_val), Constant(_dst_val)) => {
-                todo!("implement Constant to Constant")
-            }
-            (Constant(_src_val), LargeConstant(_dst_val)) => {
-                todo!("implement Constant to LargeConstant")
-            }
-            // src LargeConstant
-            (
-                LargeConstant(_val),
-                Register(_dst_num, _dst_val_size, _dst_add_locs, _dst_add_loc_reg),
-            ) => {
-                todo!("implement LargeConstant to Register")
-            }
-            (LargeConstant(_val), Direct(_dst_reg_num, _dst_off, _dst_val_size)) => {
-                todo!("implement LargeConstant to Direct")
-            }
-            (LargeConstant(_val), Indirect(_dst_reg_num, _dst_off, _dst_val_size)) => {
-                todo!("implement LargeConstant to Indirect")
-            }
-            (LargeConstant(_src_val), Constant(_dst_val)) => {
-                todo!("implement LargeConstant to Constant")
-            }
-            (LargeConstant(_src_val), LargeConstant(_dst_val)) => {
-                todo!("implement LargeConstant to LargeConstant")
-            }
+            _ => panic!("unexpectd dst location: {:?}", dst_location),
         }
+
     }
 
     // Assembly code to restore registers
