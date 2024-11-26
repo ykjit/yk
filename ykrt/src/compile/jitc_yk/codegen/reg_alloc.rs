@@ -31,6 +31,8 @@ pub(crate) enum VarLocation {
     ConstInt { bits: u32, v: u64 },
     /// A constant float.
     ConstFloat(f64),
+    /// A constant pointer.
+    ConstPtr(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

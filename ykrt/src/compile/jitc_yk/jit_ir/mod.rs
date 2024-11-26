@@ -157,12 +157,13 @@ pub(crate) struct Module {
     guard_info: Vec<GuardInfo>,
     /// Indirect calls.
     indirect_calls: Vec<IndirectCallInst>,
-    /// Live variables at the beginning of the loop.
-    loop_start_vars: Vec<Operand>,
-    /// Live variables at the end of the loop.
-    loop_jump_vars: Vec<Operand>,
     /// Live variables at the beginning of the root trace.
     root_entry_vars: Vec<VarLocation>,
+    /// Live variables at the beginning of the loop.
+    loop_start_vars: Vec<Operand>,
+    /// The ordered sequence of operands at the end of the loop: there will be one per [Operand] at
+    /// the start of the loop.
+    loop_jump_operands: Vec<PackedOperand>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
@@ -255,7 +256,7 @@ impl Module {
             guard_info: Vec::new(),
             indirect_calls: Vec::new(),
             loop_start_vars: Vec::new(),
-            loop_jump_vars: Vec::new(),
+            loop_jump_operands: Vec::new(),
             root_entry_vars: Vec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
@@ -609,8 +610,9 @@ impl Module {
         self.root_entry_vars.extend_from_slice(entry_vars);
     }
 
-    pub(crate) fn loop_jump_vars(&self) -> &[Operand] {
-        &self.loop_jump_vars
+    /// Return the loop jump operands.
+    pub(crate) fn loop_jump_operands(&self) -> &[PackedOperand] {
+        &self.loop_jump_operands
     }
 
     /// Get the entry live variables of the root trace.
@@ -619,7 +621,7 @@ impl Module {
     }
 
     pub(crate) fn push_loop_jump_var(&mut self, op: Operand) {
-        self.loop_jump_vars.push(op);
+        self.loop_jump_operands.push(PackedOperand::new(&op));
     }
 
     /// Get the address of the root trace. This is where we need jump to at the end of a
@@ -1606,13 +1608,13 @@ impl Inst {
                 }
             }
             Inst::TraceLoopJump => {
-                for x in &m.loop_jump_vars {
-                    x.map_iidx(f);
+                for x in &m.loop_jump_operands {
+                    x.unpack(m).map_iidx(f);
                 }
             }
             Inst::RootJump => {
-                for x in &m.loop_jump_vars {
-                    x.map_iidx(f);
+                for x in &m.loop_jump_operands {
+                    x.unpack(m).map_iidx(f);
                 }
             }
             Inst::SExt(SExtInst { val, .. }) => val.unpack(m).map_iidx(f),
@@ -1711,19 +1713,13 @@ impl Inst {
                 }
             }
             Inst::TraceLoopJump => {
-                for val in &m.loop_jump_vars {
-                    match val {
-                        Operand::Var(iidx) => f(*iidx),
-                        Operand::Const(_) => (),
-                    }
+                for val in &m.loop_jump_operands {
+                    val.map_iidx(f);
                 }
             }
             Inst::RootJump => {
-                for val in &m.loop_jump_vars {
-                    match val {
-                        Operand::Var(iidx) => f(*iidx),
-                        Operand::Const(_) => (),
-                    }
+                for val in &m.loop_jump_operands {
+                    val.map_iidx(f);
                 }
             }
             Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
@@ -1952,9 +1948,9 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::TraceLoopJump => {
                 // Just marks a location, so we format it to look like a label.
                 write!(f, "tloop_jump [")?;
-                for var in &self.m.loop_jump_vars {
-                    write!(f, "{}", var.display(self.m))?;
-                    if var != self.m.loop_jump_vars.last().unwrap() {
+                for var in &self.m.loop_jump_operands {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if var != self.m.loop_jump_operands.last().unwrap() {
                         write!(f, ", ")?;
                     }
                 }
@@ -1962,9 +1958,9 @@ impl fmt::Display for DisplayableInst<'_> {
             }
             Inst::RootJump => {
                 write!(f, "parent_jump {:?} [", self.m.root_jump_ptr)?;
-                for var in &self.m.loop_jump_vars {
-                    write!(f, "{}", var.display(self.m))?;
-                    if var != self.m.loop_jump_vars.last().unwrap() {
+                for var in &self.m.loop_jump_operands {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if var != self.m.loop_jump_operands.last().unwrap() {
                         write!(f, ", ")?;
                     }
                 }
