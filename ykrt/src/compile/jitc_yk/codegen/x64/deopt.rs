@@ -320,7 +320,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // The `clone` should really be `Arc::clone(&ctr)` but that doesn't play well with type
     // inference in this (unusual) case.
-    ctr.mt.guard_failure(ctr.clone(), gidx);
+    ctr.mt.guard_failure(ctr.clone(), gidx, frameaddr);
 
     // Since we won't return from this function, drop `ctr` manually.
     drop(ctr);

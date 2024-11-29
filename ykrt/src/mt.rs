@@ -438,6 +438,7 @@ impl MT {
                             hl,
                             thread_tracer: tt,
                             promotions: Vec::new(),
+                            frameaddr,
                         };
                     }),
                     Err(e) => todo!("{e:?}"),
@@ -453,7 +454,11 @@ impl MT {
                                 hl,
                                 thread_tracer,
                                 promotions,
-                            } => (hl, thread_tracer, promotions),
+                                frameaddr: tracing_frameaddr,
+                            } => {
+                                assert_eq!(frameaddr as *const c_void, tracing_frameaddr);
+                                (hl, thread_tracer, promotions)
+                            }
                             _ => unreachable!(),
                         },
                     );
@@ -485,7 +490,11 @@ impl MT {
                                 hl,
                                 thread_tracer,
                                 promotions,
-                            } => (hl, thread_tracer, promotions),
+                                frameaddr: tracing_frameaddr,
+                            } => {
+                                assert_eq!(frameaddr as *const c_void, tracing_frameaddr);
+                                (hl, thread_tracer, promotions)
+                            }
                             _ => unreachable!(),
                         },
                     );
@@ -733,7 +742,12 @@ impl MT {
     // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
     // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
     // and a trace compiled for case A won't work for case B.
-    pub(crate) fn guard_failure(self: &Arc<Self>, parent: Arc<dyn CompiledTrace>, gidx: GuardIdx) {
+    pub(crate) fn guard_failure(
+        self: &Arc<Self>,
+        parent: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
+        frameaddr: *const c_void,
+    ) {
         match self.transition_guard_failure(parent, gidx) {
             TransitionGuardFailure::NoAction => (),
             TransitionGuardFailure::StartSideTracing(hl) => {
@@ -748,6 +762,7 @@ impl MT {
                             hl,
                             thread_tracer: tt,
                             promotions: Vec::new(),
+                            frameaddr,
                         };
                     }),
                     Err(e) => todo!("{e:?}"),
@@ -809,6 +824,9 @@ enum MTThreadState {
         thread_tracer: Box<dyn TraceRecorder>,
         /// Records the content of data recorded via `yk_promote`.
         promotions: Vec<u8>,
+        /// The `frameaddr` when tracing started. This allows us to tell if we're finishing tracing
+        /// at the same point that we started.
+        frameaddr: *const c_void,
     },
     /// This thread is executing a trace. Note that the `dyn CompiledTrace` serves two different purposes:
     ///
@@ -1023,6 +1041,7 @@ mod tests {
                 hl,
                 thread_tracer: Box::new(DummyTraceRecorder),
                 promotions: Vec::new(),
+                frameaddr: 0 as *const c_void,
             };
         });
     }
@@ -1047,6 +1066,7 @@ mod tests {
                 hl,
                 thread_tracer: Box::new(DummyTraceRecorder),
                 promotions: Vec::new(),
+                frameaddr: 0 as *const c_void,
             };
         });
     }
@@ -1168,6 +1188,7 @@ mod tests {
                             hl,
                             thread_tracer: Box::new(DummyTraceRecorder),
                             promotions: Vec::new(),
+                            frameaddr: 0 as *const c_void,
                         };
                     });
                     break;
@@ -1360,6 +1381,7 @@ mod tests {
                                     hl,
                                     thread_tracer: Box::new(DummyTraceRecorder),
                                     promotions: Vec::new(),
+                                    frameaddr: 0 as *const c_void,
                                 };
                             });
                             assert!(matches!(
