@@ -49,6 +49,22 @@ void yk_mt_shutdown(YkMT *);
 // execute JITted code.
 void yk_mt_control_point(YkMT *, YkLocation *);
 
+// At each point a function containing a control point can exit "early" this
+// function must be called. "Early" includes, but is not
+// limited to, the following:
+//
+//   1. Immediately after a non-infinite loop containing a call to
+//      `yk_mt_control_point`.
+//   2. Immediately before `return` statements in code reachable from a
+//      `yk_mt_control_point`.
+//
+// Failure to call this function will lead to undefined behaviour.
+# define yk_mt_early_return(mt) __yk_mt_early_return(mt, __builtin_frame_address(0))
+
+// This is an internal function to yk: calling it directly leads to undefined
+// behaviour.
+void __yk_mt_early_return(YkMT *, void *);
+
 // Set the threshold at which `YkLocation`'s are considered hot.
 void yk_mt_hot_threshold_set(YkMT *, YkHotThreshold);
 

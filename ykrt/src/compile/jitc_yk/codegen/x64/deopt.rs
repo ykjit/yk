@@ -92,7 +92,7 @@ fn running_trace(gidxs: &[usize]) -> Arc<X64CompiledTrace> {
 /// * glen - Length for list in `gptr`.
 #[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
-    frameaddr: *const c_void,
+    frameaddr: *mut c_void,
     gidx: u64,
     gp_regs: &[u64; 16],
     fp_regs: &[u64; 16],
