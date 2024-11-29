@@ -280,7 +280,11 @@ impl MT {
                 }
                 Err(e) => {
                     mt.stats.trace_compiled_err();
-                    hl_arc.lock().tracecompilation_error(&mt);
+                    let mut hl = hl_arc.lock();
+                    debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
+                    if let TraceFailed::DontTrace = hl.tracecompilation_error(&mt) {
+                        hl.kind = HotLocationKind::DontTrace;
+                    }
                     match e {
                         CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
                             mt.log.log(
@@ -362,8 +366,8 @@ impl MT {
                     mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {
+                    // FIXME: We need to track how often compiling a guard fails.
                     mt.stats.trace_compiled_err();
-                    hl_arc.lock().tracecompilation_error(&mt);
                     match e {
                         CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
                             mt.log.log(
@@ -611,9 +615,11 @@ impl MT {
                                         self.stats.trace_recorded_err();
                                         match lk.tracecompilation_error(self) {
                                             TraceFailed::KeepTrying => {
+                                                lk.kind = HotLocationKind::Tracing;
                                                 TransitionControlPoint::StartTracing(hl)
                                             }
                                             TraceFailed::DontTrace => {
+                                                lk.kind = HotLocationKind::DontTrace;
                                                 TransitionControlPoint::NoAction
                                             }
                                         }

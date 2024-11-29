@@ -227,10 +227,8 @@ impl HotLocation {
     pub(crate) fn tracecompilation_error(&mut self, mt: &Arc<MT>) -> TraceFailed {
         if self.tracecompilation_errors < mt.trace_failure_threshold() {
             self.tracecompilation_errors += 1;
-            self.kind = HotLocationKind::Tracing;
             TraceFailed::KeepTrying
         } else {
-            self.kind = HotLocationKind::DontTrace;
             TraceFailed::DontTrace
         }
     }
