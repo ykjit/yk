@@ -42,12 +42,21 @@ impl fmt::Display for CompilationError {
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {
-    /// Compile a mapped trace into machine code.
-    fn compile(
+    /// Compile a mapped root trace into machine code.
+    fn root_compile(
         &self,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
-        sti: Option<Arc<dyn SideTraceInfo>>,
+        hl: Arc<Mutex<HotLocation>>,
+        promotions: Box<[u8]>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
+
+    /// Compile a mapped root trace into machine code.
+    fn sidetrace_compile(
+        &self,
+        mt: Arc<MT>,
+        aottrace_iter: Box<dyn AOTTraceIterator>,
+        sti: Arc<dyn SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
