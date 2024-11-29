@@ -1,6 +1,6 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   stderr:
 //     --- Begin aot ---
 //     ...

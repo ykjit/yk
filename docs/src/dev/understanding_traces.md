@@ -10,7 +10,7 @@ to make them a bit easier to understand.
 
 ### `YKD_LOG_IR`
 
-`YKD_LOG_IR=<path>:<irstage_1>[,...,<irstage_n>]` logs IR from different stages
+`YKD_LOG_IR=[<path>:]<irstage_1>[,...,<irstage_n>]` logs IR from different stages
 to `path`. The special value `-` (i.e. a single dash) can be used for `<path>`
 to indicate stderr.
 
