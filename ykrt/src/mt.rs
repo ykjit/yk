@@ -250,18 +250,12 @@ impl MT {
         }
     }
 
-    /// Add a compilation job for to the global work queue:
-    ///   * `utrace` is the trace to be compiled.
-    ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
-    ///   * `sidetrace`, if not `None`, specifies that this is a side-trace compilation job.
-    ///     The `Arc<dyn CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
-    ///     side-traces can nest, this may or may not be the same [CompiledTrace] as contained
-    ///     in the `hl_arc`.
-    fn queue_compile_job(
+    /// Add a compilation job for a root trace where `hl_arc` is the [HotLocation] this compilation
+    /// job is related to.
+    fn queue_root_compile_job(
         self: &Arc<Self>,
         trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>),
         hl_arc: Arc<Mutex<HotLocation>>,
-        sidetrace: Option<(Arc<dyn CompiledTrace>, GuardIdx, Arc<dyn CompiledTrace>)>,
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
@@ -271,14 +265,87 @@ impl MT {
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            let (sti, guardid) = if let Some((root_ctr, guardid, ctr)) = &sidetrace {
-                (
-                    Some(ctr.sidetraceinfo(Arc::clone(root_ctr), *guardid)),
-                    Some(*guardid),
-                )
-            } else {
-                (None, None)
+            match compiler.compile(
+                Arc::clone(&mt),
+                trace_iter.0,
+                None,
+                Arc::clone(&hl_arc),
+                trace_iter.1,
+            ) {
+                Ok(ct) => {
+                    let mut hl = hl_arc.lock();
+                    debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
+                    hl.kind = HotLocationKind::Compiled(ct);
+                    mt.stats.trace_compiled_ok();
+                }
+                Err(e) => {
+                    mt.stats.trace_compiled_err();
+                    hl_arc.lock().tracecompilation_error(&mt);
+                    match e {
+                        CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
+                            mt.log.log(
+                                Verbosity::Warning,
+                                &format!("trace-compilation-aborted: {e}"),
+                            );
+                        }
+                        CompilationError::InternalError(e) => {
+                            #[cfg(feature = "ykd")]
+                            panic!("{e}");
+                            #[cfg(not(feature = "ykd"))]
+                            {
+                                mt.log.log(
+                                    Verbosity::Error,
+                                    &format!("trace-compilation-aborted: {e}"),
+                                );
+                            }
+                        }
+                        CompilationError::ResourceExhausted(e) => {
+                            mt.log
+                                .log(Verbosity::Error, &format!("trace-compilation-aborted: {e}"));
+                        }
+                    }
+                }
+            }
+
+            mt.stats.timing_state(TimingState::None);
+        };
+
+        #[cfg(feature = "yk_testing")]
+        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
+            // To ensure that we properly test that compilation can occur in another thread, we
+            // spin up a new thread for each compilation. This is only acceptable because a)
+            // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
+            // checking correctness, not performance.
+            thread::spawn(do_compile).join().unwrap();
+            return;
+        }
+
+        self.queue_job(Box::new(do_compile));
+    }
+
+    /// Add a compilation job for a sidetrace where: `hl_arc` is the [HotLocation] this compilation
+    ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
+    ///   * The `Arc<dyn CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
+    ///     side-traces can nest, this may or may not be the same [CompiledTrace] as contained in
+    ///     the `hl_arc`.
+    fn queue_sidetrace_compile_job(
+        self: &Arc<Self>,
+        trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>),
+        hl_arc: Arc<Mutex<HotLocation>>,
+        (root_ctr, guardid, parent_ctr): (Arc<dyn CompiledTrace>, GuardIdx, Arc<dyn CompiledTrace>),
+    ) {
+        self.stats.trace_recorded_ok();
+        let mt = Arc::clone(self);
+        let do_compile = move || {
+            let compiler = {
+                let lk = mt.compiler.lock();
+                Arc::clone(&*lk)
             };
+            mt.stats.timing_state(TimingState::Compiling);
+            let (sti, guardid) = (
+                Some(parent_ctr.sidetraceinfo(Arc::clone(&root_ctr), guardid)),
+                Some(guardid),
+            );
             // FIXME: Can we pass in the root trace address, root trace entry variable locations,
             // and the base stack-size from here, rather than spreading them out via
             // DeoptInfo/SideTraceInfo, and CompiledTrace?
@@ -290,13 +357,7 @@ impl MT {
                 trace_iter.1,
             ) {
                 Ok(ct) => {
-                    if let Some((_root_ctr, _, parent_ctr)) = sidetrace {
-                        parent_ctr.guard(guardid.unwrap()).set_ctr(ct);
-                    } else {
-                        let mut hl = hl_arc.lock();
-                        debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
-                        hl.kind = HotLocationKind::Compiled(ct);
-                    }
+                    parent_ctr.guard(guardid.unwrap()).set_ctr(ct);
                     mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {
@@ -406,7 +467,7 @@ impl MT {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
                         self.log.log(Verbosity::JITEvent, "stop-tracing");
-                        self.queue_compile_job((utrace, promotions.into_boxed_slice()), hl, None);
+                        self.queue_root_compile_job((utrace, promotions.into_boxed_slice()), hl);
                     }
                     Err(e) => {
                         self.stats.timing_state(TimingState::None);
@@ -439,10 +500,10 @@ impl MT {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
                         self.log.log(Verbosity::JITEvent, "stop-tracing");
-                        self.queue_compile_job(
+                        self.queue_sidetrace_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
-                            Some((root_ctr, guardid, parent_ctr)),
+                            (root_ctr, guardid, parent_ctr),
                         );
                     }
                     Err(e) => {
