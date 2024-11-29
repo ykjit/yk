@@ -219,6 +219,16 @@ impl MT {
 
     /// Queue `job` to be run on a worker thread.
     fn queue_job(self: &Arc<Self>, job: Box<dyn FnOnce() + Send>) {
+        #[cfg(feature = "yk_testing")]
+        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
+            // To ensure that we properly test that compilation can occur in another thread, we
+            // spin up a new thread for each compilation. This is only acceptable because a)
+            // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
+            // checking correctness, not performance.
+            thread::spawn(job).join().unwrap();
+            return;
+        }
+
         // Push the job onto the queue.
         let (cv, mtx) = &*self.job_queue;
         mtx.lock().push_back(job);
@@ -314,16 +324,6 @@ impl MT {
             mt.stats.timing_state(TimingState::None);
         };
 
-        #[cfg(feature = "yk_testing")]
-        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
-            // To ensure that we properly test that compilation can occur in another thread, we
-            // spin up a new thread for each compilation. This is only acceptable because a)
-            // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
-            // checking correctness, not performance.
-            thread::spawn(do_compile).join().unwrap();
-            return;
-        }
-
         self.queue_job(Box::new(do_compile));
     }
 
@@ -396,16 +396,6 @@ impl MT {
 
             mt.stats.timing_state(TimingState::None);
         };
-
-        #[cfg(feature = "yk_testing")]
-        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
-            // To ensure that we properly test that compilation can occur in another thread, we
-            // spin up a new thread for each compilation. This is only acceptable because a)
-            // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
-            // checking correctness, not performance.
-            thread::spawn(do_compile).join().unwrap();
-            return;
-        }
 
         self.queue_job(Box::new(do_compile));
     }
