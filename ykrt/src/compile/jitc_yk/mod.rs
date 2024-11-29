@@ -102,9 +102,8 @@ impl JITCYk {
             codegen: codegen::default_codegen()?,
         }))
     }
-}
 
-impl Compiler for JITCYk {
+    // FIXME: This should probably be split into separate root / sidetrace functions.
     fn compile(
         &self,
         mt: Arc<MT>,
@@ -164,6 +163,29 @@ impl Compiler for JITCYk {
         }
 
         Ok(ct)
+    }
+}
+
+impl Compiler for JITCYk {
+    fn root_compile(
+        &self,
+        mt: Arc<MT>,
+        aottrace_iter: Box<dyn AOTTraceIterator>,
+        hl: Arc<Mutex<HotLocation>>,
+        promotions: Box<[u8]>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        self.compile(mt, aottrace_iter, None, hl, promotions)
+    }
+
+    fn sidetrace_compile(
+        &self,
+        mt: Arc<MT>,
+        aottrace_iter: Box<dyn AOTTraceIterator>,
+        sti: Arc<dyn SideTraceInfo>,
+        hl: Arc<Mutex<HotLocation>>,
+        promotions: Box<[u8]>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        self.compile(mt, aottrace_iter, Some(sti), hl, promotions)
     }
 }
 

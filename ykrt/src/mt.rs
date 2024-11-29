@@ -275,10 +275,9 @@ impl MT {
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            match compiler.compile(
+            match compiler.root_compile(
                 Arc::clone(&mt),
                 trace_iter.0,
-                None,
                 Arc::clone(&hl_arc),
                 trace_iter.1,
             ) {
@@ -354,10 +353,10 @@ impl MT {
             // FIXME: Can we pass in the root trace address, root trace entry variable locations,
             // and the base stack-size from here, rather than spreading them out via
             // DeoptInfo/SideTraceInfo, and CompiledTrace?
-            match compiler.compile(
+            match compiler.sidetrace_compile(
                 Arc::clone(&mt),
                 trace_iter.0,
-                Some(sti),
+                sti,
                 Arc::clone(&hl_arc),
                 trace_iter.1,
             ) {
