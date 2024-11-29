@@ -20,3 +20,5 @@ The following `ir_stage`s are supported:
  - `jit-pre-opt`: the JIT IR trace before optimisation.
  - `jit-post-opt`: the JIT IR trace after optimisation.
  - `jit-asm`: the assembler code of the compiled JIT IR trace.
+ - `jit-asm-full`: the assembler code of the compiled JIT IR trace with
+   instruction offsets and virtual addresses annotated.
