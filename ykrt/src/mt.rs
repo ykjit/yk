@@ -325,14 +325,18 @@ impl MT {
 
     /// Add a compilation job for a sidetrace where: `hl_arc` is the [HotLocation] this compilation
     ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
-    ///   * The `Arc<dyn CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
-    ///     side-traces can nest, this may or may not be the same [CompiledTrace] as contained in
-    ///     the `hl_arc`.
+    ///   * `root_ctr` is the root [CompiledTrace].
+    ///   * `parent_ctr` is the parent [CompiledTrace] of the side-trace that's about to be
+    ///     compiled. Because side-traces can nest, this may or may not be the same [CompiledTrace]
+    ///     as `root_ctr`.
+    ///   * `guardid` is the ID of the guard in `parent_ctr` which failed.
     fn queue_sidetrace_compile_job(
         self: &Arc<Self>,
         trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>),
         hl_arc: Arc<Mutex<HotLocation>>,
-        (root_ctr, guardid, parent_ctr): (Arc<dyn CompiledTrace>, GuardIdx, Arc<dyn CompiledTrace>),
+        root_ctr: Arc<dyn CompiledTrace>,
+        parent_ctr: Arc<dyn CompiledTrace>,
+        guardid: GuardIdx,
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
@@ -342,22 +346,19 @@ impl MT {
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            let (sti, guardid) = (
-                Some(parent_ctr.sidetraceinfo(Arc::clone(&root_ctr), guardid)),
-                Some(guardid),
-            );
+            let sti = parent_ctr.sidetraceinfo(Arc::clone(&root_ctr), guardid);
             // FIXME: Can we pass in the root trace address, root trace entry variable locations,
             // and the base stack-size from here, rather than spreading them out via
             // DeoptInfo/SideTraceInfo, and CompiledTrace?
             match compiler.compile(
                 Arc::clone(&mt),
                 trace_iter.0,
-                sti,
+                Some(sti),
                 Arc::clone(&hl_arc),
                 trace_iter.1,
             ) {
                 Ok(ct) => {
-                    parent_ctr.guard(guardid.unwrap()).set_ctr(ct);
+                    parent_ctr.guard(guardid).set_ctr(ct);
                     mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {
@@ -503,7 +504,9 @@ impl MT {
                         self.queue_sidetrace_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
-                            (root_ctr, guardid, parent_ctr),
+                            root_ctr,
+                            parent_ctr,
+                            guardid,
                         );
                     }
                     Err(e) => {
