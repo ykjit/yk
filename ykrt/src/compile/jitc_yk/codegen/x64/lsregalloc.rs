@@ -252,12 +252,30 @@ impl<'a> LSRegAlloc<'a> {
 
 /// The parts of the register allocator needed for general purpose registers.
 impl LSRegAlloc<'_> {
-    /// Forcibly assign the machine register `reg`, which must be in the [RegState::Empty] state,
-    /// to the value produced by instruction `iidx`.
-    pub(crate) fn force_assign_inst_gp_reg(&mut self, iidx: InstIdx, reg: Rq) {
-        debug_assert!(!self.gp_regset.is_set(reg));
-        self.gp_regset.set(reg);
-        self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+    /// Forcibly assign the machine register `reg` to the value produced by instruction `iidx`.
+    /// Note that if this register is already used, a spill will be generated instead.
+    pub(crate) fn force_assign_inst_gp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
+        if self.gp_regset.is_set(reg) {
+            debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
+            // Input values alias to a single register. To avoid the rest of the register allocator
+            // having to think about this, we "dealias" the values by spilling.
+            let inst = self.m.inst_no_copies(iidx);
+            let size = inst.def_byte_size(self.m);
+            self.stack.align(size); // FIXME
+            let frame_off = self.stack.grow(size);
+            let off = i32::try_from(frame_off).unwrap();
+            match size {
+                1 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
+                2 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
+                4 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
+                8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
+                _ => unreachable!(),
+            }
+            self.spills[usize::from(iidx)] = SpillState::Stack(off);
+        } else {
+            self.gp_regset.set(reg);
+            self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+        }
     }
 
     /// Forcibly assign the floating point register `reg`, which must be in the [RegState::Empty] state,
@@ -825,15 +843,13 @@ impl LSRegAlloc<'_> {
             match cnstr {
                 RegConstraint::InputIntoReg(_, reg)
                 | RegConstraint::InputIntoRegAndClobber(_, reg)
+                | RegConstraint::InputOutputIntoReg(_, reg)
                 | RegConstraint::OutputFromReg(reg)
                 | RegConstraint::Clobber(reg) => avoid.set(*reg),
                 RegConstraint::Input(_)
                 | RegConstraint::InputOutput(_)
                 | RegConstraint::Output
                 | RegConstraint::Temporary => {}
-                RegConstraint::InputOutputIntoReg(_, _) => {
-                    panic!();
-                }
             }
         }
 
@@ -870,11 +886,11 @@ impl LSRegAlloc<'_> {
                 },
                 RegConstraint::InputIntoReg(_, _)
                 | RegConstraint::InputIntoRegAndClobber(_, _)
+                | RegConstraint::InputOutputIntoReg(_, _)
                 | RegConstraint::Clobber(_) => {
                     // OPT: do the same trick as Input/InputOutput
                 }
                 RegConstraint::Output | RegConstraint::OutputFromReg(_) => (),
-                RegConstraint::InputOutputIntoReg(_op, _reg) => unreachable!(),
                 RegConstraint::Temporary => (),
             }
         }
@@ -888,19 +904,18 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Input(op)
                 | RegConstraint::InputIntoReg(op, _)
                 | RegConstraint::InputIntoRegAndClobber(op, _)
+                | RegConstraint::InputOutputIntoReg(op, _)
                 | RegConstraint::InputOutput(op) => {
                     let reg = match x {
                         RegConstraint::Input(_) | RegConstraint::InputOutput(_) => {
                             self.assign_empty_fp_reg(asm, iidx, avoid)
                         }
                         RegConstraint::InputIntoReg(_, reg)
-                        | RegConstraint::InputIntoRegAndClobber(_, reg) => {
+                        | RegConstraint::InputIntoRegAndClobber(_, reg)
+                        | RegConstraint::InputOutputIntoReg(_, reg) => {
                             // OPT: Not everything needs spilling
                             self.spill_fp_if_not_already(asm, *reg);
                             *reg
-                        }
-                        RegConstraint::InputOutputIntoReg(_, _) => {
-                            unreachable!()
                         }
                         RegConstraint::Output
                         | RegConstraint::OutputFromReg(_)
@@ -934,14 +949,12 @@ impl LSRegAlloc<'_> {
                             self.fp_regset.unset(reg);
                             RegState::Empty
                         }
-                        RegConstraint::InputOutput(_) => {
+                        RegConstraint::InputOutput(_) | RegConstraint::InputOutputIntoReg(_, _) => {
                             debug_assert!(!found_output);
                             found_output = true;
                             RegState::FromInst(iidx)
                         }
-                        RegConstraint::InputOutputIntoReg(_, _)
-                        | RegConstraint::Output
-                        | RegConstraint::OutputFromReg(_) => {
+                        RegConstraint::Output | RegConstraint::OutputFromReg(_) => {
                             unreachable!()
                         }
                         RegConstraint::Temporary => todo!(),
@@ -971,7 +984,6 @@ impl LSRegAlloc<'_> {
                     avoid.set(*reg);
                     out[i] = Some(*reg);
                 }
-                RegConstraint::InputOutputIntoReg(_, _) => unreachable!(),
                 RegConstraint::Temporary => {
                     let reg = self.assign_empty_fp_reg(asm, iidx, avoid);
                     self.fp_regset.unset(reg);

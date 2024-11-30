@@ -102,9 +102,8 @@ impl JITCYk {
             codegen: codegen::default_codegen()?,
         }))
     }
-}
 
-impl Compiler for JITCYk {
+    // FIXME: This should probably be split into separate root / sidetrace functions.
     fn compile(
         &self,
         mt: Arc<MT>,
@@ -159,11 +158,40 @@ impl Compiler for JITCYk {
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
                 "--- Begin jit-asm ---\n{}\n--- End jit-asm ---\n",
-                ct.disassemble().unwrap()
+                ct.disassemble(false).unwrap()
+            ));
+        }
+        if should_log_ir(IRPhase::AsmFull) {
+            log_ir(&format!(
+                "--- Begin jit-asm-full ---\n{}\n--- End jit-asm-full ---\n",
+                ct.disassemble(true).unwrap()
             ));
         }
 
         Ok(ct)
+    }
+}
+
+impl Compiler for JITCYk {
+    fn root_compile(
+        &self,
+        mt: Arc<MT>,
+        aottrace_iter: Box<dyn AOTTraceIterator>,
+        hl: Arc<Mutex<HotLocation>>,
+        promotions: Box<[u8]>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        self.compile(mt, aottrace_iter, None, hl, promotions)
+    }
+
+    fn sidetrace_compile(
+        &self,
+        mt: Arc<MT>,
+        aottrace_iter: Box<dyn AOTTraceIterator>,
+        sti: Arc<dyn SideTraceInfo>,
+        hl: Arc<Mutex<HotLocation>>,
+        promotions: Box<[u8]>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        self.compile(mt, aottrace_iter, Some(sti), hl, promotions)
     }
 }
 

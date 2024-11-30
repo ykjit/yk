@@ -1202,29 +1202,53 @@ impl TraceBuilder {
                 })
                 .collect::<Vec<_>>();
 
-            #[cfg(tracer_swt)]
+            // When side-tracing a switch guard failure, we need to reprocess the switch statement
+            // (and only the switch statement) in order to emit a guard at the beginning of the
+            // side-trace to check that the case requiring execution is that case the trace
+            // captures.
+            //
+            // Note that it is not necessary to emit such a guard into side-traces stemming from
+            // regular conditionals, since a conditional has only two sucessors. The parent trace
+            // captures one, so by construction the side trace must capture the other.
+            let prevbb = self.aot_mod.bblock(prev_bid.as_ref().unwrap());
+            if let aot_ir::Inst::Switch {
+                test_val,
+                default_dest,
+                case_values,
+                case_dests,
+                safepoint,
+            } = &prevbb.insts.last().unwrap()
             {
-                // FIXME: This is a hack! When we side-trace the guard failure of a switch
-                // statement, the software-tracer doesn't report the switch-statement block as the
-                // first block in the trace. This means we don't generate a guard at the top of the
-                // side-trace checking that the switch-case is correct when executing the trace. We
-                // work around this force processing the previous block that's passed in via
-                // `SideTraceInfo` if it's last instruction is a switch statement. Technically,
-                // this is the correct fix for hardware-tracing too, since we shouldn't re-process
-                // the switch-statement block, as it was already executed in the parent trace,
-                // which is problematic if the block has side-effects.
-                let prevbb = self.aot_mod.bblock(prev_bid.as_ref().unwrap());
-                if matches!(prevbb.insts.last(), Some(aot_ir::Inst::Switch { .. })) {
-                    let nextbb = match &tas.first() {
-                        Some(b) => self.lookup_aot_block(b),
-                        _ => panic!(),
-                    };
-                    self.process_block(prev_bid.as_ref().unwrap(), &None, nextbb)?;
-                }
+                let nextbb = match &tas.first() {
+                    Some(b) => self.lookup_aot_block(b),
+                    _ => panic!(),
+                };
+                self.handle_switch(
+                    prev_bid.as_ref().unwrap(), // this is safe, we've just created this above
+                    prevbb.insts.len() - 1,
+                    safepoint,
+                    nextbb.as_ref().unwrap(),
+                    test_val,
+                    default_dest,
+                    case_values,
+                    case_dests,
+                )?;
             }
         }
-
+        // The variable `prev_bid` contains the block of the guard that initiated side-tracing (for
+        // normal traces this is set to `None`). When hardware tracing, we capture this block again
+        // as part of the side-trace. However, since we've already processed this block in the
+        // parent trace, we must not process it again in the side-trace.
+        //
+        // Typically, the mapper would strip this block for us, but for codegen related reasons,
+        // e.g. a switch statement codegenning to many machine blocks, it's possible for multiple
+        // duplicates of this same block to show up here, which all need to be skipped.
         let mut trace_iter = tas.into_iter().peekable();
+        if prev_bid.is_some() {
+            while self.lookup_aot_block(trace_iter.peek().unwrap()) == prev_bid {
+                trace_iter.next().unwrap();
+            }
+        }
 
         if sti.is_none() {
             // Find the block containing the control point call. This is the (sole) predecessor of the

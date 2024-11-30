@@ -42,12 +42,21 @@ impl fmt::Display for CompilationError {
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {
-    /// Compile a mapped trace into machine code.
-    fn compile(
+    /// Compile a mapped root trace into machine code.
+    fn root_compile(
         &self,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
-        sti: Option<Arc<dyn SideTraceInfo>>,
+        hl: Arc<Mutex<HotLocation>>,
+        promotions: Box<[u8]>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
+
+    /// Compile a mapped root trace into machine code.
+    fn sidetrace_compile(
+        &self,
+        mt: Arc<MT>,
+        aottrace_iter: Box<dyn AOTTraceIterator>,
+        sti: Arc<dyn SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
@@ -86,7 +95,7 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     fn hl(&self) -> &Weak<Mutex<HotLocation>>;
 
     /// Disassemble the JITted code into a string, for testing and deubgging.
-    fn disassemble(&self) -> Result<String, Box<dyn Error>>;
+    fn disassemble(&self, with_addrs: bool) -> Result<String, Box<dyn Error>>;
 }
 
 /// Stores information required for compiling a side-trace. Passed down from a (parent) trace
@@ -137,7 +146,7 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn disassemble(&self) -> Result<String, Box<dyn Error>> {
+        fn disassemble(&self, _with_addrs: bool) -> Result<String, Box<dyn Error>> {
             panic!();
         }
     }
@@ -185,7 +194,7 @@ mod compiled_trace_testing {
             &self.hl
         }
 
-        fn disassemble(&self) -> Result<String, Box<dyn Error>> {
+        fn disassemble(&self, _with_addrs: bool) -> Result<String, Box<dyn Error>> {
             panic!();
         }
     }

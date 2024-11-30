@@ -10,7 +10,7 @@ to make them a bit easier to understand.
 
 ### `YKD_LOG_IR`
 
-`YKD_LOG_IR=<path>:<irstage_1>[,...,<irstage_n>]` logs IR from different stages
+`YKD_LOG_IR=[<path>:]<irstage_1>[,...,<irstage_n>]` logs IR from different stages
 to `path`. The special value `-` (i.e. a single dash) can be used for `<path>`
 to indicate stderr.
 
@@ -20,3 +20,5 @@ The following `ir_stage`s are supported:
  - `jit-pre-opt`: the JIT IR trace before optimisation.
  - `jit-post-opt`: the JIT IR trace after optimisation.
  - `jit-asm`: the assembler code of the compiled JIT IR trace.
+ - `jit-asm-full`: the assembler code of the compiled JIT IR trace with
+   instruction offsets and virtual addresses annotated.
