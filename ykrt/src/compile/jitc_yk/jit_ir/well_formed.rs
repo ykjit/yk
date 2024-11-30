@@ -29,10 +29,10 @@ use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
         if !self.root_entry_vars.is_empty() {
-            if self.root_entry_vars.len() != self.loop_jump_vars.len() {
+            if self.root_entry_vars.len() != self.loop_jump_operands.len() {
                 panic!("Loop start/end variables have different lengths.");
             }
-        } else if self.loop_start_vars.len() != self.loop_jump_vars.len() {
+        } else if self.loop_start_vars.len() != self.loop_jump_operands.len() {
             panic!("Loop start/end variables have different lengths.");
         }
 

@@ -203,6 +203,7 @@ pub(crate) extern "C" fn __yk_deopt(
                 },
                 VarLocation::ConstInt { bits: _, v } => v,
                 VarLocation::ConstFloat(f) => f.to_bits(),
+                VarLocation::ConstPtr(v) => u64::try_from(v).unwrap(),
                 VarLocation::Direct { .. } => {
                     // See comment below: this case never needs to do anything.
                     varidx += 1;

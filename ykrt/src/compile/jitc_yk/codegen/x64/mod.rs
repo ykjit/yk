@@ -1589,6 +1589,26 @@ impl<'a> Assemble<'a> {
         Ok(())
     }
 
+    /// Return the [VarLocation] an [Operand] relates to.
+    fn op_to_var_location(&self, op: Operand) -> VarLocation {
+        match op {
+            Operand::Var(iidx) => self.ra.var_location(iidx),
+            Operand::Const(cidx) => match self.m.const_(cidx) {
+                Const::Float(_, v) => VarLocation::ConstFloat(*v),
+                Const::Int(tyidx, v) => {
+                    let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                        panic!()
+                    };
+                    VarLocation::ConstInt {
+                        bits: *bit_size,
+                        v: *v,
+                    }
+                }
+                Const::Ptr(v) => VarLocation::ConstPtr(*v),
+            },
+        }
+    }
+
     /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
     /// it, otherwise return `None`.
     fn op_to_i8(&self, op: &Operand) -> Option<i8> {
@@ -1904,13 +1924,15 @@ impl<'a> Assemble<'a> {
         // If we pass in `None` use `self.loop_start_locs` instead. We need to do this since we
         // can't pass in `&self.loop_start_locs` directly due to borrowing restrictions.
         let tgt_vars = tgt_vars.unwrap_or(self.loop_start_locs.as_slice());
-        for (i, op) in self.m.loop_jump_vars().iter().enumerate() {
+        for (i, op) in self.m.loop_jump_operands().iter().enumerate() {
+            // FIXME: This is completely broken: see the FIXME later.
+            let op = op.unpack(self.m);
             let (iidx, src) = match op {
-                Operand::Var(iidx) => {
-                    let iidx = self.m.inst_decopy(*iidx).0;
-                    (iidx, self.ra.var_location(iidx))
-                }
-                _ => panic!(),
+                Operand::Var(iidx) => (iidx, self.op_to_var_location(op.clone())),
+                Operand::Const(_) => (
+                    InstIdx::try_from(0).unwrap(),
+                    self.op_to_var_location(op.clone()),
+                ),
             };
             let dst = tgt_vars[i];
             if dst == src {
@@ -1960,9 +1982,11 @@ impl<'a> Assemble<'a> {
                     // match. But since the value can't change we can safely ignore this.
                 }
                 VarLocation::Register(reg) => {
-                    // Copy the value into a register. We can ask the register allocator to
-                    // this for us, but telling it to load the source operand into the
-                    // target register.
+                    // FIXME: This is completely broken, only works by accident and, probably,
+                    // doesn't even always work. Continually running the register allocator in this
+                    // way means we can end up clobbering values and, because this is the last
+                    // instruction in the trace, none of the values will be used after this, so
+                    // they don't have to be spilled.
                     match reg {
                         reg_alloc::Register::GP(r) => {
                             let [_] = self.ra.assign_gp_regs(

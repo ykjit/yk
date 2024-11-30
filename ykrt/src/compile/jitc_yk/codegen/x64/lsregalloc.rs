@@ -769,7 +769,7 @@ impl LSRegAlloc<'_> {
     ///
     /// Note that it is undefined behaviour to ask for the location of an instruction which has not
     /// yet produced a value.
-    pub(crate) fn var_location(&mut self, iidx: InstIdx) -> VarLocation {
+    pub(crate) fn var_location(&self, iidx: InstIdx) -> VarLocation {
         if let Some(reg_i) = self.gp_reg_states.iter().position(|x| {
             if let RegState::FromInst(y) = x {
                 *y == iidx

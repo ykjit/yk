@@ -449,7 +449,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::TraceLoopJump(ops) => {
                         for op in ops {
                             let op = self.process_operand(op)?;
-                            self.m.loop_jump_vars.push(op);
+                            self.m.loop_jump_operands.push(PackedOperand::new(&op));
                         }
                         self.m.push(Inst::TraceLoopJump).unwrap();
                     }
