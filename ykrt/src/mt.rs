@@ -21,7 +21,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 #[cfg(tracer_swt)]
-use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP};
+use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP, debug_return_into_opt_cp, debug_return_into_unopt_cp};
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
@@ -59,7 +59,7 @@ const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 const DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD: TraceCompilationErrorThreshold = 5;
 static REG64_SIZE: usize = 8;
 
-static mut swt_jump_flag: bool = false;
+static mut SWT_JUMP_FLAG: bool = false;
 
 thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
@@ -450,9 +450,10 @@ impl MT {
                 unsafe {
                     // println!("about to return into unopt cp");
                     // execute asm
-                    if !swt_jump_flag {
-                        swt_jump_flag = true;
+                    if !SWT_JUMP_FLAG {
+                        SWT_JUMP_FLAG = true;
                     } else {
+                        // let func: unsafe fn() = std::mem::transmute(debug_return_into_unopt_cp().as_ptr());
                         let func: unsafe fn() = std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr());
                         func();
                     }
@@ -490,6 +491,7 @@ impl MT {
                 // println!("about to return into opt cp");
                 #[cfg(tracer_swt)]
                 unsafe {
+                    // let func: unsafe fn() = std::mem::transmute(debug_return_into_opt_cp().as_ptr());
                     let func: unsafe fn() = std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr());
                     func();
                 }

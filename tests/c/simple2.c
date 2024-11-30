@@ -16,19 +16,14 @@ int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
-
-  int res = 9998;
-  int i = 4;
+  int i = 5;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
     i--;
+    printf("%d\n", i);
   }
-  fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

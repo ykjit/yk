@@ -1,7 +1,6 @@
 use crate::aotsmp::AOT_STACKMAPS;
 use capstone::prelude::*;
 use dynasmrt::x64::Rq;
-use dynasmrt::x64::Rq::{RAX, RBP, RCX, RDI, RDX, RSI, RSP};
 use dynasmrt::{dynasm, x64::Assembler, DynasmApi, ExecutableBuffer};
 use std::error::Error;
 use std::sync::Arc;
@@ -24,10 +23,23 @@ pub(crate) static RETURN_INTO_OPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock
     Arc::new(buffer)
 });
 
+// Only used temporarily for debugging
+// TODO: remove in favour of LazyLock
+pub(crate) fn debug_return_into_opt_cp() -> Arc<ExecutableBuffer> {
+    println!("@@ jump into opt cp");
+    let mut asm = Assembler::new().unwrap();
+    build_livevars_cp_asm(UNOPT_CP_SMID, OPT_CP_SMID, &mut asm);
+    let buffer = asm.finalize().unwrap();
+    Arc::new(buffer)
+}
+
+
+
 // Example IR:
 //  call void (i64, i32, ptr, i32, ...) @llvm.experimental.patchpoint.void(i64 0, i32 13, ptr @__ykrt_control_point, i32 3, ptr %28, ptr %7, i64 0, ptr %6, ptr %7, ptr %8, ptr %9, ptr %28), !dbg !74
 //
 //  Where - 0 is the control point id
+// pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
 pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
     let mut asm = Assembler::new().unwrap();
     build_livevars_cp_asm(OPT_CP_SMID, UNOPT_CP_SMID, &mut asm);
@@ -35,27 +47,21 @@ pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLo
     Arc::new(buffer)
 });
 
-fn reg_num_to_dynasm_reg(dwarf_reg_num: u16) -> Rq {
-    match dwarf_reg_num {
-        0 => Rq::RAX,
-        1 => Rq::RDX,
-        2 => Rq::RCX,
-        3 => Rq::RBX,
-        4 => Rq::RSI,
-        5 => Rq::RDI,
-        6 => Rq::RBP,
-        7 => Rq::RSP,
-        8 => Rq::R8,
-        9 => Rq::R9,
-        10 => Rq::R10,
-        11 => Rq::R11,
-        12 => Rq::R12,
-        13 => Rq::R13,
-        14 => Rq::R14,
-        15 => Rq::R15,
-        _ => panic!("Unsupported register"),
-    }
+// Only used temporarily for debugging
+// TODO: remove in favour of LazyLock
+pub(crate) fn debug_return_into_unopt_cp() -> Arc<ExecutableBuffer> {
+    println!("@@ jump into unopt cp");
+    let mut asm = Assembler::new().unwrap();
+    build_livevars_cp_asm(OPT_CP_SMID, UNOPT_CP_SMID, &mut asm);
+    let buffer = asm.finalize().unwrap();
+    Arc::new(buffer)
 }
+
+
+const REG_MAP: [Rq; 16] = [
+    Rq::RAX, Rq::RDX, Rq::RCX, Rq::RBX, Rq::RSI, Rq::RDI, Rq::RBP, Rq::RSP,
+    Rq::R8, Rq::R9, Rq::R10, Rq::R11, Rq::R12, Rq::R13, Rq::R14, Rq::R15,
+];
 
 #[cfg(tracer_swt)]
 fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
@@ -128,7 +134,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             src_val_size, dst_val_size
                         );
                         assert!(*src_add_locs == 0, "deal with additional info");
-                        let src_reg = u8::try_from(*src_reg_num).unwrap();
+
                         let src_offset = reg_num_stack_offset(*src_reg_num);
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *src_val_size {
@@ -152,7 +158,8 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     },
-                    Constant(_val) => { todo!("implement constant to indirect") },
+                    Constant(_val) => { todo!("implement Indirect to Constant") },
+                    LargeConstant(_val) => { todo!("implement Indirect to LargeConstant") },
                     Indirect(src_reg_num, src_off, src_val_size) => {
                         println!(
                             "@@ Indirect to Indirect - from {:?} to {:?}",
@@ -164,9 +171,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             src_val_size,
                             dst_val_size
                         );
-                        // let src_reg = u8::try_from(*src_reg_num).unwrap();
-                        // let dst_reg = u8::try_from(*dst_reg_num).unwrap();
-
                         match *src_val_size {
                             1 => dynasm!(asm
                                 ; mov al, BYTE [rsp + *src_off]
@@ -221,6 +225,10 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             "Register to Indirect - src and dst val size must match. got src: {} and dst: {}",
                             src_val_size, dst_val_size
                         );
+                        assert!(
+                            REG_MAP.get(*src_reg_num as usize) == Some(&Rq::RBP),
+                            "indirect register is expected to be rbp"
+                        );
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
 
                         match *src_val_size {
@@ -243,27 +251,77 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                     _ => panic!("Unsupported source location: {:?}", src_location),
                 }
             }
-            Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
-                // Direct locations are read-only, so it doesn't make sense to write to
-                // them. This is likely a case where the direct value has been moved
-                // somewhere else (register/normal stack) so dst and src no longer
-                // match. But since the value can't change we can safely ignore this.
+            Direct(dst_reg_num, dst_off, dst_val_size) => {
+            // Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
+            // Direct locations are read-only, so it doesn't make sense to write to
+            // them. This is likely a case where the direct value has been moved
+            // somewhere else (register/normal stack) so dst and src no longer
+            // match. But since the value can't change we can safely ignore this.
+            //    match src_location {
+            //     Direct(src_reg_num, src_off, src_val_size) => {
+            //         assert_eq!(
+            //             *src_val_size, *dst_val_size,
+            //             "Source and destination value sizes do not match"
+            //         );
+            //         let src_reg = u8::try_from(*src_reg_num).unwrap();
+            //         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
+            //         // Skipping copying to the same register with the same offset
+            //         if src_reg_num == dst_reg_num && src_off == dst_off {
+            //             continue;
+            //         }
+            //         match *src_val_size {
+            //             1 => dynasm!(asm
+            //                 ; mov al, BYTE [Rq(src_reg) + *src_off]
+            //                 ; mov BYTE [Rq(dst_reg) + *dst_off], al
+            //             ),
+            //             2 => dynasm!(asm
+            //                 ; mov ax, WORD [Rq(src_reg) + *src_off]
+            //                 ; mov WORD [Rq(dst_reg) + *dst_off], ax
+            //             ),
+            //             4 => dynasm!(asm
+            //                 ; mov eax, DWORD [Rq(src_reg) + *src_off]
+            //                 ; mov DWORD [Rq(dst_reg) + *dst_off], eax
+            //             ),
+            //             8 => dynasm!(asm
+            //                 ; mov rax, QWORD [Rq(src_reg) + *src_off]
+            //                 ; mov QWORD [Rq(dst_reg) + *dst_off], rax
+            //             ),
+            //             _ => panic!("Unsupported source value size: {}", src_val_size),
+            //         }
+            //     }
+            //     _ => panic!("unexpect src location: {:?}", src_location),
+            //    }
             }
             _ => panic!("unexpect dst location: {:?}", dst_location),
         }
 
     }
 
+    // Adjust RSP before the jump
+    let stack_size_diff = dst_rec.size as i32 - src_rec.size as i32;
+    if stack_size_diff != 0 {
+        if stack_size_diff > 0 {
+            // If the destination stack is larger, allocate more stack space
+            dynasm!(asm
+                ; .arch x64
+                ; sub rsp, stack_size_diff
+            );
+        } else {
+            // If the destination stack is smaller, deallocate excess stack space
+            dynasm!(asm
+                ; .arch x64
+                ; add rsp, -stack_size_diff
+            );
+        }
+    }
+
+
+
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
     let target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
-    // TODO: Before we do the jump we need to adjust rsp:
-    // 1. check stack size of unopt
-    // 2. calculate the difference
-    // 3. sub the diff from rsp
-
-
     dynasm!(asm
         ; .arch x64
+        // ; int3
         ; mov rax, QWORD target_addr
         ; mov [rsp], rax
         ; ret
