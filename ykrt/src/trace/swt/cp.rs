@@ -18,18 +18,8 @@ const OPT_CP_SMID: usize = 1;
 //
 //  Where - 1 is the control point id
 pub(crate) static RETURN_INTO_OPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
-    let (rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(OPT_CP_SMID);
     let mut asm = Assembler::new().unwrap();
     build_livevars_cp_asm(UNOPT_CP_SMID, OPT_CP_SMID, &mut asm);
-    let call_offset = calc_after_cp_offset(rec.offset).unwrap();
-    let target_addr = i64::try_from(rec.offset).unwrap() + call_offset;
-    dynasm!(asm
-        ; .arch x64
-        // ; int3                          // Insert a breakpoint for GDB
-        ; mov rax, QWORD target_addr
-        ; mov [rsp], rax
-        ; ret
-    );
     let buffer = asm.finalize().unwrap();
     Arc::new(buffer)
 });
@@ -39,21 +29,8 @@ pub(crate) static RETURN_INTO_OPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock
 //
 //  Where - 0 is the control point id
 pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
-    let (rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(UNOPT_CP_SMID);
-
     let mut asm = Assembler::new().unwrap();
     build_livevars_cp_asm(OPT_CP_SMID, UNOPT_CP_SMID, &mut asm);
-
-    let call_offset = calc_after_cp_offset(rec.offset).unwrap();
-    let target_addr = i64::try_from(rec.offset).unwrap() + call_offset;
-    dynasm!(asm
-        ; .arch x64
-        // ; int3                          // Insert a breakpoint for GDB
-        // ; int3                          // Insert a breakpoint for GDB
-        ; mov rax, QWORD target_addr
-        ; mov [rsp], rax
-        ; ret
-    );
     let buffer = asm.finalize().unwrap();
     Arc::new(buffer)
 });
@@ -129,7 +106,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
     );
 
     // TODO: remove this temporary break instruction
-    dynasm!(asm; int3);
+    // dynasm!(asm; int3);
 
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
         let dst_var = &dst_rec.live_vars[index];
@@ -151,10 +128,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             src_val_size, dst_val_size
                         );
                         assert!(*src_add_locs == 0, "deal with additional info");
-                        println!(
-                            "@@ Indirect to Register - from {:?} to {:?}",
-                            src_reg_num, dst_reg_num
-                        );
                         let src_reg = u8::try_from(*src_reg_num).unwrap();
                         let src_offset = reg_num_stack_offset(*src_reg_num);
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
@@ -179,9 +152,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     },
-                    Constant(_val) => {
-                        // copy from constant to indirect
-                    },
+                    Constant(_val) => { todo!("implement constant to indirect") },
                     Indirect(src_reg_num, src_off, src_val_size) => {
                         println!(
                             "@@ Indirect to Indirect - from {:?} to {:?}",
@@ -222,10 +193,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
             Register(dst_reg_num, dst_val_size, dst_add_locs, _dst_add_loc_reg) => {
                 match src_location {
                     Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg) => {
-                        println!(
-                            "@@ Register to Register - from {:?} to {:?}",
-                            src_reg_num, dst_reg_num
-                        );
                         assert!(
                             *src_add_locs == 0 && *dst_add_locs == 0,
                             "deal with additional info"
@@ -249,22 +216,11 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                         }
                     },
                     Indirect(src_reg_num, src_off, src_val_size) => {
-                        println!(
-                            "@@ Register to Indirect - from {:?} to {:?}",
-                            src_reg_num, dst_reg_num
-                        );
-
                         assert!(
                             dst_val_size == src_val_size,
                             "Register to Indirect - src and dst val size must match. got src: {} and dst: {}",
                             src_val_size, dst_val_size
                         );
-                        println!(
-                            "@@ Register to Indirect - from {:?} to {:?}",
-                            src_reg_num, dst_reg_num
-                        );
-                        // let src_reg = u8::try_from(*src_reg_num).unwrap();
-                        // let src_offset = reg_num_stack_offset(*src_reg_num);
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
 
                         match *src_val_size {
@@ -293,10 +249,25 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                 // somewhere else (register/normal stack) so dst and src no longer
                 // match. But since the value can't change we can safely ignore this.
             }
-            _ => panic!("unexpectd dst location: {:?}", dst_location),
+            _ => panic!("unexpect dst location: {:?}", dst_location),
         }
 
     }
+
+    let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
+    let target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
+    // TODO: Before we do the jump we need to adjust rsp:
+    // 1. check stack size of unopt
+    // 2. calculate the difference
+    // 3. sub the diff from rsp
+
+
+    dynasm!(asm
+        ; .arch x64
+        ; mov rax, QWORD target_addr
+        ; mov [rsp], rax
+        ; ret
+    );
 
     // Assembly code to restore registers
     // dynasm!(asm

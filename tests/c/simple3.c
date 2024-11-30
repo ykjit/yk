@@ -12,6 +12,10 @@
 #include <yk.h>
 #include <yk_testing.h>
 
+int dec(int i) {
+  return i - 1;
+}
+
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
@@ -25,7 +29,7 @@ int main(int argc, char **argv) {
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     fprintf(stderr, "%d\n", i);
-    i--;
+    i = dec(i);
   }
   fprintf(stderr, "exit\n");
   NOOPT_VAL(res);
