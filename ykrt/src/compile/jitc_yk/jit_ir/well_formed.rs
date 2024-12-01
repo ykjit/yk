@@ -280,10 +280,10 @@ impl Module {
                             self.inst_no_copies(iidx).display(iidx, self));
                     }
                 }
-                Inst::LoadTraceInput(_) => {
+                Inst::Parameter(_) => {
                     if let Some(i) = last_inst {
-                        if !matches!(i, Inst::LoadTraceInput(_)) {
-                            panic!("LoadTraceInput instruction may only appear at the beginning of a trace or after another LoadTraceInput instruction\n  {}",
+                        if !matches!(i, Inst::Parameter(_)) {
+                            panic!("Parameter instruction may only appear at the beginning of a trace or after another Parameter instruction\n  {}",
                                 self.inst_no_copies(iidx).display(iidx, self));
                         }
                     }
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "LoadTraceInput instruction may only appear at the beginning of a trace or after another LoadTraceInput instruction"
+        expected = "Parameter instruction may only appear at the beginning of a trace or after another Parameter instruction"
     )]
     fn load_ti_invalid() {
         Module::from_str(

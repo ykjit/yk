@@ -466,7 +466,7 @@ impl<'a> Assemble<'a> {
                 }
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
-                jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
+                jit_ir::Inst::Parameter(i) => self.cg_loadtraceinput(iidx, i),
                 jit_ir::Inst::Load(i) => self.cg_load(iidx, i, 0),
                 jit_ir::Inst::PtrAdd(pa_inst) => {
                     next = iter.next();

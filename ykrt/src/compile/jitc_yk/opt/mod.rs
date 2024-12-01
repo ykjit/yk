@@ -351,7 +351,7 @@ impl Opt {
                         self.m.replace(iidx, Inst::Const(dst_cidx));
                     }
                 }
-                Inst::LoadTraceInput(x) => {
+                Inst::Parameter(x) => {
                     // FIXME: This feels like it should be handled by trace_builder, but we can't
                     // do so yet because of https://github.com/ykjit/yk/issues/1435.
                     let locidx = x.locidx();

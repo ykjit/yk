@@ -1430,7 +1430,7 @@ pub(crate) enum Inst {
     BinOp(BinOpInst),
     Load(LoadInst),
     LookupGlobal(LookupGlobalInst),
-    LoadTraceInput(LoadTraceInputInst),
+    Parameter(LoadTraceInputInst),
     Call(DirectCallInst),
     IndirectCall(IndirectCallIdx),
     PtrAdd(PtrAddInst),
@@ -1485,7 +1485,7 @@ impl Inst {
             }
             Self::Load(li) => li.tyidx(),
             Self::LookupGlobal(..) => m.ptr_tyidx(),
-            Self::LoadTraceInput(li) => li.tyidx(),
+            Self::Parameter(li) => li.tyidx(),
             Self::Call(ci) => m.func_type(ci.target()).ret_tyidx(),
             Self::PtrAdd(..) => m.ptr_tyidx(),
             Self::DynPtrAdd(..) => m.ptr_tyidx(),
@@ -1564,7 +1564,7 @@ impl Inst {
             }
             Inst::Load(LoadInst { op, .. }) => op.unpack(m).map_iidx(f),
             Inst::LookupGlobal(_) => (),
-            Inst::LoadTraceInput(_) => (),
+            Inst::Parameter(_) => (),
             Inst::Call(x) => {
                 for i in x.iter_args_idx() {
                     m.arg(i).map_iidx(f);
@@ -1666,7 +1666,7 @@ impl Inst {
             }
             Inst::Load(LoadInst { op, .. }) => op.map_iidx(f),
             Inst::LookupGlobal(_) => (),
-            Inst::LoadTraceInput(_) => (),
+            Inst::Parameter(_) => (),
             Inst::Call(x) => {
                 for i in x.iter_args_idx() {
                     m.arg_packed(i).map_iidx(f);
@@ -1789,7 +1789,7 @@ impl Inst {
             (Self::Load(x), Self::Load(y)) => x.decopy_eq(m, y),
             (Self::Store(x), Self::Store(y)) => x.decopy_eq(m, y),
             (Self::LookupGlobal(x), Self::LookupGlobal(y)) => x.decopy_eq(y),
-            (Self::LoadTraceInput(x), Self::LoadTraceInput(y)) => x.decopy_eq(y),
+            (Self::Parameter(x), Self::Parameter(y)) => x.decopy_eq(y),
             (Self::PtrAdd(x), Self::PtrAdd(y)) => x.decopy_eq(m, y),
             (Self::DynPtrAdd(x), Self::DynPtrAdd(y)) => x.decopy_eq(m, y),
             (Self::ICmp(x), Self::ICmp(y)) => x.decopy_eq(m, y),
@@ -1927,7 +1927,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     cond.unpack(self.m).display(self.m),
                 )
             }
-            Inst::LoadTraceInput(x) => {
+            Inst::Parameter(x) => {
                 write!(
                     f,
                     "load_ti {:?}",
@@ -2016,7 +2016,7 @@ inst!(BlackBox, BlackBoxInst);
 inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
-inst!(LoadTraceInput, LoadTraceInputInst);
+inst!(Parameter, LoadTraceInputInst);
 inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(DynPtrAdd, DynPtrAddInst);
@@ -2990,11 +2990,11 @@ mod tests {
             Operand::Var(InstIdx(1)),
             Operand::Var(InstIdx(2)),
         ];
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(0, i32_tyidx)))
+        m.push(Inst::Parameter(LoadTraceInputInst::new(0, i32_tyidx)))
             .unwrap();
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(1, i32_tyidx)))
+        m.push(Inst::Parameter(LoadTraceInputInst::new(1, i32_tyidx)))
             .unwrap();
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(2, i32_tyidx)))
+        m.push(Inst::Parameter(LoadTraceInputInst::new(2, i32_tyidx)))
             .unwrap();
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
