@@ -314,7 +314,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             .span_str(tiidx)
                             .parse::<u32>()
                             .map_err(|e| self.error_at_span(tiidx, &e.to_string()))?;
-                        assert_eq!(self.m.tilocs.len(), usize::try_from(off).unwrap());
+                        assert_eq!(self.m.params.len(), usize::try_from(off).unwrap());
                         let type_ = self.process_type(type_)?;
                         let size = self.m.type_(type_).byte_size().ok_or_else(|| {
                             self.error_at_span(

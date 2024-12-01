@@ -128,8 +128,8 @@ pub(crate) struct Module {
     consts: IndexSet<ConstIndexSetWrapper>,
     /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
-    /// The trace-input location pool.
-    tilocs: Vec<yksmp::Location>,
+    /// The ordered sequence of trace parameters.
+    params: Vec<yksmp::Location>,
     /// Addresses of root traces to jump to at the end of a side-trace.
     root_jump_ptr: *const libc::c_void,
     /// The type index of the void type. Cached for convenience.
@@ -242,7 +242,7 @@ impl Module {
             args: Vec::new(),
             consts,
             types,
-            tilocs: Vec::new(),
+            params: Vec::new(),
             root_jump_ptr: std::ptr::null(),
             void_tyidx,
             ptr_tyidx,
@@ -445,12 +445,12 @@ impl Module {
 
     /// Push the location of a trace parameter.
     pub(crate) fn push_param(&mut self, loc: yksmp::Location) {
-        self.tilocs.push(loc);
+        self.params.push(loc);
     }
 
     /// Return a slice over all trace parameters.
     pub(crate) fn params(&self) -> &[yksmp::Location] {
-        &self.tilocs
+        &self.params
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -1932,7 +1932,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(
                     f,
                     "param {:?}",
-                    self.m.tilocs[usize::try_from(x.locidx()).unwrap()]
+                    self.m.params[usize::try_from(x.locidx()).unwrap()]
                 )
             }
             Inst::TraceLoopStart => {
