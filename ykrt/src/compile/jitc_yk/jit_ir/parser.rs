@@ -328,7 +328,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 if gp_reg_off == 15 {
                                     panic!("out of gp registers");
                                 }
-                                self.m.push_tiloc(yksmp::Location::Register(
+                                self.m.push_parameter(yksmp::Location::Register(
                                     gp_reg_off,
                                     u16::try_from(size).unwrap(),
                                     0,
@@ -344,7 +344,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 if fp_reg_off == 32 {
                                     panic!("out of fp regisers");
                                 }
-                                self.m.push_tiloc(yksmp::Location::Register(
+                                self.m.push_parameter(yksmp::Location::Register(
                                     fp_reg_off,
                                     u16::try_from(size).unwrap(),
                                     0,
@@ -876,8 +876,8 @@ mod tests {
         let mut m = Module::new_testing();
         let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
 
-        m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push_parameter(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push_parameter(yksmp::Location::Register(3, 1, 0, vec![]));
         let op1 = m
             .push_and_make_operand(ParameterInst::new(0, i16_tyidx).into())
             .unwrap();

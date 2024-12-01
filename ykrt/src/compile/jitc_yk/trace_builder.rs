@@ -126,7 +126,7 @@ impl TraceBuilder {
             if var.len() > 1 {
                 todo!("Deal with multi register locations");
             }
-            self.jit_mod.push_tiloc(var.get(0).unwrap().clone());
+            self.jit_mod.push_parameter(var.get(0).unwrap().clone());
             self.local_map.insert(
                 aot_op.to_inst_id(),
                 jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
@@ -1184,7 +1184,7 @@ impl TraceBuilder {
                 let param_inst =
                     jit_ir::ParameterInst::new(u32::try_from(idx).unwrap(), tyidx).into();
                 self.jit_mod.push(param_inst)?;
-                self.jit_mod.push_tiloc(loc.clone());
+                self.jit_mod.push_parameter(loc.clone());
                 self.local_map.insert(
                     aotid.clone(),
                     jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),

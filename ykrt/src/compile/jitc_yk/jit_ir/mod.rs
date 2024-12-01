@@ -443,12 +443,13 @@ impl Module {
         self.args[usize::from(idx)]
     }
 
-    /// Push the location of a trace input variable.
-    pub(crate) fn push_tiloc(&mut self, loc: yksmp::Location) {
+    /// Push the location of a trace parameter.
+    pub(crate) fn push_parameter(&mut self, loc: yksmp::Location) {
         self.tilocs.push(loc);
     }
 
-    pub(crate) fn tilocs(&self) -> &[yksmp::Location] {
+    /// Return a slice over all trace parameters.
+    pub(crate) fn parameters(&self) -> &[yksmp::Location] {
         &self.tilocs
     }
 
@@ -3117,7 +3118,7 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push_parameter(yksmp::Location::Register(3, 1, 0, vec![]));
         m.push(ParameterInst::new(0, m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(

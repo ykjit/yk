@@ -356,7 +356,7 @@ impl Opt {
                     // do so yet because of https://github.com/ykjit/yk/issues/1435.
                     let locidx = x.locidx();
                     if let yksmp::Location::Constant(v) =
-                        self.m.tilocs()[usize::try_from(locidx).unwrap()]
+                        self.m.parameters()[usize::try_from(locidx).unwrap()]
                     {
                         let cidx = self.m.insert_const(Const::Int(x.tyidx(), v.into()))?;
                         self.an.set_value(iidx, Value::Const(cidx));

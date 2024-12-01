@@ -1077,7 +1077,7 @@ impl<'a> Assemble<'a> {
     /// Codegen a [jit_ir::ParameterInst]. This only informs the register allocator about the
     /// locations of live variables without generating any actual machine code.
     fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParameterInst) {
-        let m = match &self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
+        let m = match &self.m.parameters()[usize::try_from(inst.locidx()).unwrap()] {
             yksmp::Location::Register(0, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))
             }
@@ -4498,15 +4498,15 @@ mod tests {
     }
 
     #[test]
-    fn cg_aliasing_loadtis() {
+    fn cg_aliasing_parameters() {
         let mut m = jit_ir::Module::new(0, 0).unwrap();
 
-        // Create two trace inputs whose locations alias.
+        // Create two trace paramaters whose locations alias.
         let loc = yksmp::Location::Register(13, 1, 0, [].into());
-        m.push_tiloc(loc);
-        let ti_inst = jit_ir::ParameterInst::new(0, m.int8_tyidx());
-        let op1 = m.push_and_make_operand(ti_inst.clone().into()).unwrap();
-        let op2 = m.push_and_make_operand(ti_inst.into()).unwrap();
+        m.push_parameter(loc);
+        let param_inst = jit_ir::ParameterInst::new(0, m.int8_tyidx());
+        let op1 = m.push_and_make_operand(param_inst.clone().into()).unwrap();
+        let op2 = m.push_and_make_operand(param_inst.into()).unwrap();
 
         let add_inst = jit_ir::BinOpInst::new(op1, jit_ir::BinOp::Add, op2);
         m.push(add_inst.into()).unwrap();
