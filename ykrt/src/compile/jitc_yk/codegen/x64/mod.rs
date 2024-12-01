@@ -466,7 +466,7 @@ impl<'a> Assemble<'a> {
                 }
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
-                jit_ir::Inst::Param(i) => self.cg_loadtraceinput(iidx, i),
+                jit_ir::Inst::Param(i) => self.cg_param(iidx, i),
                 jit_ir::Inst::Load(i) => self.cg_load(iidx, i, 0),
                 jit_ir::Inst::PtrAdd(pa_inst) => {
                     next = iter.next();
@@ -1076,7 +1076,7 @@ impl<'a> Assemble<'a> {
 
     /// Codegen a [jit_ir::ParamInst]. This only informs the register allocator about the
     /// locations of live variables without generating any actual machine code.
-    fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParamInst) {
+    fn cg_param(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParamInst) {
         let m = match &self.m.params()[usize::try_from(inst.locidx()).unwrap()] {
             yksmp::Location::Register(0, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))

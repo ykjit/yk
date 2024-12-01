@@ -23,8 +23,8 @@ pub(crate) struct TraceBuilder {
     local_map: HashMap<aot_ir::InstID, jit_ir::Operand>,
     /// BBlock containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BBlockId>,
-    /// Index of the first traceinput instruction.
-    first_ti_idx: usize,
+    /// Index of the first [ParameterInst].
+    first_paraminst_idx: usize,
     /// Inlined calls.
     frames: Vec<InlinedFrame>,
     /// The block at which to stop outlining.
@@ -58,7 +58,7 @@ impl TraceBuilder {
             jit_mod: jit_ir::Module::new(ctr_id, aot_mod.global_decls_len())?,
             local_map: HashMap::new(),
             cp_block: None,
-            first_ti_idx: 0,
+            first_paraminst_idx: 0,
             // We have to set the funcidx to None here as we don't know what it is yet. We'll
             // update it as soon as we do.
             frames: vec![InlinedFrame {
@@ -204,7 +204,7 @@ impl TraceBuilder {
                     dyn_elem_sizes,
                     ..
                 } => {
-                    if self.cp_block.as_ref() == Some(bid) && iidx == self.first_ti_idx {
+                    if self.cp_block.as_ref() == Some(bid) && iidx == self.first_paraminst_idx {
                         // We've reached the trace inputs part of the control point block. There's
                         // no point in copying these instructions over and we can just skip to the
                         // next block.
