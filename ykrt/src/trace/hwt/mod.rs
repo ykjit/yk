@@ -29,6 +29,7 @@ impl super::Tracer for HWTracer {
 }
 
 /// Hardware thread tracer.
+#[derive(Debug)]
 struct HWTTraceRecorder {
     thread_tracer: Box<dyn hwtracer::ThreadTracer>,
 }

@@ -12,7 +12,7 @@
 //!
 //! This module thus contains tracing backends which can record and process traces.
 
-use std::{error::Error, ffi::CString, sync::Arc};
+use std::{error::Error, ffi::CString, fmt, sync::Arc};
 use thiserror::Error;
 
 #[cfg(tracer_hwt)]
@@ -45,7 +45,7 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 }
 
 /// An instance of a [Tracer] which is currently recording a trace of the current thread.
-pub(crate) trait TraceRecorder {
+pub(crate) trait TraceRecorder: fmt::Debug {
     /// Stop recording a trace of the current thread and return an iterator which successively
     /// produces [TraceAction]s.
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError>;

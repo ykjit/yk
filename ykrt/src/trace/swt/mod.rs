@@ -79,6 +79,7 @@ impl Tracer for SWTracer {
     }
 }
 
+#[derive(Debug)]
 struct SWTTraceRecorder {}
 
 impl TraceRecorder for SWTTraceRecorder {
