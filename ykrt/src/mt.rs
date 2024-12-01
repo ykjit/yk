@@ -450,8 +450,6 @@ impl MT {
                 }
                 #[cfg(tracer_swt)]
                 unsafe {
-                    // println!("about to return into unopt cp");
-                    // execute asm
                     if !SWT_JUMP_FLAG {
                         SWT_JUMP_FLAG = true;
                     } else {
@@ -489,8 +487,6 @@ impl MT {
                             .log(Verbosity::Warning, &format!("stop-tracing-aborted: {e}"));
                     }
                 }
-                // execute asm
-                // println!("about to return into opt cp");
                 #[cfg(tracer_swt)]
                 unsafe {
                     // let func: unsafe fn() = std::mem::transmute(debug_return_into_opt_cp().as_ptr());

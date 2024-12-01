@@ -77,22 +77,22 @@ const REG_MAP: [Rq; 16] = [
 #[cfg(tracer_swt)]
 fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
     match dwarf_reg_num {
-        0 => 0,  // rax
-        1 => 8,  // rdx
-        2 => 16, // rcx
-        3 => 24, // rbx
-        4 => 40, // rsi
-        5 => 32, // rdi
+        0 => 0,   // rax
+        1 => 8,   // rdx
+        2 => 16,  // rcx
+        3 => 24,  // rbx
+        4 => 32,  // rsi
+        5 => 40,  // rdi
         // rbp is not saved
         // rsp is not saved
-        8 => 64,   // r8
-        9 => 72,   // r9
-        10 => 80,  // r10
-        11 => 88,  // r11
-        12 => 96,  // r12
-        13 => 104, // r13
-        14 => 112, // r14
-        15 => 120, // r15
+        8 => 64,  // r8
+        9 => 72,  // r9
+        10 => 80, // r10
+        11 => 88, // r11
+        12 => 96, // r12
+        13 => 104,// r13
+        14 => 112,// r14
+        15 => 120,// r15
         _ => panic!("Unsupported register {}", dwarf_reg_num),
     }
 }
@@ -120,8 +120,10 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         ; push rcx    // 2 - offset 16
         ; push rdx    // 1 - offset 8
         ; push rax    // 0 - offset 0
+        // ; int3        // for debugging only
     );
     println!("@@ live var count: {}", dst_rec.live_vars.len());
+
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
         let dst_var = &dst_rec.live_vars[index];
         if src_var.len() > 1 || dst_var.len() > 1 {
@@ -165,7 +167,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                                 ; mov rax, QWORD [rsp + src_offset]
                                 ; mov QWORD [Rq(dst_reg) + *dst_off], rax
                             ),
-                            //mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
@@ -188,22 +189,23 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                         //     src_val_size,
                         //     dst_val_size
                         // );
+
                         match *src_val_size {
                             1 => dynasm!(asm
-                                ; mov al, BYTE [rsp + *src_off]
-                                ; mov BYTE [rbp + *dst_off], al
+                                ; mov al, BYTE [rsp + i32::try_from(*src_off).unwrap()]
+                                ; mov BYTE [rbp + i32::try_from(*dst_off).unwrap()], al
                             ),
                             2 => dynasm!(asm
-                                ; mov ax, WORD [rsp + *src_off]
-                                ; mov WORD [rbp + *dst_off], ax
+                                ; mov ax, WORD [rsp + i32::try_from(*src_off).unwrap()]
+                                ; mov WORD [rbp + i32::try_from(*dst_off).unwrap()], ax
                             ),
                             4 => dynasm!(asm
-                                ; mov eax, DWORD [rsp + *src_off]
-                                ; mov DWORD [rbp + *dst_off], eax
+                                ; mov eax, DWORD [rsp + i32::try_from(*src_off).unwrap()]
+                                ; mov DWORD [rbp + i32::try_from(*dst_off).unwrap()], eax
                             ),
                             8 => dynasm!(asm
-                                ; mov rax, QWORD [rsp + *src_off]
-                                ; mov QWORD [rbp + *dst_off], rax
+                                ; mov rax, QWORD [rsp + i32::try_from(*src_off).unwrap()]
+                                ; mov QWORD [rbp + i32::try_from(*dst_off).unwrap()], rax
                             ),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
@@ -216,11 +218,12 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                     Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg) => {
                         assert!(
                             *src_add_locs == 0 && *dst_add_locs == 0,
-                            "deal with additional info"
+                            "Register to Register - deal with additional info"
                         );
                         assert!(
                             dst_val_size == src_val_size,
-                            "src and dst val size must match"
+                            "Register to Register - src and dst val size must match. Got src: {} and dst: {}",
+                            src_val_size, dst_val_size
                         );
                         // skip copying to the same register with the same value size
                         if src_reg_num == dst_reg_num && src_val_size == dst_val_size {
@@ -239,34 +242,26 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                         }
                     }
                     Indirect(src_reg_num, src_off, src_val_size) => {
-                        assert!(
-                            dst_val_size == src_val_size,
-                            "Register to Indirect - src and dst val size must match. got src: {} and dst: {}",
-                            src_val_size, dst_val_size
-                        );
+                        // assert!(
+                        //     dst_val_size == src_val_size,
+                        //     "Register to Indirect - src and dst val size must match. Got src: {} and dst: {}",
+                        //     src_val_size, dst_val_size
+                        // );
                         assert!(
                             REG_MAP.get(*src_reg_num as usize) == Some(&Rq::RBP),
                             "indirect register is expected to be rbp"
                         );
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         // let dst_reg_rd = map_to_rd(*dst_reg_num);
-                        match *src_val_size {
+                        match *dst_val_size {
                             // 1 => dynasm!(asm
                             //     ; mov Rq(dst_reg), BYTE [Rq(src_reg) + *src_off]
                             // ),
                             // 2 => dynasm!(asm
                             //     ; mov Rq(dst_reg), WORD [Rq(src_reg) + *src_off]
                             // ),
-                            // 4 => {
-                            //     // Use Rd for 32-bit registers
-                            //     dynasm!(asm
-                            //         ; mov Rd(dest_reg), DWORD [rbp + *src_off]
-                            //     )
-                            // },
-                            8 => dynasm!(asm
-                                ; mov Rq(dst_reg), QWORD [rbp + *src_off]
-                            ),
-                            // 8 => dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]),
+                            4 => dynasm!(asm; mov Rd(dst_reg), DWORD [rbp + i32::try_from(*src_off).unwrap()]),
+                            8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp + i32::try_from(*src_off).unwrap()]),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
@@ -345,7 +340,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
     );
     dynasm!(asm
         ; .arch x64
-        // ; int3
         ; mov rax, QWORD dst_target_addr
         ; mov [rsp], rax
         ; ret
