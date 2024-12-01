@@ -21,7 +21,9 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 #[cfg(tracer_swt)]
-use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP, debug_return_into_opt_cp, debug_return_into_unopt_cp};
+use crate::trace::swt::cp::{
+    debug_return_into_opt_cp, debug_return_into_unopt_cp, RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP,
+};
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},

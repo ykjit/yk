@@ -33,8 +33,6 @@ pub(crate) fn debug_return_into_opt_cp() -> Arc<ExecutableBuffer> {
     Arc::new(buffer)
 }
 
-
-
 // Example IR:
 //  call void (i64, i32, ptr, i32, ...) @llvm.experimental.patchpoint.void(i64 0, i32 13, ptr @__ykrt_control_point, i32 3, ptr %28, ptr %7, i64 0, ptr %6, ptr %7, ptr %8, ptr %9, ptr %28), !dbg !74
 //
@@ -57,21 +55,34 @@ pub(crate) fn debug_return_into_unopt_cp() -> Arc<ExecutableBuffer> {
     Arc::new(buffer)
 }
 
-
 const REG_MAP: [Rq; 16] = [
-    Rq::RAX, Rq::RDX, Rq::RCX, Rq::RBX, Rq::RSI, Rq::RDI, Rq::RBP, Rq::RSP,
-    Rq::R8, Rq::R9, Rq::R10, Rq::R11, Rq::R12, Rq::R13, Rq::R14, Rq::R15,
+    Rq::RAX,
+    Rq::RDX,
+    Rq::RCX,
+    Rq::RBX,
+    Rq::RSI,
+    Rq::RDI,
+    Rq::RBP,
+    Rq::RSP,
+    Rq::R8,
+    Rq::R9,
+    Rq::R10,
+    Rq::R11,
+    Rq::R12,
+    Rq::R13,
+    Rq::R14,
+    Rq::R15,
 ];
 
 #[cfg(tracer_swt)]
 fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
     match dwarf_reg_num {
-        0 => 0,    // rax
-        1 => 8,    // rdx
-        2 => 16,   // rcx
-        3 => 24,   // rbx
-        4 => 40,   // rsi
-        5 => 32,   // rdi
+        0 => 0,  // rax
+        1 => 8,  // rdx
+        2 => 16, // rcx
+        3 => 24, // rbx
+        4 => 40, // rsi
+        5 => 32, // rdi
         // rbp is not saved
         // rsp is not saved
         8 => 64,   // r8
@@ -110,10 +121,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         ; push rdx    // 1 - offset 8
         ; push rax    // 0 - offset 0
     );
-
-    // TODO: remove this temporary break instruction
-    // dynasm!(asm; int3);
-
+    println!("@@ live var count: {}", dst_rec.live_vars.len());
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
         let dst_var = &dst_rec.live_vars[index];
         if src_var.len() > 1 || dst_var.len() > 1 {
@@ -122,7 +130,10 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
 
         let src_location = &src_var.get(0).unwrap();
         let dst_location = &dst_var.get(0).unwrap();
-        println!("@@ dst_location: {:?}, src_location: {:?}", dst_location, src_location);
+        println!(
+            "@@ dst_location: {:?}, src_location: {:?}",
+            dst_location, src_location
+        );
 
         match dst_location {
             Indirect(dst_reg_num, dst_off, dst_val_size) => {
@@ -157,20 +168,26 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             //mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
-                    },
-                    Constant(_val) => { todo!("implement Indirect to Constant") },
-                    LargeConstant(_val) => { todo!("implement Indirect to LargeConstant") },
+                    }
+                    Constant(_val) => {
+                        todo!("implement Indirect to Constant")
+                    }
+                    LargeConstant(_val) => {
+                        todo!("implement Indirect to LargeConstant")
+                    }
                     Indirect(src_reg_num, src_off, src_val_size) => {
-                        println!(
-                            "@@ Indirect to Indirect - from {:?} to {:?}",
-                            src_reg_num, dst_reg_num
-                        );
-                        assert!(
-                            src_val_size == dst_val_size,
-                            "Value sizes must match, got src: {} and dst: {}",
-                            src_val_size,
-                            dst_val_size
-                        );
+                        // Example error:
+                        // @@ dst_location: Indirect(6, -96, 8), src_location: Indirect(6, -44, 4)
+                        // Value sizes must match, got src: 4 and dst: 8
+                        // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+                        // fatal runtime error: failed to initiate panic, error 5
+
+                        // assert!(
+                        //     src_val_size == dst_val_size,
+                        //     "Value sizes must match, got src: {} and dst: {}",
+                        //     src_val_size,
+                        //     dst_val_size
+                        // );
                         match *src_val_size {
                             1 => dynasm!(asm
                                 ; mov al, BYTE [rsp + *src_off]
@@ -190,7 +207,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             ),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
-                    },
+                    }
                     _ => panic!("Unsupported source location: {:?}", src_location),
                 }
             }
@@ -216,9 +233,11 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             2 => todo!("implement reg to reg 2 bytes"),
                             4 => todo!("implement reg to reg 4 bytes"),
                             8 => dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]),
-                            _ => todo!("implement Register to Register value size {}", src_val_size),
+                            _ => {
+                                todo!("implement Register to Register value size {}", src_val_size)
+                            }
                         }
-                    },
+                    }
                     Indirect(src_reg_num, src_off, src_val_size) => {
                         assert!(
                             dst_val_size == src_val_size,
@@ -230,7 +249,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             "indirect register is expected to be rbp"
                         );
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
-
+                        // let dst_reg_rd = map_to_rd(*dst_reg_num);
                         match *src_val_size {
                             // 1 => dynasm!(asm
                             //     ; mov Rq(dst_reg), BYTE [Rq(src_reg) + *src_off]
@@ -238,63 +257,65 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             // 2 => dynasm!(asm
                             //     ; mov Rq(dst_reg), WORD [Rq(src_reg) + *src_off]
                             // ),
-                            // 4 => dynasm!(asm
-                            //     ; mov Rq(dst_reg), DWORD [Rq(src_reg) + *src_off]
-                            // ),
+                            // 4 => {
+                            //     // Use Rd for 32-bit registers
+                            //     dynasm!(asm
+                            //         ; mov Rd(dest_reg), DWORD [rbp + *src_off]
+                            //     )
+                            // },
                             8 => dynasm!(asm
                                 ; mov Rq(dst_reg), QWORD [rbp + *src_off]
                             ),
                             // 8 => dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
-                    },
+                    }
                     _ => panic!("Unsupported source location: {:?}", src_location),
                 }
             }
             Direct(dst_reg_num, dst_off, dst_val_size) => {
-            // Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
-            // Direct locations are read-only, so it doesn't make sense to write to
-            // them. This is likely a case where the direct value has been moved
-            // somewhere else (register/normal stack) so dst and src no longer
-            // match. But since the value can't change we can safely ignore this.
-            //    match src_location {
-            //     Direct(src_reg_num, src_off, src_val_size) => {
-            //         assert_eq!(
-            //             *src_val_size, *dst_val_size,
-            //             "Source and destination value sizes do not match"
-            //         );
-            //         let src_reg = u8::try_from(*src_reg_num).unwrap();
-            //         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
-            //         // Skipping copying to the same register with the same offset
-            //         if src_reg_num == dst_reg_num && src_off == dst_off {
-            //             continue;
-            //         }
-            //         match *src_val_size {
-            //             1 => dynasm!(asm
-            //                 ; mov al, BYTE [Rq(src_reg) + *src_off]
-            //                 ; mov BYTE [Rq(dst_reg) + *dst_off], al
-            //             ),
-            //             2 => dynasm!(asm
-            //                 ; mov ax, WORD [Rq(src_reg) + *src_off]
-            //                 ; mov WORD [Rq(dst_reg) + *dst_off], ax
-            //             ),
-            //             4 => dynasm!(asm
-            //                 ; mov eax, DWORD [Rq(src_reg) + *src_off]
-            //                 ; mov DWORD [Rq(dst_reg) + *dst_off], eax
-            //             ),
-            //             8 => dynasm!(asm
-            //                 ; mov rax, QWORD [Rq(src_reg) + *src_off]
-            //                 ; mov QWORD [Rq(dst_reg) + *dst_off], rax
-            //             ),
-            //             _ => panic!("Unsupported source value size: {}", src_val_size),
-            //         }
-            //     }
-            //     _ => panic!("unexpect src location: {:?}", src_location),
-            //    }
+                // Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
+                // Direct locations are read-only, so it doesn't make sense to write to
+                // them. This is likely a case where the direct value has been moved
+                // somewhere else (register/normal stack) so dst and src no longer
+                // match. But since the value can't change we can safely ignore this.
+                // match src_location {
+                //     Direct(src_reg_num, src_off, src_val_size) => {
+                //         assert_eq!(
+                //             *src_val_size, *dst_val_size,
+                //             "Source and destination value sizes do not match"
+                //         );
+                //         let src_reg = u8::try_from(*src_reg_num).unwrap();
+                //         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
+                //         // Skipping copying to the same register with the same offset
+                //         if src_reg_num == dst_reg_num && src_off == dst_off {
+                //             continue;
+                //         }
+                //         match *src_val_size {
+                //             1 => dynasm!(asm
+                //                 ; mov al, BYTE [Rq(src_reg) + *src_off]
+                //                 ; mov BYTE [Rq(dst_reg) + *dst_off], al
+                //             ),
+                //             2 => dynasm!(asm
+                //                 ; mov ax, WORD [Rq(src_reg) + *src_off]
+                //                 ; mov WORD [Rq(dst_reg) + *dst_off], ax
+                //             ),
+                //             4 => dynasm!(asm
+                //                 ; mov eax, DWORD [Rq(src_reg) + *src_off]
+                //                 ; mov DWORD [Rq(dst_reg) + *dst_off], eax
+                //             ),
+                //             8 => dynasm!(asm
+                //                 ; mov rax, QWORD [Rq(src_reg) + *src_off]
+                //                 ; mov QWORD [Rq(dst_reg) + *dst_off], rax
+                //             ),
+                //             _ => panic!("Unsupported source value size: {}", src_val_size),
+                //         }
+                //     }
+                //     _ => panic!("unexpect src location: {:?}", src_location),
+                // }
             }
             _ => panic!("unexpect dst location: {:?}", dst_location),
         }
-
     }
 
     // Adjust RSP before the jump
@@ -315,47 +336,27 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         }
     }
 
-
-
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
-    let target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
+    let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
+    let src_target_addr = i64::try_from(src_rec.offset).unwrap() + call_offset;
+    println!(
+        "@@ from {} to {}, dst_target_addr: {:x}, src_target_addr: {:x}",
+        src_smid, dst_smid, dst_target_addr, src_target_addr
+    );
     dynasm!(asm
         ; .arch x64
         // ; int3
-        ; mov rax, QWORD target_addr
+        ; mov rax, QWORD dst_target_addr
         ; mov [rsp], rax
         ; ret
     );
-
-    // Assembly code to restore registers
-    // dynasm!(asm
-    //     // Restore registers by popping them in reverse order
-    //     ; pop rax     // Corresponds to push rax
-    //     ; pop rdx     // Corresponds to push rdx
-    //     ; pop rcx     // Corresponds to push rcx
-    //     ; pop rbx     // Corresponds to push rbx
-    //     ; pop rdi     // Corresponds to push rdi
-    //     ; pop rsi     // Corresponds to push rsi
-    //     ; add rsp, 16 // Reverse sub rsp, 16
-    //     ; pop r8      // Corresponds to push r8
-    //     ; pop r9      // Corresponds to push r9
-    //     ; pop r10     // Corresponds to push r10
-    //     ; pop r11     // Corresponds to push r11
-    //     ; pop r12     // Corresponds to push r12
-    //     ; pop r13     // Corresponds to push r13
-    //     ; pop r14     // Corresponds to push r14
-    //     ; pop r15     // Corresponds to push r15
-    //     ; ret
-    // );
-
-    // asm.finalize().unwrap()
 }
 
-// Additional offset to the CP Record offset.
-// TODO: calculate this offset somehow instead of hardcoding it.
+// This function calculates the offset to the call instruction just
+// after the given offset.
 // Example:
-//  CP Record offset points to 0x00000000002023a4 but we want 0x00000000002023b1
-//  Which is in offset of 0x00000000002023b1 - 0x00000000002023a4 = 0xD = 13
+//  CP Record offset points to 0x00000000002023a4, we want to find the
+//  instruction at 0x00000000002023b1.
 //  0x00000000002023a4 <+308>:	movabs $0x202620,%r11
 //  0x00000000002023ae <+318>:	call   *%r11
 //  0x00000000002023b1 <+321>:	jmp    0x2023b3 <main+323>
