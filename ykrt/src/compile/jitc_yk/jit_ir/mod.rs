@@ -1430,7 +1430,7 @@ pub(crate) enum Inst {
     BinOp(BinOpInst),
     Load(LoadInst),
     LookupGlobal(LookupGlobalInst),
-    Parameter(LoadTraceInputInst),
+    Parameter(ParameterInst),
     Call(DirectCallInst),
     IndirectCall(IndirectCallIdx),
     PtrAdd(PtrAddInst),
@@ -2016,7 +2016,7 @@ inst!(BlackBox, BlackBoxInst);
 inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
-inst!(Parameter, LoadTraceInputInst);
+inst!(Parameter, ParameterInst);
 inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(DynPtrAdd, DynPtrAddInst);
@@ -2151,26 +2151,22 @@ impl LoadInst {
     }
 }
 
-/// The `LoadTraceInput` instruction.
+/// The `Parameter` instruction.
 ///
 /// ## Semantics
 ///
-/// Loads a trace input out of the trace input struct. The variable is loaded from the specified
-/// offset (`off`) and the resulting local variable is of the type indicated by the `tyidx`.
-///
-/// FIXME (maybe): If we added a third `TraceInput` storage class to the register allocator, could
-/// we kill this instruction kind entirely?
+/// Specifies the [yksmp::Location] of a run-time argument.
 #[derive(Clone, Copy, Debug)]
 #[repr(packed)]
-pub struct LoadTraceInputInst {
+pub struct ParameterInst {
     /// The [yksmp::Location] of this input.
     locidx: u32,
     /// The type of the resulting local variable.
     tyidx: TyIdx,
 }
 
-impl LoadTraceInputInst {
-    pub(crate) fn new(locidx: u32, tyidx: TyIdx) -> LoadTraceInputInst {
+impl ParameterInst {
+    pub(crate) fn new(locidx: u32, tyidx: TyIdx) -> ParameterInst {
         Self { locidx, tyidx }
     }
 
@@ -2950,8 +2946,8 @@ mod tests {
     #[test]
     fn use_case_update_inst() {
         let mut prog: Vec<Inst> = vec![
-            LoadTraceInputInst::new(0, TyIdx::try_from(0).unwrap()).into(),
-            LoadTraceInputInst::new(8, TyIdx::try_from(0).unwrap()).into(),
+            ParameterInst::new(0, TyIdx::try_from(0).unwrap()).into(),
+            ParameterInst::new(8, TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
                 Operand::Var(InstIdx(0)),
                 TyIdx(U24::try_from(0).unwrap()),
@@ -2990,11 +2986,11 @@ mod tests {
             Operand::Var(InstIdx(1)),
             Operand::Var(InstIdx(2)),
         ];
-        m.push(Inst::Parameter(LoadTraceInputInst::new(0, i32_tyidx)))
+        m.push(Inst::Parameter(ParameterInst::new(0, i32_tyidx)))
             .unwrap();
-        m.push(Inst::Parameter(LoadTraceInputInst::new(1, i32_tyidx)))
+        m.push(Inst::Parameter(ParameterInst::new(1, i32_tyidx)))
             .unwrap();
-        m.push(Inst::Parameter(LoadTraceInputInst::new(2, i32_tyidx)))
+        m.push(Inst::Parameter(ParameterInst::new(2, i32_tyidx)))
             .unwrap();
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
@@ -3122,7 +3118,7 @@ mod tests {
     fn print_module() {
         let mut m = Module::new_testing();
         m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push(LoadTraceInputInst::new(0, m.int8_tyidx()).into())
+        m.push(ParameterInst::new(0, m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),

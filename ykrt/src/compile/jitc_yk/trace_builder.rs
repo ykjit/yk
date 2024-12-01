@@ -117,9 +117,9 @@ impl TraceBuilder {
         for idx in 0..safepoint.lives.len() {
             let aot_op = &safepoint.lives[idx];
             let input_tyidx = self.handle_type(aot_op.type_(self.aot_mod))?;
-            let load_ti_inst =
-                jit_ir::LoadTraceInputInst::new(u32::try_from(idx).unwrap(), input_tyidx).into();
-            self.jit_mod.push(load_ti_inst)?;
+            let param_inst =
+                jit_ir::ParameterInst::new(u32::try_from(idx).unwrap(), input_tyidx).into();
+            self.jit_mod.push(param_inst)?;
 
             // Get the location for this input variable.
             let var = &rec.live_vars[idx];
@@ -1181,9 +1181,9 @@ impl TraceBuilder {
                 let aotinst = self.aot_mod.inst(aotid);
                 let aotty = aotinst.def_type(self.aot_mod).unwrap();
                 let tyidx = self.handle_type(aotty)?;
-                let load_ti_inst =
-                    jit_ir::LoadTraceInputInst::new(u32::try_from(idx).unwrap(), tyidx).into();
-                self.jit_mod.push(load_ti_inst)?;
+                let param_inst =
+                    jit_ir::ParameterInst::new(u32::try_from(idx).unwrap(), tyidx).into();
+                self.jit_mod.push(param_inst)?;
                 self.jit_mod.push_tiloc(loc.clone());
                 self.local_map.insert(
                     aotid.clone(),

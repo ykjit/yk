@@ -1074,9 +1074,9 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    /// Codegen a [jit_ir::LoadTraceInputInst]. This only informs the register allocator about the
+    /// Codegen a [jit_ir::ParameterInst]. This only informs the register allocator about the
     /// locations of live variables without generating any actual machine code.
-    fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
+    fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParameterInst) {
         let m = match &self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
             yksmp::Location::Register(0, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))
@@ -4504,7 +4504,7 @@ mod tests {
         // Create two trace inputs whose locations alias.
         let loc = yksmp::Location::Register(13, 1, 0, [].into());
         m.push_tiloc(loc);
-        let ti_inst = jit_ir::LoadTraceInputInst::new(0, m.int8_tyidx());
+        let ti_inst = jit_ir::ParameterInst::new(0, m.int8_tyidx());
         let op1 = m.push_and_make_operand(ti_inst.clone().into()).unwrap();
         let op2 = m.push_and_make_operand(ti_inst.into()).unwrap();
 

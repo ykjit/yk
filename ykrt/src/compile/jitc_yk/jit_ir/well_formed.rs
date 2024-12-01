@@ -629,7 +629,7 @@ mod tests {
     #[should_panic(
         expected = "Parameter instruction may only appear at the beginning of a trace or after another Parameter instruction"
     )]
-    fn load_ti_invalid() {
+    fn parameter_invalid() {
         Module::from_str(
             "
               entry:
