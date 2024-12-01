@@ -21,9 +21,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 #[cfg(tracer_swt)]
-use crate::trace::swt::cp::{
-    debug_return_into_opt_cp, debug_return_into_unopt_cp, RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP,
-};
+use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP};
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
@@ -455,6 +453,7 @@ impl MT {
                     } else {
                         // let func: unsafe fn() = std::mem::transmute(debug_return_into_unopt_cp().as_ptr());
                         let func: unsafe fn() = std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr());
+                        // self.log.log(Verbosity::JITEvent, "returning into unopt cp");
                         func();
                     }
                 }
@@ -491,6 +490,7 @@ impl MT {
                 unsafe {
                     // let func: unsafe fn() = std::mem::transmute(debug_return_into_opt_cp().as_ptr());
                     let func: unsafe fn() = std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr());
+                    // self.log.log(Verbosity::JITEvent, "returning into opt cp");
                     func();
                 }
             }
