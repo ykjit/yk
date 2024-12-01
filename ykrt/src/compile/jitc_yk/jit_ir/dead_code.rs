@@ -36,8 +36,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = parameter 0
+            %1: i8 = parameter 1
             black_box %1
         ",
             |mut m| {
@@ -47,7 +47,7 @@ mod test {
             "
           ...
           entry:
-            %1: i8 = load_ti ...
+            %1: i8 = parameter ...
             black_box %1
         ",
         );
@@ -55,7 +55,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = parameter 0
             %1: i8 = add %0, %0
             %2: i8 = add %0, %0
             black_box %2
@@ -67,7 +67,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = parameter ...
             %2: i8 = add %0, %0
             black_box %2
         ",
@@ -76,8 +76,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = parameter 0
+            %1: i8 = parameter 1
             %2: i8 = add %1, %0
             %3: i8 = add %1, %0
             black_box %3
@@ -89,8 +89,8 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
-            %1: i8 = load_ti ...
+            %0: i8 = parameter ...
+            %1: i8 = parameter ...
             %3: i8 = add %1, %0
             black_box %3
         ",
@@ -99,8 +99,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = parameter 0
+            %1: i8 = parameter 1
             %2: i1 = ult %0, %0
             %3: i1 = ult %1, %1
             black_box %3
@@ -112,7 +112,7 @@ mod test {
             "
           ...
           entry:
-            %1: i8 = load_ti ...
+            %1: i8 = parameter ...
             %3: i1 = ult %1, %1
             black_box %3
         ",
@@ -121,7 +121,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = parameter 0
             %1: i1 = ult %0, 1i8
             guard true, %1, []
             black_box %1
@@ -133,7 +133,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = parameter ...
             %1: i1 = ult %0, 1i8
             guard true, %1, []
             black_box %1
@@ -144,8 +144,8 @@ mod test {
             "
           func_decl f(i8)
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = parameter 0
+            %1: i8 = parameter 1
             call @f(%0)
         ",
             |mut m| {
@@ -155,7 +155,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = parameter ...
             call @f(%0)
         ",
         );
@@ -164,9 +164,9 @@ mod test {
             "
           func_type t1(i8)
           entry:
-            %0: ptr = load_ti 0
-            %1: i8 = load_ti 1
-            %2: i8 = load_ti 2
+            %0: ptr = parameter 0
+            %1: i8 = parameter 1
+            %2: i8 = parameter 2
             icall<t1> %0(%1)
         ",
             |mut m| {
@@ -176,8 +176,8 @@ mod test {
             "
           ...
           entry:
-            %0: ptr = load_ti ...
-            %1: i8 = load_ti ...
+            %0: ptr = parameter ...
+            %1: i8 = parameter ...
             icall %0(%1)
         ",
         );
@@ -186,7 +186,7 @@ mod test {
             "
           func_type t1(i8)
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = parameter 0
             %1: i8 = %0
             black_box %1
         ",
@@ -197,7 +197,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = parameter ...
             black_box %0
         ",
         );

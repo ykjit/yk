@@ -330,7 +330,7 @@ mod tests {
             "
               func_decl f()
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = parameter 0
                 call @f(%0)
             ",
         );
@@ -342,7 +342,7 @@ mod tests {
             "
               func_decl f(...)
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = parameter 0
                 call @f(%0)
             ",
         );
@@ -357,7 +357,7 @@ mod tests {
             "
               func_decl f(i32) -> i32
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = parameter 0
                 %1: i32 = call @f(%0)
             ",
         );
@@ -386,8 +386,8 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i8 = load_ti 0
-                %1: i64 = load_ti 1
+                %0: i8 = parameter 0
+                %1: i64 = parameter 1
                 %2: i1 = eq %0, %1
             ",
         );
@@ -401,7 +401,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = parameter 0
                 %1: i8 = sext %0
             ",
         );
@@ -415,7 +415,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i16 = load_ti 0
+                %0: i16 = parameter 0
                 %1: i8 = zext %0
             ",
         );
@@ -429,7 +429,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i16 = load_ti 0
+                %0: i16 = parameter 0
                 %1: float = zext %0
             ",
         );
@@ -443,7 +443,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = parameter 0
                 %1: i64 = zext %0
             ",
         );
@@ -457,7 +457,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = parameter 0
                 %1: i8 = trunc %0
             ",
         );
@@ -469,7 +469,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = parameter 0
                 %1: float = trunc %0
             ",
         );
@@ -483,7 +483,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = parameter 0
                 %1: i16 = trunc %0
             ",
         );
@@ -495,7 +495,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = parameter 0
                 guard true, %0, []
             ",
         );
@@ -507,7 +507,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = parameter 0
                 %1: float = si_to_fp %0
             ",
         );
@@ -519,7 +519,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = parameter 0
                 %1: i64 = si_to_fp %0
             ",
         );
@@ -533,7 +533,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = parameter 0
                 %1: float = si_to_fp %0
             ",
         );
@@ -547,7 +547,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: double = load_ti 0
+                %0: double = parameter 0
                 %1: float = fp_ext %0
             ",
         );
@@ -559,7 +559,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = parameter 0
                 %1: double = fp_ext %0
             ",
         );
@@ -571,7 +571,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = parameter 0
                 %1: i64 = fp_ext %0
             ",
         );
@@ -583,7 +583,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = parameter 0
                 %1: float = fp_to_si %0
             ",
         );
@@ -595,7 +595,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = parameter 0
                 %1: i32 = fp_to_si %0
             ",
         );
@@ -607,7 +607,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = parameter 0
                 %1: float = add %0, %0
             ",
         );
@@ -619,7 +619,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = parameter 0
                 %1: i32 = fadd %0, %0
             ",
         );
@@ -633,9 +633,9 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = parameter 0
                 %1: i32 = add %0, %0
-                %2: i32 = load_ti 1
+                %2: i32 = parameter 1
             ",
         );
     }
@@ -648,7 +648,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = parameter 0
                 %1: i64 = bitcast %0
             ",
         );
@@ -662,7 +662,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = parameter 0
                 %1: i64 = bitcast %0
             ",
         );

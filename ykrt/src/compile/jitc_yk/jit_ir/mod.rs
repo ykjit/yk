@@ -1930,7 +1930,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Parameter(x) => {
                 write!(
                     f,
-                    "load_ti {:?}",
+                    "parameter {:?}",
                     self.m.tilocs[usize::try_from(x.locidx()).unwrap()]
                 )
             }
@@ -3139,7 +3139,7 @@ mod tests {
             "global_decl tls @some_thread_local",
             "",
             "entry:",
-            "    %0: i8 = load_ti Register(3, 1, 0, [])",
+            "    %0: i8 = parameter Register(3, 1, 0, [])",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);
@@ -3163,7 +3163,7 @@ mod tests {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = load_ti 0
+              %0: i8 = parameter 0
               tloop_start [%0]
               %2: i8 = %0
               tloop_jump [%2]
@@ -3180,7 +3180,7 @@ mod tests {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = load_ti 0
+              %0: i8 = parameter 0
               tloop_start [%0]
               %2: i8 = add %0, %0
               %3: i8 = add %0, %0

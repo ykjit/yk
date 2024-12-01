@@ -304,7 +304,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         );
                         self.push_assign(inst.into(), assign)?;
                     }
-                    ASTInst::LoadTraceInput {
+                    ASTInst::Parameter {
                         assign,
                         type_,
                         tiidx,
@@ -765,7 +765,7 @@ enum ASTInst {
         val: ASTOperand,
         volatile: bool,
     },
-    LoadTraceInput {
+    Parameter {
         assign: Span,
         type_: ASTType,
         tiidx: Span,
@@ -871,7 +871,7 @@ mod tests {
     use crate::compile::jitc_yk::jit_ir::{FuncTy, Ty};
 
     #[test]
-    #[ignore] // Requires changing the parser to parse the new load_ti format.
+    #[ignore] // Requires changing the parser to parse the new parameter format.
     fn roundtrip() {
         let mut m = Module::new_testing();
         let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
@@ -902,16 +902,16 @@ mod tests {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i16 = load_ti 0
-            %1: i16 = load_ti 1
+            %0: i16 = parameter 0
+            %1: i16 = parameter 1
             %2: i16 = add %0, %1
         ",
             |m| m,
             "
           ...
           entry:
-            %{{0}}: i16 = load_ti ...
-            %{{1}}: i16 = load_ti ...
+            %{{0}}: i16 = parameter ...
+            %{{1}}: i16 = parameter ...
             %{{_}}: i16 = add %{{0}}, %{{1}}
         ",
         );
@@ -927,16 +927,16 @@ mod tests {
             func_decl f3(i8, i32, ...) -> i64
             func_decl f4(...)
             entry:
-              %0: i32 = load_ti 0
-              %5: i8 = load_ti 1
-              %7: i32 = load_ti 2
-              %9: ptr = load_ti 3
-              %1999: float = load_ti 4
-              %30: i8 = load_ti 5
-              %31: i16 = load_ti 6
-              %32: i32 = load_ti 7
-              %33: i64 = load_ti 8
-              %48: i32 = load_ti 9
+              %0: i32 = parameter 0
+              %5: i8 = parameter 1
+              %7: i32 = parameter 2
+              %9: ptr = parameter 3
+              %1999: float = parameter 4
+              %30: i8 = parameter 5
+              %31: i16 = parameter 6
+              %32: i32 = parameter 7
+              %33: i64 = parameter 8
+              %48: i32 = parameter 9
               %1: i32 = trunc %33
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
@@ -1098,16 +1098,16 @@ mod tests {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %7: i16 = load_ti 0
-            %3: i16 = load_ti 1
+            %7: i16 = parameter 0
+            %3: i16 = parameter 1
             %19: i16 = add %7, %3
         ",
             |m| m,
             "
           ...
           entry:
-            %0: i16 = load_ti ...
-            %1: i16 = load_ti ...
+            %0: i16 = parameter ...
+            %1: i16 = parameter ...
             %2: i16 = add %0, %1
         ",
         );
@@ -1130,9 +1130,9 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %3: i16 = load_ti 0
-            %4: i16 = load_ti 1
-            %3: i16 = load_ti 2
+            %3: i16 = parameter 0
+            %4: i16 = parameter 1
+            %3: i16 = parameter 2
         ",
         );
     }
@@ -1145,7 +1145,7 @@ mod tests {
           func_type t1()
           func_type t1()
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = parameter 0
         ",
         );
     }
@@ -1157,7 +1157,7 @@ mod tests {
             "
           func_type t1()
           entry:
-            %0: ptr = load_ti 0
+            %0: ptr = parameter 0
             icall<t2> %0()
         ",
         );
@@ -1180,7 +1180,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = parameter 0
             %1: i8 = add %0, -128i8
             %2: i8 = add %0, -129i8
             ",
@@ -1193,7 +1193,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = parameter 0
             %1: i8 = add %0, 255i8
             %2: i8 = add %0, 256i8
             ",
@@ -1217,7 +1217,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i1 = load_ti 0
+            %0: i1 = parameter 0
             guard true, %0, [%1]
             ",
         );
