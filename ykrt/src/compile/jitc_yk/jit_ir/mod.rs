@@ -444,12 +444,12 @@ impl Module {
     }
 
     /// Push the location of a trace parameter.
-    pub(crate) fn push_parameter(&mut self, loc: yksmp::Location) {
+    pub(crate) fn push_param(&mut self, loc: yksmp::Location) {
         self.tilocs.push(loc);
     }
 
     /// Return a slice over all trace parameters.
-    pub(crate) fn parameters(&self) -> &[yksmp::Location] {
+    pub(crate) fn params(&self) -> &[yksmp::Location] {
         &self.tilocs
     }
 
@@ -945,7 +945,7 @@ impl FuncTy {
         }
     }
 
-    /// Return the number of paramaters the function accepts (not including varargs).
+    /// Return the number of parameters the function accepts (not including varargs).
     #[cfg(any(debug_assertions, test))]
     pub(crate) fn num_params(&self) -> usize {
         self.param_tyidxs.len()
@@ -957,7 +957,7 @@ impl FuncTy {
         &self.param_tyidxs
     }
 
-    /// Returns whether the function type has vararg arguments.
+    /// Returns whether the function type has vararg parameters.
     pub(crate) fn is_vararg(&self) -> bool {
         self.is_vararg
     }
@@ -1431,7 +1431,7 @@ pub(crate) enum Inst {
     BinOp(BinOpInst),
     Load(LoadInst),
     LookupGlobal(LookupGlobalInst),
-    Parameter(ParameterInst),
+    Param(ParamInst),
     Call(DirectCallInst),
     IndirectCall(IndirectCallIdx),
     PtrAdd(PtrAddInst),
@@ -1486,7 +1486,7 @@ impl Inst {
             }
             Self::Load(li) => li.tyidx(),
             Self::LookupGlobal(..) => m.ptr_tyidx(),
-            Self::Parameter(li) => li.tyidx(),
+            Self::Param(li) => li.tyidx(),
             Self::Call(ci) => m.func_type(ci.target()).ret_tyidx(),
             Self::PtrAdd(..) => m.ptr_tyidx(),
             Self::DynPtrAdd(..) => m.ptr_tyidx(),
@@ -1565,7 +1565,7 @@ impl Inst {
             }
             Inst::Load(LoadInst { op, .. }) => op.unpack(m).map_iidx(f),
             Inst::LookupGlobal(_) => (),
-            Inst::Parameter(_) => (),
+            Inst::Param(_) => (),
             Inst::Call(x) => {
                 for i in x.iter_args_idx() {
                     m.arg(i).map_iidx(f);
@@ -1667,7 +1667,7 @@ impl Inst {
             }
             Inst::Load(LoadInst { op, .. }) => op.map_iidx(f),
             Inst::LookupGlobal(_) => (),
-            Inst::Parameter(_) => (),
+            Inst::Param(_) => (),
             Inst::Call(x) => {
                 for i in x.iter_args_idx() {
                     m.arg_packed(i).map_iidx(f);
@@ -1790,7 +1790,7 @@ impl Inst {
             (Self::Load(x), Self::Load(y)) => x.decopy_eq(m, y),
             (Self::Store(x), Self::Store(y)) => x.decopy_eq(m, y),
             (Self::LookupGlobal(x), Self::LookupGlobal(y)) => x.decopy_eq(y),
-            (Self::Parameter(x), Self::Parameter(y)) => x.decopy_eq(y),
+            (Self::Param(x), Self::Param(y)) => x.decopy_eq(y),
             (Self::PtrAdd(x), Self::PtrAdd(y)) => x.decopy_eq(m, y),
             (Self::DynPtrAdd(x), Self::DynPtrAdd(y)) => x.decopy_eq(m, y),
             (Self::ICmp(x), Self::ICmp(y)) => x.decopy_eq(m, y),
@@ -1928,10 +1928,10 @@ impl fmt::Display for DisplayableInst<'_> {
                     cond.unpack(self.m).display(self.m),
                 )
             }
-            Inst::Parameter(x) => {
+            Inst::Param(x) => {
                 write!(
                     f,
-                    "parameter {:?}",
+                    "param {:?}",
                     self.m.tilocs[usize::try_from(x.locidx()).unwrap()]
                 )
             }
@@ -2017,7 +2017,7 @@ inst!(BlackBox, BlackBoxInst);
 inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
-inst!(Parameter, ParameterInst);
+inst!(Param, ParamInst);
 inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(DynPtrAdd, DynPtrAddInst);
@@ -2152,22 +2152,22 @@ impl LoadInst {
     }
 }
 
-/// The `Parameter` instruction.
+/// The `Param` instruction.
 ///
 /// ## Semantics
 ///
 /// Specifies the [yksmp::Location] of a run-time argument.
 #[derive(Clone, Copy, Debug)]
 #[repr(packed)]
-pub struct ParameterInst {
+pub struct ParamInst {
     /// The [yksmp::Location] of this input.
     locidx: u32,
     /// The type of the resulting local variable.
     tyidx: TyIdx,
 }
 
-impl ParameterInst {
-    pub(crate) fn new(locidx: u32, tyidx: TyIdx) -> ParameterInst {
+impl ParamInst {
+    pub(crate) fn new(locidx: u32, tyidx: TyIdx) -> ParamInst {
         Self { locidx, tyidx }
     }
 
@@ -2947,8 +2947,8 @@ mod tests {
     #[test]
     fn use_case_update_inst() {
         let mut prog: Vec<Inst> = vec![
-            ParameterInst::new(0, TyIdx::try_from(0).unwrap()).into(),
-            ParameterInst::new(8, TyIdx::try_from(0).unwrap()).into(),
+            ParamInst::new(0, TyIdx::try_from(0).unwrap()).into(),
+            ParamInst::new(8, TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
                 Operand::Var(InstIdx(0)),
                 TyIdx(U24::try_from(0).unwrap()),
@@ -2987,12 +2987,9 @@ mod tests {
             Operand::Var(InstIdx(1)),
             Operand::Var(InstIdx(2)),
         ];
-        m.push(Inst::Parameter(ParameterInst::new(0, i32_tyidx)))
-            .unwrap();
-        m.push(Inst::Parameter(ParameterInst::new(1, i32_tyidx)))
-            .unwrap();
-        m.push(Inst::Parameter(ParameterInst::new(2, i32_tyidx)))
-            .unwrap();
+        m.push(Inst::Param(ParamInst::new(0, i32_tyidx))).unwrap();
+        m.push(Inst::Param(ParamInst::new(1, i32_tyidx))).unwrap();
+        m.push(Inst::Param(ParamInst::new(2, i32_tyidx))).unwrap();
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
@@ -3118,9 +3115,8 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push_parameter(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push(ParameterInst::new(0, m.int8_tyidx()).into())
-            .unwrap();
+        m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push(ParamInst::new(0, m.int8_tyidx()).into()).unwrap();
         m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
             false,
@@ -3140,7 +3136,7 @@ mod tests {
             "global_decl tls @some_thread_local",
             "",
             "entry:",
-            "    %0: i8 = parameter Register(3, 1, 0, [])",
+            "    %0: i8 = param Register(3, 1, 0, [])",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);
@@ -3164,7 +3160,7 @@ mod tests {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = parameter 0
+              %0: i8 = param 0
               tloop_start [%0]
               %2: i8 = %0
               tloop_jump [%2]
@@ -3181,7 +3177,7 @@ mod tests {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = parameter 0
+              %0: i8 = param 0
               tloop_start [%0]
               %2: i8 = add %0, %0
               %3: i8 = add %0, %0

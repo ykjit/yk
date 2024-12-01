@@ -11,7 +11,7 @@ use super::super::{
     jit_ir::{
         BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
         FNegInst, FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
-        IndirectCallInst, Inst, InstIdx, LoadInst, Module, Operand, PackedOperand, ParameterInst,
+        IndirectCallInst, Inst, InstIdx, LoadInst, Module, Operand, PackedOperand, ParamInst,
         PtrAddInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZExtInst,
     },
 };
@@ -304,7 +304,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         );
                         self.push_assign(inst.into(), assign)?;
                     }
-                    ASTInst::Parameter {
+                    ASTInst::Param {
                         assign,
                         type_,
                         tiidx,
@@ -328,7 +328,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 if gp_reg_off == 15 {
                                     panic!("out of gp registers");
                                 }
-                                self.m.push_parameter(yksmp::Location::Register(
+                                self.m.push_param(yksmp::Location::Register(
                                     gp_reg_off,
                                     u16::try_from(size).unwrap(),
                                     0,
@@ -344,7 +344,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 if fp_reg_off == 32 {
                                     panic!("out of fp regisers");
                                 }
-                                self.m.push_parameter(yksmp::Location::Register(
+                                self.m.push_param(yksmp::Location::Register(
                                     fp_reg_off,
                                     u16::try_from(size).unwrap(),
                                     0,
@@ -354,7 +354,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             }
                             Ty::Unimplemented(_) => todo!(),
                         }
-                        let inst = ParameterInst::new(off, type_);
+                        let inst = ParamInst::new(off, type_);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::PtrAdd {
@@ -765,7 +765,7 @@ enum ASTInst {
         val: ASTOperand,
         volatile: bool,
     },
-    Parameter {
+    Param {
         assign: Span,
         type_: ASTType,
         tiidx: Span,
@@ -871,18 +871,18 @@ mod tests {
     use crate::compile::jitc_yk::jit_ir::{FuncTy, Ty};
 
     #[test]
-    #[ignore] // Requires changing the parser to parse the new parameter format.
+    #[ignore] // Requires changing the parser to parse the new param format.
     fn roundtrip() {
         let mut m = Module::new_testing();
         let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
 
-        m.push_parameter(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push_parameter(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
         let op1 = m
-            .push_and_make_operand(ParameterInst::new(0, i16_tyidx).into())
+            .push_and_make_operand(ParamInst::new(0, i16_tyidx).into())
             .unwrap();
         let op2 = m
-            .push_and_make_operand(ParameterInst::new(1, i16_tyidx).into())
+            .push_and_make_operand(ParamInst::new(1, i16_tyidx).into())
             .unwrap();
         let op3 = m
             .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op2.clone()).into())
@@ -902,16 +902,16 @@ mod tests {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i16 = parameter 0
-            %1: i16 = parameter 1
+            %0: i16 = param 0
+            %1: i16 = param 1
             %2: i16 = add %0, %1
         ",
             |m| m,
             "
           ...
           entry:
-            %{{0}}: i16 = parameter ...
-            %{{1}}: i16 = parameter ...
+            %{{0}}: i16 = param ...
+            %{{1}}: i16 = param ...
             %{{_}}: i16 = add %{{0}}, %{{1}}
         ",
         );
@@ -927,16 +927,16 @@ mod tests {
             func_decl f3(i8, i32, ...) -> i64
             func_decl f4(...)
             entry:
-              %0: i32 = parameter 0
-              %5: i8 = parameter 1
-              %7: i32 = parameter 2
-              %9: ptr = parameter 3
-              %1999: float = parameter 4
-              %30: i8 = parameter 5
-              %31: i16 = parameter 6
-              %32: i32 = parameter 7
-              %33: i64 = parameter 8
-              %48: i32 = parameter 9
+              %0: i32 = param 0
+              %5: i8 = param 1
+              %7: i32 = param 2
+              %9: ptr = param 3
+              %1999: float = param 4
+              %30: i8 = param 5
+              %31: i16 = param 6
+              %32: i32 = param 7
+              %33: i64 = param 8
+              %48: i32 = param 9
               %1: i32 = trunc %33
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
@@ -1098,16 +1098,16 @@ mod tests {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %7: i16 = parameter 0
-            %3: i16 = parameter 1
+            %7: i16 = param 0
+            %3: i16 = param 1
             %19: i16 = add %7, %3
         ",
             |m| m,
             "
           ...
           entry:
-            %0: i16 = parameter ...
-            %1: i16 = parameter ...
+            %0: i16 = param ...
+            %1: i16 = param ...
             %2: i16 = add %0, %1
         ",
         );
@@ -1130,9 +1130,9 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %3: i16 = parameter 0
-            %4: i16 = parameter 1
-            %3: i16 = parameter 2
+            %3: i16 = param 0
+            %4: i16 = param 1
+            %3: i16 = param 2
         ",
         );
     }
@@ -1145,7 +1145,7 @@ mod tests {
           func_type t1()
           func_type t1()
           entry:
-            %0: i8 = parameter 0
+            %0: i8 = param 0
         ",
         );
     }
@@ -1157,7 +1157,7 @@ mod tests {
             "
           func_type t1()
           entry:
-            %0: ptr = parameter 0
+            %0: ptr = param 0
             icall<t2> %0()
         ",
         );
@@ -1180,7 +1180,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i8 = parameter 0
+            %0: i8 = param 0
             %1: i8 = add %0, -128i8
             %2: i8 = add %0, -129i8
             ",
@@ -1193,7 +1193,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i8 = parameter 0
+            %0: i8 = param 0
             %1: i8 = add %0, 255i8
             %2: i8 = add %0, 256i8
             ",
@@ -1217,7 +1217,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i1 = parameter 0
+            %0: i1 = param 0
             guard true, %0, [%1]
             ",
         );

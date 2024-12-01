@@ -118,7 +118,7 @@ impl TraceBuilder {
             let aot_op = &safepoint.lives[idx];
             let input_tyidx = self.handle_type(aot_op.type_(self.aot_mod))?;
             let param_inst =
-                jit_ir::ParameterInst::new(u32::try_from(idx).unwrap(), input_tyidx).into();
+                jit_ir::ParamInst::new(u32::try_from(idx).unwrap(), input_tyidx).into();
             self.jit_mod.push(param_inst)?;
 
             // Get the location for this input variable.
@@ -126,7 +126,7 @@ impl TraceBuilder {
             if var.len() > 1 {
                 todo!("Deal with multi register locations");
             }
-            self.jit_mod.push_parameter(var.get(0).unwrap().clone());
+            self.jit_mod.push_param(var.get(0).unwrap().clone());
             self.local_map.insert(
                 aot_op.to_inst_id(),
                 jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
@@ -1181,10 +1181,9 @@ impl TraceBuilder {
                 let aotinst = self.aot_mod.inst(aotid);
                 let aotty = aotinst.def_type(self.aot_mod).unwrap();
                 let tyidx = self.handle_type(aotty)?;
-                let param_inst =
-                    jit_ir::ParameterInst::new(u32::try_from(idx).unwrap(), tyidx).into();
+                let param_inst = jit_ir::ParamInst::new(u32::try_from(idx).unwrap(), tyidx).into();
                 self.jit_mod.push(param_inst)?;
-                self.jit_mod.push_parameter(loc.clone());
+                self.jit_mod.push_param(loc.clone());
                 self.local_map.insert(
                     aotid.clone(),
                     jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
