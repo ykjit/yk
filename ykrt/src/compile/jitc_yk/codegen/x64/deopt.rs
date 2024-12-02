@@ -326,7 +326,7 @@ pub(crate) extern "C" fn __yk_deopt(
     drop(ctr);
 
     // Now overwrite the existing stack with our newly recreated one.
-    unsafe { replace_stack(newframedst as *mut c_void, newstack, memsize) };
+    unsafe { replace_stack(newframedst, newstack, memsize) };
 }
 
 /// Writes the stack frames that we recreated in [__yk_deopt] onto the current stack, overwriting

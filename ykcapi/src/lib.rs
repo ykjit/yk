@@ -51,7 +51,7 @@ pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
 }
 
 #[no_mangle]
-pub extern "C" fn __yk_mt_early_return(mt: *mut MT, frameaddr: *mut c_void) {
+pub unsafe extern "C" fn __yk_mt_early_return(mt: *mut MT, frameaddr: *mut c_void) {
     let mt = unsafe { &*mt };
     let arc = unsafe { Arc::from_raw(mt) };
     arc.early_return(frameaddr);
