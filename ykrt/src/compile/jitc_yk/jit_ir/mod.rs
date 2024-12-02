@@ -638,20 +638,6 @@ impl Module {
     pub(crate) fn set_root_jump_addr(&mut self, ptr: *const libc::c_void) {
         self.root_jump_ptr = ptr;
     }
-
-    pub(crate) fn inst_vals_alive_until(&self) -> Vec<InstIdx> {
-        let mut alives = vec![InstIdx::try_from(0).unwrap(); self.insts_len()];
-        for iidx in self.iter_all_inst_idxs() {
-            let inst = self.inst_raw(iidx);
-            inst.map_operand_locals(self, &mut |x| {
-                let (x, _) = self.inst_decopy(x);
-                debug_assert!(alives[usize::from(x)] <= iidx);
-                alives[usize::from(x)] = iidx;
-            });
-        }
-
-        alives
-    }
 }
 
 impl fmt::Display for Module {
@@ -3166,44 +3152,5 @@ mod tests {
         assert_eq!(Ty::Integer(127).byte_size().unwrap(), 16);
         assert_eq!(Ty::Integer(128).byte_size().unwrap(), 16);
         assert_eq!(Ty::Integer(129).byte_size().unwrap(), 17);
-    }
-
-    #[test]
-    fn alive_until() {
-        let m = Module::from_str(
-            "
-            entry:
-              %0: i8 = param 0
-              tloop_start [%0]
-              %2: i8 = %0
-              tloop_jump [%2]
-            ",
-        );
-        assert_eq!(
-            m.inst_vals_alive_until(),
-            vec![3, 0, 0, 0]
-                .iter()
-                .map(|x: &usize| InstIdx::try_from(*x).unwrap())
-                .collect::<Vec<_>>()
-        );
-
-        let m = Module::from_str(
-            "
-            entry:
-              %0: i8 = param 0
-              tloop_start [%0]
-              %2: i8 = add %0, %0
-              %3: i8 = add %0, %0
-              %4: i8 = %2
-              tloop_jump [%4]
-            ",
-        );
-        assert_eq!(
-            m.inst_vals_alive_until(),
-            vec![3, 0, 5, 0, 0, 0]
-                .iter()
-                .map(|x: &usize| InstIdx::try_from(*x).unwrap())
-                .collect::<Vec<_>>()
-        );
     }
 }

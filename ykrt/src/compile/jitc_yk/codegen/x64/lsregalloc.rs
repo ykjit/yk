@@ -128,7 +128,11 @@ pub(crate) struct LSRegAlloc<'a> {
 impl<'a> LSRegAlloc<'a> {
     /// Create a new register allocator, with the existing interpreter frame spanning
     /// `interp_stack_len` bytes.
-    pub(crate) fn new(m: &'a Module, interp_stack_len: usize) -> Self {
+    pub(crate) fn new(
+        m: &'a Module,
+        inst_vals_alive_until: Vec<InstIdx>,
+        interp_stack_len: usize,
+    ) -> Self {
         #[cfg(debug_assertions)]
         {
             // We rely on the registers in GP_REGS being numbered 0..15 (inc.) for correctness.
@@ -161,7 +165,7 @@ impl<'a> LSRegAlloc<'a> {
             gp_reg_states,
             fp_regset: RegSet::with_fp_reserved(),
             fp_reg_states,
-            inst_vals_alive_until: m.inst_vals_alive_until(),
+            inst_vals_alive_until,
             spills: vec![SpillState::Empty; m.insts_len()],
             stack,
         }
@@ -247,6 +251,11 @@ impl<'a> LSRegAlloc<'a> {
     /// Is the value produced by instruction `query_iidx` used at or after instruction `cur_idx`?
     fn is_inst_var_still_used_at(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
         usize::from(cur_iidx) <= usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inst_vals_alive_until(&self) -> &Vec<InstIdx> {
+        &self.inst_vals_alive_until
     }
 }
 

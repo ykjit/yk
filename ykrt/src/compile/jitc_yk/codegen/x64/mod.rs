@@ -242,9 +242,19 @@ impl<'a> Assemble<'a> {
             }
         };
 
+        let mut inst_vals_alive_until = vec![InstIdx::try_from(0).unwrap(); m.insts_len()];
+        for iidx in m.iter_all_inst_idxs() {
+            let inst = m.inst_raw(iidx);
+            inst.map_operand_locals(m, &mut |x| {
+                let (x, _) = m.inst_decopy(x);
+                debug_assert!(inst_vals_alive_until[usize::from(x)] <= iidx);
+                inst_vals_alive_until[usize::from(x)] = iidx;
+            });
+        }
+
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, sp_offset),
+            ra: LSRegAlloc::new(m, inst_vals_alive_until, sp_offset),
             asm,
             loop_start_locs: Vec::new(),
             deoptinfo: HashMap::new(),
@@ -2745,6 +2755,47 @@ mod tests {
                 .unwrap(),
             patt_lines,
             full_asm,
+        );
+    }
+
+    #[test]
+    fn alive_until() {
+        let m = Module::from_str(
+            "
+            entry:
+              %0: i8 = param 0
+              tloop_start [%0]
+              %2: i8 = %0
+              tloop_jump [%2]
+            ",
+        );
+        let cg = Assemble::new(&m, None, None).unwrap();
+        assert_eq!(
+            cg.ra.inst_vals_alive_until(),
+            &vec![3, 0, 0, 0]
+                .iter()
+                .map(|x: &usize| InstIdx::try_from(*x).unwrap())
+                .collect::<Vec<_>>()
+        );
+
+        let m = Module::from_str(
+            "
+            entry:
+              %0: i8 = param 0
+              tloop_start [%0]
+              %2: i8 = add %0, %0
+              %3: i8 = add %0, %0
+              %4: i8 = %2
+              tloop_jump [%4]
+            ",
+        );
+        let cg = Assemble::new(&m, None, None).unwrap();
+        assert_eq!(
+            cg.ra.inst_vals_alive_until(),
+            &vec![3, 0, 5, 0, 0, 0]
+                .iter()
+                .map(|x: &usize| InstIdx::try_from(*x).unwrap())
+                .collect::<Vec<_>>()
         );
     }
 
