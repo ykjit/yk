@@ -3,21 +3,24 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=4
 //   stderr:
-//     3
 //     2
 //     yk-jit-event: start-tracing
 //     1
 //     yk-jit-event: stop-tracing-early-return
 //     return
-//     yk-jit-event: start-tracing
 //     3
+//     yk-jit-event: start-tracing
+//     2
 //     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
+//     ...
+//     1
+//     return
 //     exit
 
-// Check that basic trace compilation works.
+// Check that early return from recursive interpreter loops works.
 
 #include <assert.h>
 #include <stdio.h>
