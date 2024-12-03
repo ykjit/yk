@@ -55,6 +55,7 @@ pub unsafe extern "C" fn __yk_mt_early_return(mt: *mut MT, frameaddr: *mut c_voi
     let mt = unsafe { &*mt };
     let arc = unsafe { Arc::from_raw(mt) };
     arc.early_return(frameaddr);
+    forget(arc);
 }
 
 // The new control point called after the interpreter has been patched by ykllvm.
