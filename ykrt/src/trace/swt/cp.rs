@@ -103,7 +103,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         ; push rax    // 0 - offset 0
     );
 
-    // println!("@@ from {} to {} live var count: {}", src_smid, dst_smid, dst_rec.live_vars.len());
+    println!("@@ from {} to {} live var count: {}", src_smid, dst_smid, dst_rec.live_vars.len());
 
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
         let dst_var = &dst_rec.live_vars[index];
@@ -113,28 +113,23 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
 
         let src_location = &src_var.get(0).unwrap();
         let dst_location = &dst_var.get(0).unwrap();
-        // println!(
-        //     "@@ dst_location: {:?}, src_location: {:?}",
-        //     dst_location, src_location
-        // );
+        println!(
+            "@@ dst_location: {:?}, src_location: {:?}",
+            dst_location, src_location
+        );
         // break on every live var copy
-        // dynasm!(asm; int3 );
+        dynasm!(asm; int3 );
         match dst_location {
             Indirect(_dst_reg_num, dst_off, dst_val_size) => {
                 match src_location {
                     Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg) => {
-                        // assert!(
-                        //     dst_val_size == src_val_size,
-                        //     "Indirect to Register - src and dst val size must match. got src: {} and dst: {}",
-                        //     src_val_size, dst_val_size
-                        // );
+                        assert!(
+                            dst_val_size == src_val_size,
+                            "Indirect to Register - src and dst val size must match. got src: {} and dst: {}",
+                            src_val_size, dst_val_size
+                        );
                         assert!(*src_add_locs == 0, "deal with additional info");
-                        // if dst_val_size != src_val_size {
-                        //     println!("@@ Register > Indirect SIZE MISMATCH dst_val_size: {}, src_val_size: {}", dst_val_size, src_val_size);
-                        //     dynasm!(asm; int3 );
-                        // }
                         let src_offset = reg_num_stack_offset(*src_reg_num);
-                        // let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *src_val_size {
                             1 => dynasm!(asm
                                 ; mov al, BYTE [rsp + src_offset]
@@ -152,7 +147,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                                 ; mov rax, QWORD [rsp + src_offset]
                                 ; mov QWORD [rbp + *dst_off], rax
                             ),
-                            _ => panic!("Unsupported source value size: {}", src_val_size),
+                            _ => panic!("Unexpected Indirect to Register value size: {}", src_val_size),
                         }
                     }
                     Constant(_val) => {
@@ -162,23 +157,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                         todo!("implement Indirect to LargeConstant")
                     }
                     Indirect(_src_reg_num, src_off, src_val_size) => {
-                        // Value sizes must match, got src: 4 and dst: 8
-                        // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-                        // fatal runtime error: failed to initiate panic, error 5
-
-                        // assert!(
-                        //     src_val_size == dst_val_size,
-                        //     "Value sizes must match, got src: {} and dst: {}",
-                        //     src_val_size,
-                        //     dst_val_size
-                        // );
                         // TODO: understand what to do where the size value is different
-                        // Example where dst_val_size is 8 and src_val_size is 4:
-                        // @@ dst_location: Indirect(6, -96, 8), src_location: Indirect(6, -44, 4)
-                        // if dst_val_size != src_val_size {
-                        //     println!("@@ Indirect > Indirect SIZE MISMATCH dst_val_size: {}, src_val_size: {}", dst_val_size, src_val_size);
-                        //     // dynasm!(asm; int3 );
-                        // }
                         let min_size = src_val_size.min(dst_val_size);
                         match min_size {
                             // based on ykrt/src/compile/jitc_yk/codegen/x64/mod.rs
@@ -198,7 +177,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                                 ; mov rax, QWORD [rbp + i32::try_from(*src_off).unwrap()]
                                 ; mov QWORD [rbp + i32::try_from(*dst_off).unwrap()], rax
                             ),
-                            _ => panic!("Unsupported size: {}", min_size),
+                            _ => panic!("Unexpected Indirect to Indirect value size: {}", min_size),
                         }
                     }
                     _ => panic!("Unsupported source location: {:?}", src_location),
@@ -216,10 +195,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             "Register to Register - src and dst val size must match. Got src: {} and dst: {}",
                             src_val_size, dst_val_size
                         );
-                        // if dst_val_size != src_val_size {
-                        //     println!("@@ Register > Register SIZE MISMATCH dst_val_size: {}, src_val_size: {}", dst_val_size, src_val_size);
-                        //     dynasm!(asm; int3 );
-                        // }
                         // skip copying to the same register with the same value size
                         if src_reg_num == dst_reg_num && src_val_size == dst_val_size {
                             continue;
@@ -232,20 +207,11 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             4 => todo!("implement reg to reg 4 bytes"),
                             8 => dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]),
                             _ => {
-                                todo!("implement Register to Register value size {}", src_val_size)
+                                todo!("unexpect Register to Register value size {}", src_val_size)
                             }
                         }
                     }
                     Indirect(src_reg_num, src_off, src_val_size) => {
-                        // assert!(
-                        //     dst_val_size == src_val_size,
-                        //     "Register to Indirect - src and dst val size must match. Got src: {} and dst: {}",
-                        //     src_val_size, dst_val_size
-                        // );
-                        // if dst_val_size != src_val_size {
-                        //     println!("@@ Indirect > Register SIZE MISMATCH dst_val_size: {}, src_val_size: {}", dst_val_size, src_val_size);
-                        //     dynasm!(asm; int3 );
-                        // }
                         assert!(
                             REG_MAP.get(*src_reg_num as usize) == Some(&Rq::RBP),
                             "Indirect register is expected to be rbp"
@@ -253,9 +219,9 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         // let dst_reg_rd = map_to_rd(*dst_reg_num);
                         match *dst_val_size {
-                            // 1 => dynasm!(asm; mov Rq(dst_reg), BYTE [rbp + i32::try_from(*src_off).unwrap()]),
-                            // 2 => dynasm!(asm; mov Rq(dst_reg), WORD [rbp + i32::try_from(*src_off).unwrap()]),
-                            // 4 => dynasm!(asm; mov Rq(dst_reg), DWORD [rbp + i32::try_from(*src_off).unwrap()]),
+                            1 => todo!("implement reg to indirect 1 byte"),
+                            2 => todo!("implement reg to indirect 2 bytes"),
+                            4 => todo!("implement reg to indirect 4 bytes"),
                             8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp + i32::try_from(*src_off).unwrap()]),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
@@ -269,40 +235,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                 // them. This is likely a case where the direct value has been moved
                 // somewhere else (register/normal stack) so dst and src no longer
                 // match. But since the value can't change we can safely ignore this.
-                // match src_location {
-                //     Direct(src_reg_num, src_off, src_val_size) => {
-                //         assert_eq!(
-                //             *src_val_size, *dst_val_size,
-                //             "Source and destination value sizes do not match"
-                //         );
-                //         let src_reg = u8::try_from(*src_reg_num).unwrap();
-                //         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
-                //         // Skipping copying to the same register with the same offset
-                //         if src_reg_num == dst_reg_num && src_off == dst_off {
-                //             continue;
-                //         }
-                //         match *src_val_size {
-                //             1 => dynasm!(asm
-                //                 ; mov al, BYTE [Rq(src_reg) + *src_off]
-                //                 ; mov BYTE [Rq(dst_reg) + *dst_off], al
-                //             ),
-                //             2 => dynasm!(asm
-                //                 ; mov ax, WORD [Rq(src_reg) + *src_off]
-                //                 ; mov WORD [Rq(dst_reg) + *dst_off], ax
-                //             ),
-                //             4 => dynasm!(asm
-                //                 ; mov eax, DWORD [Rq(src_reg) + *src_off]
-                //                 ; mov DWORD [Rq(dst_reg) + *dst_off], eax
-                //             ),
-                //             8 => dynasm!(asm
-                //                 ; mov rax, QWORD [Rq(src_reg) + *src_off]
-                //                 ; mov QWORD [Rq(dst_reg) + *dst_off], rax
-                //             ),
-                //             _ => panic!("Unsupported source value size: {}", src_val_size),
-                //         }
-                //     }
-                //     _ => panic!("unexpect src location: {:?}", src_location),
-                // }
             }
             _ => panic!("unexpect dst location: {:?}", dst_location),
         }
@@ -312,28 +244,15 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
     let stack_size_diff = dst_rec.size as i32 - src_rec.size as i32;
     if stack_size_diff != 0 {
         if stack_size_diff > 0 {
-            // If the destination stack is larger, allocate more stack space
-            dynasm!(asm
-                ; .arch x64
-                ; sub rsp, stack_size_diff
-            );
+            dynasm!(asm; sub rsp, stack_size_diff);
         } else {
-            // If the destination stack is smaller, deallocate excess stack space
-            dynasm!(asm
-                ; .arch x64
-                ; add rsp, -stack_size_diff
-            );
+            dynasm!(asm; add rsp, -stack_size_diff);
         }
     }
 
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
     let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
-    // let src_target_addr = i64::try_from(src_rec.offset).unwrap() + call_offset;
-    // println!(
-    //     "@@ from {} to {}, dst_target_addr: {:x}, src_target_addr: {:x}",
-    //     src_smid, dst_smid, dst_target_addr, src_target_addr
-    // );
-    dynasm!(asm
+     dynasm!(asm
         ; .arch x64
         ; mov rax, QWORD dst_target_addr
         ; mov [rsp], rax
