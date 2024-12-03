@@ -81,7 +81,7 @@ pub trait Tracer: Send + Sync {
 }
 
 /// Represents a thread which is currently tracing.
-pub trait ThreadTracer {
+pub trait ThreadTracer: Debug {
     /// Stop collecting a trace of the current thread.
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError>;
 }
