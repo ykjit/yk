@@ -4319,6 +4319,7 @@ mod tests {
                 %0: float = param 0
                 %1: float = param 1
                 %2: float = fmul %0, %1
+                %3: float = fmul %1, %1
             ",
             "
                 ...
