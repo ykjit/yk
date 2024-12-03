@@ -736,34 +736,6 @@ impl LSRegAlloc<'_> {
         }
     }
 
-    /// Clobber each register in `regs`, spilling if it is used at or after instruction `iidx`, and
-    /// (whether it is used later or not) marking the reg state as [RegState::Empty].
-    ///
-    /// FIXME: This method has one genuine use (clobbering registers before a CALL) and one hack
-    /// use (hence the function name) in x64/mod.rs. What we currently call `avoids` should
-    /// really be `clobbers`, but currently there is one case in x64/mod.rs which requires us to
-    /// avoid a register without clobbering it, so we have to break this out into its own function.
-    pub(crate) fn clobber_gp_regs_hack(&mut self, asm: &mut Assembler, iidx: InstIdx, regs: &[Rq]) {
-        for reg in regs {
-            match self.gp_reg_states[usize::from(reg.code())] {
-                RegState::Reserved => unreachable!(),
-                RegState::Empty => (),
-                RegState::FromConst(_) => {
-                    self.gp_regset.unset(*reg);
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
-                }
-                RegState::FromInst(from_iidx) => {
-                    // OPT: We can MOV some of these rather than just spilling.
-                    if self.is_inst_var_still_used_at(iidx, from_iidx) {
-                        self.spill_gp_if_not_already(asm, *reg);
-                    }
-                    self.gp_regset.unset(*reg);
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
-                }
-            }
-        }
-    }
-
     /// Return the location of the value at `iidx`. If that instruction's value is available in a
     /// register and is spilled to the stack, the former will always be preferred.
     ///
