@@ -1077,7 +1077,7 @@ impl<'a> Assemble<'a> {
     /// Codegen a [jit_ir::ParamInst]. This only informs the register allocator about the
     /// locations of live variables without generating any actual machine code.
     fn cg_param(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParamInst) {
-        let m = match &self.m.params()[usize::try_from(inst.locidx()).unwrap()] {
+        let m = match self.m.param(inst.paramidx()) {
             yksmp::Location::Register(0, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))
             }
@@ -2548,7 +2548,7 @@ enum Immediate {
 mod tests {
     use super::{Assemble, X64CompiledTrace};
     use crate::compile::{
-        jitc_yk::jit_ir::{self, Module},
+        jitc_yk::jit_ir::{self, Inst, InstIdx, Module},
         CompiledTrace,
     };
     use crate::location::{HotLocation, HotLocationKind};
@@ -4504,10 +4504,16 @@ mod tests {
 
         // Create two trace paramaters whose locations alias.
         let loc = yksmp::Location::Register(13, 1, 0, [].into());
+        m.push_param(loc.clone());
+        let pinst1: Inst =
+            jit_ir::ParamInst::new(InstIdx::try_from(0).unwrap(), m.int8_tyidx()).into();
+        m.push(pinst1.clone()).unwrap();
         m.push_param(loc);
-        let param_inst = jit_ir::ParamInst::new(0, m.int8_tyidx());
-        let op1 = m.push_and_make_operand(param_inst.clone().into()).unwrap();
-        let op2 = m.push_and_make_operand(param_inst.into()).unwrap();
+        let pinst2: Inst =
+            jit_ir::ParamInst::new(InstIdx::try_from(1).unwrap(), m.int8_tyidx()).into();
+        m.push(pinst2.clone()).unwrap();
+        let op1 = m.push_and_make_operand(pinst1).unwrap();
+        let op2 = m.push_and_make_operand(pinst2).unwrap();
 
         let add_inst = jit_ir::BinOpInst::new(op1, jit_ir::BinOp::Add, op2);
         m.push(add_inst.into()).unwrap();

@@ -312,7 +312,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let off = self
                             .lexer
                             .span_str(tiidx)
-                            .parse::<u32>()
+                            .parse::<usize>()
                             .map_err(|e| self.error_at_span(tiidx, &e.to_string()))?;
                         assert_eq!(self.m.params.len(), usize::try_from(off).unwrap());
                         let type_ = self.process_type(type_)?;
@@ -354,7 +354,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             }
                             Ty::Unimplemented(_) => todo!(),
                         }
-                        let inst = ParamInst::new(off, type_);
+                        let inst = ParamInst::new(InstIdx::try_from(off).unwrap(), type_);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::PtrAdd {
@@ -879,10 +879,10 @@ mod tests {
         m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
         m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
         let op1 = m
-            .push_and_make_operand(ParamInst::new(0, i16_tyidx).into())
+            .push_and_make_operand(ParamInst::new(InstIdx::try_from(0).unwrap(), i16_tyidx).into())
             .unwrap();
         let op2 = m
-            .push_and_make_operand(ParamInst::new(1, i16_tyidx).into())
+            .push_and_make_operand(ParamInst::new(InstIdx::try_from(1).unwrap(), i16_tyidx).into())
             .unwrap();
         let op3 = m
             .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op2.clone()).into())

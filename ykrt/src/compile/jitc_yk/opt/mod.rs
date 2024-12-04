@@ -354,11 +354,8 @@ impl Opt {
                 Inst::Param(x) => {
                     // FIXME: This feels like it should be handled by trace_builder, but we can't
                     // do so yet because of https://github.com/ykjit/yk/issues/1435.
-                    let locidx = x.locidx();
-                    if let yksmp::Location::Constant(v) =
-                        self.m.params()[usize::try_from(locidx).unwrap()]
-                    {
-                        let cidx = self.m.insert_const(Const::Int(x.tyidx(), v.into()))?;
+                    if let yksmp::Location::Constant(v) = self.m.param(x.paramidx()) {
+                        let cidx = self.m.insert_const(Const::Int(x.tyidx(), u64::from(*v)))?;
                         self.an.set_value(iidx, Value::Const(cidx));
                     }
                 }
