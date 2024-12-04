@@ -440,7 +440,28 @@ impl MT {
                             promotions: Vec::new(),
                         };
                     }),
-                    Err(e) => todo!("{e:?}"),
+                    Err(e) => {
+                        // FIXME: start_recorder needs a way of signalling temporary errors.
+                        #[cfg(tracer_hwt)]
+                        match e.downcast::<hwtracer::HWTracerError>() {
+                            Ok(e) => {
+                                if let hwtracer::HWTracerError::Temporary(_) = *e {
+                                    let mut lk = hl.lock();
+                                    debug_assert_matches!(lk.kind, HotLocationKind::Tracing);
+                                    lk.tracecompilation_error(self);
+                                    // FIXME: This is stupidly brutal.
+                                    lk.kind = HotLocationKind::DontTrace;
+                                    drop(lk);
+                                    self.log.log(Verbosity::JITEvent, "start-tracing-abort");
+                                } else {
+                                    todo!("{e:?}");
+                                }
+                            }
+                            Err(e) => todo!("{e:?}"),
+                        }
+                        #[cfg(not(tracer_hwt))]
+                        todo!("{e:?}");
+                    }
                 }
             }
             TransitionControlPoint::StopTracing => {
