@@ -24,7 +24,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <syscall.h>
-#include <threads.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -43,17 +42,6 @@
 
 // The bit in the IA32_RTIT_CTL MSR that disables compressed returns.
 #define IA32_RTIT_CTL_DISRETC 1 << 11
-
-/*
- * The thread's perf file descriptor and its associated underlying `mmap(2)`
- * regions. The file descriptor is re-used for subsequent trace collections for
- * the same thread.
- *
- * FIXME: These leak when a thread dies.
- */
-static thread_local void *cache_base_buf = NULL;
-static thread_local void *cache_aux_buf = NULL;
-static thread_local int cache_perf_fd = -1;
 
 enum hwt_cerror_kind {
   hwt_cerror_unused = 0,
@@ -530,9 +518,7 @@ hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf,
   tr_ctx->perf_fd = -1;
 
   // Obtain a file descriptor through which to speak to perf.
-  if (cache_perf_fd == -1)
-    cache_perf_fd = open_perf(tr_conf->aux_bufsize, err);
-  tr_ctx->perf_fd = cache_perf_fd;
+  tr_ctx->perf_fd = open_perf(tr_conf->aux_bufsize, err);
   if (tr_ctx->perf_fd == -1) {
     hwt_set_cerr(err, hwt_cerror_errno, errno);
     failing = true;
@@ -562,10 +548,8 @@ hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf,
   // data_bufsize'.
   int page_size = getpagesize();
   tr_ctx->base_bufsize = (1 + tr_conf->data_bufsize) * page_size;
-  if (!cache_base_buf)
-    cache_base_buf = mmap(NULL, tr_ctx->base_bufsize, PROT_WRITE, MAP_SHARED,
+  tr_ctx->base_buf = mmap(NULL, tr_ctx->base_bufsize, PROT_WRITE, MAP_SHARED,
                           tr_ctx->perf_fd, 0);
-  tr_ctx->base_buf = cache_base_buf;
   if (tr_ctx->base_buf == MAP_FAILED) {
     hwt_set_cerr(err, hwt_cerror_errno, errno);
     failing = true;
@@ -581,10 +565,8 @@ hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf,
   // Allocate the AUX buffer.
   //
   // Mapped R/W so as to have a saturating ring buffer.
-  if (!cache_aux_buf)
-    cache_aux_buf = mmap(NULL, base_header->aux_size, PROT_READ | PROT_WRITE,
+  tr_ctx->aux_buf = mmap(NULL, base_header->aux_size, PROT_READ | PROT_WRITE,
                          MAP_SHARED, tr_ctx->perf_fd, base_header->aux_offset);
-  tr_ctx->aux_buf = cache_aux_buf;
   if (tr_ctx->aux_buf == MAP_FAILED) {
     hwt_set_cerr(err, hwt_cerror_errno, errno);
     failing = true;
@@ -752,6 +734,16 @@ bool hwt_perf_free_collector(struct hwt_perf_ctx *tr_ctx,
                              struct hwt_cerror *err) {
   int ret = true;
 
+  if ((tr_ctx->aux_buf) &&
+      (munmap(tr_ctx->aux_buf, tr_ctx->aux_bufsize) == -1)) {
+    hwt_set_cerr(err, hwt_cerror_errno, errno);
+    ret = false;
+  }
+  if ((tr_ctx->base_buf) &&
+      (munmap(tr_ctx->base_buf, tr_ctx->base_bufsize) == -1)) {
+    hwt_set_cerr(err, hwt_cerror_errno, errno);
+    ret = false;
+  }
   if (tr_ctx->stop_fds[1] != -1) {
     // If the write end of the pipe is still open, the thread is still running.
     close(tr_ctx->stop_fds[1]); // signals thread to stop.
@@ -762,6 +754,10 @@ bool hwt_perf_free_collector(struct hwt_perf_ctx *tr_ctx,
   }
   if (tr_ctx->stop_fds[0] != -1) {
     close(tr_ctx->stop_fds[0]);
+  }
+  if (tr_ctx->perf_fd >= 0) {
+    close(tr_ctx->perf_fd);
+    tr_ctx->perf_fd = -1;
   }
   if (tr_ctx != NULL) {
     free(tr_ctx);
