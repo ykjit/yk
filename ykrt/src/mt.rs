@@ -654,22 +654,38 @@ impl MT {
                         } => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             match &*mtt.tstate.borrow() {
-                                MTThreadState::Tracing { hl: thread_hl, .. } => {
+                                MTThreadState::Tracing {
+                                    hl: thread_hl,
+                                    frameaddr: tracing_frameaddr,
+                                    ..
+                                } => {
                                     // This thread is tracing something...
                                     if !Arc::ptr_eq(thread_hl, &hl) {
                                         // ...but not this Location.
                                         TransitionControlPoint::Execute(Arc::clone(root_ctr))
                                     } else {
-                                        // ...and it's this location: we have therefore finished
-                                        // tracing the loop.
-                                        let parent_ctr = Arc::clone(parent_ctr);
-                                        let root_ctr_cl = Arc::clone(root_ctr);
-                                        lk.kind = HotLocationKind::Compiled(Arc::clone(root_ctr));
-                                        drop(lk);
-                                        TransitionControlPoint::StopSideTracing {
-                                            gidx,
-                                            parent_ctr,
-                                            root_ctr: root_ctr_cl,
+                                        // ...and it's this location.
+                                        if frameaddr == *tracing_frameaddr {
+                                            let parent_ctr = Arc::clone(parent_ctr);
+                                            let root_ctr_cl = Arc::clone(root_ctr);
+                                            lk.kind =
+                                                HotLocationKind::Compiled(Arc::clone(root_ctr));
+                                            drop(lk);
+                                            TransitionControlPoint::StopSideTracing {
+                                                gidx,
+                                                parent_ctr,
+                                                root_ctr: root_ctr_cl,
+                                            }
+                                        } else {
+                                            // ...but in a different frame.
+                                            #[cfg(target_arch = "x86_64")]
+                                            {
+                                                // If this assert fails, we've fallen through to a
+                                                // caller, which is UB.
+                                                assert!(*tracing_frameaddr > frameaddr);
+                                            }
+                                            // We're inlining.
+                                            TransitionControlPoint::NoAction
                                         }
                                     }
                                 }
