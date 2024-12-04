@@ -810,7 +810,7 @@ impl MT {
                     } => {
                         // We don't care if the thread tracer went wrong: we're not going to use
                         // its result anyway.
-                        thread_tracer.stop().unwrap();
+                        thread_tracer.stop().ok();
                         let mut lk = hl.lock();
                         lk.tracecompilation_error(self);
                         drop(lk);
