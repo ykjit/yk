@@ -32,9 +32,6 @@
 #define SYSFS_PT_TYPE "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
 
-#define MAX_OPEN_PERF_TRIES 50000
-#define OPEN_PERF_WAIT_NSECS 10000000 // 1/100 of a second.
-
 #define AUX_BUF_WAKE_RATIO 0.5
 
 #ifndef INFTIM
@@ -433,22 +430,11 @@ static int open_perf(size_t aux_bufsize, struct hwt_cerror *err) {
   attr.aux_watermark =
       (size_t)((double)aux_bufsize * getpagesize()) * AUX_BUF_WAKE_RATIO;
 
-  // Acquire file descriptor through which to talk to Intel PT. This syscall
-  // could return EBUSY, meaning another process or thread has locked the
-  // Perf device.
-  struct timespec wait_time = {0, OPEN_PERF_WAIT_NSECS};
   pid_t target_tid = syscall(__NR_gettid);
-  for (int tries = MAX_OPEN_PERF_TRIES; tries > 0; tries--) {
-    ret = syscall(SYS_perf_event_open, &attr, target_tid, -1, -1, 0);
-    if ((ret == -1) && (errno == EBUSY)) {
-      nanosleep(&wait_time, NULL); // Doesn't matter if this is interrupted.
-    } else {
-      break;
-    }
-  }
-
+  ret = syscall(SYS_perf_event_open, &attr, target_tid, -1, -1, 0);
   if (ret == -1) {
     hwt_set_cerr(err, hwt_cerror_errno, errno);
+    return ret;
   }
 
 clean:
