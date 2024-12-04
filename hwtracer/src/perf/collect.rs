@@ -78,6 +78,7 @@ impl PerfTracer {
 }
 
 /// A collector that uses the Linux Perf interface to Intel Processor Trace.
+#[derive(Debug)]
 pub struct PerfThreadTracer {
     // Opaque C pointer representing the collector context.
     ctx: *mut c_void,

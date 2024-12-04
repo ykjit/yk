@@ -94,6 +94,7 @@ use super::{aot_ir, codegen::reg_alloc::VarLocation};
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{
+    assert_matches::debug_assert_matches,
     ffi::{c_void, CString},
     fmt,
     hash::Hash,
@@ -128,8 +129,8 @@ pub(crate) struct Module {
     consts: IndexSet<ConstIndexSetWrapper>,
     /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
-    /// The trace-input location pool.
-    tilocs: Vec<yksmp::Location>,
+    /// The ordered sequence of trace parameters.
+    params: Vec<yksmp::Location>,
     /// Addresses of root traces to jump to at the end of a side-trace.
     root_jump_ptr: *const libc::c_void,
     /// The type index of the void type. Cached for convenience.
@@ -242,7 +243,7 @@ impl Module {
             args: Vec::new(),
             consts,
             types,
-            tilocs: Vec::new(),
+            params: Vec::new(),
             root_jump_ptr: std::ptr::null(),
             void_tyidx,
             ptr_tyidx,
@@ -443,13 +444,15 @@ impl Module {
         self.args[usize::from(idx)]
     }
 
-    /// Push the location of a trace input variable.
-    pub(crate) fn push_tiloc(&mut self, loc: yksmp::Location) {
-        self.tilocs.push(loc);
+    /// Push the location of a trace parameter.
+    pub(crate) fn push_param(&mut self, loc: yksmp::Location) {
+        self.params.push(loc);
     }
 
-    pub(crate) fn tilocs(&self) -> &[yksmp::Location] {
-        &self.tilocs
+    /// Return the parameter at a given [InstIdx].
+    pub(crate) fn param(&self, iidx: InstIdx) -> &yksmp::Location {
+        debug_assert_matches!(self.inst_decopy(iidx).1, Inst::Param(_));
+        &self.params[usize::from(iidx)]
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -944,7 +947,7 @@ impl FuncTy {
         }
     }
 
-    /// Return the number of paramaters the function accepts (not including varargs).
+    /// Return the number of parameters the function accepts (not including varargs).
     #[cfg(any(debug_assertions, test))]
     pub(crate) fn num_params(&self) -> usize {
         self.param_tyidxs.len()
@@ -956,7 +959,7 @@ impl FuncTy {
         &self.param_tyidxs
     }
 
-    /// Returns whether the function type has vararg arguments.
+    /// Returns whether the function type has vararg parameters.
     pub(crate) fn is_vararg(&self) -> bool {
         self.is_vararg
     }
@@ -1430,7 +1433,7 @@ pub(crate) enum Inst {
     BinOp(BinOpInst),
     Load(LoadInst),
     LookupGlobal(LookupGlobalInst),
-    LoadTraceInput(LoadTraceInputInst),
+    Param(ParamInst),
     Call(DirectCallInst),
     IndirectCall(IndirectCallIdx),
     PtrAdd(PtrAddInst),
@@ -1485,7 +1488,7 @@ impl Inst {
             }
             Self::Load(li) => li.tyidx(),
             Self::LookupGlobal(..) => m.ptr_tyidx(),
-            Self::LoadTraceInput(li) => li.tyidx(),
+            Self::Param(li) => li.tyidx(),
             Self::Call(ci) => m.func_type(ci.target()).ret_tyidx(),
             Self::PtrAdd(..) => m.ptr_tyidx(),
             Self::DynPtrAdd(..) => m.ptr_tyidx(),
@@ -1564,7 +1567,7 @@ impl Inst {
             }
             Inst::Load(LoadInst { op, .. }) => op.unpack(m).map_iidx(f),
             Inst::LookupGlobal(_) => (),
-            Inst::LoadTraceInput(_) => (),
+            Inst::Param(_) => (),
             Inst::Call(x) => {
                 for i in x.iter_args_idx() {
                     m.arg(i).map_iidx(f);
@@ -1666,7 +1669,7 @@ impl Inst {
             }
             Inst::Load(LoadInst { op, .. }) => op.map_iidx(f),
             Inst::LookupGlobal(_) => (),
-            Inst::LoadTraceInput(_) => (),
+            Inst::Param(_) => (),
             Inst::Call(x) => {
                 for i in x.iter_args_idx() {
                     m.arg_packed(i).map_iidx(f);
@@ -1789,7 +1792,7 @@ impl Inst {
             (Self::Load(x), Self::Load(y)) => x.decopy_eq(m, y),
             (Self::Store(x), Self::Store(y)) => x.decopy_eq(m, y),
             (Self::LookupGlobal(x), Self::LookupGlobal(y)) => x.decopy_eq(y),
-            (Self::LoadTraceInput(x), Self::LoadTraceInput(y)) => x.decopy_eq(y),
+            (Self::Param(x), Self::Param(y)) => x.decopy_eq(y),
             (Self::PtrAdd(x), Self::PtrAdd(y)) => x.decopy_eq(m, y),
             (Self::DynPtrAdd(x), Self::DynPtrAdd(y)) => x.decopy_eq(m, y),
             (Self::ICmp(x), Self::ICmp(y)) => x.decopy_eq(m, y),
@@ -1927,12 +1930,8 @@ impl fmt::Display for DisplayableInst<'_> {
                     cond.unpack(self.m).display(self.m),
                 )
             }
-            Inst::LoadTraceInput(x) => {
-                write!(
-                    f,
-                    "load_ti {:?}",
-                    self.m.tilocs[usize::try_from(x.locidx()).unwrap()]
-                )
+            Inst::Param(x) => {
+                write!(f, "param {:?}", self.m.params[usize::from(x.paramidx())])
             }
             Inst::TraceLoopStart => {
                 // Just marks a location, so we format it to look like a label.
@@ -2016,7 +2015,7 @@ inst!(BlackBox, BlackBoxInst);
 inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
-inst!(LoadTraceInput, LoadTraceInputInst);
+inst!(Param, ParamInst);
 inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(DynPtrAdd, DynPtrAddInst);
@@ -2151,40 +2150,38 @@ impl LoadInst {
     }
 }
 
-/// The `LoadTraceInput` instruction.
+/// The `Param` instruction.
 ///
 /// ## Semantics
 ///
-/// Loads a trace input out of the trace input struct. The variable is loaded from the specified
-/// offset (`off`) and the resulting local variable is of the type indicated by the `tyidx`.
-///
-/// FIXME (maybe): If we added a third `TraceInput` storage class to the register allocator, could
-/// we kill this instruction kind entirely?
+/// Specifies the [yksmp::Location] of a run-time argument.
 #[derive(Clone, Copy, Debug)]
-#[repr(packed)]
-pub struct LoadTraceInputInst {
-    /// The [yksmp::Location] of this input.
-    locidx: u32,
+pub struct ParamInst {
+    /// The [InstIdx] of the [yksmp::Location] parameter.
+    paramidx: InstIdx,
     /// The type of the resulting local variable.
     tyidx: TyIdx,
 }
 
-impl LoadTraceInputInst {
-    pub(crate) fn new(locidx: u32, tyidx: TyIdx) -> LoadTraceInputInst {
-        Self { locidx, tyidx }
+impl ParamInst {
+    pub(crate) fn new(locidx: InstIdx, tyidx: TyIdx) -> ParamInst {
+        Self {
+            paramidx: locidx,
+            tyidx,
+        }
     }
 
     pub(crate) fn decopy_eq(&self, other: Self) -> bool {
-        self.locidx == other.locidx && self.tyidx == other.tyidx
+        self.paramidx == other.paramidx && self.tyidx == other.tyidx
     }
 
     pub(crate) fn tyidx(&self) -> TyIdx {
         self.tyidx
     }
 
-    /// The [yksmp::Location] of this input.
-    pub(crate) fn locidx(&self) -> u32 {
-        self.locidx
+    /// Return The [InstIdx] of the [yksmp::Location] parameter.
+    pub(crate) fn paramidx(&self) -> InstIdx {
+        self.paramidx
     }
 }
 
@@ -2950,8 +2947,8 @@ mod tests {
     #[test]
     fn use_case_update_inst() {
         let mut prog: Vec<Inst> = vec![
-            LoadTraceInputInst::new(0, TyIdx::try_from(0).unwrap()).into(),
-            LoadTraceInputInst::new(8, TyIdx::try_from(0).unwrap()).into(),
+            ParamInst::new(InstIdx::try_from(0).unwrap(), TyIdx::try_from(0).unwrap()).into(),
+            ParamInst::new(InstIdx::try_from(8).unwrap(), TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
                 Operand::Var(InstIdx(0)),
                 TyIdx(U24::try_from(0).unwrap()),
@@ -2990,12 +2987,21 @@ mod tests {
             Operand::Var(InstIdx(1)),
             Operand::Var(InstIdx(2)),
         ];
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(0, i32_tyidx)))
-            .unwrap();
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(1, i32_tyidx)))
-            .unwrap();
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(2, i32_tyidx)))
-            .unwrap();
+        m.push(Inst::Param(ParamInst::new(
+            InstIdx::try_from(0).unwrap(),
+            i32_tyidx,
+        )))
+        .unwrap();
+        m.push(Inst::Param(ParamInst::new(
+            InstIdx::try_from(1).unwrap(),
+            i32_tyidx,
+        )))
+        .unwrap();
+        m.push(Inst::Param(ParamInst::new(
+            InstIdx::try_from(2).unwrap(),
+            i32_tyidx,
+        )))
+        .unwrap();
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
@@ -3121,8 +3127,8 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push(LoadTraceInputInst::new(0, m.int8_tyidx()).into())
+        m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push(ParamInst::new(InstIdx::try_from(0).unwrap(), m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
@@ -3143,7 +3149,7 @@ mod tests {
             "global_decl tls @some_thread_local",
             "",
             "entry:",
-            "    %0: i8 = load_ti Register(3, 1, 0, [])",
+            "    %0: i8 = param Register(3, 1, 0, [])",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);
@@ -3167,7 +3173,7 @@ mod tests {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = load_ti 0
+              %0: i8 = param 0
               tloop_start [%0]
               %2: i8 = %0
               tloop_jump [%2]
@@ -3184,7 +3190,7 @@ mod tests {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = load_ti 0
+              %0: i8 = param 0
               tloop_start [%0]
               %2: i8 = add %0, %0
               %3: i8 = add %0, %0

@@ -351,14 +351,11 @@ impl Opt {
                         self.m.replace(iidx, Inst::Const(dst_cidx));
                     }
                 }
-                Inst::LoadTraceInput(x) => {
+                Inst::Param(x) => {
                     // FIXME: This feels like it should be handled by trace_builder, but we can't
                     // do so yet because of https://github.com/ykjit/yk/issues/1435.
-                    let locidx = x.locidx();
-                    if let yksmp::Location::Constant(v) =
-                        self.m.tilocs()[usize::try_from(locidx).unwrap()]
-                    {
-                        let cidx = self.m.insert_const(Const::Int(x.tyidx(), v.into()))?;
+                    if let yksmp::Location::Constant(v) = self.m.param(x.paramidx()) {
+                        let cidx = self.m.insert_const(Const::Int(x.tyidx(), u64::from(*v)))?;
                         self.an.set_value(iidx, Value::Const(cidx));
                     }
                 }
@@ -525,7 +522,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i1 = load_ti 0
+            %0: i1 = param 0
             guard false, 0i1, [%0]
         ",
             |m| opt(m).unwrap(),
@@ -559,7 +556,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = mul %0, 0i8
             %2: i1 = eq %1, 0i8
             guard true, %2, [%0, %1]
@@ -569,7 +566,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = param ...
             black_box %0
         ",
         );
@@ -580,7 +577,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = add %0, 0i8
             black_box %1
         ",
@@ -588,7 +585,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = param ...
             black_box %0
         ",
         );
@@ -621,7 +618,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = and %0, 0i8
             black_box %1
         ",
@@ -658,7 +655,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = load_ti 0
+            %0: ptr = param 0
             %1: ptr = dyn_ptr_add %0, 2i8, 3
             black_box %1
         ",
@@ -666,7 +663,7 @@ mod test {
             "
           ...
           entry:
-            %0: ptr = load_ti ...
+            %0: ptr = param ...
             %1: ptr = ptr_add %0, 6
             black_box %1
         ",
@@ -678,7 +675,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = lshr %0, 0i8
             black_box %1
         ",
@@ -686,7 +683,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = param ...
             black_box %0
         ",
         );
@@ -716,7 +713,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = or %0, 0i8
             %2: i8 = or 0i8, %0
             black_box %1
@@ -726,7 +723,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = param ...
             black_box %0
             black_box %0
         ",
@@ -757,8 +754,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = param 0
+            %1: i8 = param 1
             %2: i8 = mul %0, 0i8
             %3: i8 = add %1, %2
             %4: i8 = mul 0i8, %0
@@ -770,7 +767,7 @@ mod test {
             "
           ...
           entry:
-            %1: i8 = load_ti ...
+            %1: i8 = param ...
             black_box %1
             black_box %1
         ",
@@ -782,8 +779,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = param 0
+            %1: i8 = param 1
             %2: i8 = mul %0, 1i8
             %3: i8 = add %1, %2
             %4: i8 = mul 1i8, %0
@@ -795,8 +792,8 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
-            %1: i8 = load_ti ...
+            %0: i8 = param ...
+            %1: i8 = param ...
             %3: i8 = add %1, %0
             black_box %3
             black_box %3
@@ -835,7 +832,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i64 = load_ti 0
+            %0: i64 = param 0
             %1: i64 = mul %0, 2i64
             %2: i64 = mul %0, 4i64
             %3: i64 = mul %0, 4611686018427387904i64
@@ -851,7 +848,7 @@ mod test {
             "
           ...
           entry:
-            %0: i64 = load_ti ...
+            %0: i64 = param ...
             %1: i64 = shl %0, 1i64
             %2: i64 = shl %0, 2i64
             %3: i64 = shl %0, 62i64
@@ -989,7 +986,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = load_ti 0
+            %0: ptr = param 0
             %1: ptr = ptr_add %0, 0
             black_box %1
         ",
@@ -997,7 +994,7 @@ mod test {
             "
           ...
           entry:
-            %0: ptr = load_ti ...
+            %0: ptr = param ...
             black_box %0
         ",
         );
@@ -1008,7 +1005,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = load_ti 0
+            %0: ptr = param 0
             %1: ptr = dyn_ptr_add %0, 2i64, 8
             black_box %1
             %3: ptr = dyn_ptr_add %0, -1i64, 8
@@ -1020,7 +1017,7 @@ mod test {
             "
           ...
           entry:
-            %0: ptr = load_ti...
+            %0: ptr = param ...
             %1: ptr = ptr_add %0, 16
             black_box %1
             %3: ptr = ptr_add %0, -8
@@ -1036,8 +1033,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = param 0
+            %1: i8 = param 1
             %2: i1 = eq %0, %1
             guard true, %2, [%0, %1]
             guard true, %2, [%0, %1]
@@ -1046,8 +1043,8 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
-            %1: i8 = load_ti ...
+            %0: i8 = param ...
+            %1: i8 = param ...
             %2: i1 = eq %0, %1
             guard true, %2, ...
         ",

@@ -864,6 +864,7 @@ unsafe extern "C" fn __yk_exec_trace(
 
 /// [MTThread]'s major job is to record what state in the "interpreting/tracing/executing"
 /// state-machine this thread is in. This enum contains the states.
+#[derive(Debug)]
 enum MTThreadState {
     /// This thread is executing in the normal interpreter: it is not executing a trace or
     /// recording a trace.
@@ -1077,6 +1078,7 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
     struct DummyTraceRecorder;
 
     impl TraceRecorder for DummyTraceRecorder {

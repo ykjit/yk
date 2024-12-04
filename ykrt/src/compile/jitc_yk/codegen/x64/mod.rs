@@ -466,7 +466,7 @@ impl<'a> Assemble<'a> {
                 }
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
-                jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
+                jit_ir::Inst::Param(i) => self.cg_param(iidx, i),
                 jit_ir::Inst::Load(i) => self.cg_load(iidx, i, 0),
                 jit_ir::Inst::PtrAdd(pa_inst) => {
                     next = iter.next();
@@ -1074,10 +1074,10 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    /// Codegen a [jit_ir::LoadTraceInputInst]. This only informs the register allocator about the
+    /// Codegen a [jit_ir::ParamInst]. This only informs the register allocator about the
     /// locations of live variables without generating any actual machine code.
-    fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
-        let m = match &self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
+    fn cg_param(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParamInst) {
+        let m = match self.m.param(inst.paramidx()) {
             yksmp::Location::Register(0, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))
             }
@@ -2548,7 +2548,7 @@ enum Immediate {
 mod tests {
     use super::{Assemble, X64CompiledTrace};
     use crate::compile::{
-        jitc_yk::jit_ir::{self, Module},
+        jitc_yk::jit_ir::{self, Inst, InstIdx, Module},
         CompiledTrace,
     };
     use crate::location::{HotLocation, HotLocationKind};
@@ -2753,7 +2753,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = param 0
                 %1: ptr = load %0
             ",
             "
@@ -2771,7 +2771,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = param 0
                 %1: i8 = load %0
             ",
             "
@@ -2789,7 +2789,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i32 = load %0
             ",
             "
@@ -2807,7 +2807,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = param 0
                 *%0 = 0x0
             ",
             "
@@ -2826,7 +2826,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = param 0
                 %1: i32 = ptr_add %0, 64
             ",
             "
@@ -2844,8 +2844,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: ptr = load_ti 1
+                %0: ptr = param 0
+                %1: ptr = param 1
                 %2: ptr = ptr_add %0, 64
                 %3: i64 = load %2
                 %4: ptr = ptr_add %1, 32
@@ -2872,8 +2872,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: ptr = load_ti 1
+                %0: ptr = param 0
+                %1: ptr = param 1
                 %2: ptr = ptr_add %0, 64
                 *%2 = 1i8
                 %4: ptr = ptr_add %1, 32
@@ -2900,8 +2900,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 1
             ",
             "
@@ -2916,8 +2916,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 2
             ",
             "
@@ -2932,8 +2932,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 4
             ",
             "
@@ -2948,8 +2948,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 5
             ",
             "
@@ -2965,8 +2965,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 16
             ",
             "
@@ -2982,8 +2982,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 77
             ",
             "
@@ -3002,14 +3002,14 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: ptr = load_ti 1
+                %0: ptr = param 0
+                %1: ptr = param 1
                 *%1 = %0
             ",
             "
                 ...
-                ; %0: ptr = load_ti ...
-                ; %1: ptr = load_ti ...
+                ; %0: ptr = param ...
+                ; %1: ptr = param ...
                 ; *%1 = %0
                 mov [r.64.x], r.64.y
                 ...
@@ -3023,7 +3023,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = param 0
                 *%0 = 1i8
                 *%0 = 2i16
                 *%0 = 3i32
@@ -3031,7 +3031,7 @@ mod tests {
             ",
             "
                 ...
-                ; %0: ptr = load_ti ...
+                ; %0: ptr = param ...
                 ; *%0 = 1i8
                 mov byte ptr [r.64.x], 0x01
                 ; *%0 = 2i16
@@ -3051,8 +3051,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
+                %0: i16 = param 0
+                %1: i16 = param 1
                 %3: i16 = add %0, %1
             ",
             "
@@ -3070,8 +3070,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
-                %1: i64 = load_ti 1
+                %0: i64 = param 0
+                %1: i64 = param 1
                 %3: i64 = add %0, %1
             ",
             "
@@ -3089,7 +3089,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = param 0
                 %1: i64 = add %0, 1i64
             ",
             "
@@ -3107,7 +3107,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = param 0
                 %1: i64 = add %0, 18446744073709551615i64
             ",
             "
@@ -3126,7 +3126,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = param 0
                 %1: i64 = add %0, 2147483647i64
             ",
             "
@@ -3144,7 +3144,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = param 0
                 %1: i64 = add %0, 2147483648i64
             ",
             "
@@ -3163,7 +3163,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i32 = add %0, 1i32
             ",
             "
@@ -3181,7 +3181,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i32 = add %0, 4294967295i32
             ",
             "
@@ -3199,12 +3199,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = and %0, %1
                 %7: i32 = and %2, %3
                 %8: i63 = and %4, %5
@@ -3228,9 +3228,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i16 = ashr %0, 1i16
                 %4: i32 = ashr %1, 2i32
                 %5: i63 = ashr %2, 3i63
@@ -3260,9 +3260,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i16 = lshr %0, 1i16
                 %4: i32 = lshr %1, 2i32
                 %5: i63 = lshr %2, 3i63
@@ -3292,9 +3292,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i16 = shl %0, 1i16
                 %4: i32 = shl %1, 2i32
                 %5: i63 = shl %2, 3i63
@@ -3324,12 +3324,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = mul %0, %1
                 %7: i32 = mul %2, %3
                 %8: i63 = mul %4, %5
@@ -3358,12 +3358,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = or %0, %1
                 %7: i32 = or %2, %3
                 %8: i63 = or %4, %5
@@ -3387,12 +3387,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = sdiv %0, %1
                 %7: i32 = sdiv %2, %3
                 %8: i63 = sdiv %4, %5
@@ -3428,12 +3428,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = srem %0, %1
                 %7: i32 = srem %2, %3
                 %8: i63 = srem %4, %5
@@ -3469,12 +3469,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = sub %0, %1
                 %7: i32 = sub %2, %3
                 %8: i63 = sub %4, %5
@@ -3506,12 +3506,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = xor %0, %1
                 %7: i32 = xor %2, %3
                 %8: i63 = xor %4, %5
@@ -3535,12 +3535,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = udiv %0, %1
                 %7: i32 = udiv %2, %3
                 %8: i63 = udiv %4, %5
@@ -3602,9 +3602,9 @@ mod tests {
               func_decl puts (i32, i32, i32)
 
               entry:
-                %0: i32 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i32 = load_ti 2
+                %0: i32 = param 0
+                %1: i32 = param 1
+                %2: i32 = param 2
                 call @puts(%0, %1, %2)
             ",
             &format!(
@@ -3631,9 +3631,9 @@ mod tests {
               func_decl puts (i8, i16, ptr)
 
               entry:
-                %0: i8 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: ptr = load_ti 2
+                %0: i8 = param 0
+                %1: i16 = param 1
+                %2: ptr = param 2
                 call @puts(%0, %1, %2)
             ",
             &format!(
@@ -3690,9 +3690,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 tloop_start [%0, %1, %2]
                 %4: i1 = eq %0, %0
                 %5: i1 = eq %1, %1
@@ -3734,9 +3734,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i32 = sext %0
                 %4: i64 = sext %1
                 %5: i64 = sext %2
@@ -3760,9 +3760,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i32 = zext %0
                 %4: i64 = zext %1
                 %5: i64 = zext %2
@@ -3786,8 +3786,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
-                %1: i32 = load_ti 1
+                %0: i64 = param 0
+                %1: i32 = param 1
                 %2: double = bitcast %0
                 %3: float = bitcast %1
                 ",
@@ -3807,7 +3807,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = load_ti 0
+                %0: i1 = param 0
                 guard true, %0, []
             ",
             "
@@ -3836,7 +3836,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = load_ti 0
+                %0: i1 = param 0
                 guard false, %0, []
             ",
             "
@@ -3865,7 +3865,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = load_ti 0
+                %0: i1 = param 0
                 %1: i8 = 10i8
                 %2: i8 = 32i8
                 %3: i8 = add %1, %2
@@ -3897,7 +3897,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = param 0
                 %2: i1 = eq %0, 3i8
             ",
             "
@@ -3918,7 +3918,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = param 0
                 %2: i1 = eq %0, 3i8
                 guard true, %2, []
             ",
@@ -3975,14 +3975,14 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = param 0
                 tloop_start [%0]
                 %2: i8 = add %0, %0
                 tloop_jump [%0]
             ",
             "
                 ...
-                ; %0: i8 = load_ti ...
+                ; %0: i8 = param ...
                 ...
                 ; tloop_start [%0]:
                 ; %2: i8 = add %0, %0
@@ -4001,8 +4001,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
-                %1: i8 = load_ti 1
+                %0: i8 = param 0
+                %1: i8 = param 1
                 %2: i8 = srem %0, %1
             ",
             "
@@ -4024,8 +4024,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i56 = load_ti 0
-                %1: i56 = load_ti 1
+                %0: i56 = param 0
+                %1: i56 = param 1
                 %2: i56 = srem %0, %1
             ",
             "
@@ -4049,14 +4049,14 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i8 = trunc %0
                 %2: i8 = trunc %0
                 %3: i8 = add %2, %1
             ",
             "
                 ...
-                ; %0: i32 = load_ti ...
+                ; %0: i32 = param ...
                 ...
                 ; %1: i8 = trunc %0
                 mov r.64.x, r.64.y
@@ -4071,7 +4071,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i32 = %0 ? 1i32 : 2i32
             ",
             "
@@ -4092,7 +4092,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = param 0
                 %1: i8 = 1i8
                 %2: i8 = add %0, %1
             ",
@@ -4111,7 +4111,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: float = si_to_fp %0
             ",
             "
@@ -4129,7 +4129,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: double = si_to_fp %0
             ",
             "
@@ -4147,12 +4147,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = param 0
                 %1: double = fp_ext %0
             ",
             "
                 ...
-                ; %0: float = load_ti ...
+                ; %0: float = param ...
                 ; %1: double = fp_ext %0
                 cvtss2sd fp.128.x, fp.128.x
                 ...
@@ -4166,7 +4166,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = param 0
                 %1: i32 = fp_to_si %0
             ",
             "
@@ -4184,7 +4184,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
+                %0: double = param 0
                 %1: i32 = fp_to_si %0
             ",
             "
@@ -4202,8 +4202,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: float = fdiv %0, %1
             ",
             "
@@ -4221,8 +4221,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: double = fdiv %0, %1
             ",
             "
@@ -4240,8 +4240,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: float = fadd %0, %1
             ",
             "
@@ -4259,8 +4259,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: double = fadd %0, %1
             ",
             "
@@ -4278,8 +4278,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: float = fsub %0, %1
             ",
             "
@@ -4297,8 +4297,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: double = fsub %0, %1
             ",
             "
@@ -4316,9 +4316,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: float = fmul %0, %1
+                %3: float = fmul %1, %1
             ",
             "
                 ...
@@ -4335,8 +4336,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: double = fmul %0, %1
             ",
             "
@@ -4354,8 +4355,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
             ",
@@ -4382,8 +4383,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
             ",
@@ -4454,14 +4455,14 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = param 0
                 tloop_start [%0]
                 %1: i8 = 42i8
                 tloop_jump [%1]
             ",
             "
                 ...
-                ; %0: i8 = load_ti ...
+                ; %0: i8 = param ...
                 ...
                 ; tloop_start [%0]:
                 ; tloop_jump [42i8]:
@@ -4477,8 +4478,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: double = load_ti 1
+                %0: float = param 0
+                %1: double = param 1
                 %2: float = fneg %0
                 %3: double = fneg %1
             ",
@@ -4498,15 +4499,21 @@ mod tests {
     }
 
     #[test]
-    fn cg_aliasing_loadtis() {
+    fn cg_aliasing_params() {
         let mut m = jit_ir::Module::new(0, 0).unwrap();
 
-        // Create two trace inputs whose locations alias.
+        // Create two trace paramaters whose locations alias.
         let loc = yksmp::Location::Register(13, 1, 0, [].into());
-        m.push_tiloc(loc);
-        let ti_inst = jit_ir::LoadTraceInputInst::new(0, m.int8_tyidx());
-        let op1 = m.push_and_make_operand(ti_inst.clone().into()).unwrap();
-        let op2 = m.push_and_make_operand(ti_inst.into()).unwrap();
+        m.push_param(loc.clone());
+        let pinst1: Inst =
+            jit_ir::ParamInst::new(InstIdx::try_from(0).unwrap(), m.int8_tyidx()).into();
+        m.push(pinst1.clone()).unwrap();
+        m.push_param(loc);
+        let pinst2: Inst =
+            jit_ir::ParamInst::new(InstIdx::try_from(1).unwrap(), m.int8_tyidx()).into();
+        m.push(pinst2.clone()).unwrap();
+        let op1 = m.push_and_make_operand(pinst1).unwrap();
+        let op2 = m.push_and_make_operand(pinst2).unwrap();
 
         let add_inst = jit_ir::BinOpInst::new(op1, jit_ir::BinOp::Add, op2);
         m.push(add_inst.into()).unwrap();
