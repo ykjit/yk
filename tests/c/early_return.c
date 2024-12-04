@@ -20,7 +20,8 @@
 //     return
 //     exit
 
-// Check that basic trace compilation works.
+// Check that an early return caused by falling out of the interpreter loop is
+// handled correctly.
 
 #include <assert.h>
 #include <stdio.h>

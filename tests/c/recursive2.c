@@ -25,9 +25,6 @@
 // In this scenario, the parent function starts tracing at location 1, a
 // recursive interpreter loop runs and exits, but without encountering
 // location 1 (the location that initiated tracing).
-//
-// XXX: question to Laurie: should the early_return from the inner interpreter
-// loop abort tracing in this scenario? (It does, FWIW -- this test passes).
 
 #include <assert.h>
 #include <stdio.h>
