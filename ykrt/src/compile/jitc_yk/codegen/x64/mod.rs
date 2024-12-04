@@ -23,7 +23,7 @@
 use super::{
     super::{
         int_signs::{SignExtend, Truncate},
-        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, Ty},
+        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
         CompilationError,
     },
     reg_alloc::{self, StackDirection, VarLocation},
@@ -60,11 +60,13 @@ use std::{
     slice,
     sync::{Arc, Weak},
 };
+use vob::Vob;
 use ykaddr::addr::symbol_to_ptr;
 use yksmp;
 
 mod deopt;
 mod lsregalloc;
+mod rev_analyse;
 
 use deopt::{__yk_deopt, __yk_guardcheck};
 use lsregalloc::{LSRegAlloc, RegConstraint};
@@ -195,6 +197,12 @@ struct Assemble<'a> {
     /// The stack pointer offset of the root trace's frame from the base pointer of the interpreter
     /// frame. If this is the root trace, this will be None.
     root_offset: Option<usize>,
+    /// Does this Load/Store instruction reference a [PtrAddInst]?
+    ptradds: Vec<Option<PtrAddInst>>,
+    /// For each instruction, does this code generator use its value? This is implicitly a second
+    /// layer of dead-code elimination: it doesn't cause JIT IR instructions to be removed, but
+    /// it will stop any code being (directly) generated for some of them.
+    used_insts: Vob,
 }
 
 impl<'a> Assemble<'a> {
@@ -242,15 +250,19 @@ impl<'a> Assemble<'a> {
             }
         };
 
+        let (inst_vals_alive_until, used_insts, ptradds) = rev_analyse::rev_analyse(m)?;
+
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, sp_offset),
+            ra: LSRegAlloc::new(m, inst_vals_alive_until, sp_offset),
             asm,
             loop_start_locs: Vec::new(),
             deoptinfo: HashMap::new(),
             comments: Cell::new(IndexMap::new()),
             sp_offset,
             root_offset,
+            used_insts,
+            ptradds,
         }))
     }
 
@@ -455,52 +467,26 @@ impl<'a> Assemble<'a> {
         let mut iter = self.m.iter_skipping_insts();
         let mut next = iter.next();
         while let Some((iidx, inst)) = next {
-            self.ra.expire_regs(iidx);
             self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
+            if !self.used_insts[usize::from(iidx)] {
+                next = iter.next();
+                continue;
+            }
+            self.ra.expire_regs(iidx);
 
             match inst {
                 #[cfg(test)]
-                jit_ir::Inst::BlackBox(_) => unreachable!(),
+                jit_ir::Inst::BlackBox(_) => (),
                 jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
                     unreachable!();
                 }
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
                 jit_ir::Inst::Param(i) => self.cg_param(iidx, i),
-                jit_ir::Inst::Load(i) => self.cg_load(iidx, i, 0),
-                jit_ir::Inst::PtrAdd(pa_inst) => {
-                    next = iter.next();
-                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
-                    // by a `load` *and* the result of the `PtrAdd` isn't used again.
-                    if let Some((next_iidx, Inst::Load(l_inst))) = next {
-                        if let Operand::Var(op_iidx) = l_inst.operand(self.m) {
-                            if op_iidx == iidx
-                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
-                            {
-                                self.cg_ptradd_load(iidx, pa_inst, next_iidx, l_inst);
-                                next = iter.next();
-                                continue;
-                            }
-                        }
-                    }
-                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
-                    // by a `store` *and* the result of the `PtrAdd` isn't used again.
-                    if let Some((next_iidx, Inst::Store(s_inst))) = next {
-                        if let Operand::Var(tgt_iidx) = s_inst.tgt(self.m) {
-                            if tgt_iidx == iidx
-                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
-                            {
-                                self.cg_ptradd_store(iidx, pa_inst, next_iidx, s_inst);
-                                next = iter.next();
-                                continue;
-                            }
-                        }
-                    }
-                    self.cg_ptradd(iidx, pa_inst);
-                    continue;
-                }
+                jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+                jit_ir::Inst::PtrAdd(pa_inst) => self.cg_ptradd(iidx, pa_inst),
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
-                jit_ir::Inst::Store(i) => self.cg_store(iidx, i, 0),
+                jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
                 jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
                 jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
                 jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
@@ -1175,21 +1161,22 @@ impl<'a> Assemble<'a> {
 
     /// Generate code for a [LoadInst], loading from a `register + off`. `off` should only be
     /// non-zero if the [LoadInst] references a [PtrAddInst].
-    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst, off: i32) {
+    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+        let (ptr_op, off) = match self.ptradds[usize::from(iidx)] {
+            Some(x) => (x.ptr(self.m), x.off()),
+            None => (inst.operand(self.m), 0),
+        };
+
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
-                let op = inst.operand(self.m);
-                if let Operand::Var(op_iidx) = op {
+                if let Operand::Var(op_iidx) = ptr_op {
                     if self.ra.is_inst_var_still_used_after(iidx, op_iidx) {
                         // If the operand value is still live after the current instruction, avoid
                         // clobbering it, in the hope that it can be reused.
                         let [in_reg, out_reg] = self.ra.assign_gp_regs(
                             &mut self.asm,
                             iidx,
-                            [
-                                RegConstraint::Input(inst.operand(self.m)),
-                                RegConstraint::Output,
-                            ],
+                            [RegConstraint::Input(ptr_op), RegConstraint::Output],
                         );
                         let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
                         debug_assert!(size <= REG64_BYTESIZE);
@@ -1216,7 +1203,7 @@ impl<'a> Assemble<'a> {
                 let [reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
-                    [RegConstraint::InputOutput(inst.operand(self.m))],
+                    [RegConstraint::InputOutput(ptr_op)],
                 );
                 let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_BYTESIZE);
@@ -1229,11 +1216,9 @@ impl<'a> Assemble<'a> {
                 };
             }
             Ty::Float(fty) => {
-                let [src_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::Input(inst.operand(self.m))],
-                );
+                let [src_reg] =
+                    self.ra
+                        .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(ptr_op)]);
                 let [tgt_reg] =
                     self.ra
                         .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
@@ -1248,54 +1233,6 @@ impl<'a> Assemble<'a> {
             }
             x => todo!("{x:?}"),
         }
-    }
-
-    /// Optimise `PtrAdd` followed by `Load`. This has the following preconditions:
-    ///   1. The `Load` must consume the result of the `PtrAdd`.
-    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Load` is the sole
-    ///      consumer of the `PtrAdd`s result).
-    fn cg_ptradd_load(
-        &mut self,
-        pa_iidx: InstIdx,
-        pa_inst: &jit_ir::PtrAddInst,
-        l_iidx: InstIdx,
-        l_inst: &jit_ir::LoadInst,
-    ) {
-        let [_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            pa_iidx,
-            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
-        );
-        self.ra.expire_regs(l_iidx);
-        self.comment(
-            self.asm.offset(),
-            Inst::Load(*l_inst).display(l_iidx, self.m).to_string(),
-        );
-        self.cg_load(l_iidx, l_inst, pa_inst.off());
-    }
-
-    /// Optimise `PtrAdd` followed by `Store`. This has the following preconditions:
-    ///   1. The `Load` must consume the result of the `PtrAdd`.
-    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Store` is the sole
-    ///      consumer of the `PtrAdd`s result).
-    fn cg_ptradd_store(
-        &mut self,
-        pa_iidx: InstIdx,
-        pa_inst: &jit_ir::PtrAddInst,
-        s_iidx: InstIdx,
-        s_inst: &jit_ir::StoreInst,
-    ) {
-        let [_ptr_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            pa_iidx,
-            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
-        );
-        self.ra.expire_regs(s_iidx);
-        self.comment(
-            self.asm.offset(),
-            Inst::Store(*s_inst).display(s_iidx, self.m).to_string(),
-        );
-        self.cg_store(s_iidx, s_inst, pa_inst.off());
     }
 
     fn cg_ptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
@@ -1356,17 +1293,20 @@ impl<'a> Assemble<'a> {
 
     /// Generate code for a [StoreInst], storing it at a `register + off`. `off` should only be
     /// non-zero if the [StoreInst] references a [PtrAddInst].
-    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst, off: i32) {
+    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
+        let (tgt_op, off) = match self.ptradds[usize::from(iidx)] {
+            Some(x) => (x.ptr(self.m), x.off()),
+            None => (inst.tgt(self.m), 0),
+        };
+
         let val = inst.val(self.m);
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
                 let byte_size = val.byte_size(self.m);
                 if let Some(imm) = self.op_to_immediate(&val) {
-                    let [tgt_reg] = self.ra.assign_gp_regs(
-                        &mut self.asm,
-                        iidx,
-                        [RegConstraint::Input(inst.tgt(self.m))],
-                    );
+                    let [tgt_reg] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
                     match (imm, byte_size) {
                         (Immediate::I8(v), 1) => {
                             dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code()) + off], v)
@@ -1386,10 +1326,7 @@ impl<'a> Assemble<'a> {
                     let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
                         &mut self.asm,
                         iidx,
-                        [
-                            RegConstraint::Input(inst.tgt(self.m)),
-                            RegConstraint::Input(val),
-                        ],
+                        [RegConstraint::Input(tgt_op), RegConstraint::Input(val)],
                     );
                     match byte_size {
                         1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rb(val_reg.code())),
@@ -1401,11 +1338,9 @@ impl<'a> Assemble<'a> {
                 }
             }
             Ty::Float(fty) => {
-                let [tgt_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::Input(inst.tgt(self.m))],
-                );
+                let [tgt_reg] =
+                    self.ra
+                        .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
                 let [val_reg] =
                     self.ra
                         .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(val)]);
@@ -2755,6 +2690,7 @@ mod tests {
               entry:
                 %0: ptr = param 0
                 %1: ptr = load %0
+                black_box %1
             ",
             "
                 ...
@@ -2773,6 +2709,7 @@ mod tests {
               entry:
                 %0: i8 = param 0
                 %1: i8 = load %0
+                black_box %1
             ",
             "
                 ...
@@ -2791,6 +2728,7 @@ mod tests {
               entry:
                 %0: i32 = param 0
                 %1: i32 = load %0
+                black_box %1
             ",
             "
                 ...
@@ -2828,6 +2766,7 @@ mod tests {
               entry:
                 %0: ptr = param 0
                 %1: i32 = ptr_add %0, 64
+                black_box %1
             ",
             "
                 ...
@@ -2851,6 +2790,9 @@ mod tests {
                 %4: ptr = ptr_add %1, 32
                 %5: i64 = load %4
                 %6: ptr = ptr_add %4, 1
+                black_box %3
+                black_box %5
+                black_box %6
             ",
             "
                 ...
@@ -2858,9 +2800,10 @@ mod tests {
                 ; %3: i64 = load %2
                 mov r.64.x, [rbx+{{_}}]
                 ; %4: ptr = ptr_add %1, 32
-                add r.64.y, 0x20
+                mov r.64.y, r.64._
+                add r.64._, 0x20
                 ; %5: i64 = load %4
-                mov r.64._, [r.64.y]
+                mov r.64._, [r.64.y+0x20]
                 ...
                 ",
             false,
@@ -2879,17 +2822,18 @@ mod tests {
                 %4: ptr = ptr_add %1, 32
                 %5: i64 = load %4
                 *%4 = 2i8
+                black_box %5
             ",
             "
                 ...
                 ; *%2 = 1i8
                 mov byte ptr [rbx+{{_}}], 0x01
                 ; %4: ptr = ptr_add %1, 32
-                add r.64.x, 0x20
                 ; %5: i64 = load %4
-                mov r.64.y, [r.64.x]
+                mov r.64.y, [r.64.x+0x20]
                 ; *%4 = 2i8
-                mov byte ptr [r.64.x], 0x02
+                mov byte ptr [r.64.x+0x20], 0x02
+                ...
                 ",
             false,
         );
@@ -2903,6 +2847,7 @@ mod tests {
                 %0: ptr = param 0
                 %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 1
+                black_box %2
             ",
             "
                 ...
@@ -2919,6 +2864,7 @@ mod tests {
                 %0: ptr = param 0
                 %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 2
+                black_box %2
             ",
             "
                 ...
@@ -2935,6 +2881,7 @@ mod tests {
                 %0: ptr = param 0
                 %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 4
+                black_box %2
             ",
             "
                 ...
@@ -2951,6 +2898,7 @@ mod tests {
                 %0: ptr = param 0
                 %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 5
+                black_box %2
             ",
             "
                 ...
@@ -2968,6 +2916,7 @@ mod tests {
                 %0: ptr = param 0
                 %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 16
+                black_box %2
             ",
             "
                 ...
@@ -2985,6 +2934,7 @@ mod tests {
                 %0: ptr = param 0
                 %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 77
+                black_box %2
             ",
             "
                 ...
@@ -3054,6 +3004,7 @@ mod tests {
                 %0: i16 = param 0
                 %1: i16 = param 1
                 %3: i16 = add %0, %1
+                black_box %3
             ",
             "
                 ...
@@ -3073,6 +3024,7 @@ mod tests {
                 %0: i64 = param 0
                 %1: i64 = param 1
                 %3: i64 = add %0, %1
+                black_box %3
             ",
             "
                 ...
@@ -3091,6 +3043,7 @@ mod tests {
               entry:
                 %0: i64 = param 0
                 %1: i64 = add %0, 1i64
+                black_box %1
             ",
             "
                 ...
@@ -3109,6 +3062,7 @@ mod tests {
               entry:
                 %0: i64 = param 0
                 %1: i64 = add %0, 18446744073709551615i64
+                black_box %1
             ",
             "
                 ...
@@ -3128,6 +3082,7 @@ mod tests {
               entry:
                 %0: i64 = param 0
                 %1: i64 = add %0, 2147483647i64
+                black_box %1
             ",
             "
                 ...
@@ -3146,6 +3101,7 @@ mod tests {
               entry:
                 %0: i64 = param 0
                 %1: i64 = add %0, 2147483648i64
+                black_box %1
             ",
             "
                 ...
@@ -3165,6 +3121,7 @@ mod tests {
               entry:
                 %0: i32 = param 0
                 %1: i32 = add %0, 1i32
+                black_box %1
             ",
             "
                 ...
@@ -3183,6 +3140,7 @@ mod tests {
               entry:
                 %0: i32 = param 0
                 %1: i32 = add %0, 4294967295i32
+                black_box %1
             ",
             "
                 ...
@@ -3208,6 +3166,9 @@ mod tests {
                 %6: i16 = and %0, %1
                 %7: i32 = and %2, %3
                 %8: i63 = and %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3234,6 +3195,9 @@ mod tests {
                 %3: i16 = ashr %0, 1i16
                 %4: i32 = ashr %1, 2i32
                 %5: i63 = ashr %2, 3i63
+                black_box %3
+                black_box %4
+                black_box %5
             ",
             "
                 ...
@@ -3266,6 +3230,9 @@ mod tests {
                 %3: i16 = lshr %0, 1i16
                 %4: i32 = lshr %1, 2i32
                 %5: i63 = lshr %2, 3i63
+                black_box %3
+                black_box %4
+                black_box %5
             ",
             "
                 ...
@@ -3299,6 +3266,10 @@ mod tests {
                 %4: i32 = shl %1, 2i32
                 %5: i63 = shl %2, 3i63
                 %6: i32 = shl %1, %4
+                black_box %3
+                black_box %4
+                black_box %5
+                black_box %6
             ",
             "
                 ...
@@ -3314,6 +3285,7 @@ mod tests {
                 ; %6: i32 = shl %1, %4
                 ......
                 shl r.32.b, cl
+                ...
                 ",
             false,
         );
@@ -3333,6 +3305,9 @@ mod tests {
                 %6: i16 = mul %0, %1
                 %7: i32 = mul %2, %3
                 %8: i63 = mul %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3340,12 +3315,10 @@ mod tests {
                 mov rax, ...
                 mul r.64.a
                 ; %7: i32 = mul %2, %3
-                ...
-                mov rax, ...
+                ......
                 mul r.64.b
                 ; %8: i63 = mul %4, %5
-                ...
-                mov rax, ...
+                ......
                 mul r.64.c
                 ...
                 ",
@@ -3367,6 +3340,9 @@ mod tests {
                 %6: i16 = or %0, %1
                 %7: i32 = or %2, %3
                 %8: i63 = or %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3396,6 +3372,9 @@ mod tests {
                 %6: i16 = sdiv %0, %1
                 %7: i32 = sdiv %2, %3
                 %8: i63 = sdiv %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3437,6 +3416,9 @@ mod tests {
                 %6: i16 = srem %0, %1
                 %7: i32 = srem %2, %3
                 %8: i63 = srem %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3479,6 +3461,10 @@ mod tests {
                 %7: i32 = sub %2, %3
                 %8: i63 = sub %4, %5
                 %9: i32 = sub 0i32, %7
+                black_box %6
+                black_box %7
+                black_box %8
+                black_box %9
             ",
             "
                 ...
@@ -3495,7 +3481,9 @@ mod tests {
                 sar r.64.f, 0x01
                 sub r.64.e, r.64.f
                 ; %9: i32 = sub 0i32, %7
+                ......
                 neg r.32.c
+                ...
                 ",
             false,
         );
@@ -3515,6 +3503,9 @@ mod tests {
                 %6: i16 = xor %0, %1
                 %7: i32 = xor %2, %3
                 %8: i63 = xor %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3544,6 +3535,9 @@ mod tests {
                 %6: i16 = udiv %0, %1
                 %7: i32 = udiv %2, %3
                 %8: i63 = udiv %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3697,6 +3691,9 @@ mod tests {
                 %4: i1 = eq %0, %0
                 %5: i1 = eq %1, %1
                 %6: i1 = eq %2, %2
+                black_box %4
+                black_box %5
+                black_box %6
                 tloop_jump [%0, %1, %2]
             ",
             "
@@ -3740,6 +3737,9 @@ mod tests {
                 %3: i32 = sext %0
                 %4: i64 = sext %1
                 %5: i64 = sext %2
+                black_box %3
+                black_box %4
+                black_box %5
                 ",
             "
                 ...
@@ -3750,6 +3750,7 @@ mod tests {
                 ; %5: i64 = sext %2
                 shl r.64.c, 0x01
                 sar r.64.c, 0x01
+                ...
                 ",
             false,
         );
@@ -3766,6 +3767,9 @@ mod tests {
                 %3: i32 = zext %0
                 %4: i64 = zext %1
                 %5: i64 = zext %2
+                black_box %3
+                black_box %4
+                black_box %5
                 ",
             "
                 ...
@@ -3776,6 +3780,7 @@ mod tests {
                 ; %5: i64 = zext %2
                 shl r.64.c, 0x01
                 shr r.64.c, 0x01
+                ...
                 ",
             false,
         );
@@ -3790,13 +3795,16 @@ mod tests {
                 %1: i32 = param 1
                 %2: double = bitcast %0
                 %3: float = bitcast %1
+                black_box %2
+                black_box %3
                 ",
             "
             ...
             ; %2: double = bitcast %0
             cvtsi2sd fp.128.x, r.64.x
             ; %3: float = bitcast %1
-            cvtsi2ss fp.128.x, r.32.x
+            cvtsi2ss fp.128.y, r.32.y
+            ...
             ",
             false,
         );
@@ -3899,6 +3907,7 @@ mod tests {
               entry:
                 %0: i8 = param 0
                 %2: i1 = eq %0, 3i8
+                black_box %2
             ",
             "
                 ...
@@ -3978,6 +3987,7 @@ mod tests {
                 %0: i8 = param 0
                 tloop_start [%0]
                 %2: i8 = add %0, %0
+                black_box %2
                 tloop_jump [%0]
             ",
             "
@@ -4004,6 +4014,7 @@ mod tests {
                 %0: i8 = param 0
                 %1: i8 = param 1
                 %2: i8 = srem %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4027,6 +4038,7 @@ mod tests {
                 %0: i56 = param 0
                 %1: i56 = param 1
                 %2: i56 = srem %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4053,6 +4065,7 @@ mod tests {
                 %1: i8 = trunc %0
                 %2: i8 = trunc %0
                 %3: i8 = add %2, %1
+                black_box %3
             ",
             "
                 ...
@@ -4073,6 +4086,7 @@ mod tests {
               entry:
                 %0: i32 = param 0
                 %1: i32 = %0 ? 1i32 : 2i32
+                black_box %1
             ",
             "
                 ...
@@ -4095,6 +4109,7 @@ mod tests {
                 %0: i8 = param 0
                 %1: i8 = 1i8
                 %2: i8 = add %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4113,6 +4128,7 @@ mod tests {
               entry:
                 %0: i32 = param 0
                 %1: float = si_to_fp %0
+                black_box %1
             ",
             "
                 ...
@@ -4131,6 +4147,7 @@ mod tests {
               entry:
                 %0: i32 = param 0
                 %1: double = si_to_fp %0
+                black_box %1
             ",
             "
                 ...
@@ -4149,6 +4166,7 @@ mod tests {
               entry:
                 %0: float = param 0
                 %1: double = fp_ext %0
+                black_box %1
             ",
             "
                 ...
@@ -4168,6 +4186,7 @@ mod tests {
               entry:
                 %0: float = param 0
                 %1: i32 = fp_to_si %0
+                black_box %1
             ",
             "
                 ...
@@ -4186,6 +4205,7 @@ mod tests {
               entry:
                 %0: double = param 0
                 %1: i32 = fp_to_si %0
+                black_box %1
             ",
             "
                 ...
@@ -4205,6 +4225,7 @@ mod tests {
                 %0: float = param 0
                 %1: float = param 1
                 %2: float = fdiv %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4224,6 +4245,7 @@ mod tests {
                 %0: double = param 0
                 %1: double = param 1
                 %2: double = fdiv %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4243,6 +4265,7 @@ mod tests {
                 %0: float = param 0
                 %1: float = param 1
                 %2: float = fadd %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4262,6 +4285,7 @@ mod tests {
                 %0: double = param 0
                 %1: double = param 1
                 %2: double = fadd %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4281,6 +4305,7 @@ mod tests {
                 %0: float = param 0
                 %1: float = param 1
                 %2: float = fsub %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4300,6 +4325,7 @@ mod tests {
                 %0: double = param 0
                 %1: double = param 1
                 %2: double = fsub %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4320,6 +4346,8 @@ mod tests {
                 %1: float = param 1
                 %2: float = fmul %0, %1
                 %3: float = fmul %1, %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
@@ -4339,6 +4367,7 @@ mod tests {
                 %0: double = param 0
                 %1: double = param 1
                 %2: double = fmul %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4359,6 +4388,8 @@ mod tests {
                 %1: float = param 1
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
@@ -4369,9 +4400,9 @@ mod tests {
                 and r.8.x, r.8.y
                 ; %3: i1 = f_ugt %0, %1
                 ucomiss fp.128.x, fp.128.y
-                setnbe r.8.x
-                setnp r.8.y
-                and r.8.x, r.8.y
+                setnbe r.8._
+                setnp r.8._
+                and r.8._, r.8._
                 ...
                 ",
             false,
@@ -4387,6 +4418,8 @@ mod tests {
                 %1: double = param 1
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
@@ -4397,9 +4430,9 @@ mod tests {
                 and r.8.x, r.8.y
                 ; %3: i1 = f_ugt %0, %1
                 ucomisd fp.128.x, fp.128.y
-                setnbe r.8.x
-                setnp r.8.y
-                and r.8.x, r.8.y
+                setnbe r.8._
+                setnp r.8._
+                and r.8._, r.8._
                 ...
                 ",
             false,
@@ -4412,6 +4445,7 @@ mod tests {
             "
               entry:
                 %0: float = fadd 1.2float, 3.4float
+                black_box %0
             ",
             "
                 ...
@@ -4436,6 +4470,7 @@ mod tests {
             "
               entry:
                 %0: double = fadd 1.2double, 3.4double
+                black_box %0
             ",
             "
                 ...
@@ -4482,6 +4517,8 @@ mod tests {
                 %1: double = param 1
                 %2: float = fneg %0
                 %3: double = fneg %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
@@ -4493,6 +4530,7 @@ mod tests {
                 mov r.64.x, 0x8000000000000000
                 movq fp.128.y, r.64.x
                 xorpd fp.128.a, fp.128.y
+                ...
             ",
             false,
         );
