@@ -81,6 +81,10 @@ int main(int argc, char **argv) {
   NOOPT_VAL(num2);
   NOOPT_VAL(num3);
   NOOPT_VAL(num4);
+  NOOPT_VAL(num5);
+  NOOPT_VAL(num6);
+  NOOPT_VAL(num7);
+  NOOPT_VAL(num8);
   NOOPT_VAL(loc);
   NOOPT_VAL(i);
   while (i > 0) {
