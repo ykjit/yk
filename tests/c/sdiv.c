@@ -89,18 +89,14 @@ int main(int argc, char **argv) {
     int32_t sdiv2 = num2 / 3;
     int64_t sdiv3 = num3 / 3;
     int8_t sdiv4 = num4 / 3;
-    fprintf(stderr, "sdiv1 %hd\n", sdiv);
-    fprintf(stderr, "sdiv2 %d\n", sdiv2);
-    fprintf(stderr, "sdiv3 %ld\n", sdiv3);
-    fprintf(stderr, "sdiv4 %d\n", sdiv4);
+    fprintf(stderr, "sdiv1 %hd\nsdiv2 %d\nsdiv3 %ld\nsdiv4 %d\n", sdiv, sdiv2,
+            sdiv3, sdiv4);
     int16_t sdiv5 = num5 / -3;
     int32_t sdiv6 = num6 / -3;
     int64_t sdiv7 = num7 / -3;
     int8_t sdiv8 = num8 / -3;
-    fprintf(stderr, "sdiv5 %hd\n", sdiv5);
-    fprintf(stderr, "sdiv6 %d\n", sdiv6);
-    fprintf(stderr, "sdiv7 %ld\n", sdiv7);
-    fprintf(stderr, "sdiv8 %d\n", sdiv8);
+    fprintf(stderr, "sdiv5 %hd\nsdiv6 %d\nsdiv7 %ld\nsdiv8 %d\n", sdiv5, sdiv6,
+            sdiv7, sdiv8);
     i--;
   }
   fprintf(stderr, "exit\n");
