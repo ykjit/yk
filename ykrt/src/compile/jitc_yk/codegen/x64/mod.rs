@@ -2483,7 +2483,7 @@ enum Immediate {
 mod tests {
     use super::{Assemble, X64CompiledTrace};
     use crate::compile::{
-        jitc_yk::jit_ir::{self, Inst, InstIdx, Module},
+        jitc_yk::jit_ir::{self, Inst, Module, ParamIdx},
         CompiledTrace,
     };
     use crate::location::{HotLocation, HotLocationKind};
@@ -4544,11 +4544,11 @@ mod tests {
         let loc = yksmp::Location::Register(13, 1, 0, [].into());
         m.push_param(loc.clone());
         let pinst1: Inst =
-            jit_ir::ParamInst::new(InstIdx::try_from(0).unwrap(), m.int8_tyidx()).into();
+            jit_ir::ParamInst::new(ParamIdx::try_from(0).unwrap(), m.int8_tyidx()).into();
         m.push(pinst1.clone()).unwrap();
         m.push_param(loc);
         let pinst2: Inst =
-            jit_ir::ParamInst::new(InstIdx::try_from(1).unwrap(), m.int8_tyidx()).into();
+            jit_ir::ParamInst::new(ParamIdx::try_from(1).unwrap(), m.int8_tyidx()).into();
         m.push(pinst2.clone()).unwrap();
         let op1 = m.push_and_make_operand(pinst1).unwrap();
         let op2 = m.push_and_make_operand(pinst2).unwrap();

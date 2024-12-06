@@ -94,7 +94,6 @@ use super::{aot_ir, codegen::reg_alloc::VarLocation};
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{
-    assert_matches::debug_assert_matches,
     ffi::{c_void, CString},
     fmt,
     hash::Hash,
@@ -450,9 +449,8 @@ impl Module {
     }
 
     /// Return the parameter at a given [InstIdx].
-    pub(crate) fn param(&self, iidx: InstIdx) -> &yksmp::Location {
-        debug_assert_matches!(self.inst_decopy(iidx).1, Inst::Param(_));
-        &self.params[usize::from(iidx)]
+    pub(crate) fn param(&self, pidx: ParamIdx) -> &yksmp::Location {
+        &self.params[usize::from(pidx)]
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -906,12 +904,15 @@ index_24bit!(GlobalDeclIdx);
 pub(crate) struct IndirectCallIdx(U24);
 index_24bit!(IndirectCallIdx);
 
-/// An instruction index.
-///
-/// One of these is an index into the [Module::insts].
+/// An index into [Module::insts].
 #[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct InstIdx(u16);
 index_16bit!(InstIdx);
+
+/// An index into [Module::params].
+#[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct ParamIdx(u16);
+index_16bit!(ParamIdx);
 
 /// A function's type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -2143,22 +2144,19 @@ impl LoadInst {
 /// Specifies the [yksmp::Location] of a run-time argument.
 #[derive(Clone, Copy, Debug)]
 pub struct ParamInst {
-    /// The [InstIdx] of the [yksmp::Location] parameter.
-    paramidx: InstIdx,
+    /// The [ParamIdx] of the [yksmp::Location] parameter.
+    pidx: ParamIdx,
     /// The type of the resulting local variable.
     tyidx: TyIdx,
 }
 
 impl ParamInst {
-    pub(crate) fn new(locidx: InstIdx, tyidx: TyIdx) -> ParamInst {
-        Self {
-            paramidx: locidx,
-            tyidx,
-        }
+    pub(crate) fn new(pidx: ParamIdx, tyidx: TyIdx) -> ParamInst {
+        Self { pidx, tyidx }
     }
 
     pub(crate) fn decopy_eq(&self, other: Self) -> bool {
-        self.paramidx == other.paramidx && self.tyidx == other.tyidx
+        self.pidx == other.pidx && self.tyidx == other.tyidx
     }
 
     pub(crate) fn tyidx(&self) -> TyIdx {
@@ -2166,8 +2164,8 @@ impl ParamInst {
     }
 
     /// Return The [InstIdx] of the [yksmp::Location] parameter.
-    pub(crate) fn paramidx(&self) -> InstIdx {
-        self.paramidx
+    pub(crate) fn paramidx(&self) -> ParamIdx {
+        self.pidx
     }
 }
 
@@ -2933,8 +2931,8 @@ mod tests {
     #[test]
     fn use_case_update_inst() {
         let mut prog: Vec<Inst> = vec![
-            ParamInst::new(InstIdx::try_from(0).unwrap(), TyIdx::try_from(0).unwrap()).into(),
-            ParamInst::new(InstIdx::try_from(8).unwrap(), TyIdx::try_from(0).unwrap()).into(),
+            ParamInst::new(ParamIdx::try_from(0).unwrap(), TyIdx::try_from(0).unwrap()).into(),
+            ParamInst::new(ParamIdx::try_from(8).unwrap(), TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
                 Operand::Var(InstIdx(0)),
                 TyIdx(U24::try_from(0).unwrap()),
@@ -2974,17 +2972,17 @@ mod tests {
             Operand::Var(InstIdx(2)),
         ];
         m.push(Inst::Param(ParamInst::new(
-            InstIdx::try_from(0).unwrap(),
+            ParamIdx::try_from(0).unwrap(),
             i32_tyidx,
         )))
         .unwrap();
         m.push(Inst::Param(ParamInst::new(
-            InstIdx::try_from(1).unwrap(),
+            ParamIdx::try_from(1).unwrap(),
             i32_tyidx,
         )))
         .unwrap();
         m.push(Inst::Param(ParamInst::new(
-            InstIdx::try_from(2).unwrap(),
+            ParamIdx::try_from(2).unwrap(),
             i32_tyidx,
         )))
         .unwrap();
@@ -3114,7 +3112,7 @@ mod tests {
     fn print_module() {
         let mut m = Module::new_testing();
         m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push(ParamInst::new(InstIdx::try_from(0).unwrap(), m.int8_tyidx()).into())
+        m.push(ParamInst::new(ParamIdx::try_from(0).unwrap(), m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
