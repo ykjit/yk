@@ -11,8 +11,9 @@ use super::super::{
     jit_ir::{
         BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
         FNegInst, FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
-        IndirectCallInst, Inst, InstIdx, LoadInst, Module, Operand, PackedOperand, ParamInst,
-        PtrAddInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZExtInst,
+        IndirectCallInst, Inst, InstIdx, LoadInst, Module, Operand, PackedOperand, ParamIdx,
+        ParamInst, PtrAddInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
+        ZExtInst,
     },
 };
 use fm::FMBuilder;
@@ -354,7 +355,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             }
                             Ty::Unimplemented(_) => todo!(),
                         }
-                        let inst = ParamInst::new(InstIdx::try_from(off).unwrap(), type_);
+                        let inst = ParamInst::new(ParamIdx::try_from(off).unwrap(), type_);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::PtrAdd {
@@ -879,10 +880,10 @@ mod tests {
         m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
         m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
         let op1 = m
-            .push_and_make_operand(ParamInst::new(InstIdx::try_from(0).unwrap(), i16_tyidx).into())
+            .push_and_make_operand(ParamInst::new(ParamIdx::try_from(0).unwrap(), i16_tyidx).into())
             .unwrap();
         let op2 = m
-            .push_and_make_operand(ParamInst::new(InstIdx::try_from(1).unwrap(), i16_tyidx).into())
+            .push_and_make_operand(ParamInst::new(ParamIdx::try_from(1).unwrap(), i16_tyidx).into())
             .unwrap();
         let op3 = m
             .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op2.clone()).into())

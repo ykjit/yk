@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const, InstIdx, Operand, PackedOperand},
+    jit_ir::{self, Const, Operand, PackedOperand, ParamIdx},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -123,7 +123,7 @@ impl TraceBuilder {
             if var.len() > 1 {
                 todo!("Deal with multi register locations");
             }
-            let param_inst = jit_ir::ParamInst::new(InstIdx::try_from(idx)?, input_tyidx).into();
+            let param_inst = jit_ir::ParamInst::new(ParamIdx::try_from(idx)?, input_tyidx).into();
             self.jit_mod.push(param_inst)?;
             self.jit_mod.push_param(var.get(0).unwrap().clone());
             self.local_map.insert(
@@ -1180,7 +1180,7 @@ impl TraceBuilder {
                 let aotinst = self.aot_mod.inst(aotid);
                 let aotty = aotinst.def_type(self.aot_mod).unwrap();
                 let tyidx = self.handle_type(aotty)?;
-                let param_inst = jit_ir::ParamInst::new(InstIdx::try_from(idx)?, tyidx).into();
+                let param_inst = jit_ir::ParamInst::new(ParamIdx::try_from(idx)?, tyidx).into();
                 self.jit_mod.push(param_inst)?;
                 self.jit_mod.push_param(loc.clone());
                 self.local_map.insert(
