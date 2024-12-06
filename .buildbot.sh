@@ -2,6 +2,9 @@
 
 set -eu
 
+# What git commit hash of yklua will we test in buildbot?
+YKLUA_COMMIT="7ced271cf4f36a78127d0cc745906cc21409ae0d"
+
 TRACERS="hwt swt"
 
 # Build yklua and run the test suite.
@@ -11,7 +14,11 @@ TRACERS="hwt swt"
 #  - YK_BUILD_TYPE must be set.
 test_yklua() {
     if [ ! -e "yklua" ]; then
-        git clone https://github.com/ykjit/yklua
+        git clone --depth=1 https://github.com/ykjit/yklua
+        cd yklua
+        git fetch --depth=1 origin "$YKLUA_COMMIT"
+        git checkout "$YKLUA_COMMIT"
+        cd ..
     fi
     cd yklua
     make clean
