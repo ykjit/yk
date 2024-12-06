@@ -27,14 +27,15 @@ pub(super) fn rev_analyse(
     for iidx in m.iter_all_inst_idxs().rev() {
         let inst = m.inst_raw(iidx);
 
-        // "Inline" `PtrAdd`s into loads/stores, and don't mark the `PtrAdd` as used. This
-        // means that some (though not all) `PtrAdd`s will not lead to actual code being
-        // generated.
         if used_insts.get(usize::from(iidx)).unwrap()
             || inst.has_store_effect(m)
             || inst.is_barrier(m)
         {
             used_insts.set(usize::from(iidx), true);
+
+            // "Inline" `PtrAdd`s into loads/stores, and don't mark the `PtrAdd` as used. This
+            // means that some (though not all) `PtrAdd`s will not lead to actual code being
+            // generated.
             match inst {
                 Inst::Load(x) => {
                     if let Operand::Var(op_iidx) = x.operand(m) {
@@ -72,18 +73,16 @@ pub(super) fn rev_analyse(
                 }
                 _ => (),
             }
-            inst.map_packed_operand_locals(m, &mut |x| {
+
+            // Calculate inst_vals_alive_until
+            inst.map_operand_locals(m, &mut |x| {
+                let (x, _) = m.inst_decopy(x);
                 used_insts.set(usize::from(x), true);
+                if inst_vals_alive_until[usize::from(x)] < iidx {
+                    inst_vals_alive_until[usize::from(x)] = iidx;
+                }
             });
         }
-
-        // Calculate inst_vals_alive_until
-        inst.map_operand_locals(m, &mut |x| {
-            let (x, _) = m.inst_decopy(x);
-            if inst_vals_alive_until[usize::from(x)] < iidx {
-                inst_vals_alive_until[usize::from(x)] = iidx;
-            }
-        });
     }
 
     Ok((inst_vals_alive_until, used_insts, ptradds))
@@ -129,7 +128,7 @@ mod test {
         let alives = rev_analyse(&m).unwrap().0;
         assert_eq!(
             alives,
-            vec![3, 0, 5, 0, 0, 0]
+            vec![2, 0, 5, 0, 0, 0]
                 .iter()
                 .map(|x: &usize| InstIdx::try_from(*x).unwrap())
                 .collect::<Vec<_>>()
