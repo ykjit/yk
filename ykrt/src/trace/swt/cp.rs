@@ -60,12 +60,15 @@ fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
 
 #[cfg(tracer_swt)]
 fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) {
+    let verbose = false;
+
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
     let (dst_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
 
     // Save all the registers to the stack
     dynasm!(asm
         ; .arch x64
+        ; int3 // breakpoint
         ; push r15    // 15 - offset 120
         ; push r14    // 14 - offset 112
         ; push r13    // 13 - offset 104
@@ -83,28 +86,35 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         ; push rax    // 0 - offset 0
     );
 
-    println!(
-        "@@ from {} to {} live var count: {}",
-        src_smid,
-        dst_smid,
-        dst_rec.live_vars.len()
-    );
+    if verbose {
+        println!(
+            "@@ from {} to {} live var count: {}",
+            src_smid,
+            dst_smid,
+            dst_rec.live_vars.len()
+        );
+    }
 
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
         let dst_var = &dst_rec.live_vars[index];
         if src_var.len() > 1 || dst_var.len() > 1 {
             todo!("Deal with multi register locations");
         }
-        assert!(src_rec.live_vars.len() == dst_rec.live_vars.len(), "Expected single register location");
+        assert!(
+            src_rec.live_vars.len() == dst_rec.live_vars.len(),
+            "Expected single register location"
+        );
 
         let src_location = &src_var.get(0).unwrap();
         let dst_location = &dst_var.get(0).unwrap();
-        println!(
-            "@@ dst_location: {:?}, src_location: {:?}",
-            dst_location, src_location
-        );
+        if verbose {
+            println!(
+                "@@ dst_location: {:?}, src_location: {:?}",
+                dst_location, src_location
+            );
+        }
         // break on every live var copy
-        dynasm!(asm; int3 );
+        // dynasm!(asm; int3 );
         match dst_location {
             Indirect(_dst_reg_num, dst_off, dst_val_size) => {
                 match src_location {
@@ -201,10 +211,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                         }
                     }
                     Indirect(src_reg_num, src_off, src_val_size) => {
-                        assert!(
-                            *src_reg_num == 6,
-                            "Indirect register is expected to be rbp"
-                        );
+                        assert!(*src_reg_num == 6, "Indirect register is expected to be rbp");
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         // let dst_reg_rd = map_to_rd(*dst_reg_num);
                         match *dst_val_size {
@@ -231,13 +238,16 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         }
     }
 
-     dynasm!(asm
+    dynasm!(asm
         ; .arch x64
         ; add rsp, 16 * 8 // 16 registers * 8 bytes
     );
 
     // Adjust RSP before the jump
     let stack_size_diff = dst_rec.size as i32 - src_rec.size as i32;
+    if verbose {
+        println!("@@ stack_size_diff: {}", stack_size_diff);
+    }
     if stack_size_diff != 0 {
         if stack_size_diff > 0 {
             dynasm!(asm; sub rsp, stack_size_diff);
@@ -248,14 +258,22 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
 
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
     let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
+
+    // dynasm!(asm
+    //     ; .arch x64
+    //     ; mov rcx, QWORD dst_target_addr    // Load the target address into rcx
+    //     ; jmp rcx                           // Jump to the address in rcx
+    // );
+
     dynasm!(asm
         ; .arch x64
-        ; sub rsp, 16
-        ; mov [rsp], rax
-        ; mov rax, QWORD dst_target_addr
-        ; mov [rsp+8], rax
-        ; pop rax
-        ; ret
+        ; int3 // breakpoint
+        ; sub rsp, 16 // reserves 16 bytes of space on the stack.
+        ; mov [rsp], rax // stores original rax at the memory at rsp
+        ; mov rax, QWORD dst_target_addr // loads the target address into rax
+        ; mov [rsp + 8], rax // stores the target address into rsp+8
+        ; pop rax // restores the original rax at rsp
+        ; ret // loads 8 bytes from rsp and jumps to it
     );
 }
 
