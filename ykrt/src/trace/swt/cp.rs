@@ -35,45 +35,25 @@ pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLo
     Arc::new(buffer)
 });
 
-const REG_MAP: [Rq; 16] = [
-    Rq::RAX, // 0
-    Rq::RDX, // 1
-    Rq::RCX, // 2
-    Rq::RBX, // 3
-    Rq::RSI, // 4
-    Rq::RDI, // 5
-    Rq::RBP, // 6
-    Rq::RSP, // 7
-    Rq::R8,  // 8
-    Rq::R9,  // 9
-    Rq::R10, // 10
-    Rq::R11, // 11
-    Rq::R12, // 12
-    Rq::R13, // 13
-    Rq::R14, // 14
-    Rq::R15, // 15
-];
-
 #[cfg(tracer_swt)]
 fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
     match dwarf_reg_num {
-
-        0 => 0,   // rax
-        1 => 8,   // rdx
-        2 => 16,  // rcx
-        3 => 24,  // rbx
-        4 => 32,  // rsi
-        5 => 40,  // rdi
+        0 => 0,  // rax
+        1 => 8,  // rdx
+        2 => 16, // rcx
+        3 => 24, // rbx
+        4 => 32, // rsi
+        5 => 40, // rdi
         // rbp is not saved
         // rsp is not saved
-        8 => 64,  // r8
-        9 => 72,  // r9
-        10 => 80, // r10
-        11 => 88, // r11
-        12 => 96, // r12
-        13 => 104,// r13
-        14 => 112,// r14
-        15 => 120,// r15
+        8 => 64,   // r8
+        9 => 72,   // r9
+        10 => 80,  // r10
+        11 => 88,  // r11
+        12 => 96,  // r12
+        13 => 104, // r13
+        14 => 112, // r14
+        15 => 120, // r15
         _ => panic!("Unsupported register {}", dwarf_reg_num),
     }
 }
@@ -103,13 +83,19 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         ; push rax    // 0 - offset 0
     );
 
-    println!("@@ from {} to {} live var count: {}", src_smid, dst_smid, dst_rec.live_vars.len());
+    println!(
+        "@@ from {} to {} live var count: {}",
+        src_smid,
+        dst_smid,
+        dst_rec.live_vars.len()
+    );
 
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
         let dst_var = &dst_rec.live_vars[index];
         if src_var.len() > 1 || dst_var.len() > 1 {
             todo!("Deal with multi register locations");
         }
+        assert!(src_rec.live_vars.len() == dst_rec.live_vars.len(), "Expected single register location");
 
         let src_location = &src_var.get(0).unwrap();
         let dst_location = &dst_var.get(0).unwrap();
@@ -147,7 +133,10 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                                 ; mov rax, QWORD [rsp + src_offset]
                                 ; mov QWORD [rbp + *dst_off], rax
                             ),
-                            _ => panic!("Unexpected Indirect to Register value size: {}", src_val_size),
+                            _ => panic!(
+                                "Unexpected Indirect to Register value size: {}",
+                                src_val_size
+                            ),
                         }
                     }
                     Constant(_val) => {
@@ -213,7 +202,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                     }
                     Indirect(src_reg_num, src_off, src_val_size) => {
                         assert!(
-                            REG_MAP.get(*src_reg_num as usize) == Some(&Rq::RBP),
+                            *src_reg_num == 6,
                             "Indirect register is expected to be rbp"
                         );
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
@@ -222,7 +211,10 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                             1 => todo!("implement reg to indirect 1 byte"),
                             2 => todo!("implement reg to indirect 2 bytes"),
                             4 => todo!("implement reg to indirect 4 bytes"),
-                            8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp + i32::try_from(*src_off).unwrap()]),
+                            // 4 => dynasm!(asm; mov Rq(dst_reg), DWORD [rsp + i32::try_from(*src_off).unwrap()]),
+                            8 => {
+                                dynasm!(asm; mov Rq(dst_reg), QWORD [rbp + i32::try_from(*src_off).unwrap()])
+                            }
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
@@ -230,7 +222,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
                 }
             }
             Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
-                // Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
                 // Direct locations are read-only, so it doesn't make sense to write to
                 // them. This is likely a case where the direct value has been moved
                 // somewhere else (register/normal stack) so dst and src no longer
@@ -240,22 +231,30 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         }
     }
 
+     dynasm!(asm
+        ; .arch x64
+        ; add rsp, 16 * 8 // 16 registers * 8 bytes
+    );
+
     // Adjust RSP before the jump
     let stack_size_diff = dst_rec.size as i32 - src_rec.size as i32;
     if stack_size_diff != 0 {
         if stack_size_diff > 0 {
             dynasm!(asm; sub rsp, stack_size_diff);
         } else {
-            dynasm!(asm; add rsp, -stack_size_diff);
+            dynasm!(asm; add rsp, stack_size_diff);
         }
     }
 
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
     let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
-     dynasm!(asm
+    dynasm!(asm
         ; .arch x64
-        ; mov rax, QWORD dst_target_addr
+        ; sub rsp, 16
         ; mov [rsp], rax
+        ; mov rax, QWORD dst_target_addr
+        ; mov [rsp+8], rax
+        ; pop rax
         ; ret
     );
 }
