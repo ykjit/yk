@@ -79,15 +79,9 @@ int main(int argc, char **argv) {
     int xor = i ^ 1;
     int xor2 = ~i;
     int shl = i << 1;
-    fprintf(stderr, "and %d\n", and);
-    fprintf(stderr, "or %d\n", or);
-    fprintf(stderr, "lshr %d\n", lshr);
-    fprintf(stderr, "ashr %d\n", ashr);
-    fprintf(stderr, "ashr2 %d\n", ashr2);
-    fprintf(stderr, "xor %d\n", xor);
-    fprintf(stderr, "xor2 %d\n", xor2);
-    fprintf(stderr, "shl %d\n", shl);
-    fprintf(stderr, "---\n");
+    fprintf(stderr, "and %d\nor %d\nlshr %d\nashr %d\n", and, or, lshr, ashr);
+    fprintf(stderr, "ashr2 %d\nxor %d\nxor2 %d\nshl %d\n---\n", ashr2, xor,
+            xor2, shl);
     i--;
   }
   fprintf(stderr, "exit\n");
