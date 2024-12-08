@@ -322,7 +322,7 @@ impl Module {
     /// This function has very few uses and unless you explicitly know why you're using it, you
     /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
     /// correctly leads to undefined behaviour.
-    pub(crate) fn inst_raw(&self, iidx: InstIdx) -> Inst {
+    fn inst_raw(&self, iidx: InstIdx) -> Inst {
         self.insts[usize::from(iidx)]
     }
 
