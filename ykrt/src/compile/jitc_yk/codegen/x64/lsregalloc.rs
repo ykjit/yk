@@ -674,7 +674,7 @@ impl LSRegAlloc<'_> {
     ///
     /// If `iidx` has not previously been spilled.
     fn force_gp_unspill(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
-        let (iidx, inst) = self.m.inst_decopy(iidx);
+        let inst = self.m.inst_no_copies(iidx);
         let size = inst.def_byte_size(self.m);
 
         if let Inst::Const(cidx) = inst {
@@ -768,7 +768,7 @@ impl LSRegAlloc<'_> {
         }) {
             VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
         } else {
-            let (iidx, inst) = self.m.inst_decopy(iidx);
+            let inst = self.m.inst_no_copies(iidx);
             let size = inst.def_byte_size(self.m);
             match inst {
                 Inst::Copy(_) => panic!(),

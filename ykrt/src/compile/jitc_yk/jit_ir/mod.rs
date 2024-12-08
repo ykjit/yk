@@ -310,17 +310,6 @@ impl Module {
         }
     }
 
-    /// Return the decopied instruction at the specified index (i.e. searching
-    /// until a non-`Copy` instruction is found).
-    pub(crate) fn inst_decopy(&self, mut iidx: InstIdx) -> (InstIdx, Inst) {
-        loop {
-            match self.insts[usize::from(iidx)] {
-                Inst::Copy(copy_iidx) => iidx = copy_iidx,
-                x => return (iidx, x),
-            }
-        }
-    }
-
     /// Return the instruction at the specified index or `None` if it is a `Copy` instruction.
     pub(crate) fn inst_nocopy(&self, iidx: InstIdx) -> Option<Inst> {
         match self.insts[usize::from(iidx)] {

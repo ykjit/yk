@@ -1994,10 +1994,7 @@ impl<'a> Assemble<'a> {
         // back around here we need to write the live variables back into these same locations.
         for var in self.m.loop_start_vars() {
             let loc = match var {
-                Operand::Var(iidx) => {
-                    debug_assert_eq!(*iidx, self.m.inst_decopy(*iidx).0);
-                    self.ra.var_location(*iidx)
-                }
+                Operand::Var(iidx) => self.ra.var_location(*iidx),
                 _ => panic!(),
             };
             self.loop_start_locs.push(loc);

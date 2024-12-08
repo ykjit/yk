@@ -37,7 +37,7 @@ pub(super) fn rev_analyse(
             match inst {
                 Inst::Load(x) => {
                     if let Operand::Var(op_iidx) = x.operand(m) {
-                        if let Inst::PtrAdd(pa_inst) = m.inst_decopy(op_iidx).1 {
+                        if let Inst::PtrAdd(pa_inst) = m.inst_no_copies(op_iidx) {
                             ptradds[usize::from(iidx)] = Some(pa_inst);
                             if let Operand::Var(y) = pa_inst.ptr(m) {
                                 if inst_vals_alive_until[usize::from(y)] < iidx {
@@ -51,7 +51,7 @@ pub(super) fn rev_analyse(
                 }
                 Inst::Store(x) => {
                     if let Operand::Var(op_iidx) = x.tgt(m) {
-                        if let Inst::PtrAdd(pa_inst) = m.inst_decopy(op_iidx).1 {
+                        if let Inst::PtrAdd(pa_inst) = m.inst_no_copies(op_iidx) {
                             ptradds[usize::from(iidx)] = Some(pa_inst);
                             if let Operand::Var(y) = pa_inst.ptr(m) {
                                 if inst_vals_alive_until[usize::from(y)] < iidx {
@@ -74,7 +74,6 @@ pub(super) fn rev_analyse(
 
             // Calculate inst_vals_alive_until
             inst.map_operand_locals(m, &mut |x| {
-                let (x, _) = m.inst_decopy(x);
                 used_insts.set(usize::from(x), true);
                 if inst_vals_alive_until[usize::from(x)] < iidx {
                     inst_vals_alive_until[usize::from(x)] = iidx;
