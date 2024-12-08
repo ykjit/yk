@@ -37,7 +37,7 @@ pub(super) fn rev_analyse(
             match inst {
                 Inst::Load(x) => {
                     if let Operand::Var(op_iidx) = x.operand(m) {
-                        if let Inst::PtrAdd(pa_inst) = m.inst_no_copies(op_iidx) {
+                        if let Inst::PtrAdd(pa_inst) = m.inst(op_iidx) {
                             ptradds[usize::from(iidx)] = Some(pa_inst);
                             if let Operand::Var(y) = pa_inst.ptr(m) {
                                 if inst_vals_alive_until[usize::from(y)] < iidx {
@@ -51,7 +51,7 @@ pub(super) fn rev_analyse(
                 }
                 Inst::Store(x) => {
                     if let Operand::Var(op_iidx) = x.tgt(m) {
-                        if let Inst::PtrAdd(pa_inst) = m.inst_no_copies(op_iidx) {
+                        if let Inst::PtrAdd(pa_inst) = m.inst(op_iidx) {
                             ptradds[usize::from(iidx)] = Some(pa_inst);
                             if let Operand::Var(y) = pa_inst.ptr(m) {
                                 if inst_vals_alive_until[usize::from(y)] < iidx {

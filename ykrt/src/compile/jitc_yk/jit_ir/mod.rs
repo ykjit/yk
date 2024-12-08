@@ -301,11 +301,10 @@ impl Module {
     ///
     /// # Panics
     ///
-    /// If `iidx` points to a `Copy` instruction.
-    pub(crate) fn inst_no_copies(&self, iidx: InstIdx) -> Inst {
+    /// If `iidx` points to a `Const`, `Copy`, or `Tombstone` instruction.
+    pub(crate) fn inst(&self, iidx: InstIdx) -> Inst {
         match self.insts[usize::from(iidx)] {
-            Inst::Const(_) => todo!(),
-            Inst::Copy(_) => panic!(),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => todo!(),
             x => x,
         }
     }

@@ -1125,7 +1125,7 @@ impl<'a> Assemble<'a> {
             yksmp::Location::Constant(v) => {
                 // FIXME: This isn't fine-grained enough, as there may be constants of any
                 // bit-size.
-                let byte_size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                let byte_size = self.m.inst(iidx).def_byte_size(self.m);
                 debug_assert!(byte_size <= 8);
                 VarLocation::ConstInt {
                     bits: u32::try_from(byte_size).unwrap() * 8,
@@ -1136,7 +1136,7 @@ impl<'a> Assemble<'a> {
                 todo!("{:?}", e);
             }
         };
-        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+        let size = self.m.inst(iidx).def_byte_size(self.m);
         debug_assert!(size <= REG64_BYTESIZE);
         match m {
             VarLocation::Register(reg_alloc::Register::GP(reg)) => {
@@ -1178,7 +1178,7 @@ impl<'a> Assemble<'a> {
                             iidx,
                             [RegConstraint::Input(ptr_op), RegConstraint::Output],
                         );
-                        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                        let size = self.m.inst(iidx).def_byte_size(self.m);
                         debug_assert!(size <= REG64_BYTESIZE);
                         match size {
                             1 => {
@@ -1205,7 +1205,7 @@ impl<'a> Assemble<'a> {
                     iidx,
                     [RegConstraint::InputOutput(ptr_op)],
                 );
-                let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                let size = self.m.inst(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_BYTESIZE);
                 match size {
                     1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + off]),
