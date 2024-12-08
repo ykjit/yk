@@ -344,14 +344,6 @@ impl Module {
         InstIdx::try_from(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
-    /// Iterate, in order, over all `InstIdx`s of this module (including `Const`, `Copy`, and
-    /// `Tombstone` instructions).
-    pub(crate) fn iter_all_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
-        // The `unchecked_from` is safe because we know from `Self::push` that we can't have
-        // exceeded `InstIdx`'s bounds.
-        (0..self.insts.len()).map(InstIdx::unchecked_from)
-    }
-
     /// Iterate, in order, over the `InstIdx`s of this module skipping `Const`, `Copy`, and
     /// `Tombstone` instructions.
     pub(crate) fn iter_skipping_insts(
@@ -363,6 +355,21 @@ impl Module {
             let inst = &self.insts[i];
             if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
                 Some((InstIdx::unchecked_from(i), inst))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Iterate, in order, over the `InstIdx`s of this module skipping `Const`, `Copy`, and
+    /// `Tombstone` instructions.
+    pub(crate) fn iter_skipping_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> + '_ {
+        // The `unchecked_from` is safe because we know from `Self::push` that we can't have
+        // exceeded `InstIdx`'s bounds.
+        (0..self.insts.len()).filter_map(|i| {
+            let inst = &self.insts[i];
+            if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
+                Some(InstIdx::unchecked_from(i))
             } else {
                 None
             }
