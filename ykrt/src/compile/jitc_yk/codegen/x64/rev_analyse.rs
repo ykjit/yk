@@ -24,9 +24,7 @@ pub(super) fn rev_analyse(
     let mut inst_vals_alive_until = vec![InstIdx::try_from(0).unwrap(); m.insts_len()];
     let mut ptradds = vec![None; m.insts_len()];
     let mut used_insts = Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1);
-    for iidx in m.iter_all_inst_idxs().rev() {
-        let inst = m.inst_raw(iidx);
-
+    for (iidx, inst) in m.iter_skipping_insts().rev() {
         if used_insts.get(usize::from(iidx)).unwrap()
             || inst.has_store_effect(m)
             || inst.is_barrier(m)
@@ -39,7 +37,7 @@ pub(super) fn rev_analyse(
             match inst {
                 Inst::Load(x) => {
                     if let Operand::Var(op_iidx) = x.operand(m) {
-                        if let Inst::PtrAdd(pa_inst) = m.inst_decopy(op_iidx).1 {
+                        if let Inst::PtrAdd(pa_inst) = m.inst(op_iidx) {
                             ptradds[usize::from(iidx)] = Some(pa_inst);
                             if let Operand::Var(y) = pa_inst.ptr(m) {
                                 if inst_vals_alive_until[usize::from(y)] < iidx {
@@ -53,7 +51,7 @@ pub(super) fn rev_analyse(
                 }
                 Inst::Store(x) => {
                     if let Operand::Var(op_iidx) = x.tgt(m) {
-                        if let Inst::PtrAdd(pa_inst) = m.inst_decopy(op_iidx).1 {
+                        if let Inst::PtrAdd(pa_inst) = m.inst(op_iidx) {
                             ptradds[usize::from(iidx)] = Some(pa_inst);
                             if let Operand::Var(y) = pa_inst.ptr(m) {
                                 if inst_vals_alive_until[usize::from(y)] < iidx {
@@ -76,7 +74,6 @@ pub(super) fn rev_analyse(
 
             // Calculate inst_vals_alive_until
             inst.map_operand_locals(m, &mut |x| {
-                let (x, _) = m.inst_decopy(x);
                 used_insts.set(usize::from(x), true);
                 if inst_vals_alive_until[usize::from(x)] < iidx {
                     inst_vals_alive_until[usize::from(x)] = iidx;

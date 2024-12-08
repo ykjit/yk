@@ -1125,7 +1125,7 @@ impl<'a> Assemble<'a> {
             yksmp::Location::Constant(v) => {
                 // FIXME: This isn't fine-grained enough, as there may be constants of any
                 // bit-size.
-                let byte_size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                let byte_size = self.m.inst(iidx).def_byte_size(self.m);
                 debug_assert!(byte_size <= 8);
                 VarLocation::ConstInt {
                     bits: u32::try_from(byte_size).unwrap() * 8,
@@ -1136,7 +1136,7 @@ impl<'a> Assemble<'a> {
                 todo!("{:?}", e);
             }
         };
-        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+        let size = self.m.inst(iidx).def_byte_size(self.m);
         debug_assert!(size <= REG64_BYTESIZE);
         match m {
             VarLocation::Register(reg_alloc::Register::GP(reg)) => {
@@ -1178,7 +1178,7 @@ impl<'a> Assemble<'a> {
                             iidx,
                             [RegConstraint::Input(ptr_op), RegConstraint::Output],
                         );
-                        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                        let size = self.m.inst(iidx).def_byte_size(self.m);
                         debug_assert!(size <= REG64_BYTESIZE);
                         match size {
                             1 => {
@@ -1205,7 +1205,7 @@ impl<'a> Assemble<'a> {
                     iidx,
                     [RegConstraint::InputOutput(ptr_op)],
                 );
-                let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                let size = self.m.inst(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_BYTESIZE);
                 match size {
                     1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + off]),
@@ -1994,10 +1994,7 @@ impl<'a> Assemble<'a> {
         // back around here we need to write the live variables back into these same locations.
         for var in self.m.loop_start_vars() {
             let loc = match var {
-                Operand::Var(iidx) => {
-                    debug_assert_eq!(*iidx, self.m.inst_decopy(*iidx).0);
-                    self.ra.var_location(*iidx)
-                }
+                Operand::Var(iidx) => self.ra.var_location(*iidx),
                 _ => panic!(),
             };
             self.loop_start_locs.push(loc);

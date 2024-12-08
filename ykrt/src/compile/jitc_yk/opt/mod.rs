@@ -31,11 +31,12 @@ impl Opt {
     }
 
     fn opt(mut self) -> Result<Module, CompilationError> {
-        for iidx in self.m.iter_all_inst_idxs() {
-            match self.m.inst_raw(iidx) {
+        let skipping = self.m.iter_skipping_inst_idxs().collect::<Vec<_>>();
+        for iidx in skipping {
+            match self.m.inst(iidx) {
                 #[cfg(test)]
                 Inst::BlackBox(_) => (),
-                Inst::Const(cidx) => self.an.set_value(iidx, Value::Const(cidx)),
+                Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
                 Inst::BinOp(x) => match x.binop() {
                     BinOp::Add => match (
                         self.an.op_map(&self.m, x.lhs(&self.m)),
