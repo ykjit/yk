@@ -24,9 +24,7 @@ pub(super) fn rev_analyse(
     let mut inst_vals_alive_until = vec![InstIdx::try_from(0).unwrap(); m.insts_len()];
     let mut ptradds = vec![None; m.insts_len()];
     let mut used_insts = Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1);
-    for iidx in m.iter_all_inst_idxs().rev() {
-        let inst = m.inst_raw(iidx);
-
+    for (iidx, inst) in m.iter_skipping_insts().rev() {
         if used_insts.get(usize::from(iidx)).unwrap()
             || inst.has_store_effect(m)
             || inst.is_barrier(m)

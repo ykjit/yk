@@ -1,6 +1,6 @@
 //! Dead code elimination.
 
-use super::{Inst, Module};
+use super::{Inst, InstIdx, Module};
 use vob::Vob;
 
 impl Module {
@@ -10,19 +10,23 @@ impl Module {
         // We perform a simple reverse reachability analysis, tracking what's alive with a single
         // bit.
         let mut used = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
-        for iidx in self.iter_all_inst_idxs().rev() {
-            let inst = self.inst_raw(iidx);
+        let mut tombstone = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
+        for (iidx, inst) in self.iter_skipping_insts().rev() {
             if used.get(usize::from(iidx)).unwrap()
                 || inst.has_store_effect(self)
                 || inst.is_barrier(self)
             {
                 used.set(usize::from(iidx), true);
-                inst.map_packed_operand_locals(self, &mut |x| {
+                inst.map_operand_locals(self, &mut |x| {
                     used.set(usize::from(x), true);
                 });
             } else {
-                self.replace(iidx, Inst::Tombstone);
+                tombstone.set(usize::from(iidx), true);
             }
+        }
+
+        for iidx in tombstone.iter_set_bits(..) {
+            self.replace(InstIdx::unchecked_from(iidx), Inst::Tombstone);
         }
     }
 }
