@@ -1445,11 +1445,13 @@ impl<'a> Assemble<'a> {
                         RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg);
                     num_float_args += 1;
                 }
-                _ => {
+                Ty::Integer(_) | Ty::Ptr | Ty::Func(_) => {
                     let reg = gp_regs.next().unwrap();
                     let gp_i = CALLER_CLOBBER_REGS.iter().position(|x| x == reg).unwrap();
                     gp_cnstrs[gp_i] = RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg);
                 }
+                Ty::Void => unreachable!(),
+                Ty::Unimplemented(_) => todo!(),
             }
         }
 
@@ -1494,18 +1496,28 @@ impl<'a> Assemble<'a> {
         match (callee, callee_op) {
             (Some(p), None) => {
                 // Direct call
-                gp_cnstrs.push(RegConstraint::Temporary);
-                let [_, _, _, _, _, _, _, _, _, tmp_reg] =
-                    self.ra
-                        .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
 
-                if fty.is_vararg() {
-                    dynasm!(self.asm; mov rax, num_float_args); // SysV x64 ABI
+                if !fty.is_vararg() {
+                    let [_, _, _, _, _, _, _, _, _] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+                    // rax is considered clobbered, but isn't used to pass an argument, so we can
+                    // safely use it for the function pointer.
+                    dynasm!(self.asm
+                        ; mov rax, QWORD p as i64
+                        ; call rax
+                    );
+                } else {
+                    gp_cnstrs.push(RegConstraint::Temporary);
+                    let [_, _, _, _, _, _, _, _, _, tmp_reg] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+                    dynasm!(self.asm
+                        ; mov rax, num_float_args
+                        ; mov Rq(tmp_reg.code()), QWORD p as i64
+                        ; call Rq(tmp_reg.code())
+                    );
                 }
-                dynasm!(self.asm
-                    ; mov Rq(tmp_reg.code()), QWORD p as i64
-                    ; call Rq(tmp_reg.code())
-                );
             }
             (None, Some(op)) => {
                 // Indirect call
@@ -3576,8 +3588,8 @@ mod tests {
                 "
                 ...
                 ; call @puts()
-                mov r.64.x, 0x{sym_addr:X}
-                call r.64.x
+                mov rax, 0x{sym_addr:X}
+                call rax
                 ...
             "
             ),
