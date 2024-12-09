@@ -540,8 +540,8 @@ mod test {
           entry:
             %0: i1 = eq 0i8, 0i8
             guard true, %0, []
-            %1: i1 = eq 0i8, 1i8
-            guard false, %1, [%0]
+            %2: i1 = eq 0i8, 1i8
+            guard false, %2, [%0]
         ",
             |m| opt(m).unwrap(),
             "
@@ -598,10 +598,10 @@ mod test {
           entry:
             %0: i8 = 0i8
             %1: i8 = add %0, 1i8
-            %3: i64 = 18446744073709551614i64
-            %4: i64 = add %3, 4i64
+            %2: i64 = 18446744073709551614i64
+            %3: i64 = add %2, 4i64
             black_box %1
-            black_box %4
+            black_box %3
         ",
             |m| opt(m).unwrap(),
             "
