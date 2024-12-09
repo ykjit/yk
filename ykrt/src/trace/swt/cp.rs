@@ -60,7 +60,7 @@ fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
 
 #[cfg(tracer_swt)]
 fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) {
-    let verbose = false;
+    let verbose = true;
 
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
     let (dst_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
@@ -259,17 +259,10 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
     let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
 
-    // dynasm!(asm
-    //     ; .arch x64
-    //     ; mov rcx, QWORD dst_target_addr    // Load the target address into rcx
-    //     ; jmp rcx                           // Jump to the address in rcx
-    // );
-
     dynasm!(asm
         ; .arch x64
-        ; int3 // breakpoint
         ; sub rsp, 16 // reserves 16 bytes of space on the stack.
-        ; mov [rsp], rax // stores original rax at the memory at rsp
+        ; mov [rsp], rax // save rsp
         ; mov rax, QWORD dst_target_addr // loads the target address into rax
         ; mov [rsp + 8], rax // stores the target address into rsp+8
         ; pop rax // restores the original rax at rsp

@@ -451,13 +451,11 @@ impl MT {
                     if !SWT_JUMP_FLAG {
                         SWT_JUMP_FLAG = true;
                     } else {
-                        // let func: unsafe fn() = std::mem::transmute(debug_return_into_unopt_cp().as_ptr());
                         let func: unsafe fn() = std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr());
-                        // self.log.log(Verbosity::JITEvent, "returning into unopt cp");
+                        self.log.log(Verbosity::JITEvent, "returning into unopt cp");
                         func();
                     }
                 }
-                // println!("returned into unopt cp");
             }
             TransitionControlPoint::StopTracing => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -488,9 +486,8 @@ impl MT {
                 }
                 #[cfg(tracer_swt)]
                 unsafe {
-                    // let func: unsafe fn() = std::mem::transmute(debug_return_into_opt_cp().as_ptr());
                     let func: unsafe fn() = std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr());
-                    // self.log.log(Verbosity::JITEvent, "returning into opt cp");
+                    self.log.log(Verbosity::JITEvent, "returning into opt cp");
                     func();
                 }
             }
