@@ -3000,8 +3000,8 @@ mod tests {
               entry:
                 %0: i16 = param 0
                 %1: i16 = param 1
-                %3: i16 = add %0, %1
-                black_box %3
+                %2: i16 = add %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -3020,8 +3020,8 @@ mod tests {
               entry:
                 %0: i64 = param 0
                 %1: i64 = param 1
-                %3: i64 = add %0, %1
-                black_box %3
+                %2: i64 = add %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -3903,8 +3903,8 @@ mod tests {
             "
               entry:
                 %0: i8 = param 0
-                %2: i1 = eq %0, 3i8
-                black_box %2
+                %1: i1 = eq %0, 3i8
+                black_box %1
             ",
             "
                 ...
@@ -3925,8 +3925,8 @@ mod tests {
             "
               entry:
                 %0: i8 = param 0
-                %2: i1 = eq %0, 3i8
-                guard true, %2, []
+                %1: i1 = eq %0, 3i8
+                guard true, %1, []
             ",
             "
                 ...
@@ -4489,8 +4489,8 @@ mod tests {
               entry:
                 %0: i8 = param 0
                 tloop_start [%0]
-                %1: i8 = 42i8
-                tloop_jump [%1]
+                %2: i8 = 42i8
+                tloop_jump [%2]
             ",
             "
                 ...
