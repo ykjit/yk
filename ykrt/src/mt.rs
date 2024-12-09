@@ -21,7 +21,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 #[cfg(tracer_swt)]
-use crate::trace::swt::cp::{RETURN_INTO_OPT_CP, RETURN_INTO_UNOPT_CP};
+use crate::trace::swt::cp::{you_can_do_it, ControlPointStackMapId};
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
@@ -451,9 +451,8 @@ impl MT {
                     if !SWT_JUMP_FLAG {
                         SWT_JUMP_FLAG = true;
                     } else {
-                        let func: unsafe fn() = std::mem::transmute(RETURN_INTO_UNOPT_CP.as_ptr());
+                        you_can_do_it(ControlPointStackMapId::UnOpt, ControlPointStackMapId::Opt, frameaddr);
                         self.log.log(Verbosity::JITEvent, "returning into unopt cp");
-                        func();
                     }
                 }
             }
@@ -484,11 +483,11 @@ impl MT {
                             .log(Verbosity::Warning, &format!("stop-tracing-aborted: {e}"));
                     }
                 }
+
                 #[cfg(tracer_swt)]
                 unsafe {
-                    let func: unsafe fn() = std::mem::transmute(RETURN_INTO_OPT_CP.as_ptr());
+                    you_can_do_it(ControlPointStackMapId::Opt, ControlPointStackMapId::UnOpt, frameaddr);
                     self.log.log(Verbosity::JITEvent, "returning into opt cp");
-                    func();
                 }
             }
             TransitionControlPoint::StopSideTracing {

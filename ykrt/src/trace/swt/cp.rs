@@ -7,33 +7,51 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use yksmp::Location::{Constant, Direct, Indirect, LargeConstant, Register};
 
-// unoptimised (original functions) control point stack map id
-const UNOPT_CP_SMID: usize = 0;
-// optimised (cloned functions) control point stack map id
-const OPT_CP_SMID: usize = 1;
+use std::{ffi::c_void};
 
+#[repr(usize)]
+#[derive(Debug, Clone, Copy)]
+pub (crate) enum ControlPointStackMapId {
+    // unoptimised (original functions) control point stack map id
+    UnOpt = 0,
+    // optimised (cloned functions) control point stack map id
+    Opt = 1,
+}
 // Example IR:
 // call void (i64, i32, ptr, i32, ...) @llvm.experimental.patchpoint.void(i64 1, i32 13, ptr @__ykrt_control_point, i32 3, ptr %28, ptr %7, i64 1, ptr %6, ptr %7, ptr %8, ptr %9, ptr %28), !dbg !119
 //
 //  Where - 1 is the control point id
-pub(crate) static RETURN_INTO_OPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
-    let mut asm = Assembler::new().unwrap();
-    build_livevars_cp_asm(UNOPT_CP_SMID, OPT_CP_SMID, &mut asm);
-    let buffer = asm.finalize().unwrap();
-    Arc::new(buffer)
-});
+// pub(crate) static RETURN_INTO_OPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
+//     let mut asm = Assembler::new().unwrap();
+//     build_livevars_cp_asm(UnOpt, Opt, &mut asm);
+//     let buffer = asm.finalize().unwrap();
+//     Arc::new(buffer)
+// });
 
 // Example IR:
 //  call void (i64, i32, ptr, i32, ...) @llvm.experimental.patchpoint.void(i64 0, i32 13, ptr @__ykrt_control_point, i32 3, ptr %28, ptr %7, i64 0, ptr %6, ptr %7, ptr %8, ptr %9, ptr %28), !dbg !74
 //
 //  Where - 0 is the control point id
 // pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
-pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
+// pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
+//     let mut asm = Assembler::new().unwrap();
+//     build_livevars_cp_asm(Opt, UnOpt, &mut asm);
+//     let buffer = asm.finalize().unwrap();
+//     Arc::new(buffer)
+// });
+
+pub (crate) unsafe fn you_can_do_it(from: ControlPointStackMapId, to: ControlPointStackMapId, frameaddr: *mut c_void) {
+    // println!("@@ you_can_do_it from: {:x} to: {:x} frameaddr: {:x}", from as usize, to as usize, frameaddr as usize);
     let mut asm = Assembler::new().unwrap();
-    build_livevars_cp_asm(OPT_CP_SMID, UNOPT_CP_SMID, &mut asm);
+
+    // let frameaddr_i64: i64 = frameaddr as i64;
+    // println!("@@ frameaddr_i64: {:x}, {}, original: {:x}, {}", frameaddr_i64, frameaddr_i64, frameaddr as usize, frameaddr as usize);
+
+    build_livevars_cp_asm(from as usize, to as usize, &mut asm, frameaddr as usize);
     let buffer = asm.finalize().unwrap();
-    Arc::new(buffer)
-});
+    let func: unsafe fn() = std::mem::transmute(buffer.as_ptr());
+    func();
+}
 
 #[cfg(tracer_swt)]
 fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
@@ -59,8 +77,8 @@ fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
 }
 
 #[cfg(tracer_swt)]
-fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) {
-    let verbose = true;
+fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, frameaddr: usize) {
+    let verbose = false;
 
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
     let (dst_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
@@ -68,7 +86,9 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
     // Save all the registers to the stack
     dynasm!(asm
         ; .arch x64
-        ; int3 // breakpoint
+        // adjust rsp to account for the registers we are saving
+        // ; add rsp, 13 * 8 // the pushes in ykcapi/src/lib.rs - 13 * 8
+
         ; push r15    // 15 - offset 120
         ; push r14    // 14 - offset 112
         ; push r13    // 13 - offset 104
@@ -243,18 +263,14 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         ; add rsp, 16 * 8 // 16 registers * 8 bytes
     );
 
-    // Adjust RSP before the jump
-    let stack_size_diff = dst_rec.size as i32 - src_rec.size as i32;
-    if verbose {
-        println!("@@ stack_size_diff: {}", stack_size_diff);
-    }
-    if stack_size_diff != 0 {
-        if stack_size_diff > 0 {
-            dynasm!(asm; sub rsp, stack_size_diff);
-        } else {
-            dynasm!(asm; add rsp, stack_size_diff);
-        }
-    }
+    // reset rsp and rbp
+    dynasm!(asm
+        ; .arch x64
+        // ; int3
+        ; mov rbp, QWORD frameaddr as i64
+        ; mov rsp, QWORD frameaddr as i64
+        ; sub rsp, dst_rec.size.try_into().unwrap()
+    );
 
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
     let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
@@ -266,6 +282,8 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler) 
         ; mov rax, QWORD dst_target_addr // loads the target address into rax
         ; mov [rsp + 8], rax // stores the target address into rsp+8
         ; pop rax // restores the original rax at rsp
+        // ; int3 // breakpoint
+        ; add rsp, 8 // TODO: not sure why this is needed!
         ; ret // loads 8 bytes from rsp and jumps to it
     );
 }
