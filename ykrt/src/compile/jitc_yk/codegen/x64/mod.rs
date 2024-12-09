@@ -474,7 +474,7 @@ impl<'a> Assemble<'a> {
             }
             self.ra.expire_regs(iidx);
 
-            match inst {
+            match &inst {
                 #[cfg(test)]
                 jit_ir::Inst::BlackBox(_) => (),
                 jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
@@ -1663,7 +1663,7 @@ impl<'a> Assemble<'a> {
         ic_iidx: InstIdx,
         ic_inst: &jit_ir::ICmpInst,
         g_iidx: InstIdx,
-        g_inst: &jit_ir::GuardInst,
+        g_inst: jit_ir::GuardInst,
     ) {
         // Codegen ICmp
         let (lhs, pred, rhs) = (
@@ -1690,9 +1690,9 @@ impl<'a> Assemble<'a> {
         self.ra.expire_regs(g_iidx);
         self.comment(
             self.asm.offset(),
-            Inst::Guard(*g_inst).display(g_iidx, self.m).to_string(),
+            Inst::Guard(g_inst).display(g_iidx, self.m).to_string(),
         );
-        let fail_label = self.guard_to_deopt(g_inst);
+        let fail_label = self.guard_to_deopt(&g_inst);
 
         if g_inst.expect() {
             match pred {

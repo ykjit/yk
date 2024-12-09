@@ -348,13 +348,13 @@ impl Module {
     /// `Tombstone` instructions.
     pub(crate) fn iter_skipping_insts(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (InstIdx, &Inst)> + '_ {
+    ) -> impl DoubleEndedIterator<Item = (InstIdx, Inst)> + '_ {
         // The `unchecked_from` is safe because we know from `Self::push` that we can't have
         // exceeded `InstIdx`'s bounds.
         (0..self.insts.len()).filter_map(|i| {
             let inst = &self.insts[i];
             if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
-                Some((InstIdx::unchecked_from(i), inst))
+                Some((InstIdx::unchecked_from(i), *inst))
             } else {
                 None
             }

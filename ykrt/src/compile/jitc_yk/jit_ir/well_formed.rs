@@ -290,7 +290,7 @@ impl Module {
                 }
                 _ => (),
             }
-            last_inst = Some(*inst);
+            last_inst = Some(inst);
         }
     }
 }
