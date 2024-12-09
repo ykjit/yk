@@ -301,23 +301,11 @@ impl Module {
     ///
     /// # Panics
     ///
-    /// If `iidx` points to a `Copy` instruction.
-    pub(crate) fn inst_no_copies(&self, iidx: InstIdx) -> Inst {
+    /// If `iidx` points to a `Const`, `Copy`, or `Tombstone` instruction.
+    pub(crate) fn inst(&self, iidx: InstIdx) -> Inst {
         match self.insts[usize::from(iidx)] {
-            Inst::Const(_) => todo!(),
-            Inst::Copy(_) => panic!(),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => todo!(),
             x => x,
-        }
-    }
-
-    /// Return the decopied instruction at the specified index (i.e. searching
-    /// until a non-`Copy` instruction is found).
-    pub(crate) fn inst_decopy(&self, mut iidx: InstIdx) -> (InstIdx, Inst) {
-        loop {
-            match self.insts[usize::from(iidx)] {
-                Inst::Copy(copy_iidx) => iidx = copy_iidx,
-                x => return (iidx, x),
-            }
         }
     }
 
@@ -334,7 +322,7 @@ impl Module {
     /// This function has very few uses and unless you explicitly know why you're using it, you
     /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
     /// correctly leads to undefined behaviour.
-    pub(crate) fn inst_raw(&self, iidx: InstIdx) -> Inst {
+    fn inst_raw(&self, iidx: InstIdx) -> Inst {
         self.insts[usize::from(iidx)]
     }
 
@@ -356,21 +344,36 @@ impl Module {
         InstIdx::try_from(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
-    /// Iterate, in order, over all `InstIdx`s of this module (including `Const`, `Copy`, and
-    /// `Tombstone` instructions).
-    pub(crate) fn iter_all_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
+    /// Iterate, in order, over the `InstIdx`s of this module skipping `Const`, `Copy`, and
+    /// `Tombstone` instructions.
+    pub(crate) fn iter_skipping_insts(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (InstIdx, Inst)> + '_ {
         // The `unchecked_from` is safe because we know from `Self::push` that we can't have
         // exceeded `InstIdx`'s bounds.
-        (0..self.insts.len()).map(InstIdx::unchecked_from)
+        (0..self.insts.len()).filter_map(|i| {
+            let inst = &self.insts[i];
+            if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
+                Some((InstIdx::unchecked_from(i), *inst))
+            } else {
+                None
+            }
+        })
     }
 
-    /// An iterator over instructions that skips `Const`, `Copy`, and `Tombstone` instructions.
-    ///
-    /// This implicitly deduplicates the callers view of instructions (since `Const` and `Copy`
-    /// instructions are skipped), but note that the indices, while strictly monotonically
-    /// increasing, may be non-consecutive (because of skipping).
-    pub(crate) fn iter_skipping_insts(&self) -> SkippingInstsIterator<'_> {
-        SkippingInstsIterator { m: self, cur: 0 }
+    /// Iterate, in order, over the `InstIdx`s of this module skipping `Const`, `Copy`, and
+    /// `Tombstone` instructions.
+    pub(crate) fn iter_skipping_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> + '_ {
+        // The `unchecked_from` is safe because we know from `Self::push` that we can't have
+        // exceeded `InstIdx`'s bounds.
+        (0..self.insts.len()).filter_map(|i| {
+            let inst = &self.insts[i];
+            if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
+                Some(InstIdx::unchecked_from(i))
+            } else {
+                None
+            }
+        })
     }
 
     /// Replace the instruction at `iidx` with `inst`.
@@ -431,16 +434,6 @@ impl Module {
     /// If `idx` is out of bounds.
     pub(crate) fn arg(&self, idx: ArgsIdx) -> Operand {
         self.args[usize::from(idx)].unpack(self)
-    }
-
-    /// Return the raw [PackedOperand] at args index `idx`. Unless you have a good reason for doing
-    /// so, use [Self::arg] instead.
-    ///
-    /// # Panics
-    ///
-    /// If `idx` is out of bounds.
-    pub(crate) fn arg_packed(&self, idx: ArgsIdx) -> PackedOperand {
-        self.args[usize::from(idx)]
     }
 
     /// Push the location of a trace parameter.
@@ -664,35 +657,6 @@ impl fmt::Display for Module {
         }
 
         Ok(())
-    }
-}
-
-/// An iterator over instructions that skips `Const`, `Copy`, and `Tombstone` instructions.
-///
-/// This implicitly deduplicates the callers view of instructions (since `Copy` and `Const`
-/// instructions are skipped), but note that the indices, while strictly monotonically increasing,
-/// may be non-consecutive (because of skipping).
-pub(crate) struct SkippingInstsIterator<'a> {
-    m: &'a Module,
-    cur: usize,
-}
-
-impl<'a> Iterator for SkippingInstsIterator<'a> {
-    type Item = (InstIdx, &'a Inst);
-    /// Return the next instruction index and its associated instruction or `None` if the end has
-    /// been reached.
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(x) = self.m.insts.get(self.cur) {
-            // We know that `self.cur` must fit in `InstIdx`, as otherwise `m.insts` wouldn't have
-            // had the instruction in the first place, so the `unchecked_from` is safe.
-            let old = InstIdx::unchecked_from(self.cur);
-            self.cur += 1;
-            match x {
-                Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => (),
-                _ => return Some((old, &self.m.insts[usize::from(old)])),
-            }
-        }
-        None
     }
 }
 
@@ -1144,17 +1108,6 @@ impl PackedOperand {
             }
         } else {
             Operand::Const(ConstIdx(self.0 & OPERAND_IDX_MASK))
-        }
-    }
-
-    /// If this [PackedOperand] represents a local instruction, call `f` with its `InstIdx`. Note
-    /// that this does not perform any kind of decopying.
-    fn map_iidx<F>(&self, f: &mut F)
-    where
-        F: FnMut(InstIdx),
-    {
-        if (self.0 & !OPERAND_IDX_MASK) == 0 {
-            f(InstIdx(self.0))
         }
     }
 }
@@ -1628,111 +1581,6 @@ impl Inst {
             }
             Inst::FPToSI(FPToSIInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::FNeg(FNegInst { val }) => val.unpack(m).map_iidx(f),
-        }
-    }
-
-    /// Apply the function `f` to each of this instruction's [PackedOperand]s that references a
-    /// local instruction. When an instruction references more than one [PackedOperand], the order
-    /// of traversal is undefined.
-    ///
-    /// Note that this function does not perform decopying, and thus must only be used when you
-    /// know that you want to know which local an instruction's operands directly refers to (e.g.
-    /// for dead code elimination).
-    pub(crate) fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
-    where
-        F: FnMut(InstIdx),
-    {
-        match self {
-            #[cfg(test)]
-            Inst::BlackBox(BlackBoxInst { op }) => {
-                op.map_iidx(f);
-            }
-            Inst::Const(_) => (),
-            Inst::Copy(iidx) => f(*iidx),
-            Inst::Tombstone => (),
-            Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
-                lhs.map_iidx(f);
-                rhs.map_iidx(f);
-            }
-            Inst::Load(LoadInst { op, .. }) => op.map_iidx(f),
-            Inst::LookupGlobal(_) => (),
-            Inst::Param(_) => (),
-            Inst::Call(x) => {
-                for i in x.iter_args_idx() {
-                    m.arg_packed(i).map_iidx(f);
-                }
-            }
-            Inst::IndirectCall(x) => {
-                let ici = m.indirect_call(*x);
-                let IndirectCallInst { target, .. } = ici;
-                target.map_iidx(f);
-                for i in ici.iter_args_idx() {
-                    m.arg_packed(i).map_iidx(f);
-                }
-            }
-            Inst::PtrAdd(x) => {
-                let ptr = x.ptr;
-                ptr.map_iidx(f);
-            }
-            Inst::DynPtrAdd(x) => {
-                let ptr = x.ptr;
-                ptr.map_iidx(f);
-                let num_elems = x.num_elems;
-                num_elems.map_iidx(f);
-            }
-            Inst::Store(StoreInst { tgt, val, .. }) => {
-                tgt.map_iidx(f);
-                val.map_iidx(f);
-            }
-            Inst::ICmp(ICmpInst { lhs, pred: _, rhs }) => {
-                lhs.map_iidx(f);
-                rhs.map_iidx(f);
-            }
-            Inst::Guard(x @ GuardInst { cond, .. }) => {
-                cond.map_iidx(f);
-                for (_, pop) in x.guard_info(m).live_vars() {
-                    pop.map_iidx(f);
-                }
-            }
-            Inst::TraceLoopStart => {
-                for val in &m.loop_start_vars {
-                    match val {
-                        Operand::Var(iidx) => f(*iidx),
-                        _ => panic!(),
-                    }
-                }
-            }
-            Inst::TraceLoopJump => {
-                for val in &m.loop_jump_operands {
-                    val.map_iidx(f);
-                }
-            }
-            Inst::RootJump => {
-                for val in &m.loop_jump_operands {
-                    val.map_iidx(f);
-                }
-            }
-            Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
-            Inst::ZExt(ZExtInst { val, .. }) => val.map_iidx(f),
-            Inst::BitCast(BitCastInst { val, .. }) => val.map_iidx(f),
-            Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
-            Inst::Select(SelectInst {
-                cond,
-                trueval,
-                falseval,
-            }) => {
-                cond.map_iidx(f);
-                trueval.map_iidx(f);
-                falseval.map_iidx(f);
-            }
-            Inst::SIToFP(SIToFPInst { val, .. }) => val.map_iidx(f),
-            Inst::FPExt(FPExtInst { val, .. }) => val.map_iidx(f),
-            Inst::FCmp(FCmpInst { lhs, pred: _, rhs }) => {
-                lhs.map_iidx(f);
-                rhs.map_iidx(f);
-            }
-            Inst::FPToSI(FPToSIInst { val, .. }) => val.map_iidx(f),
-            Inst::FNeg(FNegInst { val }) => val.map_iidx(f),
         }
     }
 
@@ -3150,5 +2998,29 @@ mod tests {
         assert_eq!(Ty::Integer(127).byte_size().unwrap(), 16);
         assert_eq!(Ty::Integer(128).byte_size().unwrap(), 16);
         assert_eq!(Ty::Integer(129).byte_size().unwrap(), 17);
+    }
+
+    #[test]
+    fn iter_skipping_insts() {
+        let m = Module::from_str(
+            "
+        entry:
+          %0: i8 = param 0
+          %1: i8 = param 1
+          %2: i8 = param 2
+          %3: i8 = param 3
+          %4: i8 = param 4
+          %5: i8 = param 5
+        ",
+        );
+        let mut iter = m.iter_skipping_insts();
+        assert_eq!(Some(0), iter.next().map(|x| usize::from(x.0)));
+        assert_eq!(Some(5), iter.next_back().map(|x| usize::from(x.0)));
+        assert_eq!(Some(4), iter.next_back().map(|x| usize::from(x.0)));
+        assert_eq!(Some(1), iter.next().map(|x| usize::from(x.0)));
+        assert_eq!(Some(2), iter.next().map(|x| usize::from(x.0)));
+        assert_eq!(Some(3), iter.next().map(|x| usize::from(x.0)));
+        assert!(iter.next().is_none());
+        assert!(iter.next_back().is_none());
     }
 }
