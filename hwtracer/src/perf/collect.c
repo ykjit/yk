@@ -49,7 +49,9 @@
  * FIXME: These leak when a thread dies.
  */
 static thread_local void *cache_base_buf = NULL;
+static thread_local size_t cache_base_buf_size = 0;
 static thread_local void *cache_aux_buf = NULL;
+static thread_local size_t cache_aux_buf_size = 0;
 static thread_local int cache_perf_fd = -1;
 
 enum hwt_cerror_kind {
@@ -548,9 +550,16 @@ hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf,
   // data_bufsize'.
   int page_size = getpagesize();
   tr_ctx->base_bufsize = (1 + tr_conf->data_bufsize) * page_size;
-  if (!cache_base_buf)
+  if (!cache_base_buf) {
     cache_base_buf = mmap(NULL, tr_ctx->base_bufsize, PROT_WRITE, MAP_SHARED,
                           tr_ctx->perf_fd, 0);
+    cache_base_buf_size = tr_ctx->base_bufsize;
+  } else if (tr_ctx->base_bufsize < cache_base_buf_size) {
+    // The cached buffer is too small.
+    //
+    // FIXME: For now crash. Ideally we'd remap it.
+    errx(EXIT_FAILURE, "cached base mmap too small");
+  }
   tr_ctx->base_buf = cache_base_buf;
   if (tr_ctx->base_buf == MAP_FAILED) {
     hwt_set_cerr(err, hwt_cerror_errno, errno);
@@ -567,9 +576,16 @@ hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf,
   // Allocate the AUX buffer.
   //
   // Mapped R/W so as to have a saturating ring buffer.
-  if (!cache_aux_buf)
+  if (!cache_aux_buf) {
     cache_aux_buf = mmap(NULL, base_header->aux_size, PROT_READ | PROT_WRITE,
                          MAP_SHARED, tr_ctx->perf_fd, base_header->aux_offset);
+    cache_aux_buf_size = base_header->aux_size;
+  } else if (base_header->aux_size < cache_aux_buf_size) {
+    // The cached buffer is too small.
+    //
+    // FIXME: For now crash. Ideally we'd remap it.
+    errx(EXIT_FAILURE, "cached aux mmap too small");
+  }
   tr_ctx->aux_buf = cache_aux_buf;
   if (tr_ctx->aux_buf == MAP_FAILED) {
     hwt_set_cerr(err, hwt_cerror_errno, errno);
