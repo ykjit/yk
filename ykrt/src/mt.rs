@@ -651,7 +651,7 @@ impl MT {
                                     // This thread is tracing something...
                                     if !Arc::ptr_eq(thread_hl, &hl) {
                                         // ...but not this Location.
-                                        TransitionControlPoint::Execute(Arc::clone(root_ctr))
+                                        TransitionControlPoint::NoAction
                                     } else {
                                         // ...and it's this location: we have therefore finished
                                         // tracing the loop.
@@ -668,6 +668,7 @@ impl MT {
                                 }
                                 _ => {
                                     // This thread isn't tracing anything.
+                                    assert!(!is_tracing);
                                     TransitionControlPoint::Execute(Arc::clone(root_ctr))
                                 }
                             }
@@ -1518,7 +1519,7 @@ mod tests {
         expect_start_side_tracing(&mt, ctr2);
         assert!(matches!(
             dbg!(mt.transition_control_point(&loc1)),
-            TransitionControlPoint::Execute(_)
+            TransitionControlPoint::NoAction
         ));
         assert!(matches!(
             mt.transition_control_point(&loc2),
