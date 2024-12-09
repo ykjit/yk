@@ -313,8 +313,7 @@ impl Opt {
                             let Some(Inst::Guard(y)) = self.m.inst_nocopy(back_iidx) else {
                                 continue;
                             };
-                            if x.cond(&self.m) == y.cond(&self.m) {
-                                debug_assert_eq!(x.expect, y.expect);
+                            if x.cond(&self.m) == y.cond(&self.m) && x.expect() == y.expect() {
                                 self.m.replace(iidx, Inst::Tombstone);
                                 removed = true;
                                 break;
@@ -1039,6 +1038,7 @@ mod test {
             %2: i1 = eq %0, %1
             guard true, %2, [%0, %1]
             guard true, %2, [%0, %1]
+            guard false, %2, [%0, %1]
         ",
             |m| opt(m).unwrap(),
             "
@@ -1048,6 +1048,7 @@ mod test {
             %1: i8 = param ...
             %2: i1 = eq %0, %1
             guard true, %2, ...
+            guard false, %2, ...
         ",
         );
     }
