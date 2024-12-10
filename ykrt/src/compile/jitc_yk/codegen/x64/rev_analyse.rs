@@ -4,6 +4,84 @@ use crate::compile::{
 };
 use vob::Vob;
 
+struct RevAnalyse<'a> {
+    m: &'a Module,
+    inst_vals_alive_until: Vec<InstIdx>,
+    ptradds: Vec<Option<PtrAddInst>>,
+    used_insts: Vob,
+}
+
+impl<'a> RevAnalyse<'a> {
+    fn new(m: &'a Module) -> RevAnalyse<'a> {
+        Self {
+            m,
+            inst_vals_alive_until: vec![InstIdx::try_from(0).unwrap(); m.insts_len()],
+            ptradds: vec![None; m.insts_len()],
+            used_insts: Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1),
+        }
+    }
+
+    fn analyse(&mut self) {
+        for (iidx, inst) in self.m.iter_skipping_insts().rev() {
+            if self.used_insts.get(usize::from(iidx)).unwrap()
+                || inst.has_store_effect(self.m)
+                || inst.is_barrier(self.m)
+            {
+                self.used_insts.set(usize::from(iidx), true);
+
+                // "Inline" `PtrAdd`s into loads/stores, and don't mark the `PtrAdd` as used. This
+                // means that some (though not all) `PtrAdd`s will not lead to actual code being
+                // generated.
+                match inst {
+                    Inst::Load(x) => {
+                        if let Operand::Var(op_iidx) = x.operand(self.m) {
+                            if let Inst::PtrAdd(pa_inst) = self.m.inst(op_iidx) {
+                                self.ptradds[usize::from(iidx)] = Some(pa_inst);
+                                if let Operand::Var(y) = pa_inst.ptr(self.m) {
+                                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
+                                        self.inst_vals_alive_until[usize::from(y)] = iidx;
+                                    }
+                                    self.used_insts.set(usize::from(y), true);
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                    Inst::Store(x) => {
+                        if let Operand::Var(op_iidx) = x.tgt(self.m) {
+                            if let Inst::PtrAdd(pa_inst) = self.m.inst(op_iidx) {
+                                self.ptradds[usize::from(iidx)] = Some(pa_inst);
+                                if let Operand::Var(y) = pa_inst.ptr(self.m) {
+                                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
+                                        self.inst_vals_alive_until[usize::from(y)] = iidx;
+                                    }
+                                    self.used_insts.set(usize::from(y), true);
+                                }
+                                if let Operand::Var(y) = x.val(self.m) {
+                                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
+                                        self.inst_vals_alive_until[usize::from(y)] = iidx;
+                                    }
+                                    self.used_insts.set(usize::from(y), true);
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                    _ => (),
+                }
+
+                // Calculate inst_vals_alive_until
+                inst.map_operand_locals(self.m, &mut |x| {
+                    self.used_insts.set(usize::from(x), true);
+                    if self.inst_vals_alive_until[usize::from(x)] < iidx {
+                        self.inst_vals_alive_until[usize::from(x)] = iidx;
+                    }
+                });
+            }
+        }
+    }
+}
+
 /// Perform a reverse analysis on a module's instructions returning, in order:
 ///
 ///   1. A `Vec<InstIdx>` with one entry per instruction. Each denotes the last instruction that
@@ -21,68 +99,9 @@ use vob::Vob;
 pub(super) fn rev_analyse(
     m: &Module,
 ) -> Result<(Vec<InstIdx>, Vob, Vec<Option<PtrAddInst>>), CompilationError> {
-    let mut inst_vals_alive_until = vec![InstIdx::try_from(0).unwrap(); m.insts_len()];
-    let mut ptradds = vec![None; m.insts_len()];
-    let mut used_insts = Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1);
-    for (iidx, inst) in m.iter_skipping_insts().rev() {
-        if used_insts.get(usize::from(iidx)).unwrap()
-            || inst.has_store_effect(m)
-            || inst.is_barrier(m)
-        {
-            used_insts.set(usize::from(iidx), true);
-
-            // "Inline" `PtrAdd`s into loads/stores, and don't mark the `PtrAdd` as used. This
-            // means that some (though not all) `PtrAdd`s will not lead to actual code being
-            // generated.
-            match inst {
-                Inst::Load(x) => {
-                    if let Operand::Var(op_iidx) = x.operand(m) {
-                        if let Inst::PtrAdd(pa_inst) = m.inst(op_iidx) {
-                            ptradds[usize::from(iidx)] = Some(pa_inst);
-                            if let Operand::Var(y) = pa_inst.ptr(m) {
-                                if inst_vals_alive_until[usize::from(y)] < iidx {
-                                    inst_vals_alive_until[usize::from(y)] = iidx;
-                                }
-                                used_insts.set(usize::from(y), true);
-                            }
-                            continue;
-                        }
-                    }
-                }
-                Inst::Store(x) => {
-                    if let Operand::Var(op_iidx) = x.tgt(m) {
-                        if let Inst::PtrAdd(pa_inst) = m.inst(op_iidx) {
-                            ptradds[usize::from(iidx)] = Some(pa_inst);
-                            if let Operand::Var(y) = pa_inst.ptr(m) {
-                                if inst_vals_alive_until[usize::from(y)] < iidx {
-                                    inst_vals_alive_until[usize::from(y)] = iidx;
-                                }
-                                used_insts.set(usize::from(y), true);
-                            }
-                            if let Operand::Var(y) = x.val(m) {
-                                if inst_vals_alive_until[usize::from(y)] < iidx {
-                                    inst_vals_alive_until[usize::from(y)] = iidx;
-                                }
-                                used_insts.set(usize::from(y), true);
-                            }
-                            continue;
-                        }
-                    }
-                }
-                _ => (),
-            }
-
-            // Calculate inst_vals_alive_until
-            inst.map_operand_locals(m, &mut |x| {
-                used_insts.set(usize::from(x), true);
-                if inst_vals_alive_until[usize::from(x)] < iidx {
-                    inst_vals_alive_until[usize::from(x)] = iidx;
-                }
-            });
-        }
-    }
-
-    Ok((inst_vals_alive_until, used_insts, ptradds))
+    let mut rean = RevAnalyse::new(m);
+    rean.analyse();
+    Ok((rean.inst_vals_alive_until, rean.used_insts, rean.ptradds))
 }
 
 #[cfg(test)]
