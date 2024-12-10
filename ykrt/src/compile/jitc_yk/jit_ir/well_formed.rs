@@ -120,7 +120,7 @@ impl Module {
                         }
                     }
                 }
-                Inst::Guard(GuardInst { cond, .. }) => {
+                Inst::Guard(GuardInst { cond, expect, .. }) => {
                     let cond = cond.unpack(self);
                     let tyidx = cond.tyidx(self);
                     let Ty::Integer(1) = self.type_(tyidx) else {
@@ -130,18 +130,15 @@ impl Module {
                         )
                     };
                     if let Operand::Const(x) = cond {
-                        let Const::Int(_, _v) = self.const_(x) else {
+                        let Const::Int(_, v) = self.const_(x) else {
                             unreachable!()
                         };
-                        // FIXME: We currently need to break this check due to side-traces being
-                        // unfinished and needing to deopt back to the normal interpreter at the
-                        // end.
-                        // if (*expect && *v == 0) || (!*expect && *v == 1) {
-                        //     panic!(
-                        //         "Guard at position {iidx} references a constant that is at odds with the guard itself\n  {}",
-                        //         self.inst_no_copies(iidx).display(iidx, self)
-                        //     );
-                        // }
+                        if (expect && *v == 0) || (!expect && *v == 1) {
+                            panic!(
+                                "Guard at position {iidx} references a constant that is at odds with the guard itself\n  {}",
+                                inst.display(iidx, self)
+                            );
+                        }
                     }
                 }
                 Inst::ICmp(x) => {
@@ -496,6 +493,31 @@ mod tests {
             "
               entry:
                 %0: i8 = param 0
+                guard true, %0, []
+            ",
+        );
+    }
+
+    #[test]
+    fn guard_const() {
+        Module::from_str(
+            "
+              entry:
+                %0: i1 = 1i1
+                guard true, %0, []
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Guard at position 1 references a constant that is at odds with the guard itself"
+    )]
+    fn guard_impossible_const() {
+        Module::from_str(
+            "
+              entry:
+                %0: i1 = 0i1
                 guard true, %0, []
             ",
         );
