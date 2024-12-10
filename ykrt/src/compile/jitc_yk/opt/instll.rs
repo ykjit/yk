@@ -1,7 +1,7 @@
 //! A linked list of instruction types.
 //!
-//! This allows one to iterate backwards over a trace starting at instruction X and seeing all
-//! previous instructions of the same types as X.
+//! This allows one to iterate backwards over a trace starting at instruction X and efficiently
+//! view all previous instructions of the same kind as X.
 //!
 //! For example given the trace:
 //!
@@ -15,7 +15,7 @@
 //! ```
 //!
 //! If we iterate backwards from `%5`, this linked list will successively return the values `%3`
-//! and `%2`.
+//! and `%2` (i.e. the other `BinOp` functions).
 //!
 //! The internal data structure is modelled on an equivalent in LuaJIT. It is highly efficient,
 //! requiring only a single memory allocation with one `InstIdx` per instruction in a trace.
