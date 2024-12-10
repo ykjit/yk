@@ -1,5 +1,5 @@
 use crate::compile::{
-    jitc_yk::jit_ir::{Inst, InstIdx, Module, Operand, PtrAddInst},
+    jitc_yk::jit_ir::{Inst, InstIdx, LoadInst, Module, Operand, PtrAddInst, StoreInst},
     CompilationError,
 };
 use vob::Vob;
@@ -34,37 +34,13 @@ impl<'a> RevAnalyse<'a> {
                 // generated.
                 match inst {
                     Inst::Load(x) => {
-                        if let Operand::Var(op_iidx) = x.operand(self.m) {
-                            if let Inst::PtrAdd(pa_inst) = self.m.inst(op_iidx) {
-                                self.ptradds[usize::from(iidx)] = Some(pa_inst);
-                                if let Operand::Var(y) = pa_inst.ptr(self.m) {
-                                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
-                                        self.inst_vals_alive_until[usize::from(y)] = iidx;
-                                    }
-                                    self.used_insts.set(usize::from(y), true);
-                                }
-                                continue;
-                            }
+                        if self.an_load(iidx, x) {
+                            continue;
                         }
                     }
                     Inst::Store(x) => {
-                        if let Operand::Var(op_iidx) = x.tgt(self.m) {
-                            if let Inst::PtrAdd(pa_inst) = self.m.inst(op_iidx) {
-                                self.ptradds[usize::from(iidx)] = Some(pa_inst);
-                                if let Operand::Var(y) = pa_inst.ptr(self.m) {
-                                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
-                                        self.inst_vals_alive_until[usize::from(y)] = iidx;
-                                    }
-                                    self.used_insts.set(usize::from(y), true);
-                                }
-                                if let Operand::Var(y) = x.val(self.m) {
-                                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
-                                        self.inst_vals_alive_until[usize::from(y)] = iidx;
-                                    }
-                                    self.used_insts.set(usize::from(y), true);
-                                }
-                                continue;
-                            }
+                        if self.an_store(iidx, x) {
+                            continue;
                         }
                     }
                     _ => (),
@@ -79,6 +55,48 @@ impl<'a> RevAnalyse<'a> {
                 });
             }
         }
+    }
+
+    /// Analyse a [LoadInst]. Returns `true` if it has been inlined and should not go through the
+    /// normal "calculate `inst_vals_alive_until`" phase.
+    fn an_load(&mut self, iidx: InstIdx, inst: LoadInst) -> bool {
+        if let Operand::Var(op_iidx) = inst.operand(self.m) {
+            if let Inst::PtrAdd(pa_inst) = self.m.inst(op_iidx) {
+                self.ptradds[usize::from(iidx)] = Some(pa_inst);
+                if let Operand::Var(y) = pa_inst.ptr(self.m) {
+                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
+                        self.inst_vals_alive_until[usize::from(y)] = iidx;
+                    }
+                    self.used_insts.set(usize::from(y), true);
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Analyse a [StoreInst]. Returns `true` if it has been inlined and should not go through the
+    /// normal "calculate `inst_vals_alive_until`" phase.
+    fn an_store(&mut self, iidx: InstIdx, inst: StoreInst) -> bool {
+        if let Operand::Var(op_iidx) = inst.tgt(self.m) {
+            if let Inst::PtrAdd(pa_inst) = self.m.inst(op_iidx) {
+                self.ptradds[usize::from(iidx)] = Some(pa_inst);
+                if let Operand::Var(y) = pa_inst.ptr(self.m) {
+                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
+                        self.inst_vals_alive_until[usize::from(y)] = iidx;
+                    }
+                    self.used_insts.set(usize::from(y), true);
+                }
+                if let Operand::Var(y) = inst.val(self.m) {
+                    if self.inst_vals_alive_until[usize::from(y)] < iidx {
+                        self.inst_vals_alive_until[usize::from(y)] = iidx;
+                    }
+                    self.used_insts.set(usize::from(y), true);
+                }
+                return true;
+            }
+        }
+        false
     }
 }
 
