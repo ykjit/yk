@@ -78,7 +78,7 @@ fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
 
 #[cfg(tracer_swt)]
 fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, frameaddr: usize) {
-    let verbose = false;
+    let verbose = true;
 
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
     let (dst_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
@@ -86,9 +86,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
     // Save all the registers to the stack
     dynasm!(asm
         ; .arch x64
-        // adjust rsp to account for the registers we are saving
-        // ; add rsp, 13 * 8 // the pushes in ykcapi/src/lib.rs - 13 * 8
-
         ; push r15    // 15 - offset 120
         ; push r14    // 14 - offset 112
         ; push r13    // 13 - offset 104
@@ -133,8 +130,8 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
                 dst_location, src_location
             );
         }
-        // break on every live var copy
-        // dynasm!(asm; int3 );
+        // breakpoint for each location
+        // dynasm!(asm; int3);
         match dst_location {
             Indirect(_dst_reg_num, dst_off, dst_val_size) => {
                 match src_location {
@@ -258,32 +255,42 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
         }
     }
 
-    dynasm!(asm
-        ; .arch x64
-        ; add rsp, 16 * 8 // 16 registers * 8 bytes
-    );
+    if verbose {
+        println!("@@ dst_size: 0x{:x}, dst_rbp: 0x{:x}, dst addr: 0x{:x}", dst_rec.size as i64, frameaddr as i64, dst_rec.offset);
+        println!("@@ src_size: 0x{:x}, src_rbp: 0x{:x}, src addr: 0x{:x}", src_rec.size as i64, frameaddr as i64, src_rec.offset);
+    }
+
+
+
+    let align_rsp = (dst_rec.size as u64 + frameaddr as u64) % 16;
+    // check that dst_rsp is 16 aligned
+    if align_rsp != 0 && verbose {
+        println!("@@ dst_rsp {} is not 16 aligned, adding {} to dst_rsp", (dst_rec.size as u64 + frameaddr as u64), align_rsp);
+    }
 
     // reset rsp and rbp
     dynasm!(asm
         ; .arch x64
         // ; int3
-        ; mov rbp, QWORD frameaddr as i64
-        ; mov rsp, QWORD frameaddr as i64
-        ; sub rsp, dst_rec.size.try_into().unwrap()
+        ; mov rbp, QWORD frameaddr as i64 // reset rbp
+        ; mov rsp, QWORD frameaddr as i64 // reset rsp
+        // Align rsp to 16
+        ; sub rsp, (dst_rec.size + align_rsp).try_into().unwrap()
+        // ; sub rsp, (dst_rec.size).try_into().unwrap()
+        // ; int3
     );
-
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
     let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
 
     dynasm!(asm
         ; .arch x64
+        // ; int3
         ; sub rsp, 16 // reserves 16 bytes of space on the stack.
         ; mov [rsp], rax // save rsp
         ; mov rax, QWORD dst_target_addr // loads the target address into rax
         ; mov [rsp + 8], rax // stores the target address into rsp+8
         ; pop rax // restores the original rax at rsp
-        // ; int3 // breakpoint
-        ; add rsp, 8 // TODO: not sure why this is needed!
+        ; int3 // breakpoint
         ; ret // loads 8 bytes from rsp and jumps to it
     );
 }

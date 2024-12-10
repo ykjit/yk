@@ -59,7 +59,7 @@ const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 const DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD: TraceCompilationErrorThreshold = 5;
 static REG64_SIZE: usize = 8;
 
-static mut SWT_JUMP_FLAG: bool = false;
+static mut IS_IN_OPT: bool = false;
 
 thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
@@ -448,10 +448,8 @@ impl MT {
                 }
                 #[cfg(tracer_swt)]
                 unsafe {
-                    if !SWT_JUMP_FLAG {
-                        SWT_JUMP_FLAG = true;
-                    } else {
-                        you_can_do_it(ControlPointStackMapId::UnOpt, ControlPointStackMapId::Opt, frameaddr);
+                    if IS_IN_OPT {
+                        you_can_do_it(ControlPointStackMapId::Opt, ControlPointStackMapId::UnOpt, frameaddr);
                         self.log.log(Verbosity::JITEvent, "returning into unopt cp");
                     }
                 }
@@ -486,7 +484,8 @@ impl MT {
 
                 #[cfg(tracer_swt)]
                 unsafe {
-                    you_can_do_it(ControlPointStackMapId::Opt, ControlPointStackMapId::UnOpt, frameaddr);
+                    IS_IN_OPT = true;
+                    you_can_do_it(ControlPointStackMapId::UnOpt, ControlPointStackMapId::Opt, frameaddr);
                     self.log.log(Verbosity::JITEvent, "returning into opt cp");
                 }
             }
