@@ -9,8 +9,8 @@
 use super::{
     int_signs::{SignExtend, Truncate},
     jit_ir::{
-        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstDiscriminants, InstIdx, Module,
-        Operand, Predicate, PtrAddInst, Ty,
+        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate,
+        PtrAddInst, Ty,
     },
 };
 use crate::compile::CompilationError;
@@ -400,8 +400,7 @@ impl Opt {
                 // We don't perform CSE on instructions that have / enforce effects.
                 if inst.has_store_effect(&self.m)
                     || inst.has_load_effect(&self.m)
-                    || (inst.is_barrier(&self.m)
-                        && InstDiscriminants::from(inst) != InstDiscriminants::Guard)
+                    || inst.is_barrier(&self.m)
                 {
                     return;
                 }
