@@ -52,7 +52,7 @@ impl InstLinkedList {
     /// As a trace is being optimised, this method should be called with each new instruction
     /// generated.
     pub(super) fn push(&mut self, iidx: InstIdx, inst: Inst) {
-        let dim_off = usize::from(inst.discriminant());
+        let dim_off = inst.discriminant();
         if self.heads[dim_off] != InstIdx::max() {
             self.predecessors[usize::from(iidx)] = self.heads[dim_off];
         }
@@ -64,7 +64,7 @@ impl InstLinkedList {
         InstLLRevIterator {
             m,
             instll: self,
-            next: self.heads[usize::from(inst.discriminant())],
+            next: self.heads[inst.discriminant()],
         }
     }
 }

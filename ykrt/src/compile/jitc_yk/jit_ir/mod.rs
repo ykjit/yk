@@ -1341,7 +1341,6 @@ impl InlinedFrame {
 
 /// An IR instruction.
 #[derive(Clone, Copy, Debug, EnumCount, EnumDiscriminants)]
-// Note: changing `repr` to anything other than `u8` means changing `Inst::discriminant`.
 #[repr(u8)]
 pub(crate) enum Inst {
     // "Internal" IR instructions: these don't correspond to IR that a user interpreter can
@@ -1393,9 +1392,9 @@ pub(crate) enum Inst {
 impl Inst {
     /// What is the numeric discriminant of this [Inst]? These are guaranteed to be consecutive
     /// integers from `0..Inst::COUNT`.
-    pub(crate) fn discriminant(&self) -> u8 {
+    pub(crate) fn discriminant(&self) -> usize {
         debug_assert!((InstDiscriminants::from(self) as usize) < Self::COUNT);
-        InstDiscriminants::from(self) as u8
+        InstDiscriminants::from(self) as usize
     }
 
     /// Returns the type of the value that the instruction produces (if any).
