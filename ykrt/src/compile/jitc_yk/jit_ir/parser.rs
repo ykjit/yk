@@ -667,15 +667,22 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
     /// function to capture cases where users try referencing the variable itself (e.g. `%0 = %0`
     /// will be caught as an error by this function).
     fn push_assign(&mut self, inst: Inst, span: Span) -> Result<(), Box<dyn Error>> {
-        let idx = self.lexer.span_str(span)[1..]
+        let iidx = self.lexer.span_str(span)[1..]
             .parse::<usize>()
             .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-        let idx = InstIdx::try_from(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
-        self.m.push(inst).unwrap();
-        match self.inst_idx_map.insert(idx, self.m.last_inst_idx()) {
-            None => Ok(()),
-            Some(_) => Err(format!("Local operand '%{idx}' redefined").into()),
+        let iidx = InstIdx::try_from(iidx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
+
+        if usize::from(iidx) != self.m.insts_len() {
+            return Err(self.error_at_span(
+                span,
+                &format!("Assignment should be '%{}'", self.m.insts_len()),
+            ));
         }
+
+        self.m.push(inst).unwrap();
+        debug_assert!(self.inst_idx_map.get(&iidx).is_none());
+        self.inst_idx_map.insert(iidx, self.m.last_inst_idx());
+        Ok(())
     }
 
     /// Return an error message pinpointing `span` as the culprit.
@@ -929,70 +936,70 @@ mod tests {
             func_decl f4(...)
             entry:
               %0: i32 = param 0
-              %5: i8 = param 1
-              %7: i32 = param 2
-              %9: ptr = param 3
-              %1999: float = param 4
-              %30: i8 = param 5
-              %31: i16 = param 6
-              %32: i32 = param 7
-              %33: i64 = param 8
-              %48: i32 = param 9
-              %1: i32 = trunc %33
-              %2: i32 = add %0, %1
-              %4: i1 = eq %1, %2
-              tloop_start [%0, %5]
-              guard true, %4, [%0, %1, %2, 1i8]
+              %1: i8 = param 1
+              %2: i32 = param 2
+              %3: ptr = param 3
+              %4: float = param 4
+              %5: i8 = param 5
+              %6: i16 = param 6
+              %7: i32 = param 7
+              %8: i64 = param 8
+              %9: i32 = param 9
+              %10: i32 = trunc %8
+              %11: i32 = add %7, %9
+              %12: i1 = eq %0, %2
+              tloop_start [%0, %6]
+              guard true, %12, [%0, %1, %2, 1i8]
               call @f1()
-              %6: i32 = call @f2(%5)
-              %8: i64 = call @f3(%5, %7, %0)
+              %16: i32 = call @f2(%5)
+              %17: i64 = call @f3(%5, %7, %0)
               call @f4(%0, %1)
-              *%9 = %8
-              %10: i32 = load %9
-              %11: i64 = sext %10
-              %111: i64 = zext %10
-              %12: i32 = add %0, %1
-              %13: i32 = sub %0, %1
-              %14: i32 = mul %0, %1
-              %15: i32 = or %0, %1
-              %16: i32 = and %0, %1
-              %17: i32 = xor %0, %1
-              %18: i32 = shl %0, %1
-              %19: i32 = ashr %0, %1
-              %20: float = fadd %1999, %1999
-              %21: float = fdiv %1999, %1999
-              %22: float = fmul %1999, %1999
-              %23: float = frem %1999, %1999
-              %24: float = fsub %1999, %1999
-              %25: i32 = lshr %0, %1
-              %26: i32 = sdiv %0, %1
-              %27: i32 = srem %0, %1
-              %28: i32 = udiv %0, %1
-              %29: i32 = urem %0, %1
-              %34: i8 = add %30, 255i8
-              %35: i16 = add %31, 32768i16
-              %36: i32 = add %32, 2147483648i32
-              %37: i64 = add %33, 9223372036854775808i64
-              *%9 = 0x0
-              *%9 = 0xFFFFFFFF
-              %38: i1 = ne %1, %2
-              %40: i1 = ugt %1, %2
-              %41: i1 = uge %1, %2
-              %42: i1 = ult %1, %2
-              %43: i1 = ule %1, %2
-              %44: i1 = sgt %1, %2
-              %45: i1 = sge %1, %2
-              %46: i1 = slt %1, %2
-              %47: i1 = sle %1, %2
-              %49: float = si_to_fp %48
-              %50: double = fp_ext %49
-              %500: i32 = fp_to_si %49
-              %51: double = fadd 1double, 2.345double
-              %52: float = fadd 1float, 2.345float
-              %53: i64 = icall<ft1> %9(%5, %7, %0)
-              tloop_jump [%12, %6]
-              %54: float = bitcast %7
-              %55: float = fneg %54
+              *%3 = %8
+              %20: i32 = load %9
+              %21: i64 = sext %10
+              %22: i64 = zext %10
+              %23: i32 = add %7, %9
+              %24: i32 = sub %7, %9
+              %25: i32 = mul %7, %9
+              %26: i32 = or %7, %9
+              %27: i32 = and %7, %9
+              %28: i32 = xor %7, %9
+              %29: i32 = shl %7, %9
+              %30: i32 = ashr %7, %9
+              %31: float = fadd %4, %4
+              %32: float = fdiv %4, %4
+              %33: float = fmul %4, %4
+              %34: float = frem %4, %4
+              %35: float = fsub %4, %4
+              %36: i32 = lshr %0, 2i32
+              %37: i32 = sdiv %0, 2i32
+              %38: i32 = srem %0, 2i32
+              %39: i32 = udiv %0, 2i32
+              %40: i32 = urem %0, 2i32
+              %41: i8 = add %1, 255i8
+              %42: i16 = add %6, 32768i16
+              %43: i32 = add %10, 2147483648i32
+              %44: i64 = add %21, 9223372036854775808i64
+              *%3 = 0x0
+              *%3 = 0xFFFFFFFF
+              %47: i1 = ne %0, %2
+              %48: i1 = ugt %0, %2
+              %49: i1 = uge %0, %2
+              %50: i1 = ult %0, %2
+              %51: i1 = ule %0, %2
+              %52: i1 = sgt %0, %2
+              %53: i1 = sge %0, %2
+              %54: i1 = slt %0, %2
+              %55: i1 = sle %0, %2
+              %56: float = si_to_fp %43
+              %57: double = fp_ext %56
+              %58: i32 = fp_to_si %56
+              %59: double = fadd 1double, 2.345double
+              %60: float = fadd 1float, 2.345float
+              %61: i64 = icall<ft1> %9(%5, %7, %0)
+              %62: float = bitcast %7
+              %63: float = fneg %54
+              tloop_jump [%43, %58]
         ",
         );
     }
@@ -1095,21 +1102,14 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Assignment should be '%1'")]
     fn discontinuous_operand_ids() {
-        Module::assert_ir_transform_eq(
+        Module::from_str(
             "
           entry:
-            %7: i16 = param 0
+            %0: i16 = param 0
             %3: i16 = param 1
             %19: i16 = add %7, %3
-        ",
-            |m| m,
-            "
-          ...
-          entry:
-            %0: i16 = param ...
-            %1: i16 = param ...
-            %2: i16 = add %0, %1
         ",
         );
     }
@@ -1120,20 +1120,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %19: i16 = add %7, %3
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "Local operand '%3' redefined")]
-    fn repeated_local_operand_definition() {
-        Module::from_str(
-            "
-          entry:
-            %3: i16 = param 0
-            %4: i16 = param 1
-            %3: i16 = param 2
+            %0: i16 = add %7, %3
         ",
         );
     }
