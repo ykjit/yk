@@ -9,31 +9,36 @@
 use super::{
     int_signs::{SignExtend, Truncate},
     jit_ir::{
-        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate,
-        PtrAddInst, Ty,
+        BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstDiscriminants, InstIdx, Module,
+        Operand, Predicate, PtrAddInst, Ty,
     },
 };
 use crate::compile::CompilationError;
 
 mod analyse;
+mod instll;
 
 use analyse::Analyse;
+use instll::InstLinkedList;
 
 struct Opt {
     m: Module,
     an: Analyse,
+    /// Needed for common subexpression elimination.
+    instll: InstLinkedList,
 }
 
 impl Opt {
     fn new(m: Module) -> Self {
         let an = Analyse::new(&m);
-        Self { m, an }
+        let instll = InstLinkedList::new(&m);
+        Self { m, an, instll }
     }
 
     fn opt(mut self) -> Result<Module, CompilationError> {
-        let skipping = self.m.iter_skipping_inst_idxs().collect::<Vec<_>>();
-        for iidx in skipping {
-            match self.m.inst(iidx) {
+        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
+        for (iidx, inst) in skipping.into_iter() {
+            match inst {
                 #[cfg(test)]
                 Inst::BlackBox(_) => (),
                 Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
@@ -302,26 +307,7 @@ impl Opt {
                         // doesn't affect future analyses.
                         self.m.replace(iidx, Inst::Tombstone);
                     } else {
-                        // Remove guards that reference the same i1 variable: if the earlier guard
-                        // succeeded, then this guard must also succeed, by definition.
-                        let mut removed = false;
-                        // OPT: This is O(n), but most instructions can't possibly be guards.
-                        for back_iidx in (0..usize::from(iidx)).rev() {
-                            let back_iidx = InstIdx::unchecked_from(back_iidx);
-                            // Only examine non-`Copy` instructions, to avoid us continually checking the same
-                            // (subset of) instructions over and over again.
-                            let Some(Inst::Guard(y)) = self.m.inst_nocopy(back_iidx) else {
-                                continue;
-                            };
-                            if x.cond(&self.m) == y.cond(&self.m) && x.expect() == y.expect() {
-                                self.m.replace(iidx, Inst::Tombstone);
-                                removed = true;
-                                break;
-                            }
-                        }
-                        if !removed {
-                            self.an.guard(&self.m, x);
-                        }
+                        self.an.guard(&self.m, x);
                     }
                 }
                 Inst::PtrAdd(x) => match self.an.op_map(&self.m, x.ptr(&self.m)) {
@@ -389,38 +375,55 @@ impl Opt {
         Ok(self.m)
     }
 
-    /// Attempt common subexpression elimination on `iidx`, replacing it with a `Copy` if possible.
+    /// Attempt common subexpression elimination on `iidx`, replacing it with a `Copy` or
+    /// `Tombstone` if possible.
     fn cse(&mut self, iidx: InstIdx) {
-        // If this instruction is already a `Copy`, then there is nothing for CSE to do.
-        let Some(inst) = self.m.inst_nocopy(iidx) else {
-            return;
-        };
-        // There's no point in trying CSE on a `Tombstone`.
-        if let Inst::Tombstone = inst {
-            return;
-        }
-        // We don't perform CSE on instructions that have / enforce effects.
-        if inst.has_store_effect(&self.m)
-            || inst.has_load_effect(&self.m)
-            || inst.is_barrier(&self.m)
-        {
-            return;
-        }
-
-        // OPT: This is O(n), but most instructions can't possibly be CSE candidates.
-        for back_iidx in (0..usize::from(iidx)).rev() {
-            let back_iidx = InstIdx::unchecked_from(back_iidx);
-            // Only examine non-`Copy` instructions, to avoid us continually checking the same
-            // (subset of) instructions over and over again.
-            let Some(back) = self.m.inst_nocopy(back_iidx) else {
-                continue;
-            };
-
-            if inst.decopy_eq(&self.m, back) {
-                self.m.replace(iidx, Inst::Copy(back_iidx));
-                return;
+        let inst = match self.m.inst_nocopy(iidx) {
+            // If this instruction is already a `Copy`, then there is nothing for CSE to do.
+            None => return,
+            // There's no point in trying CSE on a `Const` or `Tombstone`.
+            Some(Inst::Const(_)) | Some(Inst::Tombstone) => return,
+            Some(inst @ Inst::Guard(ginst)) => {
+                for (_, back_inst) in self.instll.rev_iter(&self.m, inst) {
+                    if let Inst::Guard(back_ginst) = back_inst {
+                        if ginst.cond(&self.m) == back_ginst.cond(&self.m)
+                            && ginst.expect() == back_ginst.expect()
+                        {
+                            self.m.replace(iidx, Inst::Tombstone);
+                            return;
+                        }
+                    }
+                }
+                inst
             }
-        }
+            Some(inst) => {
+                // We don't perform CSE on instructions that have / enforce effects.
+                if inst.has_store_effect(&self.m)
+                    || inst.has_load_effect(&self.m)
+                    || (inst.is_barrier(&self.m)
+                        && InstDiscriminants::from(inst) != InstDiscriminants::Guard)
+                {
+                    return;
+                }
+
+                // Can we CSE the instruction at `iidx`?
+                for (back_iidx, back_inst) in self.instll.rev_iter(&self.m, inst) {
+                    if inst.decopy_eq(&self.m, back_inst) {
+                        self.m.replace(iidx, Inst::Copy(back_iidx));
+                        return;
+                    }
+                }
+                inst
+            }
+        };
+
+        // We only need to `push` instructions that:
+        //
+        //   1. Can possibly be CSE candidates. Earlier in the function we've ruled out a number of
+        //      things that aren't CSE candidates, which saves us some pointless work.
+        //   2. Haven't been turned into `Copy`s. So only if we've failed to CSE a given
+        //      instruction is it worth pushing to the `instll`.
+        self.instll.push(iidx, inst);
     }
 
     /// Optimise an [ICmpInst].

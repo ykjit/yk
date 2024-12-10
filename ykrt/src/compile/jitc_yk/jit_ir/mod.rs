@@ -99,6 +99,7 @@ use std::{
     hash::Hash,
     mem,
 };
+use strum::{EnumCount, EnumDiscriminants};
 #[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
 
@@ -355,21 +356,6 @@ impl Module {
             let inst = &self.insts[i];
             if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
                 Some((InstIdx::unchecked_from(i), *inst))
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Iterate, in order, over the `InstIdx`s of this module skipping `Const`, `Copy`, and
-    /// `Tombstone` instructions.
-    pub(crate) fn iter_skipping_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> + '_ {
-        // The `unchecked_from` is safe because we know from `Self::push` that we can't have
-        // exceeded `InstIdx`'s bounds.
-        (0..self.insts.len()).filter_map(|i| {
-            let inst = &self.insts[i];
-            if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
-                Some(InstIdx::unchecked_from(i))
             } else {
                 None
             }
@@ -777,6 +763,11 @@ macro_rules! index_16bit {
     ($struct:ident) => {
         #[allow(dead_code)]
         impl $struct {
+            /// What is the maximum value this index type can represent?
+            pub(crate) fn max() -> Self {
+                Self(u16::MAX)
+            }
+
             /// Create an instance of `$struct` without checking whether `v` exceeds the underlying
             /// type's bounds. If it does exceed those bounds, the result will be an instance of
             /// this struct whose values is the `MAX` value the underlying type can represent.
@@ -1349,8 +1340,9 @@ impl InlinedFrame {
 }
 
 /// An IR instruction.
+#[derive(Clone, Copy, Debug, EnumCount, EnumDiscriminants)]
+// Note: changing `repr` to anything other than `u8` means changing `Inst::discriminant`.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug)]
 pub(crate) enum Inst {
     // "Internal" IR instructions: these don't correspond to IR that a user interpreter can
     // express, but are used either for efficient representation of the IR or testing.
@@ -1399,6 +1391,13 @@ pub(crate) enum Inst {
 }
 
 impl Inst {
+    /// What is the numeric discriminant of this [Inst]? These are guaranteed to be consecutive
+    /// integers from `0..Inst::COUNT`.
+    pub(crate) fn discriminant(&self) -> u8 {
+        debug_assert!((InstDiscriminants::from(self) as usize) < Self::COUNT);
+        InstDiscriminants::from(self) as u8
+    }
+
     /// Returns the type of the value that the instruction produces (if any).
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Ty> {
         let idx = self.tyidx(m);
