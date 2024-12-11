@@ -9,6 +9,8 @@ use crate::{
 };
 use dynasmrt::Register as _;
 use libc::c_void;
+#[cfg(debug_assertions)]
+use std::collections::HashMap;
 use std::{ptr, slice, sync::Arc};
 use yksmp::Location as SMLocation;
 
@@ -182,12 +184,38 @@ pub(crate) extern "C" fn __yk_deopt(
             }
         }
 
+        // Sanity check: We shouldn't deopt to the same location twice.
+        #[cfg(debug_assertions)]
+        let mut seen_locs = HashMap::new();
+        // Records deopt of a location `l` with the value `v`.
+        //
+        // l >= 0: DWARF register number.
+        // l < 0: stack offset relative to rbp
+        //
+        // (note rbp-0 is never deopted and thus isn't necessary for us to express)
+        //
+        // FIXME: check for overlapping stack regions too.
+        #[cfg(debug_assertions)]
+        let mut seen = |l: isize, v: u64| {
+            // It's OK to deopt the same value to the same location.
+            // FIXME: but why does this happen?
+            if let std::collections::hash_map::Entry::Vacant(e) = seen_locs.entry(l) {
+                e.insert(v);
+            } else {
+                debug_assert_eq!(seen_locs[&l], v, "duplicate deopt with different value");
+            }
+        };
+
         // Now write all live variables to the new stack in the order they are listed in the AOT
         // stackmap.
         for aotvar in rec.live_vars.iter() {
             // Read live JIT values from the trace's stack frame.
             let jitval = match info.live_vars[varidx].1 {
                 VarLocation::Stack { frame_off, size } => {
+                    // rbp-0 can't contain a variable.
+                    // [rbp-0] points to either the return address or the previous frame's rbp
+                    // (when using --no-omit-framepointer) and thus can't contain live variables.
+                    debug_assert!(frame_off > 0);
                     let p = unsafe { frameaddr.byte_sub(usize::try_from(frame_off).unwrap()) };
                     match size {
                         1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
@@ -219,8 +247,12 @@ pub(crate) extern "C" fn __yk_deopt(
             };
             match aotloc {
                 SMLocation::Register(reg, size, off, extras) => {
+                    #[cfg(debug_assertions)]
+                    seen(isize::try_from(*reg).unwrap(), jitval);
                     registers[usize::from(*reg)] = jitval;
                     for extra in extras {
+                        #[cfg(debug_assertions)]
+                        seen(isize::from(*extra), jitval);
                         // Write any additional locations that were tracked for this variable.
                         // Numbers greater or equal to zero are registers in Dwarf notation.
                         // Negative numbers are offsets relative to RBP.
@@ -258,6 +290,8 @@ pub(crate) extern "C" fn __yk_deopt(
                     continue;
                 }
                 SMLocation::Indirect(reg, off, size) => {
+                    #[cfg(debug_assertions)]
+                    seen(isize::try_from(*off).unwrap(), jitval);
                     debug_assert_eq!(*reg, RBP_DWARF_NUM);
                     let temp = if i == 0 {
                         // While the bottom frame is already on the stack and doesn't need to
