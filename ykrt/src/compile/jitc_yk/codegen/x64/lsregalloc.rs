@@ -342,6 +342,7 @@ impl LSRegAlloc<'_> {
                     | RegConstraint::InputIntoRegAndClobber(_, _) => false,
                     RegConstraint::InputOutputIntoReg(_, _)
                     | RegConstraint::Output
+                    | RegConstraint::OutputCanBeSameAsInput(_)
                     | RegConstraint::OutputFromReg(_)
                     | RegConstraint::InputOutput(_) => true,
                     RegConstraint::Clobber(_) | RegConstraint::Temporary => false,
@@ -372,21 +373,55 @@ impl LSRegAlloc<'_> {
                 }
                 RegConstraint::InputOutput(_)
                 | RegConstraint::Output
+                | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::Input(_)
                 | RegConstraint::Temporary => {}
+            }
+        }
+
+        // Deal with `OutputCanBeSameAsInput`.
+        for i in 0..constraints.len() {
+            if let RegConstraint::OutputCanBeSameAsInput(search_op) = constraints[i].clone() {
+                if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
+                    self.vloc_hints[usize::from(iidx)]
+                {
+                    if avoid.is_set(reg) {
+                        continue;
+                    }
+                    if let Operand::Var(search_op_iidx) = search_op {
+                        if !self.is_inst_var_still_used_after(iidx, search_op_iidx) {
+                            for j in 0..constraints.len() {
+                                if let RegConstraint::Input(in_op) = constraints[j].clone() {
+                                    if search_op == in_op {
+                                        constraints[i] = RegConstraint::OutputFromReg(reg);
+                                        constraints[j] = RegConstraint::InputIntoReg(in_op, reg);
+                                        asgn[i] = Some(reg);
+                                        asgn[j] = Some(reg);
+                                        avoid.set(reg);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
         // If we have a hint for a constraint, use it.
         for (i, cnstr) in constraints.iter_mut().enumerate() {
             match cnstr {
-                RegConstraint::Output | RegConstraint::InputOutput(_) => {
+                RegConstraint::Output
+                | RegConstraint::OutputCanBeSameAsInput(_)
+                | RegConstraint::InputOutput(_) => {
                     if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
                         self.vloc_hints[usize::from(iidx)]
                     {
                         if !avoid.is_set(reg) {
                             *cnstr = match cnstr {
                                 RegConstraint::Output => RegConstraint::OutputFromReg(reg),
+                                RegConstraint::OutputCanBeSameAsInput(_) => {
+                                    RegConstraint::OutputFromReg(reg)
+                                }
                                 RegConstraint::InputOutput(op) => {
                                     RegConstraint::InputOutputIntoReg(op.clone(), reg)
                                 }
@@ -434,6 +469,7 @@ impl LSRegAlloc<'_> {
                     // These were all handled in the first for loop.
                 }
                 RegConstraint::Output
+                | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::OutputFromReg(_)
                 | RegConstraint::Temporary => (),
             }
@@ -522,6 +558,7 @@ impl LSRegAlloc<'_> {
                     }
                 }
                 RegConstraint::Output
+                | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::OutputFromReg(_)
                 | RegConstraint::Clobber(_)
                 | RegConstraint::Temporary => (),
@@ -558,7 +595,9 @@ impl LSRegAlloc<'_> {
                     }
                     self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
                 }
-                RegConstraint::Output | RegConstraint::OutputFromReg(_) => {
+                RegConstraint::Output
+                | RegConstraint::OutputCanBeSameAsInput(_)
+                | RegConstraint::OutputFromReg(_) => {
                     self.move_or_spill_gp(asm, iidx, &mut avoid, reg);
                     self.gp_regset.set(reg);
                     self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
@@ -869,6 +908,7 @@ impl LSRegAlloc<'_> {
                     | RegConstraint::InputIntoRegAndClobber(_, _) => false,
                     RegConstraint::InputOutputIntoReg(_, _)
                     | RegConstraint::Output
+                    | RegConstraint::OutputCanBeSameAsInput(_)
                     | RegConstraint::OutputFromReg(_)
                     | RegConstraint::InputOutput(_) => true,
                     RegConstraint::Clobber(_) | RegConstraint::Temporary => false,
@@ -899,8 +939,16 @@ impl LSRegAlloc<'_> {
                 }
                 RegConstraint::Input(_)
                 | RegConstraint::InputOutput(_)
+                | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::Output
                 | RegConstraint::Temporary => {}
+            }
+        }
+
+        // Deal with `OutputCanBeSameAsInput`.
+        for cnstr in &constraints {
+            if let RegConstraint::OutputCanBeSameAsInput(_) = cnstr {
+                todo!();
             }
         }
 
@@ -939,6 +987,7 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Output
                 | RegConstraint::OutputFromReg(_)
                 | RegConstraint::Temporary => (),
+                RegConstraint::OutputCanBeSameAsInput(_) => todo!(),
             }
         }
 
@@ -1028,6 +1077,7 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::OutputFromReg(_)
                 | RegConstraint::Clobber(_)
                 | RegConstraint::Temporary => (),
+                RegConstraint::OutputCanBeSameAsInput(_) => todo!(),
             }
         }
 
@@ -1071,6 +1121,7 @@ impl LSRegAlloc<'_> {
                     self.fp_regset.unset(reg);
                     self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
                 }
+                RegConstraint::OutputCanBeSameAsInput(_) => todo!(),
             }
         }
         asgn.map(|x| x.unwrap())
@@ -1281,7 +1332,7 @@ impl LSRegAlloc<'_> {
 ///
 /// In the following `R` is a fixed register specified inside the variant, whereas *x* is an
 /// unspecified register determined by the allocator.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum RegConstraint<R: Register> {
     /// Make sure `Operand` is loaded into a register *x* on entry; its value must be unchanged
     /// after the instruction is executed.
@@ -1299,6 +1350,14 @@ pub(crate) enum RegConstraint<R: Register> {
     InputOutputIntoReg(Operand, R),
     /// The result of this instruction will be stored in register *x*.
     Output,
+    /// The result of this instruction will be stored in register *x*. That register can be the
+    /// same as the register used for an `Input(Operand)` constraint, or it can be a different
+    /// register, depending on what the register allocator considers best.
+    ///
+    /// Note: the `Operand` in an `OutputCanBeSameAsInput` is used to search for an `Input`
+    /// constraint with the same `Operand`. In other words, the `Operand` in an
+    /// `OutputCanBeSameAsInput` is not used directly in the allocator.
+    OutputCanBeSameAsInput(Operand),
     /// The result of this instruction will be stored in register `R`.
     OutputFromReg(R),
     /// The register `R` will be clobbered.
@@ -1317,7 +1376,11 @@ impl<R: dynasmrt::Register> RegConstraint<R> {
             | Self::InputIntoRegAndClobber(o, _)
             | Self::InputOutput(o)
             | Self::InputOutputIntoReg(o, _) => Some(o),
-            Self::Output | Self::OutputFromReg(_) | Self::Clobber(_) | Self::Temporary => None,
+            Self::Output
+            | Self::OutputCanBeSameAsInput(_)
+            | Self::OutputFromReg(_)
+            | Self::Clobber(_)
+            | Self::Temporary => None,
         }
     }
 }
