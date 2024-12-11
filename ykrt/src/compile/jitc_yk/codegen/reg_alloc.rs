@@ -4,9 +4,12 @@
 //!  - describes the generic interface to register allocators.
 //!  - contains concrete implementations of register allocators.
 
+use crate::compile::jitc_yk::jit_ir::{InstIdx, Module};
 use dynasmrt::x64::{Rq, Rx};
 
 /// Where is an SSA variable stored?
+///
+/// FIXME: Too much of this is hard-coded to the x64 backend.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum VarLocation {
     /// The SSA variable is on the stack of the of the executed trace or the main interpreter loop.
@@ -45,6 +48,59 @@ pub(crate) enum Register {
 pub(crate) enum StackDirection {
     GrowsUp,
     GrowsDown,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl VarLocation {
+    pub(crate) fn from_yksmp_location(m: &Module, iidx: InstIdx, x: &yksmp::Location) -> Self {
+        match x {
+            yksmp::Location::Register(0, ..) => VarLocation::Register(Register::GP(Rq::RAX)),
+            yksmp::Location::Register(1, ..) => {
+                // Since the control point passes the stackmap ID via RDX this case only happens in
+                // side-traces.
+                VarLocation::Register(Register::GP(Rq::RDX))
+            }
+            yksmp::Location::Register(2, ..) => VarLocation::Register(Register::GP(Rq::RCX)),
+            yksmp::Location::Register(3, ..) => VarLocation::Register(Register::GP(Rq::RBX)),
+            yksmp::Location::Register(4, ..) => VarLocation::Register(Register::GP(Rq::RSI)),
+            yksmp::Location::Register(5, ..) => VarLocation::Register(Register::GP(Rq::RDI)),
+            yksmp::Location::Register(8, ..) => VarLocation::Register(Register::GP(Rq::R8)),
+            yksmp::Location::Register(9, ..) => VarLocation::Register(Register::GP(Rq::R9)),
+            yksmp::Location::Register(10, ..) => VarLocation::Register(Register::GP(Rq::R10)),
+            yksmp::Location::Register(11, ..) => VarLocation::Register(Register::GP(Rq::R11)),
+            yksmp::Location::Register(12, ..) => VarLocation::Register(Register::GP(Rq::R12)),
+            yksmp::Location::Register(13, ..) => VarLocation::Register(Register::GP(Rq::R13)),
+            yksmp::Location::Register(14, ..) => VarLocation::Register(Register::GP(Rq::R14)),
+            yksmp::Location::Register(15, ..) => VarLocation::Register(Register::GP(Rq::R15)),
+            yksmp::Location::Register(x, ..) if *x >= 17 && *x <= 32 => VarLocation::Register(
+                Register::FP(super::x64::lsregalloc::FP_REGS[usize::from(x - 17)]),
+            ),
+            yksmp::Location::Direct(6, off, size) => VarLocation::Direct {
+                frame_off: *off,
+                size: usize::from(*size),
+            },
+            // Since the trace shares the same stack frame as the main interpreter loop, we can
+            // translate indirect locations into normal stack locations. Note that while stackmaps
+            // use negative offsets, we use positive offsets for stack locations.
+            yksmp::Location::Indirect(6, off, size) => VarLocation::Stack {
+                frame_off: u32::try_from(*off * -1).unwrap(),
+                size: usize::from(*size),
+            },
+            yksmp::Location::Constant(v) => {
+                // FIXME: This isn't fine-grained enough, as there may be constants of any
+                // bit-size.
+                let byte_size = m.inst(iidx).def_byte_size(m);
+                debug_assert!(byte_size <= 8);
+                VarLocation::ConstInt {
+                    bits: u32::try_from(byte_size).unwrap() * 8,
+                    v: u64::from(*v),
+                }
+            }
+            e => {
+                todo!("{:?}", e);
+            }
+        }
+    }
 }
 
 impl From<&VarLocation> for yksmp::Location {
