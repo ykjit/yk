@@ -123,6 +123,8 @@ pub(crate) struct LSRegAlloc<'a> {
     spills: Vec<SpillState>,
     /// The abstract stack: shared between general purpose and floating point registers.
     stack: AbstractStack,
+    /// What [VarLocation] should an instruction aim to put its output to?
+    vloc_hints: Vec<Option<VarLocation>>,
 }
 
 impl<'a> LSRegAlloc<'a> {
@@ -131,6 +133,7 @@ impl<'a> LSRegAlloc<'a> {
     pub(crate) fn new(
         m: &'a Module,
         inst_vals_alive_until: Vec<InstIdx>,
+        vloc_hints: Vec<Option<VarLocation>>,
         interp_stack_len: usize,
     ) -> Self {
         #[cfg(debug_assertions)]
@@ -166,6 +169,7 @@ impl<'a> LSRegAlloc<'a> {
             fp_regset: RegSet::with_fp_reserved(),
             fp_reg_states,
             inst_vals_alive_until,
+            vloc_hints,
             spills: vec![SpillState::Empty; m.insts_len()],
             stack,
         }
@@ -318,7 +322,7 @@ impl LSRegAlloc<'_> {
         &mut self,
         asm: &mut Assembler,
         iidx: InstIdx,
-        constraints: [RegConstraint<Rq>; N],
+        mut constraints: [RegConstraint<Rq>; N],
     ) -> [Rq; N] {
         // No constraint operands should be float-typed.
         #[cfg(debug_assertions)]
@@ -366,10 +370,34 @@ impl LSRegAlloc<'_> {
                     asgn[i] = Some(*reg);
                     avoid.set(*reg);
                 }
-                RegConstraint::Input(_)
-                | RegConstraint::InputOutput(_)
+                RegConstraint::InputOutput(_)
                 | RegConstraint::Output
+                | RegConstraint::Input(_)
                 | RegConstraint::Temporary => {}
+            }
+        }
+
+        // If we have a hint for a constraint, use it.
+        for (i, cnstr) in constraints.iter_mut().enumerate() {
+            match cnstr {
+                RegConstraint::Output | RegConstraint::InputOutput(_) => {
+                    if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
+                        self.vloc_hints[usize::from(iidx)]
+                    {
+                        if !avoid.is_set(reg) {
+                            *cnstr = match cnstr {
+                                RegConstraint::Output => RegConstraint::OutputFromReg(reg),
+                                RegConstraint::InputOutput(op) => {
+                                    RegConstraint::InputOutputIntoReg(op.clone(), reg)
+                                }
+                                _ => unreachable!(),
+                            };
+                            asgn[i] = Some(reg);
+                            avoid.set(reg);
+                        }
+                    }
+                }
+                _ => (),
             }
         }
 
@@ -624,15 +652,31 @@ impl LSRegAlloc<'_> {
             RegState::FromConst(_) => (),
             RegState::FromInst(query_iidx) => {
                 if self.is_inst_var_still_used_after(cur_iidx, query_iidx) {
-                    match self.gp_regset.find_empty_avoiding(*avoid) {
-                        Some(new_reg) => {
-                            dynasm!(asm; mov Rq(new_reg.code()), Rq(old_reg.code()));
-                            avoid.set(new_reg);
-                            self.gp_regset.set(new_reg);
-                            self.gp_reg_states[usize::from(new_reg.code())] =
-                                self.gp_reg_states[usize::from(old_reg.code())];
+                    let mut new_reg = None;
+                    // Try to use `query_iidx`s hint, if there is one, and it's not in use...
+                    if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
+                        self.vloc_hints[usize::from(query_iidx)]
+                    {
+                        if !self.gp_regset.is_set(reg) && !avoid.is_set(reg) {
+                            new_reg = Some(reg);
                         }
-                        None => self.spill_gp_if_not_already(asm, old_reg),
+                    }
+                    // ...otherwise try to find an arbitrary empty register.
+                    if new_reg.is_none() {
+                        if let Some(reg) = self.gp_regset.find_empty_avoiding(*avoid) {
+                            new_reg = Some(reg);
+                        }
+                    }
+                    if let Some(new_reg) = new_reg {
+                        // We found a register to move to.
+                        dynasm!(asm; mov Rq(new_reg.code()), Rq(old_reg.code()));
+                        avoid.set(new_reg);
+                        self.gp_regset.set(new_reg);
+                        self.gp_reg_states[usize::from(new_reg.code())] =
+                            self.gp_reg_states[usize::from(old_reg.code())];
+                    } else {
+                        // We have no choice but to spill.
+                        self.spill_gp_if_not_already(asm, old_reg);
                     }
                 }
             }

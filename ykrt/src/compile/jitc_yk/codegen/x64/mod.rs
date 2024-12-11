@@ -249,11 +249,11 @@ impl<'a> Assemble<'a> {
             }
         };
 
-        let (inst_vals_alive_until, used_insts, ptradds) = rev_analyse::rev_analyse(m)?;
+        let (inst_vals_alive_until, used_insts, ptradds, vloc_hints) = rev_analyse::rev_analyse(m)?;
 
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, inst_vals_alive_until, sp_offset),
+            ra: LSRegAlloc::new(m, inst_vals_alive_until, vloc_hints, sp_offset),
             asm,
             loop_start_locs: Vec::new(),
             deoptinfo: HashMap::new(),
@@ -3215,10 +3215,8 @@ mod tests {
                 ...
                 shl r.32.a, 0x02
                 ; %5: i63 = shl %2, 3i63
-                ...
                 shl r.64.b, 0x03
                 ; %6: i32 = shl %1, %4
-                ......
                 shl r.32.b, cl
                 ...
                 ",
