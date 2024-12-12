@@ -81,7 +81,21 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
     let verbose = true;
 
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
-    let (dst_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
+    let (dst_rec, dst_rec_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
+
+    // TODO: memcopy the stack or allocate another stack frame
+
+    let mut dest_rsp = dst_rec.size;
+    if dst_rec_pinfo.hasfp {
+        dest_rsp -= 8; // TODO: use whatever is used in deopt
+    }
+    dynasm!(asm
+        ; .arch x64
+        ; mov rbp, QWORD frameaddr as i64 // reset rbp
+        ; mov rsp, QWORD frameaddr as i64 // reset rsp
+        ; sub rsp, (dest_rsp).try_into().unwrap()
+        ; int3
+    );
 
     // Save all the registers to the stack
     dynasm!(asm
@@ -178,6 +192,8 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
                         match min_size {
                             // based on ykrt/src/compile/jitc_yk/codegen/x64/mod.rs
                             1 => dynasm!(asm
+                                // TODO: this is problematic cause of read and writes at the sames time
+                                // 1. memcopy the whole stack and then copy to the right rbp
                                 ; mov al, BYTE [rbp + i32::try_from(*src_off).unwrap()]
                                 ; mov BYTE [rbp + i32::try_from(*dst_off).unwrap()], al
                             ),
@@ -260,25 +276,6 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
         println!("@@ src_size: 0x{:x}, src_rbp: 0x{:x}, src addr: 0x{:x}", src_rec.size as i64, frameaddr as i64, src_rec.offset);
     }
 
-
-
-    let align_rsp = (dst_rec.size as u64 + frameaddr as u64) % 16;
-    // check that dst_rsp is 16 aligned
-    if align_rsp != 0 && verbose {
-        println!("@@ dst_rsp {} is not 16 aligned, adding {} to dst_rsp", (dst_rec.size as u64 + frameaddr as u64), align_rsp);
-    }
-
-    // reset rsp and rbp
-    dynasm!(asm
-        ; .arch x64
-        // ; int3
-        ; mov rbp, QWORD frameaddr as i64 // reset rbp
-        ; mov rsp, QWORD frameaddr as i64 // reset rsp
-        // Align rsp to 16
-        ; sub rsp, (dst_rec.size + align_rsp).try_into().unwrap()
-        // ; sub rsp, (dst_rec.size).try_into().unwrap()
-        // ; int3
-    );
     let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
     let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
 
