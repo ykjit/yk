@@ -204,6 +204,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 aot_ir::BBlockId::new(0.into(), 0.into()),
                                 live_vars,
                                 Vec::new(),
+                                0,
                             ))
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(cond)?, is_true, gidx);

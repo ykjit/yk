@@ -1274,9 +1274,12 @@ pub(crate) struct GuardInfo {
     bid: aot_ir::BBlockId,
     /// Live variables, mapping AOT vars to JIT [Operand]s.
     live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
-    // Inlined frames info.
-    // FIXME With this field, the aotlives field is redundant.
+    /// Inlined frames info.
+    /// FIXME With this field, the aotlives field is redundant.
     inlined_frames: Vec<InlinedFrame>,
+    /// What AOT safepoint does this guard correspond to? This is used solely for debugging
+    /// purposes.
+    safepoint_id: u64,
 }
 
 impl GuardInfo {
@@ -1284,11 +1287,13 @@ impl GuardInfo {
         bid: aot_ir::BBlockId,
         live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
         inlined_frames: Vec<InlinedFrame>,
+        safepoint_id: u64,
     ) -> Self {
         Self {
             bid,
             live_vars,
             inlined_frames,
+            safepoint_id,
         }
     }
 
@@ -1734,15 +1739,9 @@ impl fmt::Display for DisplayableInst<'_> {
                 x.lhs(self.m).display(self.m),
                 x.rhs(self.m).display(self.m)
             ),
-            Inst::Guard(
-                x @ GuardInst {
-                    cond,
-                    expect,
-                    gidx: _,
-                },
-            ) => {
-                let live_vars = x
-                    .guard_info(self.m)
+            Inst::Guard(x @ GuardInst { cond, expect, gidx }) => {
+                let gi = x.guard_info(self.m);
+                let live_vars = gi
                     .live_vars()
                     .iter()
                     .map(|(x, y)| {
@@ -1751,16 +1750,17 @@ impl fmt::Display for DisplayableInst<'_> {
                             usize::from(x.funcidx()),
                             usize::from(x.bbidx()),
                             usize::from(x.iidx()),
-                            y.unpack(self.m).display(self.m)
+                            y.unpack(self.m).display(self.m),
                         )
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(
                     f,
-                    "guard {}, {}, [{live_vars}]",
+                    "guard {}, {}, [{live_vars}] ; trace_gidx {gidx} safepoint_id {}",
                     if *expect { "true" } else { "false" },
                     cond.unpack(self.m).display(self.m),
+                    gi.safepoint_id
                 )
             }
             Inst::Param(x) => {
