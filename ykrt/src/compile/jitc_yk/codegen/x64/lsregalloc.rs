@@ -42,7 +42,7 @@ use dynasmrt::{
     },
     DynasmApi, Register,
 };
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem};
 
 /// The complete set of general purpose x64 registers, in the order that dynasmrt defines them.
 /// Note that large portions of the code rely on these registers mapping to the integers 0..15
@@ -149,12 +149,12 @@ impl<'a> LSRegAlloc<'a> {
             }
         }
 
-        let mut gp_reg_states = [RegState::Empty; GP_REGS_LEN];
+        let mut gp_reg_states = std::array::from_fn(|_| RegState::Empty);
         for reg in RESERVED_GP_REGS {
             gp_reg_states[usize::from(reg.code())] = RegState::Reserved;
         }
 
-        let mut fp_reg_states = [RegState::Empty; FP_REGS_LEN];
+        let mut fp_reg_states = std::array::from_fn(|_| RegState::Empty);
         for reg in RESERVED_FP_REGS {
             fp_reg_states[usize::from(reg.code())] = RegState::Reserved;
         }
@@ -698,10 +698,11 @@ impl LSRegAlloc<'_> {
     fn move_gp_reg(&mut self, asm: &mut Assembler, old_reg: Rq, new_reg: Rq) {
         dynasm!(asm; mov Rq(new_reg.code()), Rq(old_reg.code()));
         self.gp_regset.set(new_reg);
-        self.gp_reg_states[usize::from(new_reg.code())] =
-            self.gp_reg_states[usize::from(old_reg.code())];
+        self.gp_reg_states[usize::from(new_reg.code())] = mem::replace(
+            &mut self.gp_reg_states[usize::from(old_reg.code())],
+            RegState::Empty,
+        );
         self.gp_regset.unset(old_reg);
-        self.gp_reg_states[usize::from(old_reg.code())] = RegState::Empty;
     }
 
     /// Swap the values, and register states, for `old_reg` and `new_reg`.
@@ -746,7 +747,7 @@ impl LSRegAlloc<'_> {
                         avoid.set(new_reg);
                         self.gp_regset.set(new_reg);
                         self.gp_reg_states[usize::from(new_reg.code())] =
-                            self.gp_reg_states[usize::from(old_reg.code())];
+                            self.gp_reg_states[usize::from(old_reg.code())].clone();
                     } else {
                         // We have no choice but to spill.
                         self.spill_gp_if_not_already(asm, old_reg);
@@ -1213,10 +1214,11 @@ impl LSRegAlloc<'_> {
     fn move_fp_reg(&mut self, asm: &mut Assembler, old_reg: Rx, new_reg: Rx) {
         dynasm!(asm; movsd Rx(new_reg.code()), Rx(old_reg.code()));
         self.fp_regset.set(new_reg);
-        self.fp_reg_states[usize::from(new_reg.code())] =
-            self.fp_reg_states[usize::from(old_reg.code())];
+        self.fp_reg_states[usize::from(new_reg.code())] = mem::replace(
+            &mut self.fp_reg_states[usize::from(old_reg.code())],
+            RegState::Empty,
+        );
         self.fp_regset.unset(old_reg);
-        self.fp_reg_states[usize::from(old_reg.code())] = RegState::Empty;
     }
 
     /// Swap the values, and register states, for `old_reg` and `new_reg`.
@@ -1250,7 +1252,7 @@ impl LSRegAlloc<'_> {
                             avoid.set(new_reg);
                             self.fp_regset.set(new_reg);
                             self.fp_reg_states[usize::from(new_reg.code())] =
-                                self.fp_reg_states[usize::from(old_reg.code())];
+                                self.fp_reg_states[usize::from(old_reg.code())].clone();
                         }
                         None => self.spill_fp_if_not_already(asm, old_reg),
                     }
@@ -1419,7 +1421,7 @@ impl<R: dynasmrt::Register> RegConstraint<R> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum RegState {
     Reserved,
     Empty,
