@@ -62,10 +62,9 @@ use std::{
 };
 use vob::Vob;
 use ykaddr::addr::symbol_to_ptr;
-use yksmp;
 
 mod deopt;
-mod lsregalloc;
+pub(super) mod lsregalloc;
 mod rev_analyse;
 
 use deopt::{__yk_deopt, __yk_guardcheck};
@@ -250,11 +249,11 @@ impl<'a> Assemble<'a> {
             }
         };
 
-        let (inst_vals_alive_until, used_insts, ptradds) = rev_analyse::rev_analyse(m)?;
+        let (inst_vals_alive_until, used_insts, ptradds, vloc_hints) = rev_analyse::rev_analyse(m)?;
 
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, inst_vals_alive_until, sp_offset),
+            ra: LSRegAlloc::new(m, inst_vals_alive_until, vloc_hints, sp_offset),
             asm,
             loop_start_locs: Vec::new(),
             deoptinfo: HashMap::new(),
@@ -1063,81 +1062,8 @@ impl<'a> Assemble<'a> {
     /// Codegen a [jit_ir::ParamInst]. This only informs the register allocator about the
     /// locations of live variables without generating any actual machine code.
     fn cg_param(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParamInst) {
-        let m = match self.m.param(inst.paramidx()) {
-            yksmp::Location::Register(0, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))
-            }
-            yksmp::Location::Register(1, ..) => {
-                // Since the control point passes the stackmap ID via RDX this case only happens in
-                // side-traces.
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RDX))
-            }
-            yksmp::Location::Register(2, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RCX))
-            }
-            yksmp::Location::Register(3, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RBX))
-            }
-            yksmp::Location::Register(4, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RSI))
-            }
-            yksmp::Location::Register(5, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RDI))
-            }
-            yksmp::Location::Register(8, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R8))
-            }
-            yksmp::Location::Register(9, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R9))
-            }
-            yksmp::Location::Register(10, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R10))
-            }
-            yksmp::Location::Register(11, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R11))
-            }
-            yksmp::Location::Register(12, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R12))
-            }
-            yksmp::Location::Register(13, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R13))
-            }
-            yksmp::Location::Register(14, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R14))
-            }
-            yksmp::Location::Register(15, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R15))
-            }
-            yksmp::Location::Register(x, ..) if *x >= 17 && *x <= 32 => VarLocation::Register(
-                reg_alloc::Register::FP(lsregalloc::FP_REGS[usize::from(x - 17)]),
-            ),
-            yksmp::Location::Direct(6, off, size) => VarLocation::Direct {
-                frame_off: *off,
-                size: usize::from(*size),
-            },
-            // Since the trace shares the same stack frame as the main interpreter loop, we can
-            // translate indirect locations into normal stack locations. Note that while stackmaps
-            // use negative offsets, we use positive offsets for stack locations.
-            yksmp::Location::Indirect(6, off, size) => VarLocation::Stack {
-                frame_off: u32::try_from(*off * -1).unwrap(),
-                size: usize::from(*size),
-            },
-            yksmp::Location::Constant(v) => {
-                // FIXME: This isn't fine-grained enough, as there may be constants of any
-                // bit-size.
-                let byte_size = self.m.inst(iidx).def_byte_size(self.m);
-                debug_assert!(byte_size <= 8);
-                VarLocation::ConstInt {
-                    bits: u32::try_from(byte_size).unwrap() * 8,
-                    v: u64::from(*v),
-                }
-            }
-            e => {
-                todo!("{:?}", e);
-            }
-        };
-        let size = self.m.inst(iidx).def_byte_size(self.m);
-        debug_assert!(size <= REG64_BYTESIZE);
+        let m = VarLocation::from_yksmp_location(self.m, iidx, self.m.param(inst.paramidx()));
+        debug_assert!(self.m.inst(iidx).def_byte_size(self.m) <= REG64_BYTESIZE);
         match m {
             VarLocation::Register(reg_alloc::Register::GP(reg)) => {
                 self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
@@ -1169,49 +1095,25 @@ impl<'a> Assemble<'a> {
 
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
-                if let Operand::Var(op_iidx) = ptr_op {
-                    if self.ra.is_inst_var_still_used_after(iidx, op_iidx) {
-                        // If the operand value is still live after the current instruction, avoid
-                        // clobbering it, in the hope that it can be reused.
-                        let [in_reg, out_reg] = self.ra.assign_gp_regs(
-                            &mut self.asm,
-                            iidx,
-                            [RegConstraint::Input(ptr_op), RegConstraint::Output],
-                        );
-                        let size = self.m.inst(iidx).def_byte_size(self.m);
-                        debug_assert!(size <= REG64_BYTESIZE);
-                        match size {
-                            1 => {
-                                dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code()) + off])
-                            }
-                            2 => {
-                                dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code()) + off])
-                            }
-                            4 => {
-                                dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code()) + off])
-                            }
-                            8 => {
-                                dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code()) + off])
-                            }
-                            _ => todo!("{}", size),
-                        };
-                        return;
-                    }
-                }
-                // The input operand is dead after this instruction, so reuse the same register for
-                // input and output.
-                let [reg] = self.ra.assign_gp_regs(
+                let [in_reg, out_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
-                    [RegConstraint::InputOutput(ptr_op)],
+                    [
+                        RegConstraint::Input(ptr_op.clone()),
+                        RegConstraint::OutputCanBeSameAsInput(ptr_op),
+                    ],
                 );
                 let size = self.m.inst(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_BYTESIZE);
                 match size {
-                    1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + off]),
-                    2 => dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code()) + off]),
-                    4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code()) + off]),
-                    8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code()) + off]),
+                    1 => {
+                        dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code()) + off])
+                    }
+                    2 => {
+                        dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code()) + off])
+                    }
+                    4 => dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code()) + off]),
+                    8 => dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code()) + off]),
                     _ => todo!("{}", size),
                 };
             }
@@ -1240,13 +1142,17 @@ impl<'a> Assemble<'a> {
         // size of the LLVM pointer index type. For address space zero on x86, truncation can't
         // happen, and when an immediate second operand is used for x86_64 `add`, it is implicitly
         // sign extended.
-        let [reg] = self.ra.assign_gp_regs(
+        let ptr_op = inst.ptr(self.m);
+        let [in_reg, out_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
-            [RegConstraint::InputOutput(inst.ptr(self.m))],
+            [
+                RegConstraint::Input(ptr_op.clone()),
+                RegConstraint::OutputCanBeSameAsInput(ptr_op),
+            ],
         );
 
-        dynasm!(self.asm ; add Rq(reg.code()), inst.off());
+        dynasm!(self.asm ; lea Rq(out_reg.code()), [Rq(in_reg.code()) + inst.off()]);
     }
 
     fn cg_dynptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::DynPtrAddInst) {
@@ -2780,7 +2686,7 @@ mod tests {
             "
                 ...
                 ; %1: ptr = ptr_add %0, 64
-                add r.64.x, 0x40
+                lea r.64.x, [r.64._+0x40]
                 ...
                 ",
             false,
@@ -2809,10 +2715,9 @@ mod tests {
                 ; %3: i64 = load %2
                 mov r.64.x, [rbx+{{_}}]
                 ; %4: ptr = ptr_add %1, 32
-                mov r.64.y, r.64._
-                add r.64._, 0x20
+                lea r.64.y, [r.64.z+0x20]
                 ; %5: i64 = load %4
-                mov r.64._, [r.64.y+0x20]
+                mov r.64._, [r.64.z+0x20]
                 ...
                 ",
             false,
@@ -3289,10 +3194,8 @@ mod tests {
                 ...
                 shl r.32.a, 0x02
                 ; %5: i63 = shl %2, 3i63
-                ...
                 shl r.64.b, 0x03
                 ; %6: i32 = shl %1, %4
-                ......
                 shl r.32.b, cl
                 ...
                 ",
