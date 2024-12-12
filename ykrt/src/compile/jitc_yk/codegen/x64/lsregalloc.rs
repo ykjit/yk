@@ -317,6 +317,40 @@ impl LSRegAlloc<'_> {
         self.spills[usize::from(iidx)] = SpillState::ConstInt { bits, v };
     }
 
+    /// Assign registers for the instruction `iidx`, which consumes the [Operand] `op` but does not
+    /// change its value. In many cases, the register allocator can avoid generating any code for
+    /// this case at all.
+    pub(crate) fn assign_gp_pass_through(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        op: Operand,
+    ) {
+        match op {
+            Operand::Var(op_iidx) => {
+                match self.gp_reg_states.iter().position(|x| {
+                    if let RegState::FromInst(y) = x {
+                        *y == op_iidx
+                    } else {
+                        false
+                    }
+                }) {
+                    Some(reg_i) => {
+                        if self.is_inst_var_still_used_after(iidx, op_iidx) {
+                            let mut avoid = RegSet::with_gp_reserved();
+                            self.move_or_spill_gp(asm, iidx, &mut avoid, GP_REGS[reg_i]);
+                        }
+                        self.gp_reg_states[reg_i] = RegState::FromInst(iidx);
+                    }
+                    None => {
+                        self.spills[usize::from(iidx)] = self.spills[usize::from(op_iidx)];
+                    }
+                }
+            }
+            Operand::Const(_cidx) => todo!(),
+        }
+    }
+
     /// Assign registers for the instruction at position `iidx`.
     pub(crate) fn assign_gp_regs<const N: usize>(
         &mut self,

@@ -1922,47 +1922,56 @@ impl<'a> Assemble<'a> {
         dynasm!(self.asm; ->tloop_start:);
     }
 
-    fn cg_sext(&mut self, iidx: InstIdx, i: &jit_ir::SExtInst) {
-        let [reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [RegConstraint::InputOutput(i.val(self.m))],
-        );
-
-        let src_val = i.val(self.m);
+    fn cg_sext(&mut self, iidx: InstIdx, sinst: &jit_ir::SExtInst) {
+        let src_val = sinst.val(self.m);
         let src_type = self.m.type_(src_val.tyidx(self.m));
         let Ty::Integer(src_bitsize) = src_type else {
             unreachable!(); // must be an integer
         };
 
-        let dest_type = self.m.type_(i.dest_tyidx());
+        let dest_type = self.m.type_(sinst.dest_tyidx());
         let Ty::Integer(dest_bitsize) = dest_type else {
             unreachable!(); // must be an integer
         };
 
         if *dest_bitsize <= u32::try_from(REG64_BITSIZE).unwrap() {
-            // If it fits in a register, we can just sign extend up to the entire register width.
-            self.sign_extend_to_reg64(reg, u8::try_from(*src_bitsize).unwrap());
+            if *src_bitsize == 64 {
+                // The 64 bit registers are implicitly sign extended.
+                self.ra
+                    .assign_gp_pass_through(&mut self.asm, iidx, sinst.val(self.m));
+            } else {
+                let [reg] = self.ra.assign_gp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::InputOutput(sinst.val(self.m))],
+                );
+                self.sign_extend_to_reg64(reg, u8::try_from(*src_bitsize).unwrap());
+            }
         } else {
             todo!("{} {}", src_bitsize, dest_bitsize);
         }
     }
 
-    fn cg_zext(&mut self, iidx: InstIdx, i: &jit_ir::ZExtInst) {
-        let [reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [RegConstraint::InputOutput(i.val(self.m))],
-        );
-
-        let src_type = self.m.type_(i.val(self.m).tyidx(self.m));
+    fn cg_zext(&mut self, iidx: InstIdx, zinst: &jit_ir::ZExtInst) {
+        let src_type = self.m.type_(zinst.val(self.m).tyidx(self.m));
         let src_bitsize = src_type.bit_size().unwrap();
-        let dest_type = self.m.type_(i.dest_tyidx());
+        let dest_type = self.m.type_(zinst.dest_tyidx());
         let dest_bitsize = dest_type.bit_size().unwrap();
 
         if dest_bitsize <= REG64_BITSIZE {
-            // If it fits in a register, we can just sign extend up to the entire register width.
-            self.zero_extend_to_reg64(reg, u8::try_from(src_bitsize).unwrap());
+            if src_bitsize == 32 || src_bitsize == 64 {
+                // The 32 and 64 bit registers are implicitly zero extended on x64.
+                self.ra
+                    .assign_gp_pass_through(&mut self.asm, iidx, zinst.val(self.m));
+            } else {
+                let [reg] = self.ra.assign_gp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::InputOutput(zinst.val(self.m))],
+                );
+
+                self.zero_extend_to_reg64(reg, u8::try_from(src_bitsize).unwrap());
+            }
         } else {
             todo!("{} {}", src_bitsize, dest_bitsize);
         }
