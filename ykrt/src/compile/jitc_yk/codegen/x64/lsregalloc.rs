@@ -42,7 +42,7 @@ use dynasmrt::{
     },
     DynasmApi, Register,
 };
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem};
 
 /// The complete set of general purpose x64 registers, in the order that dynasmrt defines them.
 /// Note that large portions of the code rely on these registers mapping to the integers 0..15
@@ -119,7 +119,7 @@ pub(crate) struct LSRegAlloc<'a> {
     /// or `>=` the offset in this vector.
     inst_vals_alive_until: Vec<InstIdx>,
     /// Where on the stack is an instruction's value spilled? Set to `usize::MAX` if that offset is
-    /// currently unknown.
+    /// currently unknown. Note: multiple instructions can alias to the same [SpillState].
     spills: Vec<SpillState>,
     /// The abstract stack: shared between general purpose and floating point registers.
     stack: AbstractStack,
@@ -149,12 +149,12 @@ impl<'a> LSRegAlloc<'a> {
             }
         }
 
-        let mut gp_reg_states = [RegState::Empty; GP_REGS_LEN];
+        let mut gp_reg_states = std::array::from_fn(|_| RegState::Empty);
         for reg in RESERVED_GP_REGS {
             gp_reg_states[usize::from(reg.code())] = RegState::Reserved;
         }
 
-        let mut fp_reg_states = [RegState::Empty; FP_REGS_LEN];
+        let mut fp_reg_states = std::array::from_fn(|_| RegState::Empty);
         for reg in RESERVED_FP_REGS {
             fp_reg_states[usize::from(reg.code())] = RegState::Reserved;
         }
@@ -315,6 +315,40 @@ impl LSRegAlloc<'_> {
     /// live variables that have been optimised to constants into side-traces.
     pub(crate) fn assign_const(&mut self, iidx: InstIdx, bits: u32, v: u64) {
         self.spills[usize::from(iidx)] = SpillState::ConstInt { bits, v };
+    }
+
+    /// Assign registers for the instruction `iidx`, which consumes the [Operand] `op` but does not
+    /// change its value. In many cases, the register allocator can avoid generating any code for
+    /// this case at all.
+    pub(crate) fn assign_gp_pass_through(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        op: Operand,
+    ) {
+        match op {
+            Operand::Var(op_iidx) => {
+                match self.gp_reg_states.iter().position(|x| {
+                    if let RegState::FromInst(y) = x {
+                        *y == op_iidx
+                    } else {
+                        false
+                    }
+                }) {
+                    Some(reg_i) => {
+                        if self.is_inst_var_still_used_after(iidx, op_iidx) {
+                            let mut avoid = RegSet::with_gp_reserved();
+                            self.move_or_spill_gp(asm, iidx, &mut avoid, GP_REGS[reg_i]);
+                        }
+                        self.gp_reg_states[reg_i] = RegState::FromInst(iidx);
+                    }
+                    None => {
+                        self.spills[usize::from(iidx)] = self.spills[usize::from(op_iidx)];
+                    }
+                }
+            }
+            Operand::Const(_cidx) => todo!(),
+        }
     }
 
     /// Assign registers for the instruction at position `iidx`.
@@ -664,10 +698,11 @@ impl LSRegAlloc<'_> {
     fn move_gp_reg(&mut self, asm: &mut Assembler, old_reg: Rq, new_reg: Rq) {
         dynasm!(asm; mov Rq(new_reg.code()), Rq(old_reg.code()));
         self.gp_regset.set(new_reg);
-        self.gp_reg_states[usize::from(new_reg.code())] =
-            self.gp_reg_states[usize::from(old_reg.code())];
+        self.gp_reg_states[usize::from(new_reg.code())] = mem::replace(
+            &mut self.gp_reg_states[usize::from(old_reg.code())],
+            RegState::Empty,
+        );
         self.gp_regset.unset(old_reg);
-        self.gp_reg_states[usize::from(old_reg.code())] = RegState::Empty;
     }
 
     /// Swap the values, and register states, for `old_reg` and `new_reg`.
@@ -712,7 +747,7 @@ impl LSRegAlloc<'_> {
                         avoid.set(new_reg);
                         self.gp_regset.set(new_reg);
                         self.gp_reg_states[usize::from(new_reg.code())] =
-                            self.gp_reg_states[usize::from(old_reg.code())];
+                            self.gp_reg_states[usize::from(old_reg.code())].clone();
                     } else {
                         // We have no choice but to spill.
                         self.spill_gp_if_not_already(asm, old_reg);
@@ -1179,10 +1214,11 @@ impl LSRegAlloc<'_> {
     fn move_fp_reg(&mut self, asm: &mut Assembler, old_reg: Rx, new_reg: Rx) {
         dynasm!(asm; movsd Rx(new_reg.code()), Rx(old_reg.code()));
         self.fp_regset.set(new_reg);
-        self.fp_reg_states[usize::from(new_reg.code())] =
-            self.fp_reg_states[usize::from(old_reg.code())];
+        self.fp_reg_states[usize::from(new_reg.code())] = mem::replace(
+            &mut self.fp_reg_states[usize::from(old_reg.code())],
+            RegState::Empty,
+        );
         self.fp_regset.unset(old_reg);
-        self.fp_reg_states[usize::from(old_reg.code())] = RegState::Empty;
     }
 
     /// Swap the values, and register states, for `old_reg` and `new_reg`.
@@ -1216,7 +1252,7 @@ impl LSRegAlloc<'_> {
                             avoid.set(new_reg);
                             self.fp_regset.set(new_reg);
                             self.fp_reg_states[usize::from(new_reg.code())] =
-                                self.fp_reg_states[usize::from(old_reg.code())];
+                                self.fp_reg_states[usize::from(old_reg.code())].clone();
                         }
                         None => self.spill_fp_if_not_already(asm, old_reg),
                     }
@@ -1385,7 +1421,7 @@ impl<R: dynasmrt::Register> RegConstraint<R> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum RegState {
     Reserved,
     Empty,
@@ -1505,8 +1541,12 @@ enum SpillState {
     /// This variable has not yet been spilt, or has been spilt and will not be used again.
     Empty,
     /// This variable is spilt to the stack with the same semantics as [VarLocation::Stack].
+    ///
+    /// Note: two SSA variables can alias to the same `Stack` location.
     Stack(i32),
     /// This variable is spilt to the stack with the same semantics as [VarLocation::Direct].
+    ///
+    /// Note: two SSA variables can alias to the same `Direct` location.
     Direct(i32),
     /// This variable is a constant.
     ConstInt { bits: u32, v: u64 },

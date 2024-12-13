@@ -14,6 +14,8 @@ use dynasmrt::x64::{Rq, Rx};
 pub(crate) enum VarLocation {
     /// The SSA variable is on the stack of the of the executed trace or the main interpreter loop.
     /// Since we execute the trace on the main interpreter frame we can't distinguish the two.
+    ///
+    /// Note: two SSA variables can alias to the same `Stack` location.
     Stack {
         /// The offset from the base of the trace's function frame.
         frame_off: u32,
@@ -21,6 +23,8 @@ pub(crate) enum VarLocation {
         size: usize,
     },
     /// The SSA variable is a stack pointer with the value `RBP-frame_off`.
+    ///
+    /// Note: two SSA variables can alias to the same `Direct` location.
     Direct {
         /// The offset from the base of the trace's function frame.
         frame_off: i32,
@@ -28,6 +32,8 @@ pub(crate) enum VarLocation {
         size: usize,
     },
     /// The SSA variable is in a register.
+    ///
+    /// Note: two SSA variables can alias to the same `Register` location.
     Register(Register),
     /// A constant integer `bits` wide (see [jit_ir::Const::ConstInt] for the constraints on the
     /// bit width) and with value `v`.
