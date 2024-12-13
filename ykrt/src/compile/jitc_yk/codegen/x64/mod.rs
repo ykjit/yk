@@ -907,7 +907,7 @@ impl<'a> Assemble<'a> {
                     [
                         // 64-bit (or 32-bit) signed division with idiv operates on RDX:RAX
                         // (EDX:EAX) and stores the remainder in RDX (EDX). We ignore the
-                        // remainder stored into RAX (EAX).
+                        // quotient stored into RAX (EAX).
                         RegConstraint::InputIntoRegAndClobber(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
                         RegConstraint::OutputFromReg(Rq::RDX),
