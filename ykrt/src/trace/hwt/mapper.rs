@@ -222,16 +222,19 @@ impl Iterator for HWTTraceIterator {
                 }
                 Some(Err(e)) => todo!("{e:?}"),
                 None => {
-                    // The last block contains pointless unmappable code (the stop tracing call).
+                    // The last block should contains pointless unmappable code (the stop tracing call).
                     match self.upcoming.pop() {
                         Some(x) => {
                             // This is a rough proxy for "check that we removed only the thing we want to
                             // remove".
-                            assert!(matches!(x, TraceAction::UnmappableBBlock));
+                            if matches!(x, TraceAction::UnmappableBBlock) {
+                                return None;
+                            } else {
+                                return Some(Err(AOTTraceIteratorError::PrematureEnd));
+                            }
                         }
-                        _ => unreachable!(),
+                        None => return Some(Err(AOTTraceIteratorError::PrematureEnd)),
                     }
-                    return None;
                 }
             }
         }
