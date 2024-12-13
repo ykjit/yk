@@ -13,22 +13,6 @@ struct Args {
     /// The test to attach gdb to.
     test_file: PathBuf,
 
-    /// Run the test with `YKD_LOG_IR` set to the specified value.
-    #[arg(short, long)]
-    log_ir: Option<String>,
-
-    /// Run the test with `YKD_LOG_JITSTATE=-`
-    #[arg(short = 'j', long)]
-    log_jitstate: bool,
-
-    /// Run the test with `YKD_SERIALISE_COMPILATION=1`
-    #[arg(short, long)]
-    serialise_compilation: bool,
-
-    /// Set breakpoints at the first `N` compiled traces.
-    #[arg(short = 'b', long)]
-    num_breaks: Option<usize>,
-
     /// Don't immediately run the program.
     #[arg(short = 'n', long)]
     wait_at_prompt: bool,
@@ -75,25 +59,6 @@ fn main() {
     // environment variables as necessary.
     let mut gdb = Command::new("gdb");
     gdb.arg(&binpath);
-
-    if args.serialise_compilation {
-        gdb.env("YKD_SERIALISE_COMPILATION", "1");
-    }
-
-    if args.log_jitstate {
-        gdb.env("YKD_LOG_JITSTATE", "1");
-    }
-
-    if let Some(irs) = args.log_ir {
-        gdb.env("YKD_LOG_IR", irs);
-    }
-
-    if let Some(num_breaks) = args.num_breaks {
-        gdb.args(["-ex", "set breakpoint pending on"]); // don't prompt for pending breaks.
-        for i in 0..num_breaks {
-            gdb.args(["-ex", &format!("b __yk_compiled_trace_{i}")]);
-        }
-    }
 
     if !args.wait_at_prompt {
         gdb.args(["-ex", "run"]);
