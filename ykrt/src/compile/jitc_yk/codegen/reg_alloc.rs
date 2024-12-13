@@ -164,7 +164,7 @@ impl From<&VarLocation> for yksmp::Location {
                 };
                 // We currently only use 8 byte registers, so the size is constant. Since these are
                 // JIT values there are no extra locations we need to worry about.
-                yksmp::Location::Register(dwarf, 8, 0, Vec::new())
+                yksmp::Location::Register(dwarf, 8, Vec::new())
             }
             VarLocation::ConstInt { bits, v } => {
                 if *bits <= 32 {

@@ -332,7 +332,6 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 self.m.push_param(yksmp::Location::Register(
                                     gp_reg_off,
                                     u16::try_from(size).unwrap(),
-                                    0,
                                     vec![],
                                 ));
                                 gp_reg_off += 1;
@@ -348,7 +347,6 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 self.m.push_param(yksmp::Location::Register(
                                     fp_reg_off,
                                     u16::try_from(size).unwrap(),
-                                    0,
                                     vec![],
                                 ));
                                 fp_reg_off += 1;
@@ -884,8 +882,8 @@ mod tests {
         let mut m = Module::new_testing();
         let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
 
-        m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push_param(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push_param(yksmp::Location::Register(3, 1, vec![]));
+        m.push_param(yksmp::Location::Register(3, 1, vec![]));
         let op1 = m
             .push_and_make_operand(ParamInst::new(ParamIdx::try_from(0).unwrap(), i16_tyidx).into())
             .unwrap();
