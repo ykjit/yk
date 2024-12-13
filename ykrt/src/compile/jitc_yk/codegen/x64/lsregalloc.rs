@@ -119,7 +119,7 @@ pub(crate) struct LSRegAlloc<'a> {
     /// or `>=` the offset in this vector.
     inst_vals_alive_until: Vec<InstIdx>,
     /// Where on the stack is an instruction's value spilled? Set to `usize::MAX` if that offset is
-    /// currently unknown.
+    /// currently unknown. Note: multiple instructions can alias to the same [SpillState].
     spills: Vec<SpillState>,
     /// The abstract stack: shared between general purpose and floating point registers.
     stack: AbstractStack,
@@ -1541,8 +1541,12 @@ enum SpillState {
     /// This variable has not yet been spilt, or has been spilt and will not be used again.
     Empty,
     /// This variable is spilt to the stack with the same semantics as [VarLocation::Stack].
+    ///
+    /// Note: two SSA variables can alias to the same `Stack` location.
     Stack(i32),
     /// This variable is spilt to the stack with the same semantics as [VarLocation::Direct].
+    ///
+    /// Note: two SSA variables can alias to the same `Direct` location.
     Direct(i32),
     /// This variable is a constant.
     ConstInt { bits: u32, v: u64 },
