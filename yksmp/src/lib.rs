@@ -53,12 +53,12 @@ pub enum Location {
     /// places, e.g. during spilling. Thus the fields describe three different locations in total:
     /// * `u16`: Dwarf register number
     /// * `u16`: size of the value
-    /// * `i32`: additional location on the stack (offset in relation to the base pointer)
-    /// * `u16`: additional location in a register (dwarf register number)
+    /// * `Vec<u16>`: additional locations. >=0  is a DWARF register number. < 0 is a stack offset
+    ///    relative to rbp (and [rbp-0] cannot be expressed, nor do we need to).
     ///
     /// FIXME: We may need more additional locations in the future, which however will require
     /// rewriting the stackmap format (until now we managed to get by with two extra locations).
-    Register(u16, u16, i32, Vec<i16>),
+    Register(u16, u16, Vec<i16>),
     /// The live variable is a pointer into the stack. To avoid unnecessary spilling and
     /// dereferencing LLVM just records the value as an (offset, register) pair where the register
     /// is typically the base pointer:
@@ -255,9 +255,11 @@ impl StackMapParser<'_> {
 
             let location = match kind {
                 0x01 => {
-                    // FIXME: This doesn't need `offset` anymore.
-                    let offset = self.read_i32();
-                    Location::Register(dwreg, size, offset, extras)
+                    let _unused = self.read_i32();
+                    // LLVM stackmaps docs: "In the common case, a value is available in a
+                    // register, and the Offset field will be zero".
+                    debug_assert_eq!(_unused, 0);
+                    Location::Register(dwreg, size, extras)
                 }
                 0x02 => {
                     let offset = self.read_i32();

@@ -4462,7 +4462,7 @@ mod tests {
         let mut m = jit_ir::Module::new(0, 0).unwrap();
 
         // Create two trace paramaters whose locations alias.
-        let loc = yksmp::Location::Register(13, 1, 0, [].into());
+        let loc = yksmp::Location::Register(13, 1, [].into());
         m.push_param(loc.clone());
         let pinst1: Inst =
             jit_ir::ParamInst::new(ParamIdx::try_from(0).unwrap(), m.int8_tyidx()).into();

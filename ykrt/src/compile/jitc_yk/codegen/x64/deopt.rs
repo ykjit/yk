@@ -246,7 +246,7 @@ pub(crate) extern "C" fn __yk_deopt(
                 todo!("Deal with multi register locations");
             };
             match aotloc {
-                SMLocation::Register(reg, size, off, extras) => {
+                SMLocation::Register(reg, size, extras) => {
                     #[cfg(debug_assertions)]
                     seen(isize::try_from(*reg).unwrap(), jitval);
                     registers[usize::from(*reg)] = jitval;
@@ -266,7 +266,6 @@ pub(crate) extern "C" fn __yk_deopt(
                                 // Write values to a reconstructed frame.
                                 unsafe { rbp.offset(isize::from(*extra)) }
                             };
-                            debug_assert!(*off < i32::try_from(rec.size).unwrap());
                             match size {
                                 // FIXME: Check that 16-byte writes are for float registers only.
                                 16 | 8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
