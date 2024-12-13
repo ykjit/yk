@@ -11,7 +11,9 @@ use std::{
     ffi::CString,
     sync::{Arc, LazyLock},
 };
-pub(crate) mod cp;
+
+pub mod cp;
+pub use cp::ControlPointStackMapId;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBBlock {

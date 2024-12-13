@@ -11,7 +11,7 @@ use std::{ffi::c_void};
 
 #[repr(usize)]
 #[derive(Debug, Clone, Copy)]
-pub (crate) enum ControlPointStackMapId {
+pub enum ControlPointStackMapId {
     // unoptimised (original functions) control point stack map id
     UnOpt = 0,
     // optimised (cloned functions) control point stack map id
@@ -40,7 +40,7 @@ pub (crate) enum ControlPointStackMapId {
 //     Arc::new(buffer)
 // });
 
-pub (crate) unsafe fn you_can_do_it(from: ControlPointStackMapId, to: ControlPointStackMapId, frameaddr: *mut c_void) {
+pub unsafe fn you_can_do_it(from: ControlPointStackMapId, to: ControlPointStackMapId, frameaddr: *mut c_void) {
     // println!("@@ you_can_do_it from: {:x} to: {:x} frameaddr: {:x}", from as usize, to as usize, frameaddr as usize);
     let mut asm = Assembler::new().unwrap();
 
@@ -79,11 +79,14 @@ fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
 #[cfg(tracer_swt)]
 fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, frameaddr: usize) {
     let verbose = true;
+    // TODO: find the pushed registers in the control point
 
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
     let (dst_rec, dst_rec_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
 
-    // TODO: memcopy the stack or allocate another stack frame
+    // TODO:
+    // 1. memcopy the stack or allocate another stack frame
+    // 2. The registers here are not the actual registers we need... We need to take them from the control point
 
     let mut dest_rsp = dst_rec.size;
     if dst_rec_pinfo.hasfp {

@@ -17,6 +17,8 @@ use std::{
 };
 use ykrt::{HotThreshold, Location, MT};
 
+use ykrt::trace::swt::cp::{you_can_do_it, ControlPointStackMapId};
+
 #[no_mangle]
 pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
     match MT::new() {
@@ -91,7 +93,7 @@ pub extern "C" fn __ykrt_control_point(
             "push r15",
             // Pass the interpreter frame's base pointer via the 4th argument register.
             "mov rcx, rbp",
-            // "int3",
+            "int3",
             "call __ykrt_control_point_real",
             // "int3",
             // Restore the previously pushed registers.
@@ -128,8 +130,20 @@ pub extern "C" fn __ykrt_control_point_real(
         let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
         let arc = unsafe { Arc::from_raw(mt) };
-        arc.control_point(loc, frameaddr, smid);
+        let jump = arc.control_point(loc, frameaddr, smid);
         forget(arc);
+
+        if jump == 1 {
+            #[cfg(tracer_swt)]
+            unsafe {
+                you_can_do_it(ControlPointStackMapId::Opt, ControlPointStackMapId::UnOpt, frameaddr);
+            }
+        } else if jump == 0 {
+            #[cfg(tracer_swt)]
+            unsafe {
+                you_can_do_it(ControlPointStackMapId::UnOpt, ControlPointStackMapId::Opt, frameaddr);
+            }
+        }
     }
 }
 

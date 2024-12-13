@@ -404,7 +404,8 @@ impl MT {
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn control_point(self: &Arc<Self>, loc: &Location, frameaddr: *mut c_void, smid: u64) {
+    pub fn control_point(self: &Arc<Self>, loc: &Location, frameaddr: *mut c_void, smid: u64) -> i32 {
+        let mut jump = -1;
         match self.transition_control_point(loc) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::Execute(ctr) => {
@@ -446,13 +447,15 @@ impl MT {
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
-                #[cfg(tracer_swt)]
-                unsafe {
-                    if IS_IN_OPT {
-                        you_can_do_it(ControlPointStackMapId::Opt, ControlPointStackMapId::UnOpt, frameaddr);
-                        self.log.log(Verbosity::JITEvent, "returning into unopt cp");
-                    }
-                }
+                // #[cfg(tracer_swt)]
+                // unsafe {
+                //     if IS_IN_OPT {
+                //         you_can_do_it(ControlPointStackMapId::Opt, ControlPointStackMapId::UnOpt, frameaddr);
+                //         self.log.log(Verbosity::JITEvent, "returning into unopt cp");
+                //     }
+                // }
+                self.log.log(Verbosity::JITEvent, "returning into unopt cp");
+                jump = 1;
             }
             TransitionControlPoint::StopTracing => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -481,13 +484,14 @@ impl MT {
                             .log(Verbosity::Warning, &format!("stop-tracing-aborted: {e}"));
                     }
                 }
-
-                #[cfg(tracer_swt)]
-                unsafe {
-                    IS_IN_OPT = true;
-                    you_can_do_it(ControlPointStackMapId::UnOpt, ControlPointStackMapId::Opt, frameaddr);
-                    self.log.log(Verbosity::JITEvent, "returning into opt cp");
-                }
+                // #[cfg(tracer_swt)]
+                // unsafe {
+                //     IS_IN_OPT = true;
+                //     you_can_do_it(ControlPointStackMapId::UnOpt, ControlPointStackMapId::Opt, frameaddr);
+                //     self.log.log(Verbosity::JITEvent, "returning into opt cp");
+                // }
+                self.log.log(Verbosity::JITEvent, "returning into opt cp");
+                jump = 1;
             }
             TransitionControlPoint::StopSideTracing {
                 gidx: guardid,
@@ -529,6 +533,7 @@ impl MT {
                 }
             }
         }
+        return jump;
     }
 
     /// Perform the next step to `loc` in the `Location` state-machine for a control point. If
