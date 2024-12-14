@@ -455,7 +455,11 @@ impl MT {
                 //     }
                 // }
                 // self.log.log(Verbosity::JITEvent, "returning into unopt cp");
-                jump = 1;
+                unsafe {
+                    if IS_IN_OPT {
+                        jump = 1;
+                    }
+                }
             }
             TransitionControlPoint::StopTracing => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -491,7 +495,10 @@ impl MT {
                 //     self.log.log(Verbosity::JITEvent, "returning into opt cp");
                 // }
                 // self.log.log(Verbosity::JITEvent, "returning into opt cp");
-                jump = 1;
+                unsafe {
+                    IS_IN_OPT = true;
+                    jump = 1;
+                }
             }
             TransitionControlPoint::StopSideTracing {
                 gidx: guardid,
