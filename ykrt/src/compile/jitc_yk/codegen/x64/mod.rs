@@ -26,7 +26,7 @@ use super::{
         jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
         CompilationError,
     },
-    reg_alloc::{self, StackDirection, VarLocation},
+    reg_alloc::{self, VarLocation},
     CodeGen,
 };
 #[cfg(any(debug_assertions, test))]
@@ -139,9 +139,6 @@ static RBP_DWARF_NUM: u16 = 6;
 
 /// The x64 SysV ABI requires a 16-byte aligned stack prior to any call.
 const SYSV_CALL_STACK_ALIGN: usize = 16;
-
-/// On x64 the stack grows down.
-const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
 /// A function that we can put a debugger breakpoint on.
 /// FIXME: gross hack.

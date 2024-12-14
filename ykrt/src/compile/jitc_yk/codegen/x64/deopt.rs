@@ -94,7 +94,7 @@ fn running_trace(gidxs: &[usize]) -> Arc<X64CompiledTrace> {
 /// * glen - Length for list in `gptr`.
 #[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
-    frameaddr: *const c_void,
+    frameaddr: *mut c_void,
     gidx: u64,
     gp_regs: &[u64; 16],
     fp_regs: &[u64; 16],
@@ -353,13 +353,13 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // The `clone` should really be `Arc::clone(&ctr)` but that doesn't play well with type
     // inference in this (unusual) case.
-    ctr.mt.guard_failure(ctr.clone(), gidx);
+    ctr.mt.guard_failure(ctr.clone(), gidx, frameaddr);
 
     // Since we won't return from this function, drop `ctr` manually.
     drop(ctr);
 
     // Now overwrite the existing stack with our newly recreated one.
-    unsafe { replace_stack(newframedst as *mut c_void, newstack, memsize) };
+    unsafe { replace_stack(newframedst, newstack, memsize) };
 }
 
 /// Writes the stack frames that we recreated in [__yk_deopt] onto the current stack, overwriting
