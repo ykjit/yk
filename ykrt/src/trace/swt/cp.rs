@@ -240,9 +240,9 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
                         let src_offset = reg_num_stack_offset(*src_reg_num);
                         let dest_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *src_val_size {
-                            1 => todo!("implement reg to reg 1 byte"),
-                            2 => todo!("implement reg to reg 2 bytes"),
-                            4 => todo!("implement reg to reg 4 bytes"),
+                            1 => dynasm!(asm; mov Rb(dest_reg), BYTE [rsp + src_offset]),
+                            2 => dynasm!(asm; mov Rw(dest_reg), WORD [rsp + src_offset]),
+                            4 => dynasm!(asm; mov Rd(dest_reg), DWORD [rsp + src_offset]),
                             8 => dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]),
                             _ => {
                                 todo!("unexpect Register to Register value size {}", src_val_size)
@@ -251,12 +251,13 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
                     }
                     Indirect(src_reg_num, src_off, src_val_size) => {
                         assert!(*src_reg_num == 6, "Indirect register is expected to be rbp");
+                        let src_offset = i32::try_from(*src_off).unwrap();
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *dst_val_size {
-                            1 => dynasm!(asm; mov Rb(dst_reg), BYTE [rsp + i32::try_from(*src_off).unwrap()]),
-                            2 => dynasm!(asm; mov Rw(dst_reg), WORD [rsp + i32::try_from(*src_off).unwrap()]),
-                            4 => dynasm!(asm; mov Rd(dst_reg), DWORD [rsp + i32::try_from(*src_off).unwrap()]),
-                            8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp + i32::try_from(*src_off).unwrap()]),
+                            1 => dynasm!(asm; mov Rb(dst_reg), BYTE [rbp + src_offset]),
+                            2 => dynasm!(asm; mov Rw(dst_reg), WORD [rbp + src_offset]),
+                            4 => dynasm!(asm; mov Rd(dst_reg), DWORD [rbp + src_offset]),
+                            8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp + src_offset]),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
