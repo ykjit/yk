@@ -21,7 +21,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 #[cfg(tracer_swt)]
-use crate::trace::swt::cp::{you_can_do_it, ControlPointStackMapId};
+// use crate::trace::swt::cp::{you_can_do_it, ControlPointStackMapId};
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
@@ -454,7 +454,7 @@ impl MT {
                 //         self.log.log(Verbosity::JITEvent, "returning into unopt cp");
                 //     }
                 // }
-                self.log.log(Verbosity::JITEvent, "returning into unopt cp");
+                // self.log.log(Verbosity::JITEvent, "returning into unopt cp");
                 jump = 1;
             }
             TransitionControlPoint::StopTracing => {
@@ -490,7 +490,7 @@ impl MT {
                 //     you_can_do_it(ControlPointStackMapId::UnOpt, ControlPointStackMapId::Opt, frameaddr);
                 //     self.log.log(Verbosity::JITEvent, "returning into opt cp");
                 // }
-                self.log.log(Verbosity::JITEvent, "returning into opt cp");
+                // self.log.log(Verbosity::JITEvent, "returning into opt cp");
                 jump = 1;
             }
             TransitionControlPoint::StopSideTracing {

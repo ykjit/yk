@@ -1,13 +1,13 @@
 use crate::aotsmp::AOT_STACKMAPS;
 use capstone::prelude::*;
-use dynasmrt::x64::Rq;
-use dynasmrt::{dynasm, x64::Assembler, DynasmApi, ExecutableBuffer};
+use dynasmrt::{dynasm, x64::Assembler, DynasmApi};
 use std::error::Error;
-use std::sync::Arc;
-use std::sync::LazyLock;
 use yksmp::Location::{Constant, Direct, Indirect, LargeConstant, Register};
 
 use std::{ffi::c_void};
+
+/// The size of a 64-bit register in bytes.
+pub(crate) static REG64_BYTESIZE: u64 = 8;
 
 #[repr(usize)]
 #[derive(Debug, Clone, Copy)]
@@ -78,7 +78,7 @@ fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
 
 #[cfg(tracer_swt)]
 fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, frameaddr: usize) {
-    let verbose = true;
+    let verbose = false;
     // TODO: find the pushed registers in the control point
 
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
@@ -90,14 +90,17 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
 
     let mut dest_rsp = dst_rec.size;
     if dst_rec_pinfo.hasfp {
-        dest_rsp -= 8; // TODO: use whatever is used in deopt
+        dest_rsp -= REG64_BYTESIZE;
     }
+
+    // TODO: figure out how to not hardcode this!
+    dest_rsp += 112; // Adjusting the stack that is extended by the __ykrt_control_point_real call.
     dynasm!(asm
         ; .arch x64
         ; mov rbp, QWORD frameaddr as i64 // reset rbp
         ; mov rsp, QWORD frameaddr as i64 // reset rsp
         ; sub rsp, (dest_rsp).try_into().unwrap()
-        ; int3
+        // ; int3
     );
 
     // Save all the registers to the stack
@@ -290,7 +293,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
         ; mov rax, QWORD dst_target_addr // loads the target address into rax
         ; mov [rsp + 8], rax // stores the target address into rsp+8
         ; pop rax // restores the original rax at rsp
-        ; int3 // breakpoint
+        // ; int3 // breakpoint
         ; ret // loads 8 bytes from rsp and jumps to it
     );
 }
