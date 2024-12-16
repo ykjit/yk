@@ -1325,7 +1325,7 @@ pub(crate) struct InlinedFrame {
     /// The deopt safepoint for [callinst].
     pub(crate) safepoint: &'static aot_ir::DeoptSafepoint,
     /// The [Operand]s passed to [funcidx].
-    pub(crate) args: Vec<Operand>,
+    pub(crate) args: Vec<PackedOperand>,
 }
 
 impl InlinedFrame {
@@ -1339,7 +1339,7 @@ impl InlinedFrame {
             callinst,
             funcidx,
             safepoint,
-            args,
+            args: args.iter().map(PackedOperand::new).collect::<Vec<_>>(),
         }
     }
 }
