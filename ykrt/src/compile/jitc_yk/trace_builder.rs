@@ -562,7 +562,7 @@ impl TraceBuilder {
             }
         }
 
-        let gi = jit_ir::GuardInfo::new(bid.clone(), live_vars, callframes);
+        let gi = jit_ir::GuardInfo::new(bid.clone(), live_vars, callframes, safepoint.id);
         let gi_idx = self.jit_mod.push_guardinfo(gi).unwrap();
 
         Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))

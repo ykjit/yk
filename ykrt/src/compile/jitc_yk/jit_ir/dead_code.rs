@@ -139,7 +139,7 @@ mod test {
           entry:
             %0: i8 = param ...
             %1: i1 = ult %0, 1i8
-            guard true, %1, []
+            guard true, %1, [] ; ...
             black_box %1
         ",
         );
