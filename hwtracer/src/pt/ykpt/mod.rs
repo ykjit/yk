@@ -44,7 +44,7 @@ use crate::{
     errors::{HWTracerError, TemporaryErrorKind},
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
     perf::collect::PerfTraceBuf,
-    Block,
+    Block, BlockIteratorError,
 };
 use intervaltree::IntervalTree;
 use std::{
@@ -233,12 +233,12 @@ impl YkPTBlockIterator<'_> {
 
     /// Convert a file offset to a virtual address.
     fn off_to_vaddr(&self, obj: &Path, off: u64) -> Result<usize, IteratorError> {
-        Ok(ykaddr::addr::off_to_vaddr(obj, off).unwrap())
+        ykaddr::addr::off_to_vaddr(obj, off).ok_or(IteratorError::NoSuchVAddr)
     }
 
     /// Convert a virtual address to a file offset.
     fn vaddr_to_off(&self, vaddr: usize) -> Result<(PathBuf, u64), IteratorError> {
-        Ok(ykaddr::addr::vaddr_to_obj_and_off(vaddr).unwrap())
+        ykaddr::addr::vaddr_to_obj_and_off(vaddr).ok_or(IteratorError::NoSuchVAddr)
     }
 
     /// Looks up the blockmap entry for the given offset in the "main object binary".
@@ -818,13 +818,14 @@ impl YkPTBlockIterator<'_> {
 }
 
 impl Iterator for YkPTBlockIterator<'_> {
-    type Item = Result<Block, HWTracerError>;
+    type Item = Result<Block, BlockIteratorError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.do_next() {
             Ok(b) => Some(Ok(b)),
             Err(IteratorError::NoMorePackets) => None,
-            Err(IteratorError::HWTracerError(e)) => Some(Err(e)),
+            Err(IteratorError::NoSuchVAddr) => Some(Err(BlockIteratorError::NoSuchVAddr)),
+            Err(IteratorError::HWTracerError(e)) => Some(Err(BlockIteratorError::HWTracerError(e))),
         }
     }
 }
@@ -844,6 +845,9 @@ impl Drop for YkPTBlockIterator<'_> {
 enum IteratorError {
     #[error("No more packets")]
     NoMorePackets,
+    #[cfg(ykpt)]
+    #[error("No such vaddr")]
+    NoSuchVAddr,
     #[error("HWTracerError: {0}")]
     HWTracerError(HWTracerError),
 }

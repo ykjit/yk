@@ -96,6 +96,9 @@ pub(crate) enum AOTTraceIteratorError {
     #[error("longjmp encountered")]
     #[allow(dead_code)]
     LongJmpEncountered,
+    #[error("{0}")]
+    #[allow(dead_code)]
+    Other(String),
 }
 
 /// A processed item from a trace.

@@ -13,7 +13,7 @@
 //! To that end, the test files in `tests/hwtracer_ykpt` are compiled into test binaries (as a
 //! langtester suite) and then they call into this file to have assertions checked in Rust code.
 
-use hwtracer::{ThreadTracer, Trace, TracerBuilder};
+use hwtracer::{BlockIteratorError, ThreadTracer, Trace, TracerBuilder};
 use std::ffi::c_void;
 
 #[no_mangle]
@@ -52,7 +52,7 @@ pub extern "C" fn __hwykpt_decode_trace(trace: *mut Box<dyn Trace>) -> bool {
     for b in trace.iter_blocks() {
         match b {
             Ok(_) => (),
-            Err(HWTracerError::Temporary(_)) => return false,
+            Err(BlockIteratorError::HWTracerError(HWTracerError::Temporary(_))) => return false,
             Err(_) => panic!(),
         }
     }
