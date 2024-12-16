@@ -492,7 +492,11 @@ impl<'a> Assemble<'a> {
                     // by a `Guard`.
                     if let Some((next_iidx, Inst::Guard(g_inst))) = next {
                         if let Operand::Var(cond_idx) = g_inst.cond(self.m) {
-                            if cond_idx == iidx {
+                            // NOTE: If the value of the condition will be used later, we have to
+                            // materialise it.
+                            if cond_idx == iidx
+                                && !self.ra.is_inst_var_still_used_after(next_iidx, cond_idx)
+                            {
                                 self.cg_icmp_guard(iidx, ic_inst, next_iidx, g_inst);
                                 next = iter.next();
                                 continue;
@@ -1580,6 +1584,8 @@ impl<'a> Assemble<'a> {
         g_iidx: InstIdx,
         g_inst: jit_ir::GuardInst,
     ) {
+        debug_assert!(!self.ra.is_inst_var_still_used_after(g_iidx, ic_iidx));
+
         // Codegen ICmp
         let (lhs, pred, rhs) = (
             ic_inst.lhs(self.m),
@@ -3856,6 +3862,37 @@ mod tests {
                 cmp r.64.x, 0x03
                 ; guard true, %1, [] ; ...
                 jnz 0x...
+                ...
+            ",
+            false,
+        );
+    }
+
+    /// Check we don't optimise icmp+guard if the result of the icmp is needed later.
+    #[test]
+    fn cg_icmp_guard_reused() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = param 0
+                %1: i1 = eq %0, 3i8
+                guard true, %1, []
+                %3: i8 = sext %1
+                black_box %3
+            ",
+            "
+                ...
+                ; %1: i1 = eq %0, 3i8
+                movzx r.64.x, r.8._
+                cmp r.64.x, 0x03
+                setz bl
+                ; guard true, %1, [] ; ...
+                cmp bl, 0x01
+                jnz 0x...
+                ; %3: i8 = sext %1
+                shl rbx, 0x3f
+                sar rbx, 0x3f
+                ; black_box %3
                 ...
             ",
             false,
