@@ -7,7 +7,7 @@ use crate::pt::c_errors::PerfPTCError;
 use crate::pt::ykpt::YkPTBlockIterator;
 use crate::{
     errors::{HWTracerError, TemporaryErrorKind},
-    Block, ThreadTracer, Trace, Tracer,
+    Block, BlockIteratorError, ThreadTracer, Trace, Tracer,
 };
 use libc::{c_void, free, geteuid, malloc, size_t};
 use std::{fs::read_to_string, sync::Arc};
@@ -182,7 +182,7 @@ impl Trace for PerfTrace {
     #[cfg(ykpt)]
     fn iter_blocks(
         mut self: Box<Self>,
-    ) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + Send> {
+    ) -> Box<dyn Iterator<Item = Result<Block, BlockIteratorError>> + Send> {
         // We hand ownership for self.buf over to `YkPTBlockIterator` so we need to make sure that
         // we don't try and free it.
         let buf = std::mem::replace(&mut self.buf, PerfTraceBuf(std::ptr::null_mut()));

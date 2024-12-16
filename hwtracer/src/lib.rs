@@ -17,6 +17,7 @@ pub use errors::{HWTracerError, TemporaryErrorKind};
 #[cfg(test)]
 use std::time::SystemTime;
 use std::{fmt::Debug, sync::Arc};
+use thiserror::Error;
 
 /// A builder for [Tracer]s. By default, will attempt to use the most appropriate [Tracer] for your
 /// platform/configuration. This can be overridden with [TracerBuilder::tracer_kind] and
@@ -93,7 +94,7 @@ pub trait Trace: Debug + Send {
     /// Iterate over the blocks of the trace.
     fn iter_blocks(
         self: Box<Self>,
-    ) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + Send>;
+    ) -> Box<dyn Iterator<Item = Result<Block, BlockIteratorError>> + Send>;
 
     #[cfg(test)]
     fn bytes(&self) -> &[u8];
@@ -105,6 +106,15 @@ pub trait Trace: Debug + Send {
     /// Get the size of the trace in bytes.
     #[cfg(test)]
     fn len(&self) -> usize;
+}
+
+#[derive(Debug, Error)]
+pub enum BlockIteratorError {
+    #[cfg(ykpt)]
+    #[error("dladdr() cannot map vaddr")]
+    NoSuchVAddr,
+    #[error("HWTracerError: {0}")]
+    HWTracerError(HWTracerError),
 }
 
 /// A loop that does some work that we can use to build a trace.

@@ -1,7 +1,10 @@
 //! The mapper translates a hwtracer trace into an IR trace.
 
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorderError};
-use hwtracer::{llvm_blockmap::LLVM_BLOCK_MAP, Block, HWTracerError, TemporaryErrorKind, Trace};
+use hwtracer::{
+    llvm_blockmap::LLVM_BLOCK_MAP, Block, BlockIteratorError, HWTracerError, TemporaryErrorKind,
+    Trace,
+};
 use ykaddr::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
     obj::SELF_BIN_PATH,
@@ -13,7 +16,7 @@ use ykaddr::{
 /// mapped LLVM IR block, or an unsuccessfully mapped "unmappable block" (an unknown region of
 /// code spanning at least one machine block).
 pub(crate) struct HWTTraceIterator {
-    hwt_iter: Box<dyn Iterator<Item = Result<Block, HWTracerError>> + Send>,
+    hwt_iter: Box<dyn Iterator<Item = Result<Block, BlockIteratorError>> + Send>,
     /// The next [TraceAction]`s we will produce when `next` is called. We need this intermediary
     /// to allow us to deduplicate mapped/unmapped basic blocks. This will be empty on the first
     /// iteration and from then on will always have at least one [TraceAction] in it at all times,
@@ -195,10 +198,12 @@ impl Iterator for HWTTraceIterator {
                         _ => panic!(),
                     }
                 }
-                Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
+                Some(Err(BlockIteratorError::HWTracerError(HWTracerError::Temporary(
+                    TemporaryErrorKind::TraceBufferOverflow,
+                )))) => {
                     return Some(Err(AOTTraceIteratorError::TraceTooLong));
                 }
-                Some(Err(e)) => todo!("{e:?}"),
+                Some(Err(e)) => return Some(Err(AOTTraceIteratorError::Other(e.to_string()))),
                 None => return Some(Err(AOTTraceIteratorError::PrematureEnd)),
             }
             debug_assert!(self.tas_generated > 0);
@@ -212,15 +217,17 @@ impl Iterator for HWTTraceIterator {
                 Some(Ok(x)) => {
                     self.map_block(&x);
                 }
-                Some(Err(HWTracerError::Unrecoverable(x)))
+                Some(Err(BlockIteratorError::HWTracerError(HWTracerError::Unrecoverable(x))))
                     if x == "longjmp within traces currently unsupported" =>
                 {
                     return Some(Err(AOTTraceIteratorError::LongJmpEncountered));
                 }
-                Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
+                Some(Err(BlockIteratorError::HWTracerError(HWTracerError::Temporary(
+                    TemporaryErrorKind::TraceBufferOverflow,
+                )))) => {
                     return Some(Err(AOTTraceIteratorError::TraceTooLong));
                 }
-                Some(Err(e)) => todo!("{e:?}"),
+                Some(Err(e)) => return Some(Err(AOTTraceIteratorError::Other(e.to_string()))),
                 None => {
                     // The last block should contains pointless unmappable code (the stop tracing call).
                     match self.upcoming.pop() {
