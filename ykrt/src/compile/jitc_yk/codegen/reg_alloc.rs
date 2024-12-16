@@ -50,12 +50,6 @@ pub(crate) enum Register {
     FP(Rx), // floating point
 }
 
-/// Indicates the direction of stack growth.
-pub(crate) enum StackDirection {
-    GrowsUp,
-    GrowsDown,
-}
-
 #[cfg(target_arch = "x86_64")]
 impl VarLocation {
     pub(crate) fn from_yksmp_location(m: &Module, iidx: InstIdx, x: &yksmp::Location) -> Self {

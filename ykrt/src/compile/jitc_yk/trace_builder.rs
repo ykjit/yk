@@ -589,8 +589,10 @@ impl TraceBuilder {
         _aot_inst_idx: usize,
         val: &Option<aot_ir::Operand>,
     ) -> Result<(), CompilationError> {
-        // FIXME: Map return value to AOT call instruction.
+        // If this `unwrap` fails, it means that early return detection in `mt.rs` is not working
+        // as expected.
         let frame = self.frames.pop().unwrap();
+        // FIXME: Map return value to AOT call instruction.
         if let Some(val) = val {
             let op = self.handle_operand(val)?;
             self.local_map.insert(frame.callinst.unwrap(), op);
