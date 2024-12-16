@@ -269,7 +269,7 @@ impl TraceBuilder {
                     let jitop = &self.frames.last().unwrap().args[*arg_idx];
                     let aot_iid =
                         aot_ir::InstID::new(bid.funcidx(), bid.bbidx(), aot_ir::InstIdx::new(iidx));
-                    self.local_map.insert(aot_iid, jitop.clone());
+                    self.local_map.insert(aot_iid, jitop.unpack(&self.jit_mod));
                     Ok(())
                 }
                 aot_ir::Inst::FCmp { lhs, pred, rhs, .. } => {
@@ -548,12 +548,11 @@ impl TraceBuilder {
                                     }
                                 }
                             }
-                            jit_ir::Operand::Const(_) => {
-                                // Since we are forcing constants into `Inst::Const`s during
-                                // inlining, this case should never happen. If you see this panic,
-                                // then look for a safepoint live variable that maps to a constant
-                                // and make the builder insert an `Inst::Const` for it instead.
-                                panic!("Constant encountered while building guardinfo!")
+                            jit_ir::Operand::Const(cidx) => {
+                                live_vars.push((
+                                    iid.clone(),
+                                    PackedOperand::new(&jit_ir::Operand::Const(cidx)),
+                                ));
                             }
                         }
                     }
@@ -760,7 +759,7 @@ impl TraceBuilder {
                 funcidx: Some(*callee),
                 callinst: Some(aot_iid),
                 safepoint: None,
-                args: jit_args,
+                args: jit_args.iter().map(PackedOperand::new).collect::<Vec<_>>(),
             });
             Ok(())
         } else {
@@ -1414,7 +1413,7 @@ struct InlinedFrame {
     funcidx: Option<aot_ir::FuncIdx>,
     callinst: Option<aot_ir::InstID>,
     safepoint: Option<&'static aot_ir::DeoptSafepoint>,
-    args: Vec<Operand>,
+    args: Vec<PackedOperand>,
 }
 
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.
