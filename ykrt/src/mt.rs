@@ -21,7 +21,8 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 #[cfg(tracer_swt)]
-// use crate::trace::swt::cp::{you_can_do_it, ControlPointStackMapId};
+use crate::trace::swt::cp::{control_point_transition, ControlPointStackMapId, ControlPointTransition};
+
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
@@ -404,8 +405,12 @@ impl MT {
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn control_point(self: &Arc<Self>, loc: &Location, frameaddr: *mut c_void, smid: u64) -> i32 {
-        let mut jump = -1;
+    pub fn control_point(
+        self: &Arc<Self>,
+        loc: &Location,
+        frameaddr: *mut c_void,
+        smid: u64,
+    ){
         match self.transition_control_point(loc) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::Execute(ctr) => {
@@ -426,10 +431,24 @@ impl MT {
                     mtt.set_running_trace(Some(ctr), None);
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
-
+                // TODO: switch here to unopt
+                #[cfg(tracer_swt)]
+                unsafe {
+                    control_point_transition(ControlPointTransition{
+                        src_smid: ControlPointStackMapId::Opt,
+                        dst_smid: ControlPointStackMapId::UnOpt,
+                        frameaddr,
+                        rsp,
+                        trace_addr: trace_addr,
+                        exec_trace: true,
+                        exec_trace_fn: __yk_exec_trace
+                    });
+                }
                 // FIXME: Calling this function overwrites the current (Rust) function frame,
                 // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
-                unsafe { __yk_exec_trace(frameaddr, rsp, trace_addr) };
+                unsafe {
+                    __yk_exec_trace(frameaddr, rsp, trace_addr);
+                };
             }
             TransitionControlPoint::StartTracing(hl) => {
                 self.log.log(Verbosity::JITEvent, "start-tracing");
@@ -447,19 +466,21 @@ impl MT {
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
-                // #[cfg(tracer_swt)]
-                // unsafe {
-                //     if IS_IN_OPT {
-                //         you_can_do_it(ControlPointStackMapId::Opt, ControlPointStackMapId::UnOpt, frameaddr);
-                //         self.log.log(Verbosity::JITEvent, "returning into unopt cp");
-                //     }
-                // }
-                // self.log.log(Verbosity::JITEvent, "returning into unopt cp");
+                #[cfg(tracer_swt)]
                 unsafe {
                     if IS_IN_OPT {
-                        jump = 1;
+                        control_point_transition(ControlPointTransition{
+                            src_smid: ControlPointStackMapId::Opt,
+                            dst_smid: ControlPointStackMapId::UnOpt,
+                            frameaddr,
+                            rsp: 0 as *const c_void,
+                            trace_addr: 0 as *const c_void,
+                            exec_trace: false,
+                            exec_trace_fn: __yk_exec_trace
+                        });
                     }
                 }
+                // self.log.log(Verbosity::JITEvent, "returning into unopt cp");
             }
             TransitionControlPoint::StopTracing => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -488,16 +509,18 @@ impl MT {
                             .log(Verbosity::Warning, &format!("stop-tracing-aborted: {e}"));
                     }
                 }
-                // #[cfg(tracer_swt)]
-                // unsafe {
-                //     IS_IN_OPT = true;
-                //     you_can_do_it(ControlPointStackMapId::UnOpt, ControlPointStackMapId::Opt, frameaddr);
-                //     self.log.log(Verbosity::JITEvent, "returning into opt cp");
-                // }
-                // self.log.log(Verbosity::JITEvent, "returning into opt cp");
+                #[cfg(tracer_swt)]
                 unsafe {
                     IS_IN_OPT = true;
-                    jump = 1;
+                    control_point_transition(ControlPointTransition{
+                        src_smid: ControlPointStackMapId::Opt,
+                        dst_smid: ControlPointStackMapId::UnOpt,
+                        frameaddr,
+                        rsp: 0 as *const c_void,
+                        trace_addr: 0 as *const c_void,
+                        exec_trace: false,
+                        exec_trace_fn: __yk_exec_trace
+                    });
                 }
             }
             TransitionControlPoint::StopSideTracing {
@@ -540,7 +563,6 @@ impl MT {
                 }
             }
         }
-        return jump;
     }
 
     /// Perform the next step to `loc` in the `Location` state-machine for a control point. If
@@ -790,13 +812,14 @@ impl MT {
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
-unsafe extern "C" fn __yk_exec_trace(
+pub(crate) unsafe extern "C" fn __yk_exec_trace(
     frameaddr: *const c_void,
     rsp: *const c_void,
     trace: *const c_void,
 ) -> ! {
     std::arch::naked_asm!(
         // Reset RBP
+        // "int3",
         "mov rbp, rdi",
         // Reset RSP to the end of the control point frame (this includes the registers we pushed
         // just before the control point)

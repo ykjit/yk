@@ -19,8 +19,6 @@ use thiserror::Error;
 pub(crate) mod hwt;
 #[cfg(tracer_swt)]
 pub mod swt;
-pub use swt::ControlPointStackMapId;
-
 
 /// A `Tracer` is a front-end to a tracer backend (e.g. hardware or software tracing). The tracer
 /// backend may have its own configuration options, which is why `Tracer` does not have a `new`

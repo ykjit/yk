@@ -2,134 +2,180 @@ use crate::aotsmp::AOT_STACKMAPS;
 use capstone::prelude::*;
 use dynasmrt::{dynasm, x64::Assembler, DynasmApi};
 use std::error::Error;
+use std::ffi::c_void;
 use yksmp::Location::{Constant, Direct, Indirect, LargeConstant, Register};
-
-use std::{ffi::c_void};
 
 /// The size of a 64-bit register in bytes.
 pub(crate) static REG64_BYTESIZE: u64 = 8;
 
 #[repr(usize)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlPointStackMapId {
     // unoptimised (original functions) control point stack map id
     UnOpt = 0,
     // optimised (cloned functions) control point stack map id
     Opt = 1,
 }
-// Example IR:
-// call void (i64, i32, ptr, i32, ...) @llvm.experimental.patchpoint.void(i64 1, i32 13, ptr @__ykrt_control_point, i32 3, ptr %28, ptr %7, i64 1, ptr %6, ptr %7, ptr %8, ptr %9, ptr %28), !dbg !119
-//
-//  Where - 1 is the control point id
-// pub(crate) static RETURN_INTO_OPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
-//     let mut asm = Assembler::new().unwrap();
-//     build_livevars_cp_asm(UnOpt, Opt, &mut asm);
-//     let buffer = asm.finalize().unwrap();
-//     Arc::new(buffer)
-// });
 
-// Example IR:
-//  call void (i64, i32, ptr, i32, ...) @llvm.experimental.patchpoint.void(i64 0, i32 13, ptr @__ykrt_control_point, i32 3, ptr %28, ptr %7, i64 0, ptr %6, ptr %7, ptr %8, ptr %9, ptr %28), !dbg !74
-//
-//  Where - 0 is the control point id
-// pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
-// pub(crate) static RETURN_INTO_UNOPT_CP: LazyLock<Arc<ExecutableBuffer>> = LazyLock::new(|| {
-//     let mut asm = Assembler::new().unwrap();
-//     build_livevars_cp_asm(Opt, UnOpt, &mut asm);
-//     let buffer = asm.finalize().unwrap();
-//     Arc::new(buffer)
-// });
 
-pub unsafe fn you_can_do_it(from: ControlPointStackMapId, to: ControlPointStackMapId, frameaddr: *mut c_void) {
-    // println!("@@ you_can_do_it from: {:x} to: {:x} frameaddr: {:x}", from as usize, to as usize, frameaddr as usize);
-    let mut asm = Assembler::new().unwrap();
-
-    // let frameaddr_i64: i64 = frameaddr as i64;
-    // println!("@@ frameaddr_i64: {:x}, {}, original: {:x}, {}", frameaddr_i64, frameaddr_i64, frameaddr as usize, frameaddr as usize);
-
-    build_livevars_cp_asm(from as usize, to as usize, &mut asm, frameaddr as usize);
-    let buffer = asm.finalize().unwrap();
-    let func: unsafe fn() = std::mem::transmute(buffer.as_ptr());
-    func();
+pub struct ControlPointTransition {
+    pub src_smid: ControlPointStackMapId,
+    pub dst_smid: ControlPointStackMapId,
+    pub frameaddr: *const c_void,
+    pub rsp: *const c_void,
+    pub trace_addr: *const c_void,
+    pub exec_trace: bool,
+    pub exec_trace_fn: ExecTraceFn,
 }
 
+static verbose: bool = false;
+static stack_sandwich: bool = false;
+
+// Based on __ykrt_control_point
+// "push rax",
+// "push rcx",
+// "push rbx",
+// "push rdi",
+// "push rsi",
+// ....
+// "push r8",
+// "push r9",
+// "push r10",
+// "push r11",
+// "push r12",
+// "push r13",
+// "push r14",
+// "push r15",
 #[cfg(tracer_swt)]
-fn reg_num_stack_offset(dwarf_reg_num: u16) -> i32 {
-    match dwarf_reg_num {
-        0 => 0,  // rax
-        1 => 8,  // rdx
-        2 => 16, // rcx
-        3 => 24, // rbx
-        4 => 32, // rsi
-        5 => 40, // rdi
-        // rbp is not saved
-        // rsp is not saved
-        8 => 64,   // r8
-        9 => 72,   // r9
-        10 => 80,  // r10
-        11 => 88,  // r11
-        12 => 96,  // r12
-        13 => 104, // r13
-        14 => 112, // r14
-        15 => 120, // r15
+fn reg_num_to__ykrt_control_point_stack_offset(dwarf_reg_num: u16) -> i32 {
+    let offset = match dwarf_reg_num {
+        0 => 0x60, // rax
+        // 1 => 8,  // rdx - is not saved
+        2 => 0x58, // rcx
+        3 => 0x50, // rbx
+        // Question: why rsi and rdi are not at their index?
+        5 => 0x48, // rdi
+        4 => 0x40, // rsi
+        // 6 => 0x48 - not saved
+        // 7 => 0x40 - not saved
+        8 => 0x38,  // r8
+        9 => 0x30,  // r9
+        10 => 0x28, // r10
+        11 => 0x20, // r11
+        12 => 0x18, // r12
+        13 => 0x10, // r13
+        14 => 0x8,  // r14
+        15 => 0x0,  // r15
         _ => panic!("Unsupported register {}", dwarf_reg_num),
+    };
+    if verbose {
+        println!("@@ reg: {}, offset: 0x{:x}", dwarf_reg_num, offset);
     }
+    return offset;
 }
 
-#[cfg(tracer_swt)]
-fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, frameaddr: usize) {
-    let verbose = false;
+pub(crate) type ExecTraceFn = unsafe extern "C" fn(
+    frameaddr: *const c_void,
+    rsp: *const c_void,
+    trace_addr: *const c_void,
+) -> !;
+
+pub unsafe fn control_point_transition(transition: ControlPointTransition) {
+    let ControlPointTransition { src_smid, dst_smid, frameaddr, rsp, trace_addr, exec_trace, exec_trace_fn} = transition;
+
+    let frameaddr = frameaddr as usize;
+
+    let mut asm = Assembler::new().unwrap();
     // TODO: find the pushed registers in the control point
 
-    let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid);
-    let (dst_rec, dst_rec_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid);
+    let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid as usize);
+    let (dst_rec, dst_rec_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid as usize);
 
-    // TODO:
-    // 1. memcopy the stack or allocate another stack frame
-    // 2. The registers here are not the actual registers we need... We need to take them from the control point
+    let (unopt_rec, unopt_pinfo) = AOT_STACKMAPS
+        .as_ref()
+        .unwrap()
+        .get(ControlPointStackMapId::UnOpt as usize);
+    let (opt_rec, opt_pinfo) = AOT_STACKMAPS
+        .as_ref()
+        .unwrap()
+        .get(ControlPointStackMapId::Opt as usize);
 
-    let mut dest_rsp = dst_rec.size;
-    if dst_rec_pinfo.hasfp {
-        dest_rsp -= REG64_BYTESIZE;
+    let mut unopt_frame_size = unopt_rec.size;
+    if unopt_pinfo.hasfp {
+        unopt_frame_size -= REG64_BYTESIZE;
     }
+    let mut opt_frame_size = opt_rec.size;
+    if opt_pinfo.hasfp {
+        opt_frame_size -= REG64_BYTESIZE;
+    }
+    // breakpoint before the stack adjustment
+    // dynasm!(asm; .arch x64; int3);
+    if verbose {
+        println!(
+            "@@ unopt_frame_size: 0x{:x}, opt_frame_size: 0x{:x}",
+            unopt_frame_size, opt_frame_size
+        );
+    }
+    if stack_sandwich {
+        // Unopt -> Opt
+        // if src_smid == ControlPointStackMapId::UnOpt && dst_smid == ControlPointStackMapId::Opt {
+        //     dynasm!(asm
+        //         ; .arch x64
+        //         // ; int3
+        //         ; mov rbp, QWORD frameaddr as i64                   // src - set rbp
+        //         ; mov rsp, QWORD frameaddr as i64                   // src - set rsp
+        //         ; sub rsp, (unopt_frame_size).try_into().unwrap()   // src - alloc stack frame
+        //         ; push rbp                                          // dst - save src rbp
+        //         ; push rbp                                          // dst - save src rbp another time
+        //         ; mov rbp, rsp                                      // dst - set rbp
+        //         ; sub rsp, (opt_frame_size).try_into().unwrap()     // dst - alloc stack frame
+        //     );
+        // }
+        // // Revert the stack sandwich
+        // if src_smid == ControlPointStackMapId::Opt && dst_smid == ControlPointStackMapId::UnOpt {
+        //     dynasm!(asm
+        //         ; .arch x64
+        //         ; int3
+        //         ; add rsp, (opt_frame_size).try_into().unwrap() // remove the frame allocated under the opt frame
+        //         ; pop rbp                                        // restore the original rbp
+        //     );
+        // }
+    } else {
+        let mut dest_rsp = opt_frame_size;
+        if dst_smid == ControlPointStackMapId::UnOpt {
+            dest_rsp = unopt_frame_size;
+        }
 
-    // TODO: figure out how to not hardcode this!
-    dest_rsp += 112; // Adjusting the stack that is extended by the __ykrt_control_point_real call.
-    dynasm!(asm
-        ; .arch x64
-        ; mov rbp, QWORD frameaddr as i64 // reset rbp
-        ; mov rsp, QWORD frameaddr as i64 // reset rsp
-        ; sub rsp, (dest_rsp).try_into().unwrap()
-        // ; int3
-    );
-
-    // Save all the registers to the stack
-    dynasm!(asm
-        ; .arch x64
-        ; push r15    // 15 - offset 120
-        ; push r14    // 14 - offset 112
-        ; push r13    // 13 - offset 104
-        ; push r12    // 12 - offset 96
-        ; push r11    // 11 - offset 88
-        ; push r10    // 10 - offset 80
-        ; push r9     // 9 - offset 72
-        ; push r8     // 8 - offset 64
-        ; sub rsp, 16 // Allocates 16 bytes of padding for rsp and rbp
-        ; push rsi    // 5 - offset 40
-        ; push rdi    // 4 - offset 32
-        ; push rbx    // 3 - offset 24
-        ; push rcx    // 2 - offset 16
-        ; push rdx    // 1 - offset 8
-        ; push rax    // 0 - offset 0
-    );
+        if verbose {
+            println!(
+                "@@ rsp: 0x{:x}, rbp: 0x{:x}",
+                frameaddr as u64 - dest_rsp as u64,
+                frameaddr as u64
+            );
+        }
+        dynasm!(asm
+            ; .arch x64
+            ; mov rbp, QWORD frameaddr as i64 // reset rbp
+            ; mov rsp, QWORD frameaddr as i64 // reset rsp
+            ; sub rsp, (dest_rsp).try_into().unwrap()
+            // ; int3
+        );
+    }
 
     if verbose {
         println!(
-            "@@ from {} to {} live var count: {}",
+            "@@ from {:?} to {:?} live var count: {}",
             src_smid,
             dst_smid,
             dst_rec.live_vars.len()
         );
+    }
+
+    let mut src_rsp_offset: i32 = 0;
+    if src_smid == ControlPointStackMapId::Opt {
+        src_rsp_offset = i32::try_from(unopt_frame_size + REG64_BYTESIZE * 2).unwrap();
+    } else if src_smid == ControlPointStackMapId::UnOpt {
+        src_rsp_offset = i32::try_from(opt_frame_size + REG64_BYTESIZE * 6).unwrap();
     }
 
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
@@ -150,8 +196,7 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
                 dst_location, src_location
             );
         }
-        // breakpoint for each location
-        // dynasm!(asm; int3);
+
         match dst_location {
             Indirect(_dst_reg_num, dst_off, dst_val_size) => {
                 match src_location {
@@ -162,7 +207,8 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
                             src_val_size, dst_val_size
                         );
                         assert!(*src_add_locs == 0, "deal with additional info");
-                        let src_offset = reg_num_stack_offset(*src_reg_num);
+                        let src_offset = reg_num_to__ykrt_control_point_stack_offset(*src_reg_num)
+                            - src_rsp_offset;
                         match *src_val_size {
                             1 => dynasm!(asm
                                 ; mov al, BYTE [rsp + src_offset]
@@ -237,7 +283,8 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
                         if src_reg_num == dst_reg_num && src_val_size == dst_val_size {
                             continue;
                         }
-                        let src_offset = reg_num_stack_offset(*src_reg_num);
+                        let src_offset = reg_num_to__ykrt_control_point_stack_offset(*src_reg_num)
+                            - src_rsp_offset;
                         let dest_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *src_val_size {
                             1 => dynasm!(asm; mov Rb(dest_reg), BYTE [rsp + src_offset]),
@@ -275,28 +322,48 @@ fn build_livevars_cp_asm(src_smid: usize, dst_smid: usize, asm: &mut Assembler, 
     }
 
     if verbose {
-        println!("@@ dst_size: 0x{:x}, dst_rbp: 0x{:x}, dst addr: 0x{:x}", dst_rec.size as i64, frameaddr as i64, dst_rec.offset);
-        println!("@@ src_size: 0x{:x}, src_rbp: 0x{:x}, src addr: 0x{:x}", src_rec.size as i64, frameaddr as i64, src_rec.offset);
+        println!(
+            "@@ dst_size: 0x{:x}, dst_rbp: 0x{:x}, dst addr: 0x{:x}",
+            dst_rec.size as i64, frameaddr as i64, dst_rec.offset
+        );
+        println!(
+            "@@ src_size: 0x{:x}, src_rbp: 0x{:x}, src addr: 0x{:x}",
+            src_rec.size as i64, frameaddr as i64, src_rec.offset
+        );
     }
+    if !exec_trace  {
+        let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
+        let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
+        dynasm!(asm
+            ; .arch x64
+            // ; add rsp, TOTAL_STACK_ADJUSTMENT // reserves 128 bytes of space on the stack.
+            ; sub rsp, 16 // reserves 16 bytes of space on the stack.
+            ; mov [rsp], rax // save rsp
+            ; mov rax, QWORD dst_target_addr // loads the target address into rax
+            ; mov [rsp + 8], rax // stores the target address into rsp+8
+            ; pop rax // restores the original rax at rsp
+            // ; int3 // breakpoint
+            ; ret // loads 8 bytes from rsp and jumps to it
+        );
+    }else{
+        // Move the arguments into the appropriate registers
+        dynasm!(asm
+            ; .arch x64
+            ; mov rdi, QWORD frameaddr as i64                   // First argument
+            ; mov rsi, QWORD rsp as i64    // Second argument
+            ; mov rdx, QWORD trace_addr as i64          // Third argument
+            ; mov rcx, QWORD exec_trace_fn as i64         // Move function pointer to rcx
+            ; call rcx // Call the function
+        );
+    }
+    // TODO: if the flag is false return to the caller
 
-    let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
-    let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
-
-    dynasm!(asm
-        ; .arch x64
-        // ; int3
-        ; sub rsp, 16 // reserves 16 bytes of space on the stack.
-        ; mov [rsp], rax // save rsp
-        ; mov rax, QWORD dst_target_addr // loads the target address into rax
-        ; mov [rsp + 8], rax // stores the target address into rsp+8
-        ; pop rax // restores the original rax at rsp
-        // ; int3 // breakpoint
-        ; ret // loads 8 bytes from rsp and jumps to it
-    );
+    let buffer = asm.finalize().unwrap();
+    let func: unsafe fn() = std::mem::transmute(buffer.as_ptr());
+    func();
 }
 
-// This function calculates the offset to the call instruction just
-// after the given offset.
+
 // Example:
 //  CP Record offset points to 0x00000000002023a4, we want to find the
 //  instruction at 0x00000000002023b1.
@@ -376,3 +443,73 @@ mod tests {
         Ok(())
     }
 }
+
+// Original code
+// dynasm!(asm
+//     ; .arch x64
+//     ; push r15    // 15 - offset 120
+//     ; push r14    // 14 - offset 112
+//     ; push r13    // 13 - offset 104
+//     ; push r12    // 12 - offset 96
+//     ; push r11    // 11 - offset 88
+//     ; push r10    // 10 - offset 80
+//     ; push r9     // 9 - offset 72
+//     ; push r8     // 8 - offset 64
+//     ; sub rsp, 16 // Allocates 16 bytes of padding for rsp and rbp
+//     ; push rsi    // 5 - offset 40
+//     ; push rdi    // 4 - offset 32
+//     ; push rbx    // 3 - offset 24
+//     ; push rcx    // 2 - offset 16
+//     ; push rdx    // 1 - offset 8
+//     ; push rax    // 0 - offset 0
+// );
+
+// let rsp_offset = -128;
+// const TOTAL_STACK_ADJUSTMENT: i32 = 16 * 8;
+// dynasm!(asm
+//     ; .arch x64
+
+//     ; sub rsp, TOTAL_STACK_ADJUSTMENT
+//     ; int3
+//     // mov r15
+//     ; mov rax, [rsp + rsp_offset + 0x0]
+//     ; mov QWORD [rsp + 0x78], rax
+//     // mov r14
+//     ; mov rax, [rsp + rsp_offset + 0x8]
+//     ; mov QWORD [rsp + 0x70], rax
+//     // mov r13
+//     ; mov rax, [rsp + rsp_offset + 0x10]
+//     ; mov QWORD [rsp + 0x68], rax
+//     // mov r12
+//     ; mov rax, [rsp + rsp_offset + 0x18]
+//     ; mov QWORD [rsp + 0x60], rax
+//     // mov r11
+//     ; mov rax, [rsp + rsp_offset + 0x20]
+//     ; mov QWORD [rsp + 0x58], rax
+//     // mov r10
+//     ; mov rax, [rsp + rsp_offset + 0x28]
+//     ; mov QWORD [rsp + 0x50], rax
+//     // mov r9
+//     ; mov rax, [rsp + rsp_offset + 0x30]
+//     ; mov QWORD [rsp + 0x48], rax
+//     // mov r8
+//     ; mov rax, [rsp + rsp_offset + 0x38]
+//     ; mov QWORD [rsp + 0x40], rax
+//     ; sub rsp, 16 // Allocates 16 bytes of padding for rsp and rbp
+//     // mov rsi
+//     ; mov rax, [rsp + rsp_offset + 0x40]
+//     ; mov QWORD [rsp + 0x28], rax
+//     // mov rdi
+//     ; mov rax, [rsp + rsp_offset + 0x48]
+//     ; mov QWORD [rsp + 0x20], rax
+//     // mov rbx
+//     ; mov rax, [rsp + rsp_offset + 0x50]
+//     ; mov QWORD [rsp + 0x18], rax
+//     // mov rcx
+//     ; mov rax, [rsp + rsp_offset + 0x58]
+//     ; mov QWORD [rsp + 0x10], rax
+//     // Note: rdx is not saved
+//     // ; mov QWORD [rsp + 0x8], 0x0
+//     ; mov rax, [rsp + rsp_offset + 0x60]
+//     ; mov QWORD [rsp + 0x0], rax
+// );
