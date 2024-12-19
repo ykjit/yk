@@ -55,7 +55,6 @@ impl Opt {
         for (iidx, inst) in skipping.into_iter() {
             match inst {
                 Inst::TraceHeaderStart => (),
-                Inst::TraceHeaderEnd => (),
                 _ => {
                     self.opt_inst(iidx)?;
                     self.cse(&mut instll, iidx);
@@ -130,7 +129,7 @@ impl Opt {
         for (iidx, inst) in skipping.into_iter() {
             match inst {
                 Inst::TraceHeaderStart | Inst::TraceHeaderEnd => panic!(),
-                Inst::TraceBodyStart | Inst::TraceBodyEnd => (),
+                Inst::TraceBodyStart => (),
                 _ => {
                     self.opt_inst(iidx)?;
                     self.cse(&mut instll, iidx);
@@ -145,14 +144,17 @@ impl Opt {
 
     /// Optimise instruction `iidx`.
     fn opt_inst(&mut self, iidx: InstIdx) -> Result<(), CompilationError> {
+        // First rewrite the instruction so that all changes from the analyser are reflected
+        // straight away. Note: we deliberately do this before some of the changes below. Most
+        // notably we need to call `rewrite` before telling the analyser about a `Guard`: if we
+        // swap that order, the guard will pick up the wrong value for operand(s) related to
+        // whether the guard succeeds!
+        self.rewrite(iidx)?;
+
         match self.m.inst(iidx) {
             #[cfg(test)]
             Inst::BlackBox(_) => (),
-            Inst::Const(_)
-            | Inst::Copy(_)
-            | Inst::Tombstone
-            | Inst::TraceHeaderStart
-            | Inst::TraceHeaderEnd => {
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone | Inst::TraceHeaderStart => {
                 unreachable!()
             }
             Inst::BinOp(x) => match x.binop() {
@@ -478,7 +480,28 @@ impl Opt {
             }
             _ => (),
         };
+
         Ok(())
+    }
+
+    /// Rewrite the instruction at `iidx`: duplicate it and remap its operands so that it reflects
+    /// everything learnt by the analyser.
+    fn rewrite(&mut self, iidx: InstIdx) -> Result<(), CompilationError> {
+        match self.m.inst_nocopy(iidx) {
+            None => Ok(()),
+            Some(Inst::Guard(_)) => {
+                // We can't safely rewrite guard operands as we pick up the result of the analysis
+                // on the guard itself!
+                Ok(())
+            }
+            Some(inst) => {
+                let r = inst.dup_and_remap_vars(&mut self.m, |m, op_iidx| {
+                    self.an.op_map(m, Operand::Var(op_iidx))
+                })?;
+                self.m.replace(iidx, r);
+                Ok(())
+            }
+        }
     }
 
     /// Attempt common subexpression elimination on `iidx`, replacing it with a `Copy` or

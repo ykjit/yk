@@ -4,6 +4,7 @@ use super::{
     super::jit_ir::{GuardInst, Inst, InstIdx, Module, Operand, Predicate},
     Value,
 };
+use std::cell::RefCell;
 
 /// Ongoing analysis of a trace: what value can a given instruction in the past produce?
 ///
@@ -11,8 +12,10 @@ use super::{
 /// `Const` now does not mean it would be valid to assume that at earlier points it is safe to
 /// assume it was also a `Const`.
 pub(super) struct Analyse {
-    /// For each instruction, what have we learnt about its [Value] so far?
-    values: Vec<Value>,
+    /// For each instruction, what have we learnt about its [Value] so far? This is a `RefCell` as
+    /// it allows [Analyse::op_map] to take `&self`: changing that to `&mut self` upsets a lot of
+    /// other parts of the system w.r.t. the borrow checker.
+    values: RefCell<Vec<Value>>,
 }
 
 impl Analyse {
@@ -22,15 +25,15 @@ impl Analyse {
             // point. What we do know is that it is at most two times the size (though since we
             // don't copy over [Tombstone]s and [Copy]s it will be slightly less than that.
             // FIXME: Can we calculate this more accurately?
-            values: vec![Value::Unknown; m.insts_len() * 2],
+            values: RefCell::new(vec![Value::Unknown; m.insts_len() * 2]),
         }
     }
 
     /// Map `op` based on our analysis so far. In some cases this will return `op` unchanged, but
     /// in others it may be able to turn what looks like a variable reference into a constant.
-    pub(super) fn op_map(&mut self, m: &Module, op: Operand) -> Operand {
+    pub(super) fn op_map(&self, m: &Module, op: Operand) -> Operand {
         match op {
-            Operand::Var(iidx) => match self.values[usize::from(iidx)] {
+            Operand::Var(iidx) => match self.values.borrow()[usize::from(iidx)] {
                 Value::Unknown => {
                     // Since we last saw an `ICmp` instruction, we may have gathered new knowledge
                     // that allows us to turn it into a constant.
@@ -42,7 +45,8 @@ impl Analyse {
                         {
                             if pred == Predicate::Equal && m.const_(lhs_cidx) == m.const_(rhs_cidx)
                             {
-                                self.values[usize::from(iidx)] = Value::Const(m.true_constidx());
+                                self.values.borrow_mut()[usize::from(iidx)] =
+                                    Value::Const(m.true_constidx());
                                 return Operand::Const(m.true_constidx());
                             }
                         }
@@ -56,12 +60,12 @@ impl Analyse {
     }
 
     /// Update our idea of what value the instruction at `iidx` can produce.
-    pub(super) fn set_value(&mut self, iidx: InstIdx, v: Value) {
-        self.values[usize::from(iidx)] = v;
+    pub(super) fn set_value(&self, iidx: InstIdx, v: Value) {
+        self.values.borrow_mut()[usize::from(iidx)] = v;
     }
 
     /// Use the guard `inst` to update our knowledge about the variable used as its condition.
-    pub(super) fn guard(&mut self, m: &Module, g_inst: GuardInst) {
+    pub(super) fn guard(&self, m: &Module, g_inst: GuardInst) {
         if let Operand::Var(iidx) = g_inst.cond(m) {
             if let Inst::ICmp(ic_inst) = m.inst(iidx) {
                 let lhs = self.op_map(m, ic_inst.lhs(m));
