@@ -68,7 +68,7 @@ impl<'a> RevAnalyse<'a> {
                 }
 
                 // Calculate inst_vals_alive_until
-                inst.map_operand_locals(self.m, &mut |x| {
+                inst.map_operand_vars(self.m, &mut |x| {
                     self.used_insts.set(usize::from(x), true);
                     if self.inst_vals_alive_until[usize::from(x)] < iidx {
                         self.inst_vals_alive_until[usize::from(x)] = iidx;

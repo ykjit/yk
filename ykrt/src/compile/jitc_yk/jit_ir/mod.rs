@@ -1521,9 +1521,9 @@ impl Inst {
     }
 
     /// Apply the function `f` to each of this instruction's [Operand]s iff they are of type
-    /// [Operand::Local]. When an instruction references more than one [Operand], the order of
+    /// [Operand::Var]. When an instruction references more than one [Operand], the order of
     /// traversal is undefined.
-    pub(crate) fn map_operand_locals<F>(&self, m: &Module, f: &mut F)
+    pub(crate) fn map_operand_vars<F>(&self, m: &Module, f: &mut F)
     where
         F: FnMut(InstIdx),
     {
@@ -1628,8 +1628,10 @@ impl Inst {
         }
     }
 
-    /// Duplicate this [Inst] while applying function `f` to each operand.
-    pub(crate) fn dup_and_remap_locals<F>(
+    /// Duplicate this [Inst] and, during that process, apply the function `f` to each of this
+    /// instruction's [Operand]s iff they are of type [Operand::Var]. When an instruction
+    /// references more than one [Operand], the order of traversal is undefined.
+    pub(crate) fn dup_and_remap_vars<F>(
         &self,
         m: &mut Module,
         f: F,
