@@ -77,7 +77,7 @@ impl Opt {
         let mut iidx_map = vec![InstIdx::max(); base];
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
-            let c = inst.dup_and_remap_locals(&mut self.m, &|op_iidx: InstIdx| {
+            let c = inst.dup_and_remap_locals(&mut self.m, |op_iidx: InstIdx| {
                 Operand::Var(iidx_map[usize::from(op_iidx)])
             })?;
             let copy_iidx = self.m.push(c)?;

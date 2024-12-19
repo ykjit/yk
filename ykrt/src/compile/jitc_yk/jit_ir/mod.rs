@@ -1632,7 +1632,7 @@ impl Inst {
     pub(crate) fn dup_and_remap_locals<F>(
         &self,
         m: &mut Module,
-        f: &F,
+        f: F,
     ) -> Result<Self, CompilationError>
     where
         F: Fn(InstIdx) -> Operand,
