@@ -24,15 +24,12 @@ use instll::InstLinkedList;
 struct Opt {
     m: Module,
     an: Analyse,
-    /// Needed for common subexpression elimination.
-    instll: InstLinkedList,
 }
 
 impl Opt {
     fn new(m: Module) -> Self {
         let an = Analyse::new(&m);
-        let instll = InstLinkedList::new(&m);
-        Self { m, an, instll }
+        Self { m, an }
     }
 
     fn opt(mut self) -> Result<Module, CompilationError> {
@@ -53,6 +50,7 @@ impl Opt {
         // Note that since we will apply loop peeling here, the list of instructions grows as this
         // loop runs. Each instruction we process is (after optimisations were applied), duplicated
         // and copied to the end of the module.
+        let mut instll = InstLinkedList::new(&self.m);
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
             match inst {
@@ -60,7 +58,7 @@ impl Opt {
                 Inst::TraceHeaderEnd => (),
                 _ => {
                     self.opt_inst(iidx)?;
-                    self.cse(iidx);
+                    self.cse(&mut instll, iidx);
                 }
             }
         }
@@ -73,8 +71,6 @@ impl Opt {
         }
 
         // Now that we've processed the trace header, duplicate it to create the loop body.
-        // FIXME: Do we need to call `iter_skipping_inst_idxs` again?
-        // Maps header instructions to their position in the body.
         let mut iidx_map = vec![InstIdx::max(); base];
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
@@ -118,7 +114,26 @@ impl Opt {
                     })?;
                     let copy_iidx = self.m.push(c)?;
                     iidx_map[usize::from(iidx)] = copy_iidx;
-                    self.opt_inst(copy_iidx)?;
+                }
+            }
+        }
+
+        // Create a fresh `instll`. Normal CSE in the body (a) can't possibly reference the header
+        // (b) the number of instructions in the `instll`-for-the-header is wrong as a result of
+        // peeling. So create a fresh `instll`.
+        let mut instll = InstLinkedList::new(&self.m);
+        let skipping = self
+            .m
+            .iter_skipping_insts()
+            .skip_while(|(_, inst)| !matches!(inst, Inst::TraceBodyStart))
+            .collect::<Vec<_>>();
+        for (iidx, inst) in skipping.into_iter() {
+            match inst {
+                Inst::TraceHeaderStart | Inst::TraceHeaderEnd => panic!(),
+                Inst::TraceBodyStart | Inst::TraceBodyEnd => (),
+                _ => {
+                    self.opt_inst(iidx)?;
+                    self.cse(&mut instll, iidx);
                 }
             }
         }
@@ -468,14 +483,14 @@ impl Opt {
 
     /// Attempt common subexpression elimination on `iidx`, replacing it with a `Copy` or
     /// `Tombstone` if possible.
-    fn cse(&mut self, iidx: InstIdx) {
+    fn cse(&mut self, instll: &mut InstLinkedList, iidx: InstIdx) {
         let inst = match self.m.inst_nocopy(iidx) {
             // If this instruction is already a `Copy`, then there is nothing for CSE to do.
             None => return,
             // There's no point in trying CSE on a `Const` or `Tombstone`.
             Some(Inst::Const(_)) | Some(Inst::Tombstone) => return,
             Some(inst @ Inst::Guard(ginst)) => {
-                for (_, back_inst) in self.instll.rev_iter(&self.m, inst) {
+                for (_, back_inst) in instll.rev_iter(&self.m, inst) {
                     if let Inst::Guard(back_ginst) = back_inst {
                         if ginst.cond(&self.m) == back_ginst.cond(&self.m)
                             && ginst.expect() == back_ginst.expect()
@@ -497,7 +512,7 @@ impl Opt {
                 }
 
                 // Can we CSE the instruction at `iidx`?
-                for (back_iidx, back_inst) in self.instll.rev_iter(&self.m, inst) {
+                for (back_iidx, back_inst) in instll.rev_iter(&self.m, inst) {
                     if inst.decopy_eq(&self.m, back_inst) {
                         self.m.replace(iidx, Inst::Copy(back_iidx));
                         return;
@@ -513,7 +528,7 @@ impl Opt {
         //      things that aren't CSE candidates, which saves us some pointless work.
         //   2. Haven't been turned into `Copy`s. So only if we've failed to CSE a given
         //      instruction is it worth pushing to the `instll`.
-        self.instll.push(iidx, inst);
+        instll.push(iidx, inst);
     }
 
     /// Optimise an [ICmpInst].
