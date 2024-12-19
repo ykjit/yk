@@ -35,6 +35,74 @@ impl Opt {
         Self { m, an, instll }
     }
 
+    fn opt(mut self) -> Result<Module, CompilationError> {
+        let base = self.m.insts_len();
+        let peel = match self.m.inst(self.m.last_inst_idx()) {
+            // If this is a sidetrace, we perform optimisations up to, but including, loop peeling.
+            Inst::SidetraceEnd => false,
+            Inst::TraceHeaderEnd => true,
+            #[cfg(test)]
+            // Not all tests create "fully valid" traces, in the sense that -- to keep things
+            // simple -- they don't end with `TraceHeaderEnd`. We don't want to peel such traces,
+            // but nor, in testing mode, do we consider them ill-formed.
+            _ => false,
+            #[cfg(not(test))]
+            _ => panic!(),
+        };
+
+        // Note that since we will apply loop peeling here, the list of instructions grows as this
+        // loop runs. Each instruction we process is (after optimisations were applied), duplicated
+        // and copied to the end of the module.
+        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
+        for (iidx, _inst) in skipping.into_iter() {
+            self.opt_inst(iidx)?;
+            self.cse(iidx);
+        }
+        // FIXME: When code generation supports backwards register allocation, we won't need to
+        // explicitly perform dead code elimination and this function can be made `#[cfg(test)]` only.
+        self.m.dead_code_elimination();
+
+        if !peel {
+            return Ok(self.m);
+        }
+
+        // Now that we've processed the trace header, duplicate it to create the loop body.
+        // FIXME: Do we need to call `iter_skipping_inst_idxs` again?
+        // Maps header instructions to their position in the body.
+        let mut iidx_map = vec![0; base];
+        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
+        for (iidx, inst) in skipping.into_iter() {
+            let c = inst.dup_and_remap_locals(&mut self.m, &|i: InstIdx| {
+                let newiidx = iidx_map[usize::from(i)];
+                Operand::Var(InstIdx::try_from(newiidx).unwrap())
+            })?;
+            let copyiidx = self.m.push(c)?;
+            iidx_map[usize::from(iidx)] = usize::from(copyiidx);
+            if let Inst::TraceHeaderStart = inst {
+                for (headop, bodyop) in self
+                    .m
+                    .trace_header_end()
+                    .iter()
+                    .zip(self.m.trace_body_start())
+                {
+                    // Inform the analyser about any constants being passed from the header into
+                    // the body.
+                    if let Operand::Const(cidx) = headop.unpack(&self.m) {
+                        let Operand::Var(op_iidx) = bodyop.unpack(&self.m) else {
+                            panic!()
+                        };
+                        self.an.set_value(op_iidx, Value::Const(cidx));
+                    }
+                }
+            }
+            self.opt_inst(copyiidx)?;
+        }
+
+        // FIXME: Apply CSE and run another pass of optimisations on the peeled loop.
+        self.m.dead_code_elimination();
+        Ok(self.m)
+    }
+
     /// Optimise instruction `iidx`.
     fn opt_inst(&mut self, iidx: InstIdx) -> Result<(), CompilationError> {
         match self.m.inst(iidx) {
@@ -365,74 +433,6 @@ impl Opt {
             _ => (),
         };
         Ok(())
-    }
-
-    fn opt(mut self) -> Result<Module, CompilationError> {
-        let base = self.m.insts_len();
-        let peel = match self.m.inst(self.m.last_inst_idx()) {
-            // If this is a sidetrace, we perform optimisations up to, but including, loop peeling.
-            Inst::SidetraceEnd => false,
-            Inst::TraceHeaderEnd => true,
-            #[cfg(test)]
-            // Not all tests create "fully valid" traces, in the sense that -- to keep things
-            // simple -- they don't end with `TraceHeaderEnd`. We don't want to peel such traces,
-            // but nor, in testing mode, do we consider them ill-formed.
-            _ => false,
-            #[cfg(not(test))]
-            _ => panic!(),
-        };
-
-        // Note that since we will apply loop peeling here, the list of instructions grows as this
-        // loop runs. Each instruction we process is (after optimisations were applied), duplicated
-        // and copied to the end of the module.
-        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
-        for (iidx, _inst) in skipping.into_iter() {
-            self.opt_inst(iidx)?;
-            self.cse(iidx);
-        }
-        // FIXME: When code generation supports backwards register allocation, we won't need to
-        // explicitly perform dead code elimination and this function can be made `#[cfg(test)]` only.
-        self.m.dead_code_elimination();
-
-        if !peel {
-            return Ok(self.m);
-        }
-
-        // Now that we've processed the trace header, duplicate it to create the loop body.
-        // FIXME: Do we need to call `iter_skipping_inst_idxs` again?
-        // Maps header instructions to their position in the body.
-        let mut iidx_map = vec![0; base];
-        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
-        for (iidx, inst) in skipping.into_iter() {
-            let c = inst.dup_and_remap_locals(&mut self.m, &|i: InstIdx| {
-                let newiidx = iidx_map[usize::from(i)];
-                Operand::Var(InstIdx::try_from(newiidx).unwrap())
-            })?;
-            let copyiidx = self.m.push(c)?;
-            iidx_map[usize::from(iidx)] = usize::from(copyiidx);
-            if let Inst::TraceHeaderStart = inst {
-                for (headop, bodyop) in self
-                    .m
-                    .trace_header_end()
-                    .iter()
-                    .zip(self.m.trace_body_start())
-                {
-                    // Inform the analyser about any constants being passed from the header into
-                    // the body.
-                    if let Operand::Const(cidx) = headop.unpack(&self.m) {
-                        let Operand::Var(op_iidx) = bodyop.unpack(&self.m) else {
-                            panic!()
-                        };
-                        self.an.set_value(op_iidx, Value::Const(cidx));
-                    }
-                }
-            }
-            self.opt_inst(copyiidx)?;
-        }
-
-        // FIXME: Apply CSE and run another pass of optimisations on the peeled loop.
-        self.m.dead_code_elimination();
-        Ok(self.m)
     }
 
     /// Attempt common subexpression elimination on `iidx`, replacing it with a `Copy` or
