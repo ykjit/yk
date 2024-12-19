@@ -35,342 +35,402 @@ impl Opt {
         Self { m, an, instll }
     }
 
-    fn opt(mut self) -> Result<Module, CompilationError> {
-        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
-        for (iidx, inst) in skipping.into_iter() {
-            match inst {
-                #[cfg(test)]
-                Inst::BlackBox(_) => (),
-                Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
-                Inst::BinOp(x) => match x.binop() {
-                    BinOp::Add => match (
-                        self.an.op_map(&self.m, x.lhs(&self.m)),
-                        self.an.op_map(&self.m, x.rhs(&self.m)),
-                    ) {
-                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
-                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                            match self.m.const_(op_cidx) {
-                                Const::Int(_, 0) => {
-                                    // Replace `x + 0` with `x`.
-                                    self.m.replace(iidx, Inst::Copy(op_iidx));
-                                }
-                                _ => {
-                                    // Canonicalise to (Var, Const).
-                                    self.m.replace(
-                                        iidx,
-                                        BinOpInst::new(
-                                            Operand::Var(op_iidx),
-                                            BinOp::Add,
-                                            Operand::Const(op_cidx),
-                                        )
-                                        .into(),
-                                    );
-                                }
+    /// Optimise instruction `iidx`.
+    fn opt_inst(&mut self, iidx: InstIdx) -> Result<(), CompilationError> {
+        match self.m.inst(iidx) {
+            #[cfg(test)]
+            Inst::BlackBox(_) => (),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
+            Inst::BinOp(x) => match x.binop() {
+                BinOp::Add => match (
+                    self.an.op_map(&self.m, x.lhs(&self.m)),
+                    self.an.op_map(&self.m, x.rhs(&self.m)),
+                ) {
+                    (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                    | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                        match self.m.const_(op_cidx) {
+                            Const::Int(_, 0) => {
+                                // Replace `x + 0` with `x`.
+                                self.m.replace(iidx, Inst::Copy(op_iidx));
+                            }
+                            _ => {
+                                // Canonicalise to (Var, Const).
+                                self.m.replace(
+                                    iidx,
+                                    BinOpInst::new(
+                                        Operand::Var(op_iidx),
+                                        BinOp::Add,
+                                        Operand::Const(op_cidx),
+                                    )
+                                    .into(),
+                                );
                             }
                         }
-                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
-                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
-                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
-                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
-                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
-                                        panic!()
-                                    };
-                                    let cidx = self.m.insert_const_int(
-                                        *lhs_tyidx,
-                                        (lhs_v.wrapping_add(*rhs_v)).truncate(*bits),
-                                    )?;
-                                    self.m.replace(iidx, Inst::Const(cidx));
-                                }
-                                _ => todo!(),
+                    }
+                    (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                        match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                    panic!()
+                                };
+                                let cidx = self.m.insert_const_int(
+                                    *lhs_tyidx,
+                                    (lhs_v.wrapping_add(*rhs_v)).truncate(*bits),
+                                )?;
+                                self.m.replace(iidx, Inst::Const(cidx));
                             }
+                            _ => todo!(),
                         }
-                        (Operand::Var(_), Operand::Var(_)) => (),
-                    },
-                    BinOp::And => match (
-                        self.an.op_map(&self.m, x.lhs(&self.m)),
-                        self.an.op_map(&self.m, x.rhs(&self.m)),
-                    ) {
-                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
-                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                            match self.m.const_(op_cidx) {
-                                Const::Int(_, 0) => {
-                                    // Replace `x & 0` with `0`.
-                                    self.m.replace(iidx, Inst::Const(op_cidx));
-                                }
-                                _ => {
-                                    // Canonicalise to (Var, Const).
-                                    self.m.replace(
-                                        iidx,
-                                        BinOpInst::new(
-                                            Operand::Var(op_iidx),
-                                            BinOp::And,
-                                            Operand::Const(op_cidx),
-                                        )
-                                        .into(),
-                                    );
-                                }
-                            }
-                        }
-                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
-                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
-                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
-                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
-                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
-                                        panic!()
-                                    };
-                                    let cidx = self.m.insert_const_int(
-                                        *lhs_tyidx,
-                                        (lhs_v & rhs_v).truncate(*bits),
-                                    )?;
-                                    self.m.replace(iidx, Inst::Const(cidx));
-                                }
-                                _ => todo!(),
-                            }
-                        }
-                        (Operand::Var(_), Operand::Var(_)) => (),
-                    },
-                    BinOp::LShr => match (
-                        self.an.op_map(&self.m, x.lhs(&self.m)),
-                        self.an.op_map(&self.m, x.rhs(&self.m)),
-                    ) {
-                        (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                            match self.m.const_(op_cidx) {
-                                Const::Int(_, 0) => {
-                                    // Replace `x >> 0` with `x`.
-                                    self.m.replace(iidx, Inst::Copy(op_iidx));
-                                }
-                                _ => {
-                                    // Canonicalise to (Var, Const).
-                                    self.m.replace(
-                                        iidx,
-                                        BinOpInst::new(
-                                            Operand::Var(op_iidx),
-                                            BinOp::LShr,
-                                            Operand::Const(op_cidx),
-                                        )
-                                        .into(),
-                                    );
-                                }
-                            }
-                        }
-                        (Operand::Const(_), Operand::Var(_)) => (),
-                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
-                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
-                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
-                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
-                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
-                                        panic!()
-                                    };
-                                    let cidx = self.m.insert_const_int(
-                                        *lhs_tyidx,
-                                        (lhs_v >> rhs_v).truncate(*bits),
-                                    )?;
-                                    self.m.replace(iidx, Inst::Const(cidx));
-                                }
-                                _ => todo!(),
-                            }
-                        }
-                        (Operand::Var(_), Operand::Var(_)) => (),
-                    },
-                    BinOp::Mul => match (
-                        self.an.op_map(&self.m, x.lhs(&self.m)),
-                        self.an.op_map(&self.m, x.rhs(&self.m)),
-                    ) {
-                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
-                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                            match self.m.const_(op_cidx) {
-                                Const::Int(_, 0) => {
-                                    // Replace `x * 0` with `0`.
-                                    self.m.replace(iidx, Inst::Const(op_cidx));
-                                }
-                                Const::Int(_, 1) => {
-                                    // Replace `x * 1` with `x`.
-                                    self.m.replace(iidx, Inst::Copy(op_iidx));
-                                }
-                                Const::Int(ty_idx, x) if x.is_power_of_two() => {
-                                    // Replace `x * y` with `x << ...`.
-                                    let shl = u64::from(x.ilog2());
-                                    let shl_op = Operand::Const(
-                                        self.m.insert_const(Const::Int(*ty_idx, shl))?,
-                                    );
-                                    let new_inst =
-                                        BinOpInst::new(Operand::Var(op_iidx), BinOp::Shl, shl_op)
-                                            .into();
-                                    self.m.replace(iidx, new_inst);
-                                }
-                                _ => {
-                                    // Canonicalise to (Var, Const).
-                                    self.m.replace(
-                                        iidx,
-                                        BinOpInst::new(
-                                            Operand::Var(op_iidx),
-                                            BinOp::Mul,
-                                            Operand::Const(op_cidx),
-                                        )
-                                        .into(),
-                                    );
-                                }
-                            }
-                        }
-                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
-                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
-                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
-                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
-                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
-                                        panic!()
-                                    };
-                                    let cidx = self.m.insert_const_int(
-                                        *lhs_tyidx,
-                                        (lhs_v.wrapping_mul(*rhs_v)).truncate(*bits),
-                                    )?;
-                                    self.m.replace(iidx, Inst::Const(cidx));
-                                }
-                                _ => todo!(),
-                            }
-                        }
-                        (Operand::Var(_), Operand::Var(_)) => (),
-                    },
-                    BinOp::Or => match (
-                        self.an.op_map(&self.m, x.lhs(&self.m)),
-                        self.an.op_map(&self.m, x.rhs(&self.m)),
-                    ) {
-                        (Operand::Const(op_cidx), Operand::Var(op_iidx))
-                        | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                            match self.m.const_(op_cidx) {
-                                Const::Int(_, 0) => {
-                                    // Replace `x | 0` with `x`.
-                                    self.m.replace(iidx, Inst::Copy(op_iidx));
-                                }
-                                _ => {
-                                    // Canonicalise to (Var, Const).
-                                    self.m.replace(
-                                        iidx,
-                                        BinOpInst::new(
-                                            Operand::Var(op_iidx),
-                                            BinOp::Or,
-                                            Operand::Const(op_cidx),
-                                        )
-                                        .into(),
-                                    );
-                                }
-                            }
-                        }
-                        (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
-                            match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
-                                (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
-                                    debug_assert_eq!(lhs_tyidx, rhs_tyidx);
-                                    let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
-                                        panic!()
-                                    };
-                                    let cidx = self.m.insert_const_int(
-                                        *lhs_tyidx,
-                                        (lhs_v | rhs_v).truncate(*bits),
-                                    )?;
-                                    self.m.replace(iidx, Inst::Const(cidx));
-                                }
-                                _ => todo!(),
-                            }
-                        }
-                        (Operand::Var(_), Operand::Var(_)) => (),
-                    },
-                    _ => (),
+                    }
+                    (Operand::Var(_), Operand::Var(_)) => (),
                 },
-                Inst::DynPtrAdd(x) => {
-                    if let Operand::Const(cidx) = self.an.op_map(&self.m, x.num_elems(&self.m)) {
-                        let Const::Int(_, v) = self.m.const_(cidx) else {
-                            panic!()
-                        };
-                        // DynPtrAdd indices are signed, so we have to be careful to interpret the
-                        // constant as such.
-                        let v = *v as i64;
-                        // LLVM IR allows `off` to be an `i64` but our IR currently allows only an
-                        // `i32`. On that basis, we can hit our limits before the program has
-                        // itself hit UB, at which point we can't go any further.
-                        let off = i32::try_from(v)
-                            .map_err(|_| ())
-                            .and_then(|v| v.checked_mul(i32::from(x.elem_size())).ok_or(()))
-                            .map_err(|_| {
-                                CompilationError::LimitExceeded(
-                                    "`DynPtrAdd` offset exceeded `i32` bounds".into(),
-                                )
-                            })?;
-                        self.m
-                            .replace(iidx, Inst::PtrAdd(PtrAddInst::new(x.ptr(&self.m), off)));
-                    }
-                }
-                Inst::ICmp(x) => {
-                    self.icmp(iidx, x);
-                }
-                Inst::Guard(x) => {
-                    if let Operand::Const(_) = self.an.op_map(&self.m, x.cond(&self.m)) {
-                        // A guard that references a constant is, by definition, not needed and
-                        // doesn't affect future analyses.
-                        self.m.replace(iidx, Inst::Tombstone);
-                    } else {
-                        self.an.guard(&self.m, x);
-                    }
-                }
-                Inst::PtrAdd(x) => match self.an.op_map(&self.m, x.ptr(&self.m)) {
-                    Operand::Const(_) => todo!(),
-                    Operand::Var(op_iidx) => {
-                        if x.off() == 0 {
-                            self.m.replace(iidx, Inst::Copy(op_iidx));
+                BinOp::And => match (
+                    self.an.op_map(&self.m, x.lhs(&self.m)),
+                    self.an.op_map(&self.m, x.rhs(&self.m)),
+                ) {
+                    (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                    | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                        match self.m.const_(op_cidx) {
+                            Const::Int(_, 0) => {
+                                // Replace `x & 0` with `0`.
+                                self.m.replace(iidx, Inst::Const(op_cidx));
+                            }
+                            _ => {
+                                // Canonicalise to (Var, Const).
+                                self.m.replace(
+                                    iidx,
+                                    BinOpInst::new(
+                                        Operand::Var(op_iidx),
+                                        BinOp::And,
+                                        Operand::Const(op_cidx),
+                                    )
+                                    .into(),
+                                );
+                            }
                         }
                     }
+                    (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                        match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                    panic!()
+                                };
+                                let cidx = self.m.insert_const_int(
+                                    *lhs_tyidx,
+                                    (lhs_v & rhs_v).truncate(*bits),
+                                )?;
+                                self.m.replace(iidx, Inst::Const(cidx));
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    (Operand::Var(_), Operand::Var(_)) => (),
                 },
-                Inst::SExt(x) => {
-                    if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
-                        let Const::Int(src_ty, src_val) = self.m.const_(cidx) else {
-                            unreachable!()
-                        };
-                        let src_ty = self.m.type_(*src_ty);
+                BinOp::LShr => match (
+                    self.an.op_map(&self.m, x.lhs(&self.m)),
+                    self.an.op_map(&self.m, x.rhs(&self.m)),
+                ) {
+                    (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                        match self.m.const_(op_cidx) {
+                            Const::Int(_, 0) => {
+                                // Replace `x >> 0` with `x`.
+                                self.m.replace(iidx, Inst::Copy(op_iidx));
+                            }
+                            _ => {
+                                // Canonicalise to (Var, Const).
+                                self.m.replace(
+                                    iidx,
+                                    BinOpInst::new(
+                                        Operand::Var(op_iidx),
+                                        BinOp::LShr,
+                                        Operand::Const(op_cidx),
+                                    )
+                                    .into(),
+                                );
+                            }
+                        }
+                    }
+                    (Operand::Const(_), Operand::Var(_)) => (),
+                    (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                        match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                    panic!()
+                                };
+                                let cidx = self.m.insert_const_int(
+                                    *lhs_tyidx,
+                                    (lhs_v >> rhs_v).truncate(*bits),
+                                )?;
+                                self.m.replace(iidx, Inst::Const(cidx));
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    (Operand::Var(_), Operand::Var(_)) => (),
+                },
+                BinOp::Mul => match (
+                    self.an.op_map(&self.m, x.lhs(&self.m)),
+                    self.an.op_map(&self.m, x.rhs(&self.m)),
+                ) {
+                    (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                    | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                        match self.m.const_(op_cidx) {
+                            Const::Int(_, 0) => {
+                                // Replace `x * 0` with `0`.
+                                self.m.replace(iidx, Inst::Const(op_cidx));
+                            }
+                            Const::Int(_, 1) => {
+                                // Replace `x * 1` with `x`.
+                                self.m.replace(iidx, Inst::Copy(op_iidx));
+                            }
+                            Const::Int(ty_idx, x) if x.is_power_of_two() => {
+                                // Replace `x * y` with `x << ...`.
+                                let shl = u64::from(x.ilog2());
+                                let shl_op =
+                                    Operand::Const(self.m.insert_const(Const::Int(*ty_idx, shl))?);
+                                let new_inst =
+                                    BinOpInst::new(Operand::Var(op_iidx), BinOp::Shl, shl_op)
+                                        .into();
+                                self.m.replace(iidx, new_inst);
+                            }
+                            _ => {
+                                // Canonicalise to (Var, Const).
+                                self.m.replace(
+                                    iidx,
+                                    BinOpInst::new(
+                                        Operand::Var(op_iidx),
+                                        BinOp::Mul,
+                                        Operand::Const(op_cidx),
+                                    )
+                                    .into(),
+                                );
+                            }
+                        }
+                    }
+                    (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                        match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                    panic!()
+                                };
+                                let cidx = self.m.insert_const_int(
+                                    *lhs_tyidx,
+                                    (lhs_v.wrapping_mul(*rhs_v)).truncate(*bits),
+                                )?;
+                                self.m.replace(iidx, Inst::Const(cidx));
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    (Operand::Var(_), Operand::Var(_)) => (),
+                },
+                BinOp::Or => match (
+                    self.an.op_map(&self.m, x.lhs(&self.m)),
+                    self.an.op_map(&self.m, x.rhs(&self.m)),
+                ) {
+                    (Operand::Const(op_cidx), Operand::Var(op_iidx))
+                    | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                        match self.m.const_(op_cidx) {
+                            Const::Int(_, 0) => {
+                                // Replace `x | 0` with `x`.
+                                self.m.replace(iidx, Inst::Copy(op_iidx));
+                            }
+                            _ => {
+                                // Canonicalise to (Var, Const).
+                                self.m.replace(
+                                    iidx,
+                                    BinOpInst::new(
+                                        Operand::Var(op_iidx),
+                                        BinOp::Or,
+                                        Operand::Const(op_cidx),
+                                    )
+                                    .into(),
+                                );
+                            }
+                        }
+                    }
+                    (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                        match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                    panic!()
+                                };
+                                let cidx = self.m.insert_const_int(
+                                    *lhs_tyidx,
+                                    (lhs_v | rhs_v).truncate(*bits),
+                                )?;
+                                self.m.replace(iidx, Inst::Const(cidx));
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    (Operand::Var(_), Operand::Var(_)) => (),
+                },
+                _ => (),
+            },
+            Inst::DynPtrAdd(x) => {
+                if let Operand::Const(cidx) = self.an.op_map(&self.m, x.num_elems(&self.m)) {
+                    let Const::Int(_, v) = self.m.const_(cidx) else {
+                        panic!()
+                    };
+                    // DynPtrAdd indices are signed, so we have to be careful to interpret the
+                    // constant as such.
+                    let v = *v as i64;
+                    // LLVM IR allows `off` to be an `i64` but our IR currently allows only an
+                    // `i32`. On that basis, we can hit our limits before the program has
+                    // itself hit UB, at which point we can't go any further.
+                    let off = i32::try_from(v)
+                        .map_err(|_| ())
+                        .and_then(|v| v.checked_mul(i32::from(x.elem_size())).ok_or(()))
+                        .map_err(|_| {
+                            CompilationError::LimitExceeded(
+                                "`DynPtrAdd` offset exceeded `i32` bounds".into(),
+                            )
+                        })?;
+                    self.m
+                        .replace(iidx, Inst::PtrAdd(PtrAddInst::new(x.ptr(&self.m), off)));
+                }
+            }
+            Inst::ICmp(x) => {
+                self.icmp(iidx, x);
+            }
+            Inst::Guard(x) => {
+                if let Operand::Const(_) = self.an.op_map(&self.m, x.cond(&self.m)) {
+                    // A guard that references a constant is, by definition, not needed and
+                    // doesn't affect future analyses.
+                    self.m.replace(iidx, Inst::Tombstone);
+                } else {
+                    self.an.guard(&self.m, x);
+                }
+            }
+            Inst::PtrAdd(x) => match self.an.op_map(&self.m, x.ptr(&self.m)) {
+                Operand::Const(_) => todo!(),
+                Operand::Var(op_iidx) => {
+                    if x.off() == 0 {
+                        self.m.replace(iidx, Inst::Copy(op_iidx));
+                    }
+                }
+            },
+            Inst::SExt(x) => {
+                if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
+                    let Const::Int(src_ty, src_val) = self.m.const_(cidx) else {
+                        unreachable!()
+                    };
+                    let src_ty = self.m.type_(*src_ty);
+                    let dst_ty = self.m.type_(x.dest_tyidx());
+                    let (Ty::Integer(src_bits), Ty::Integer(dst_bits)) = (src_ty, dst_ty) else {
+                        unreachable!()
+                    };
+                    let dst_val = match (src_bits, dst_bits) {
+                        (32, 64) => Const::Int(x.dest_tyidx(), src_val.sign_extend(32, 64)),
+                        _ => todo!("{src_bits} {dst_bits}"),
+                    };
+                    let dst_cidx = self.m.insert_const(dst_val)?;
+                    self.m.replace(iidx, Inst::Const(dst_cidx));
+                }
+            }
+            Inst::Param(x) => {
+                // FIXME: This feels like it should be handled by trace_builder, but we can't
+                // do so yet because of https://github.com/ykjit/yk/issues/1435.
+                if let yksmp::Location::Constant(v) = self.m.param(x.paramidx()) {
+                    let cidx = self.m.insert_const(Const::Int(x.tyidx(), u64::from(*v)))?;
+                    self.an.set_value(iidx, Value::Const(cidx));
+                }
+            }
+            Inst::ZExt(x) => {
+                if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
+                    let Const::Int(_src_ty, src_val) = self.m.const_(cidx) else {
+                        unreachable!()
+                    };
+                    #[cfg(debug_assertions)]
+                    {
+                        let src_ty = self.m.type_(*_src_ty);
                         let dst_ty = self.m.type_(x.dest_tyidx());
                         let (Ty::Integer(src_bits), Ty::Integer(dst_bits)) = (src_ty, dst_ty)
                         else {
                             unreachable!()
                         };
-                        let dst_val = match (src_bits, dst_bits) {
-                            (32, 64) => Const::Int(x.dest_tyidx(), src_val.sign_extend(32, 64)),
-                            _ => todo!("{src_bits} {dst_bits}"),
-                        };
-                        let dst_cidx = self.m.insert_const(dst_val)?;
-                        self.m.replace(iidx, Inst::Const(dst_cidx));
+                        debug_assert!(src_bits <= dst_bits);
+                        debug_assert!(*dst_bits <= 64);
                     }
+                    let dst_cidx = self.m.insert_const(Const::Int(x.dest_tyidx(), *src_val))?;
+                    self.m.replace(iidx, Inst::Const(dst_cidx));
                 }
-                Inst::Param(x) => {
-                    // FIXME: This feels like it should be handled by trace_builder, but we can't
-                    // do so yet because of https://github.com/ykjit/yk/issues/1435.
-                    if let yksmp::Location::Constant(v) = self.m.param(x.paramidx()) {
-                        let cidx = self.m.insert_const(Const::Int(x.tyidx(), u64::from(*v)))?;
-                        self.an.set_value(iidx, Value::Const(cidx));
-                    }
-                }
-                Inst::ZExt(x) => {
-                    if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
-                        let Const::Int(_src_ty, src_val) = self.m.const_(cidx) else {
-                            unreachable!()
-                        };
-                        #[cfg(debug_assertions)]
-                        {
-                            let src_ty = self.m.type_(*_src_ty);
-                            let dst_ty = self.m.type_(x.dest_tyidx());
-                            let (Ty::Integer(src_bits), Ty::Integer(dst_bits)) = (src_ty, dst_ty)
-                            else {
-                                unreachable!()
-                            };
-                            debug_assert!(src_bits <= dst_bits);
-                            debug_assert!(*dst_bits <= 64);
-                        }
-                        let dst_cidx = self.m.insert_const(Const::Int(x.dest_tyidx(), *src_val))?;
-                        self.m.replace(iidx, Inst::Const(dst_cidx));
-                    }
-                }
-                _ => (),
             }
+            _ => (),
+        };
+        Ok(())
+    }
+
+    fn opt(mut self) -> Result<Module, CompilationError> {
+        let base = self.m.insts_len();
+        // The instruction offset after all `loadti` instructions.
+        let is_sidetrace = matches!(self.m.inst(self.m.last_inst_idx()), Inst::SidetraceEnd);
+
+        // Disable loop peeling if there is no `header_end` and we are running tests.
+        #[cfg(test)]
+        let disable_peel = !matches!(self.m.inst(self.m.last_inst_idx()), Inst::TraceHeaderEnd);
+
+        // Note that since we will apply loop peeling here, the list of instructions grows as this
+        // loop runs. Each instruction we process is (after optimisations were applied), duplicated
+        // and copied to the end of the module.
+        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
+        for (iidx, _inst) in skipping.into_iter() {
+            self.opt_inst(iidx)?;
             self.cse(iidx);
         }
         // FIXME: When code generation supports backwards register allocation, we won't need to
         // explicitly perform dead code elimination and this function can be made `#[cfg(test)]` only.
+        self.m.dead_code_elimination();
+
+        #[cfg(test)]
+        if disable_peel {
+            return Ok(self.m);
+        }
+
+        if is_sidetrace {
+            // Side-traces don't loop and thus cannot be peeled.
+            return Ok(self.m);
+        }
+
+        // Now that we've processed the trace header, duplicate it to create the loop body.
+        // FIXME: Do we need to call `iter_skipping_inst_idxs` again?
+        // Maps header instructions to their position in the body.
+        let mut iidx_map = vec![0; base];
+        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
+        for (iidx, inst) in skipping.into_iter() {
+            let c = inst.dup_and_remap_locals(&mut self.m, &|i: InstIdx| {
+                let newiidx = iidx_map[usize::from(i)];
+                Operand::Var(InstIdx::try_from(newiidx).unwrap())
+            })?;
+            let copyiidx = self.m.push(c)?;
+            iidx_map[usize::from(iidx)] = usize::from(copyiidx);
+            if let Inst::TraceHeaderStart = inst {
+                for (headop, bodyop) in self
+                    .m
+                    .trace_header_end()
+                    .iter()
+                    .zip(self.m.trace_body_start())
+                {
+                    // Inform the analyser about any constants being passed from the header into
+                    // the body.
+                    if let Operand::Const(cidx) = headop.unpack(&self.m) {
+                        let Operand::Var(op_iidx) = bodyop.unpack(&self.m) else {
+                            panic!()
+                        };
+                        self.an.set_value(op_iidx, Value::Const(cidx));
+                    }
+                }
+            }
+            self.opt_inst(copyiidx)?;
+        }
+
+        // FIXME: Apply CSE and run another pass of optimisations on the peeled loop.
         self.m.dead_code_elimination();
         Ok(self.m)
     }
@@ -1051,6 +1111,62 @@ mod test {
             %2: i1 = eq %0, %1
             guard true, %2, ...
             guard false, %2, ...
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_peeling_simple() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param 0
+            header_start [%0]
+            %2: i8 = add %0, 1i8
+            header_end [%2]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            header_start [%0]
+            %2: i8 = add %0, 1i8
+            header_end [%2]
+            %4: i8 = param ...
+            body_start [%4]
+            %6: i8 = add %4, 1i8
+            body_end [%6]
+        ",
+        );
+    }
+
+    #[ignore]
+    #[test]
+    fn opt_peeling_hoist() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param 0
+            %1: i8 = param 1
+            body_start [%0, %1]
+            %2: i8 = add %0, 1i8
+            %3: i8 = add %1, %2
+            body_end [%0, %3]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            %1: i8 = param ...
+            head_start [%0, %1]
+            %3: i8 = add %0, 1i8
+            %4: i8 = add %1, %3
+            head_end [%0, %4, %3]
+            body_start [%0, %4, %3]
+            %10: i8 = add %4, %3
+            body_end [%0, %10, %3]
         ",
         );
     }

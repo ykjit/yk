@@ -32,16 +32,17 @@
 //     18
 //     yk-jit-event: enter-jit-code
 //     yk-jit-event: deoptimise
-//     yk-jit-event: start-side-tracing
 //     20
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: deoptimise
+//     yk-jit-event: start-side-tracing
+//     22
 //     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
-//     22
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
 //     24
+//     yk-jit-event: enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     26
 //     yk-jit-event: execute-side-trace

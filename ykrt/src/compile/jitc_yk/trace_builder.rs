@@ -131,9 +131,9 @@ impl TraceBuilder {
                 jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
             );
             self.jit_mod
-                .push_loop_start_var(jit_ir::Operand::Var(self.jit_mod.last_inst_idx()));
+                .push_body_start_var(jit_ir::Operand::Var(self.jit_mod.last_inst_idx()));
         }
-        self.jit_mod.push(jit_ir::Inst::TraceLoopStart)?;
+        self.jit_mod.push(jit_ir::Inst::TraceHeaderStart)?;
         Ok(())
     }
 
@@ -1389,19 +1389,19 @@ impl TraceBuilder {
             for idx in 0..safepoint.lives.len() {
                 let aot_op = &safepoint.lives[idx];
                 let jit_op = &self.local_map[&aot_op.to_inst_id()];
-                self.jit_mod.push_loop_jump_var(jit_op.clone());
+                self.jit_mod.push_header_end_var(jit_op.clone());
             }
             self.jit_mod.set_root_jump_addr(sti.unwrap().root_addr.0);
-            self.jit_mod.push(jit_ir::Inst::RootJump)?;
+            self.jit_mod.push(jit_ir::Inst::SidetraceEnd)?;
         } else {
             // For normal traces insert a jump back to the loop start.
             let safepoint = cpcall.safepoint().unwrap();
             for idx in 0..safepoint.lives.len() {
                 let aot_op = &safepoint.lives[idx];
                 let jit_op = &self.local_map[&aot_op.to_inst_id()];
-                self.jit_mod.push_loop_jump_var(jit_op.clone());
+                self.jit_mod.push_header_end_var(jit_op.clone());
             }
-            self.jit_mod.push(jit_ir::Inst::TraceLoopJump)?;
+            self.jit_mod.push(jit_ir::Inst::TraceHeaderEnd)?;
         }
 
         Ok(self.jit_mod)

@@ -438,19 +438,33 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let inst = BlackBoxInst::new(self.process_operand(op)?);
                         self.m.push(inst.into()).unwrap();
                     }
-                    ASTInst::TraceLoopStart(ops) => {
+                    ASTInst::TraceBodyStart(ops) => {
                         for op in ops {
                             let op = self.process_operand(op)?;
-                            self.m.loop_start_vars.push(op);
+                            self.m.trace_body_start.push(PackedOperand::new(&op));
                         }
-                        self.m.push(Inst::TraceLoopStart).unwrap();
+                        self.m.push(Inst::TraceBodyStart).unwrap();
                     }
-                    ASTInst::TraceLoopJump(ops) => {
+                    ASTInst::TraceBodyEnd(ops) => {
                         for op in ops {
                             let op = self.process_operand(op)?;
-                            self.m.loop_jump_operands.push(PackedOperand::new(&op));
+                            self.m.trace_body_end.push(PackedOperand::new(&op));
                         }
-                        self.m.push(Inst::TraceLoopJump).unwrap();
+                        self.m.push(Inst::TraceBodyEnd).unwrap();
+                    }
+                    ASTInst::TraceHeaderStart(ops) => {
+                        for op in ops {
+                            let op = self.process_operand(op)?;
+                            self.m.trace_header_start.push(PackedOperand::new(&op));
+                        }
+                        self.m.push(Inst::TraceHeaderStart).unwrap();
+                    }
+                    ASTInst::TraceHeaderEnd(ops) => {
+                        for op in ops {
+                            let op = self.process_operand(op)?;
+                            self.m.trace_header_end.push(PackedOperand::new(&op));
+                        }
+                        self.m.push(Inst::TraceHeaderEnd).unwrap();
                     }
                     ASTInst::Trunc {
                         assign,
@@ -835,8 +849,10 @@ enum ASTInst {
         volatile: bool,
     },
     BlackBox(ASTOperand),
-    TraceLoopStart(Vec<ASTOperand>),
-    TraceLoopJump(Vec<ASTOperand>),
+    TraceBodyStart(Vec<ASTOperand>),
+    TraceBodyEnd(Vec<ASTOperand>),
+    TraceHeaderStart(Vec<ASTOperand>),
+    TraceHeaderEnd(Vec<ASTOperand>),
     Trunc {
         assign: Span,
         type_: ASTType,
@@ -947,7 +963,7 @@ mod tests {
               %10: i32 = trunc %8
               %11: i32 = add %7, %9
               %12: i1 = eq %0, %2
-              tloop_start [%0, %6]
+              body_start [%0, %6]
               guard true, %12, [%0, %1, %2, 1i8]
               call @f1()
               %16: i32 = call @f2(%5)
@@ -998,7 +1014,7 @@ mod tests {
               %61: i64 = icall<ft1> %9(%5, %7, %0)
               %62: float = bitcast %7
               %63: float = fneg %54
-              tloop_jump [%43, %58]
+              body_end [%43, %58]
         ",
         );
     }
