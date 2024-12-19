@@ -74,15 +74,14 @@ impl Opt {
         // Now that we've processed the trace header, duplicate it to create the loop body.
         // FIXME: Do we need to call `iter_skipping_inst_idxs` again?
         // Maps header instructions to their position in the body.
-        let mut iidx_map = vec![0; base];
+        let mut iidx_map = vec![InstIdx::max(); base];
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
-            let c = inst.dup_and_remap_locals(&mut self.m, &|i: InstIdx| {
-                let newiidx = iidx_map[usize::from(i)];
-                Operand::Var(InstIdx::try_from(newiidx).unwrap())
+            let c = inst.dup_and_remap_locals(&mut self.m, &|op_iidx: InstIdx| {
+                Operand::Var(iidx_map[usize::from(op_iidx)])
             })?;
-            let copyiidx = self.m.push(c)?;
-            iidx_map[usize::from(iidx)] = usize::from(copyiidx);
+            let copy_iidx = self.m.push(c)?;
+            iidx_map[usize::from(iidx)] = copy_iidx;
             match inst {
                 Inst::TraceHeaderStart => {
                     for (headop, bodyop) in self
@@ -101,7 +100,7 @@ impl Opt {
                         }
                     }
                 }
-                _ => self.opt_inst(copyiidx)?,
+                _ => self.opt_inst(copy_iidx)?,
             }
         }
 
