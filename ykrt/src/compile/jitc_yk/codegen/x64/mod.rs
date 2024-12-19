@@ -204,9 +204,6 @@ struct Assemble<'a> {
     /// The offset after the trace's prologue. This is the re-entry point when returning from
     /// side-traces.
     prologue_offset: AssemblyOffset,
-    /// Whether or not to skip processing [Param]s. We enable this once we've finished processing
-    /// the header, as we currently [Param]s in the trace body are only placeholders.
-    skip_params: bool,
 }
 
 impl<'a> Assemble<'a> {
@@ -269,7 +266,6 @@ impl<'a> Assemble<'a> {
             used_insts,
             ptradds,
             prologue_offset: AssemblyOffset(0),
-            skip_params: false,
         }))
     }
 
@@ -469,6 +465,7 @@ impl<'a> Assemble<'a> {
     fn cg_insts(&mut self) -> Result<(), CompilationError> {
         let mut iter = self.m.iter_skipping_insts();
         let mut next = iter.next();
+        let mut in_header = true;
         while let Some((iidx, inst)) = next {
             self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
             if !self.used_insts[usize::from(iidx)] {
@@ -485,7 +482,13 @@ impl<'a> Assemble<'a> {
                 }
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
-                jit_ir::Inst::Param(i) => self.cg_param(iidx, i),
+                jit_ir::Inst::Param(i) => {
+                    // Right now, `Param`s in the body contain dummy values, and shouldn't be
+                    // processed.
+                    if in_header {
+                        self.cg_param(iidx, i);
+                    }
+                }
                 jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
                 jit_ir::Inst::PtrAdd(pa_inst) => self.cg_ptradd(iidx, pa_inst),
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
@@ -515,7 +518,10 @@ impl<'a> Assemble<'a> {
                 }
                 jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
                 jit_ir::Inst::TraceHeaderStart => self.cg_header_start(),
-                jit_ir::Inst::TraceHeaderEnd => self.cg_header_end(),
+                jit_ir::Inst::TraceHeaderEnd => {
+                    self.cg_header_end();
+                    in_header = false;
+                }
                 jit_ir::Inst::TraceBodyStart => self.cg_body_start(),
                 jit_ir::Inst::TraceBodyEnd => self.cg_body_end(iidx),
                 jit_ir::Inst::SidetraceEnd => self.cg_sidetrace_end(iidx, self.m.root_jump_addr()),
@@ -1072,9 +1078,6 @@ impl<'a> Assemble<'a> {
     /// Codegen a [jit_ir::ParamInst]. This only informs the register allocator about the
     /// locations of live variables without generating any actual machine code.
     fn cg_param(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParamInst) {
-        if self.skip_params {
-            return;
-        }
         let m = VarLocation::from_yksmp_location(self.m, iidx, self.m.param(inst.paramidx()));
         debug_assert!(self.m.inst(iidx).def_byte_size(self.m) <= REG64_BYTESIZE);
         match m {
@@ -1992,7 +1995,6 @@ impl<'a> Assemble<'a> {
                 e => panic!("{:?}", e),
             }
         }
-        self.skip_params = true;
     }
 
     fn cg_body_start(&mut self) {
