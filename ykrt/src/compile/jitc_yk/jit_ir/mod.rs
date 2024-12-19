@@ -1639,14 +1639,14 @@ impl Inst {
         f: F,
     ) -> Result<Self, CompilationError>
     where
-        F: Fn(InstIdx) -> Operand,
+        F: Fn(&Module, InstIdx) -> Operand,
     {
         let mapper = |m: &Module, x: &PackedOperand| match x.unpack(m) {
-            Operand::Var(iidx) => PackedOperand::new(&f(iidx)),
+            Operand::Var(iidx) => PackedOperand::new(&f(m, iidx)),
             Operand::Const(_) => *x,
         };
-        let op_mapper = |x: &Operand| match x {
-            Operand::Var(iidx) => f(*iidx),
+        let op_mapper = |m: &Module, x: &Operand| match x {
+            Operand::Var(iidx) => f(m, *iidx),
             Operand::Const(c) => Operand::Const(*c),
         };
         let inst = match self {
@@ -1663,7 +1663,7 @@ impl Inst {
                 // Clone and map arguments.
                 let args = dc
                     .iter_args_idx()
-                    .map(|x| op_mapper(&m.arg(x)))
+                    .map(|x| op_mapper(m, &m.arg(x)))
                     .collect::<Vec<_>>();
                 let dc = DirectCallInst::new(m, dc.target, args)?;
                 Inst::Call(dc)
@@ -1673,14 +1673,14 @@ impl Inst {
                 // Clone and map arguments.
                 let args = ic
                     .iter_args_idx()
-                    .map(|x| op_mapper(&m.arg(x)))
+                    .map(|x| op_mapper(m, &m.arg(x)))
                     .collect::<Vec<_>>();
-                let icnew = IndirectCallInst::new(m, ic.ftyidx, op_mapper(&ic.target(m)), args)?;
+                let icnew = IndirectCallInst::new(m, ic.ftyidx, op_mapper(m, &ic.target(m)), args)?;
                 let idx = m.push_indirect_call(icnew)?;
                 Inst::IndirectCall(idx)
             }
             Inst::Const(c) => Inst::Const(*c),
-            Inst::Copy(iidx) => match f(*iidx) {
+            Inst::Copy(iidx) => match f(m, *iidx) {
                 Operand::Var(iidx) => Inst::Copy(iidx),
                 Operand::Const(cidx) => Inst::Const(cidx),
             },
@@ -1723,7 +1723,7 @@ impl Inst {
                             x.safepoint,
                             x.args
                                 .iter()
-                                .map(|x| op_mapper(&x.unpack(m)))
+                                .map(|x| op_mapper(m, &x.unpack(m)))
                                 .collect::<Vec<_>>(),
                         )
                     })
@@ -1764,11 +1764,6 @@ impl Inst {
                     off: inst.off,
                 })
             }
-            Inst::SidetraceEnd => {
-                // This instruction only exists in side-traces, which don't have loops we can peel
-                // off.
-                unreachable!()
-            }
             Inst::Select(SelectInst {
                 cond,
                 trueval,
@@ -1799,6 +1794,16 @@ impl Inst {
             Inst::TraceBodyEnd => {
                 m.trace_body_end = m.trace_body_end.iter().map(|op| mapper(m, op)).collect();
                 Inst::TraceBodyEnd
+            }
+            Inst::TraceHeaderEnd => {
+                // Copy the header label into the body while remapping the operands.
+                m.trace_header_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::TraceHeaderEnd
+            }
+            Inst::SidetraceEnd => {
+                // Copy the header label into the body while remapping the operands.
+                m.trace_header_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::SidetraceEnd
             }
             Inst::Trunc(TruncInst { val, dest_tyidx }) => Inst::Trunc(TruncInst {
                 val: mapper(m, val),

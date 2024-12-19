@@ -80,7 +80,7 @@ impl Opt {
                     self.m.push(Inst::TraceBodyStart)?;
                     // FIXME: We rely on `dup_and_remap_vars` not being idempotent here.
                     let _ = Inst::TraceBodyStart
-                        .dup_and_remap_vars(&mut self.m, |op_iidx: InstIdx| {
+                        .dup_and_remap_vars(&mut self.m, |_, op_iidx: InstIdx| {
                             Operand::Var(iidx_map[usize::from(op_iidx)])
                         })?;
                     for (headop, bodyop) in self
@@ -104,12 +104,12 @@ impl Opt {
                     self.m.push(Inst::TraceBodyEnd)?;
                     // FIXME: We rely on `dup_and_remap_vars` not being idempotent here.
                     let _ = Inst::TraceBodyEnd
-                        .dup_and_remap_vars(&mut self.m, |op_iidx: InstIdx| {
+                        .dup_and_remap_vars(&mut self.m, |_, op_iidx: InstIdx| {
                             Operand::Var(iidx_map[usize::from(op_iidx)])
                         })?;
                 }
                 _ => {
-                    let c = inst.dup_and_remap_vars(&mut self.m, |op_iidx: InstIdx| {
+                    let c = inst.dup_and_remap_vars(&mut self.m, |_, op_iidx: InstIdx| {
                         Operand::Var(iidx_map[usize::from(op_iidx)])
                     })?;
                     let copy_iidx = self.m.push(c)?;
