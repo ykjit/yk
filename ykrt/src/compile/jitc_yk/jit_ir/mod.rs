@@ -169,10 +169,10 @@ pub(crate) struct Module {
     /// Live variables at the beginning of the root trace.
     root_entry_vars: Vec<VarLocation>,
     /// Live variables at the beginning of the trace body.
-    trace_body_start: Vec<PackedOperand>,
+    pub(crate) trace_body_start: Vec<PackedOperand>,
     /// The ordered sequence of operands at the end of the trace body: there will be one per
     /// [Operand] at the start of the loop.
-    trace_body_end: Vec<PackedOperand>,
+    pub(crate) trace_body_end: Vec<PackedOperand>,
     /// Live variables at the beginning the trace header.
     trace_header_start: Vec<PackedOperand>,
     /// Live variables at the end of the trace header.
@@ -1631,6 +1631,8 @@ impl Inst {
     /// Duplicate this [Inst] and, during that process, apply the function `f` to each of this
     /// instruction's [Operand]s iff they are of type [Operand::Var]. When an instruction
     /// references more than one [Operand], the order of traversal is undefined.
+    ///
+    /// Note: for `TraceBody*` and `TraceHeader*` functions, this function is not idempotent.
     pub(crate) fn dup_and_remap_vars<F>(
         &self,
         m: &mut Module,
@@ -1790,18 +1792,12 @@ impl Inst {
                 volatile: *volatile,
             }),
             Inst::Tombstone => Inst::Tombstone,
-            Inst::TraceHeaderStart => {
-                // Copy the header label into the body while remapping the operands.
-                m.trace_body_start = m
-                    .trace_header_start
-                    .iter()
-                    .map(|op| mapper(m, op))
-                    .collect();
+            Inst::TraceBodyStart => {
+                m.trace_body_start = m.trace_body_start.iter().map(|op| mapper(m, op)).collect();
                 Inst::TraceBodyStart
             }
-            Inst::TraceHeaderEnd => {
-                // Copy the header label into the body while remapping the operands.
-                m.trace_body_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+            Inst::TraceBodyEnd => {
+                m.trace_body_end = m.trace_body_end.iter().map(|op| mapper(m, op)).collect();
                 Inst::TraceBodyEnd
             }
             Inst::Trunc(TruncInst { val, dest_tyidx }) => Inst::Trunc(TruncInst {

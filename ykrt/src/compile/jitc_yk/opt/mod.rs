@@ -57,6 +57,7 @@ impl Opt {
         for (iidx, inst) in skipping.into_iter() {
             match inst {
                 Inst::TraceHeaderStart => (),
+                Inst::TraceHeaderEnd => (),
                 _ => {
                     self.opt_inst(iidx)?;
                     self.cse(iidx);
@@ -77,13 +78,15 @@ impl Opt {
         let mut iidx_map = vec![InstIdx::max(); base];
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
-            let c = inst.dup_and_remap_vars(&mut self.m, |op_iidx: InstIdx| {
-                Operand::Var(iidx_map[usize::from(op_iidx)])
-            })?;
-            let copy_iidx = self.m.push(c)?;
-            iidx_map[usize::from(iidx)] = copy_iidx;
             match inst {
                 Inst::TraceHeaderStart => {
+                    self.m.trace_body_start = self.m.trace_header_start().to_vec();
+                    self.m.push(Inst::TraceBodyStart)?;
+                    // FIXME: We rely on `dup_and_remap_vars` not being idempotent here.
+                    let _ = Inst::TraceBodyStart
+                        .dup_and_remap_vars(&mut self.m, |op_iidx: InstIdx| {
+                            Operand::Var(iidx_map[usize::from(op_iidx)])
+                        })?;
                     for (headop, bodyop) in self
                         .m
                         .trace_header_end()
@@ -100,7 +103,23 @@ impl Opt {
                         }
                     }
                 }
-                _ => self.opt_inst(copy_iidx)?,
+                Inst::TraceHeaderEnd => {
+                    self.m.trace_body_end = self.m.trace_header_end().to_vec();
+                    self.m.push(Inst::TraceBodyEnd)?;
+                    // FIXME: We rely on `dup_and_remap_vars` not being idempotent here.
+                    let _ = Inst::TraceBodyEnd
+                        .dup_and_remap_vars(&mut self.m, |op_iidx: InstIdx| {
+                            Operand::Var(iidx_map[usize::from(op_iidx)])
+                        })?;
+                }
+                _ => {
+                    let c = inst.dup_and_remap_vars(&mut self.m, |op_iidx: InstIdx| {
+                        Operand::Var(iidx_map[usize::from(op_iidx)])
+                    })?;
+                    let copy_iidx = self.m.push(c)?;
+                    iidx_map[usize::from(iidx)] = copy_iidx;
+                    self.opt_inst(copy_iidx)?;
+                }
             }
         }
 
@@ -114,7 +133,11 @@ impl Opt {
         match self.m.inst(iidx) {
             #[cfg(test)]
             Inst::BlackBox(_) => (),
-            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone | Inst::TraceHeaderStart => {
+            Inst::Const(_)
+            | Inst::Copy(_)
+            | Inst::Tombstone
+            | Inst::TraceHeaderStart
+            | Inst::TraceHeaderEnd => {
                 unreachable!()
             }
             Inst::BinOp(x) => match x.binop() {
