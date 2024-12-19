@@ -17,7 +17,7 @@ impl Module {
                 || inst.is_barrier(self)
             {
                 used.set(usize::from(iidx), true);
-                inst.map_operand_locals(self, &mut |x| {
+                inst.map_operand_vars(self, &mut |x| {
                     used.set(usize::from(x), true);
                 });
             } else {

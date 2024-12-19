@@ -24,23 +24,139 @@ use instll::InstLinkedList;
 struct Opt {
     m: Module,
     an: Analyse,
-    /// Needed for common subexpression elimination.
-    instll: InstLinkedList,
 }
 
 impl Opt {
     fn new(m: Module) -> Self {
         let an = Analyse::new(&m);
-        let instll = InstLinkedList::new(&m);
-        Self { m, an, instll }
+        Self { m, an }
+    }
+
+    fn opt(mut self) -> Result<Module, CompilationError> {
+        let base = self.m.insts_len();
+        let peel = match self.m.inst(self.m.last_inst_idx()) {
+            // If this is a sidetrace, we perform optimisations up to, but including, loop peeling.
+            Inst::SidetraceEnd => false,
+            Inst::TraceHeaderEnd => true,
+            #[cfg(test)]
+            // Not all tests create "fully valid" traces, in the sense that -- to keep things
+            // simple -- they don't end with `TraceHeaderEnd`. We don't want to peel such traces,
+            // but nor, in testing mode, do we consider them ill-formed.
+            _ => false,
+            #[cfg(not(test))]
+            _ => panic!(),
+        };
+
+        // Note that since we will apply loop peeling here, the list of instructions grows as this
+        // loop runs. Each instruction we process is (after optimisations were applied), duplicated
+        // and copied to the end of the module.
+        let mut instll = InstLinkedList::new(&self.m);
+        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
+        for (iidx, inst) in skipping.into_iter() {
+            match inst {
+                Inst::TraceHeaderStart => (),
+                _ => {
+                    self.opt_inst(iidx)?;
+                    self.cse(&mut instll, iidx);
+                }
+            }
+        }
+        // FIXME: When code generation supports backwards register allocation, we won't need to
+        // explicitly perform dead code elimination and this function can be made `#[cfg(test)]` only.
+        self.m.dead_code_elimination();
+
+        if !peel {
+            return Ok(self.m);
+        }
+
+        // Now that we've processed the trace header, duplicate it to create the loop body.
+        let mut iidx_map = vec![InstIdx::max(); base];
+        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
+        for (iidx, inst) in skipping.into_iter() {
+            match inst {
+                Inst::TraceHeaderStart => {
+                    self.m.trace_body_start = self.m.trace_header_start().to_vec();
+                    self.m.push(Inst::TraceBodyStart)?;
+                    // FIXME: We rely on `dup_and_remap_vars` not being idempotent here.
+                    let _ = Inst::TraceBodyStart
+                        .dup_and_remap_vars(&mut self.m, |_, op_iidx: InstIdx| {
+                            Operand::Var(iidx_map[usize::from(op_iidx)])
+                        })?;
+                    for (headop, bodyop) in self
+                        .m
+                        .trace_header_end()
+                        .iter()
+                        .zip(self.m.trace_body_start())
+                    {
+                        // Inform the analyser about any constants being passed from the header into
+                        // the body.
+                        if let Operand::Const(cidx) = headop.unpack(&self.m) {
+                            let Operand::Var(op_iidx) = bodyop.unpack(&self.m) else {
+                                panic!()
+                            };
+                            self.an.set_value(op_iidx, Value::Const(cidx));
+                        }
+                    }
+                }
+                Inst::TraceHeaderEnd => {
+                    self.m.trace_body_end = self.m.trace_header_end().to_vec();
+                    self.m.push(Inst::TraceBodyEnd)?;
+                    // FIXME: We rely on `dup_and_remap_vars` not being idempotent here.
+                    let _ = Inst::TraceBodyEnd
+                        .dup_and_remap_vars(&mut self.m, |_, op_iidx: InstIdx| {
+                            Operand::Var(iidx_map[usize::from(op_iidx)])
+                        })?;
+                }
+                _ => {
+                    let c = inst.dup_and_remap_vars(&mut self.m, |_, op_iidx: InstIdx| {
+                        Operand::Var(iidx_map[usize::from(op_iidx)])
+                    })?;
+                    let copy_iidx = self.m.push(c)?;
+                    iidx_map[usize::from(iidx)] = copy_iidx;
+                }
+            }
+        }
+
+        // Create a fresh `instll`. Normal CSE in the body (a) can't possibly reference the header
+        // (b) the number of instructions in the `instll`-for-the-header is wrong as a result of
+        // peeling. So create a fresh `instll`.
+        let mut instll = InstLinkedList::new(&self.m);
+        let skipping = self
+            .m
+            .iter_skipping_insts()
+            .skip_while(|(_, inst)| !matches!(inst, Inst::TraceBodyStart))
+            .collect::<Vec<_>>();
+        for (iidx, inst) in skipping.into_iter() {
+            match inst {
+                Inst::TraceHeaderStart | Inst::TraceHeaderEnd => panic!(),
+                Inst::TraceBodyStart => (),
+                _ => {
+                    self.opt_inst(iidx)?;
+                    self.cse(&mut instll, iidx);
+                }
+            }
+        }
+
+        // FIXME: Apply CSE and run another pass of optimisations on the peeled loop.
+        self.m.dead_code_elimination();
+        Ok(self.m)
     }
 
     /// Optimise instruction `iidx`.
     fn opt_inst(&mut self, iidx: InstIdx) -> Result<(), CompilationError> {
+        // First rewrite the instruction so that all changes from the analyser are reflected
+        // straight away. Note: we deliberately do this before some of the changes below. Most
+        // notably we need to call `rewrite` before telling the analyser about a `Guard`: if we
+        // swap that order, the guard will pick up the wrong value for operand(s) related to
+        // whether the guard succeeds!
+        self.rewrite(iidx)?;
+
         match self.m.inst(iidx) {
             #[cfg(test)]
             Inst::BlackBox(_) => (),
-            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone | Inst::TraceHeaderStart => {
+                unreachable!()
+            }
             Inst::BinOp(x) => match x.binop() {
                 BinOp::Add => match (
                     self.an.op_map(&self.m, x.lhs(&self.m)),
@@ -364,87 +480,40 @@ impl Opt {
             }
             _ => (),
         };
+
         Ok(())
     }
 
-    fn opt(mut self) -> Result<Module, CompilationError> {
-        let base = self.m.insts_len();
-        let peel = match self.m.inst(self.m.last_inst_idx()) {
-            // If this is a sidetrace, we perform optimisations up to, but including, loop peeling.
-            Inst::SidetraceEnd => false,
-            Inst::TraceHeaderEnd => true,
-            #[cfg(test)]
-            // Not all tests create "fully valid" traces, in the sense that -- to keep things
-            // simple -- they don't end with `TraceHeaderEnd`. We don't want to peel such traces,
-            // but nor, in testing mode, do we consider them ill-formed.
-            _ => false,
-            #[cfg(not(test))]
-            _ => panic!(),
-        };
-
-        // Note that since we will apply loop peeling here, the list of instructions grows as this
-        // loop runs. Each instruction we process is (after optimisations were applied), duplicated
-        // and copied to the end of the module.
-        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
-        for (iidx, _inst) in skipping.into_iter() {
-            self.opt_inst(iidx)?;
-            self.cse(iidx);
-        }
-        // FIXME: When code generation supports backwards register allocation, we won't need to
-        // explicitly perform dead code elimination and this function can be made `#[cfg(test)]` only.
-        self.m.dead_code_elimination();
-
-        if !peel {
-            return Ok(self.m);
-        }
-
-        // Now that we've processed the trace header, duplicate it to create the loop body.
-        // FIXME: Do we need to call `iter_skipping_inst_idxs` again?
-        // Maps header instructions to their position in the body.
-        let mut iidx_map = vec![0; base];
-        let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
-        for (iidx, inst) in skipping.into_iter() {
-            let c = inst.dup_and_remap_locals(&mut self.m, &|i: InstIdx| {
-                let newiidx = iidx_map[usize::from(i)];
-                Operand::Var(InstIdx::try_from(newiidx).unwrap())
-            })?;
-            let copyiidx = self.m.push(c)?;
-            iidx_map[usize::from(iidx)] = usize::from(copyiidx);
-            if let Inst::TraceHeaderStart = inst {
-                for (headop, bodyop) in self
-                    .m
-                    .trace_header_end()
-                    .iter()
-                    .zip(self.m.trace_body_start())
-                {
-                    // Inform the analyser about any constants being passed from the header into
-                    // the body.
-                    if let Operand::Const(cidx) = headop.unpack(&self.m) {
-                        let Operand::Var(op_iidx) = bodyop.unpack(&self.m) else {
-                            panic!()
-                        };
-                        self.an.set_value(op_iidx, Value::Const(cidx));
-                    }
-                }
+    /// Rewrite the instruction at `iidx`: duplicate it and remap its operands so that it reflects
+    /// everything learnt by the analyser.
+    fn rewrite(&mut self, iidx: InstIdx) -> Result<(), CompilationError> {
+        match self.m.inst_nocopy(iidx) {
+            None => Ok(()),
+            Some(Inst::Guard(_)) => {
+                // We can't safely rewrite guard operands as we pick up the result of the analysis
+                // on the guard itself!
+                Ok(())
             }
-            self.opt_inst(copyiidx)?;
+            Some(inst) => {
+                let r = inst.dup_and_remap_vars(&mut self.m, |m, op_iidx| {
+                    self.an.op_map(m, Operand::Var(op_iidx))
+                })?;
+                self.m.replace(iidx, r);
+                Ok(())
+            }
         }
-
-        // FIXME: Apply CSE and run another pass of optimisations on the peeled loop.
-        self.m.dead_code_elimination();
-        Ok(self.m)
     }
 
     /// Attempt common subexpression elimination on `iidx`, replacing it with a `Copy` or
     /// `Tombstone` if possible.
-    fn cse(&mut self, iidx: InstIdx) {
+    fn cse(&mut self, instll: &mut InstLinkedList, iidx: InstIdx) {
         let inst = match self.m.inst_nocopy(iidx) {
             // If this instruction is already a `Copy`, then there is nothing for CSE to do.
             None => return,
             // There's no point in trying CSE on a `Const` or `Tombstone`.
             Some(Inst::Const(_)) | Some(Inst::Tombstone) => return,
             Some(inst @ Inst::Guard(ginst)) => {
-                for (_, back_inst) in self.instll.rev_iter(&self.m, inst) {
+                for (_, back_inst) in instll.rev_iter(&self.m, inst) {
                     if let Inst::Guard(back_ginst) = back_inst {
                         if ginst.cond(&self.m) == back_ginst.cond(&self.m)
                             && ginst.expect() == back_ginst.expect()
@@ -466,7 +535,7 @@ impl Opt {
                 }
 
                 // Can we CSE the instruction at `iidx`?
-                for (back_iidx, back_inst) in self.instll.rev_iter(&self.m, inst) {
+                for (back_iidx, back_inst) in instll.rev_iter(&self.m, inst) {
                     if inst.decopy_eq(&self.m, back_inst) {
                         self.m.replace(iidx, Inst::Copy(back_iidx));
                         return;
@@ -482,7 +551,7 @@ impl Opt {
         //      things that aren't CSE candidates, which saves us some pointless work.
         //   2. Haven't been turned into `Copy`s. So only if we've failed to CSE a given
         //      instruction is it worth pushing to the `instll`.
-        self.instll.push(iidx, inst);
+        instll.push(iidx, inst);
     }
 
     /// Optimise an [ICmpInst].
