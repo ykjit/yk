@@ -54,9 +54,14 @@ impl Opt {
         // loop runs. Each instruction we process is (after optimisations were applied), duplicated
         // and copied to the end of the module.
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
-        for (iidx, _inst) in skipping.into_iter() {
-            self.opt_inst(iidx)?;
-            self.cse(iidx);
+        for (iidx, inst) in skipping.into_iter() {
+            match inst {
+                Inst::TraceHeaderStart => (),
+                _ => {
+                    self.opt_inst(iidx)?;
+                    self.cse(iidx);
+                }
+            }
         }
         // FIXME: When code generation supports backwards register allocation, we won't need to
         // explicitly perform dead code elimination and this function can be made `#[cfg(test)]` only.
@@ -78,24 +83,26 @@ impl Opt {
             })?;
             let copyiidx = self.m.push(c)?;
             iidx_map[usize::from(iidx)] = usize::from(copyiidx);
-            if let Inst::TraceHeaderStart = inst {
-                for (headop, bodyop) in self
-                    .m
-                    .trace_header_end()
-                    .iter()
-                    .zip(self.m.trace_body_start())
-                {
-                    // Inform the analyser about any constants being passed from the header into
-                    // the body.
-                    if let Operand::Const(cidx) = headop.unpack(&self.m) {
-                        let Operand::Var(op_iidx) = bodyop.unpack(&self.m) else {
-                            panic!()
-                        };
-                        self.an.set_value(op_iidx, Value::Const(cidx));
+            match inst {
+                Inst::TraceHeaderStart => {
+                    for (headop, bodyop) in self
+                        .m
+                        .trace_header_end()
+                        .iter()
+                        .zip(self.m.trace_body_start())
+                    {
+                        // Inform the analyser about any constants being passed from the header into
+                        // the body.
+                        if let Operand::Const(cidx) = headop.unpack(&self.m) {
+                            let Operand::Var(op_iidx) = bodyop.unpack(&self.m) else {
+                                panic!()
+                            };
+                            self.an.set_value(op_iidx, Value::Const(cidx));
+                        }
                     }
                 }
+                _ => self.opt_inst(copyiidx)?,
             }
-            self.opt_inst(copyiidx)?;
         }
 
         // FIXME: Apply CSE and run another pass of optimisations on the peeled loop.
@@ -108,7 +115,9 @@ impl Opt {
         match self.m.inst(iidx) {
             #[cfg(test)]
             Inst::BlackBox(_) => (),
-            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone | Inst::TraceHeaderStart => {
+                unreachable!()
+            }
             Inst::BinOp(x) => match x.binop() {
                 BinOp::Add => match (
                     self.an.op_map(&self.m, x.lhs(&self.m)),
