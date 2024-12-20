@@ -169,10 +169,10 @@ pub(crate) struct Module {
     /// Live variables at the beginning of the root trace.
     root_entry_vars: Vec<VarLocation>,
     /// Live variables at the beginning of the trace body.
-    trace_body_start: Vec<PackedOperand>,
+    pub(crate) trace_body_start: Vec<PackedOperand>,
     /// The ordered sequence of operands at the end of the trace body: there will be one per
     /// [Operand] at the start of the loop.
-    trace_body_end: Vec<PackedOperand>,
+    pub(crate) trace_body_end: Vec<PackedOperand>,
     /// Live variables at the beginning the trace header.
     trace_header_start: Vec<PackedOperand>,
     /// Live variables at the end of the trace header.
@@ -1521,9 +1521,9 @@ impl Inst {
     }
 
     /// Apply the function `f` to each of this instruction's [Operand]s iff they are of type
-    /// [Operand::Local]. When an instruction references more than one [Operand], the order of
+    /// [Operand::Var]. When an instruction references more than one [Operand], the order of
     /// traversal is undefined.
-    pub(crate) fn map_operand_locals<F>(&self, m: &Module, f: &mut F)
+    pub(crate) fn map_operand_vars<F>(&self, m: &Module, f: &mut F)
     where
         F: FnMut(InstIdx),
     {
@@ -1628,21 +1628,25 @@ impl Inst {
         }
     }
 
-    /// Duplicate this [Inst] while applying function `f` to each operand.
-    pub(crate) fn dup_and_remap_locals<F>(
+    /// Duplicate this [Inst] and, during that process, apply the function `f` to each of this
+    /// instruction's [Operand]s iff they are of type [Operand::Var]. When an instruction
+    /// references more than one [Operand], the order of traversal is undefined.
+    ///
+    /// Note: for `TraceBody*` and `TraceHeader*` functions, this function is not idempotent.
+    pub(crate) fn dup_and_remap_vars<F>(
         &self,
         m: &mut Module,
-        f: &F,
+        f: F,
     ) -> Result<Self, CompilationError>
     where
-        F: Fn(InstIdx) -> Operand,
+        F: Fn(&Module, InstIdx) -> Operand,
     {
         let mapper = |m: &Module, x: &PackedOperand| match x.unpack(m) {
-            Operand::Var(iidx) => PackedOperand::new(&f(iidx)),
+            Operand::Var(iidx) => PackedOperand::new(&f(m, iidx)),
             Operand::Const(_) => *x,
         };
-        let op_mapper = |x: &Operand| match x {
-            Operand::Var(iidx) => f(*iidx),
+        let op_mapper = |m: &Module, x: &Operand| match x {
+            Operand::Var(iidx) => f(m, *iidx),
             Operand::Const(c) => Operand::Const(*c),
         };
         let inst = match self {
@@ -1659,7 +1663,7 @@ impl Inst {
                 // Clone and map arguments.
                 let args = dc
                     .iter_args_idx()
-                    .map(|x| op_mapper(&m.arg(x)))
+                    .map(|x| op_mapper(m, &m.arg(x)))
                     .collect::<Vec<_>>();
                 let dc = DirectCallInst::new(m, dc.target, args)?;
                 Inst::Call(dc)
@@ -1669,14 +1673,14 @@ impl Inst {
                 // Clone and map arguments.
                 let args = ic
                     .iter_args_idx()
-                    .map(|x| op_mapper(&m.arg(x)))
+                    .map(|x| op_mapper(m, &m.arg(x)))
                     .collect::<Vec<_>>();
-                let icnew = IndirectCallInst::new(m, ic.ftyidx, op_mapper(&ic.target(m)), args)?;
+                let icnew = IndirectCallInst::new(m, ic.ftyidx, op_mapper(m, &ic.target(m)), args)?;
                 let idx = m.push_indirect_call(icnew)?;
                 Inst::IndirectCall(idx)
             }
             Inst::Const(c) => Inst::Const(*c),
-            Inst::Copy(iidx) => match f(*iidx) {
+            Inst::Copy(iidx) => match f(m, *iidx) {
                 Operand::Var(iidx) => Inst::Copy(iidx),
                 Operand::Const(cidx) => Inst::Const(cidx),
             },
@@ -1719,7 +1723,7 @@ impl Inst {
                             x.safepoint,
                             x.args
                                 .iter()
-                                .map(|x| op_mapper(&x.unpack(m)))
+                                .map(|x| op_mapper(m, &x.unpack(m)))
                                 .collect::<Vec<_>>(),
                         )
                     })
@@ -1760,11 +1764,6 @@ impl Inst {
                     off: inst.off,
                 })
             }
-            Inst::SidetraceEnd => {
-                // This instruction only exists in side-traces, which don't have loops we can peel
-                // off.
-                unreachable!()
-            }
             Inst::Select(SelectInst {
                 cond,
                 trueval,
@@ -1788,19 +1787,23 @@ impl Inst {
                 volatile: *volatile,
             }),
             Inst::Tombstone => Inst::Tombstone,
-            Inst::TraceHeaderStart => {
-                // Copy the header label into the body while remapping the operands.
-                m.trace_body_start = m
-                    .trace_header_start
-                    .iter()
-                    .map(|op| mapper(m, op))
-                    .collect();
+            Inst::TraceBodyStart => {
+                m.trace_body_start = m.trace_body_start.iter().map(|op| mapper(m, op)).collect();
                 Inst::TraceBodyStart
+            }
+            Inst::TraceBodyEnd => {
+                m.trace_body_end = m.trace_body_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::TraceBodyEnd
             }
             Inst::TraceHeaderEnd => {
                 // Copy the header label into the body while remapping the operands.
-                m.trace_body_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
-                Inst::TraceBodyEnd
+                m.trace_header_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::TraceHeaderEnd
+            }
+            Inst::SidetraceEnd => {
+                // Copy the header label into the body while remapping the operands.
+                m.trace_header_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::SidetraceEnd
             }
             Inst::Trunc(TruncInst { val, dest_tyidx }) => Inst::Trunc(TruncInst {
                 val: mapper(m, val),
