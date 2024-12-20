@@ -1,14 +1,23 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=jit-post-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YK_LOG=4
 //   stderr:
 //     ...
-//     %{{30}}: i1 = sgt %{{_}}, 0i32
-//     guard true, %{{30}}, [{{0}}:%{{0_2}}: %{{0}}, {{0}}:%{{0_6}}: %{{1}}, {{0}}:%{{0_7}}: %{{2}}, {{0}}:%{{0_8}}: %{{3}}, {{0}}:%{{0_9}}: %{{4}}, {{0}}:%{{9_1}}: 0i1] ; ...
+//     --- Begin jit-post-opt ---
+//     ...
+//     header_start ...
+//     ...
+//     header_end [%{{0}}, %{{1}}, %{{2}}, %{{3}}, %{{4}}, %{{25}}]
+//     ...
+//     body_start [%{{30}}, %{{31}}, %{{32}}, %{{33}}, %{{34}}, %{{35}}]
+//     ...
+//     body_end ...
+//     ...
+//     --- End jit-post-opt ---
 //     ...
 
-// Check that if a guard's life variables include the condition operand, that
-// is converted to a constant.
+// Check that basic trace compilation works.
 
 #include <assert.h>
 #include <stdio.h>
@@ -20,25 +29,20 @@
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  yk_mt_sidetrace_threshold_set(mt, 5);
   YkLocation loc = yk_location_new();
 
-  int res = 0;
-  int i = 20;
+  int res = 9998;
+  int i = 4;
   NOOPT_VAL(loc);
   NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    if (i % 2 == 0)
-      res += 1;
-    else
-      res += i;
-    fprintf(stderr, "%d\n", res);
+    fprintf(stderr, "%d\n", i);
     i--;
   }
+  fprintf(stderr, "exit\n");
   NOOPT_VAL(res);
-  printf("%d\n", res);
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

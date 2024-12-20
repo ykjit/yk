@@ -31,19 +31,7 @@ This will automatically compile and run the `tests/c/simple.c` test under GDB.
 This would be ideal if you have a crashing trace, as it will dump you into a
 GDB shell at the time of the crash.
 
-The tool has some other switches which are useful for other situations, e.g.:
-
-```
-bin/gdb_c_test -j -s -b10 simple.c
-```
-
-compiles and runs `tests/c/simple.c` test under GDB with [JIT state
-debugging](runtime_config.md#ykd_print_jitstate)
-enabled, with [compilation
-serialised](runtime_config.md#ykd_serialise_compilation), setting a
-breakpoint on the first 10 traces compiled.
-
-For a list of all switches available, run:
+To see what else you can do with `gdb_c_test`, run:
 
 ```
 bin/gdb_c_test --help

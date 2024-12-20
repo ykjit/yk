@@ -81,6 +81,14 @@
 //! will be in. Canonicalisation is a weak promise, not a guarantee: later stages still have to
 //! deal with the other cases, but since they're mostly expected not to occur, they may be handled
 //! suboptimally if that makes the code easier.
+//!
+//! ## Side traces
+//!
+//! While we apply loop peeling to normal traces, this doesn't make sense for side-traces which
+//! thus don't have [Inst::TraceHeaderStart], [Inst::TraceHeaderEnd], [Inst::TraceBodyStart], and
+//! [Inst::TraceBodyEnd] instructions. Instead, side-traces have a single [Inst::SidetraceEnd]
+//! instruction at the end of the trace. The operands for this label are stored in
+//! [Module::trace_header_end].
 
 mod dead_code;
 #[cfg(test)]
@@ -99,6 +107,7 @@ use std::{
     hash::Hash,
     mem,
 };
+use strum::{EnumCount, EnumDiscriminants};
 #[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
 
@@ -128,8 +137,8 @@ pub(crate) struct Module {
     consts: IndexSet<ConstIndexSetWrapper>,
     /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
-    /// The trace-input location pool.
-    tilocs: Vec<yksmp::Location>,
+    /// The ordered sequence of trace parameters.
+    params: Vec<yksmp::Location>,
     /// Addresses of root traces to jump to at the end of a side-trace.
     root_jump_ptr: *const libc::c_void,
     /// The type index of the void type. Cached for convenience.
@@ -157,12 +166,17 @@ pub(crate) struct Module {
     guard_info: Vec<GuardInfo>,
     /// Indirect calls.
     indirect_calls: Vec<IndirectCallInst>,
-    /// Live variables at the beginning of the loop.
-    loop_start_vars: Vec<Operand>,
-    /// Live variables at the end of the loop.
-    loop_jump_vars: Vec<Operand>,
     /// Live variables at the beginning of the root trace.
     root_entry_vars: Vec<VarLocation>,
+    /// Live variables at the beginning of the trace body.
+    trace_body_start: Vec<PackedOperand>,
+    /// The ordered sequence of operands at the end of the trace body: there will be one per
+    /// [Operand] at the start of the loop.
+    trace_body_end: Vec<PackedOperand>,
+    /// Live variables at the beginning the trace header.
+    trace_header_start: Vec<PackedOperand>,
+    /// Live variables at the end of the trace header.
+    trace_header_end: Vec<PackedOperand>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
@@ -241,7 +255,7 @@ impl Module {
             args: Vec::new(),
             consts,
             types,
-            tilocs: Vec::new(),
+            params: Vec::new(),
             root_jump_ptr: std::ptr::null(),
             void_tyidx,
             ptr_tyidx,
@@ -254,9 +268,11 @@ impl Module {
             global_decls: IndexSet::new(),
             guard_info: Vec::new(),
             indirect_calls: Vec::new(),
-            loop_start_vars: Vec::new(),
-            loop_jump_vars: Vec::new(),
             root_entry_vars: Vec::new(),
+            trace_body_start: Vec::new(),
+            trace_body_end: Vec::new(),
+            trace_header_start: Vec::new(),
+            trace_header_end: Vec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
         })
@@ -300,23 +316,11 @@ impl Module {
     ///
     /// # Panics
     ///
-    /// If `iidx` points to a `Copy` instruction.
-    pub(crate) fn inst_no_copies(&self, iidx: InstIdx) -> Inst {
+    /// If `iidx` points to a `Const`, `Copy`, or `Tombstone` instruction.
+    pub(crate) fn inst(&self, iidx: InstIdx) -> Inst {
         match self.insts[usize::from(iidx)] {
-            Inst::Const(_) => todo!(),
-            Inst::Copy(_) => panic!(),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => todo!(),
             x => x,
-        }
-    }
-
-    /// Return the decopied instruction at the specified index (i.e. searching
-    /// until a non-`Copy` instruction is found).
-    pub(crate) fn inst_decopy(&self, mut iidx: InstIdx) -> (InstIdx, Inst) {
-        loop {
-            match self.insts[usize::from(iidx)] {
-                Inst::Copy(copy_iidx) => iidx = copy_iidx,
-                x => return (iidx, x),
-            }
         }
     }
 
@@ -333,7 +337,7 @@ impl Module {
     /// This function has very few uses and unless you explicitly know why you're using it, you
     /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
     /// correctly leads to undefined behaviour.
-    pub(crate) fn inst_raw(&self, iidx: InstIdx) -> Inst {
+    fn inst_raw(&self, iidx: InstIdx) -> Inst {
         self.insts[usize::from(iidx)]
     }
 
@@ -355,21 +359,21 @@ impl Module {
         InstIdx::try_from(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
-    /// Iterate, in order, over all `InstIdx`s of this module (including `Const`, `Copy`, and
-    /// `Tombstone` instructions).
-    pub(crate) fn iter_all_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
+    /// Iterate, in order, over the `InstIdx`s of this module skipping `Const`, `Copy`, and
+    /// `Tombstone` instructions.
+    pub(crate) fn iter_skipping_insts(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (InstIdx, Inst)> + '_ {
         // The `unchecked_from` is safe because we know from `Self::push` that we can't have
         // exceeded `InstIdx`'s bounds.
-        (0..self.insts.len()).map(InstIdx::unchecked_from)
-    }
-
-    /// An iterator over instructions that skips `Const`, `Copy`, and `Tombstone` instructions.
-    ///
-    /// This implicitly deduplicates the callers view of instructions (since `Const` and `Copy`
-    /// instructions are skipped), but note that the indices, while strictly monotonically
-    /// increasing, may be non-consecutive (because of skipping).
-    pub(crate) fn iter_skipping_insts(&self) -> SkippingInstsIterator<'_> {
-        SkippingInstsIterator { m: self, cur: 0 }
+        (0..self.insts.len()).filter_map(|i| {
+            let inst = &self.insts[i];
+            if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
+                Some((InstIdx::unchecked_from(i), *inst))
+            } else {
+                None
+            }
+        })
     }
 
     /// Replace the instruction at `iidx` with `inst`.
@@ -432,23 +436,14 @@ impl Module {
         self.args[usize::from(idx)].unpack(self)
     }
 
-    /// Return the raw [PackedOperand] at args index `idx`. Unless you have a good reason for doing
-    /// so, use [Self::arg] instead.
-    ///
-    /// # Panics
-    ///
-    /// If `idx` is out of bounds.
-    pub(crate) fn arg_packed(&self, idx: ArgsIdx) -> PackedOperand {
-        self.args[usize::from(idx)]
+    /// Push the location of a trace parameter.
+    pub(crate) fn push_param(&mut self, loc: yksmp::Location) {
+        self.params.push(loc);
     }
 
-    /// Push the location of a trace input variable.
-    pub(crate) fn push_tiloc(&mut self, loc: yksmp::Location) {
-        self.tilocs.push(loc);
-    }
-
-    pub(crate) fn tilocs(&self) -> &[yksmp::Location] {
-        &self.tilocs
+    /// Return the parameter at a given [InstIdx].
+    pub(crate) fn param(&self, pidx: ParamIdx) -> &yksmp::Location {
+        &self.params[usize::from(pidx)]
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -595,12 +590,20 @@ impl Module {
         GuardInfoIdx::try_from(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
     }
 
-    pub(crate) fn loop_start_vars(&self) -> &[Operand] {
-        &self.loop_start_vars
+    pub(crate) fn trace_header_end(&self) -> &[PackedOperand] {
+        &self.trace_header_end
     }
 
-    pub(crate) fn push_loop_start_var(&mut self, op: Operand) {
-        self.loop_start_vars.push(op);
+    pub(crate) fn trace_header_start(&self) -> &[PackedOperand] {
+        &self.trace_header_start
+    }
+
+    pub(crate) fn trace_body_start(&self) -> &[PackedOperand] {
+        &self.trace_body_start
+    }
+
+    pub(crate) fn push_body_start_var(&mut self, op: Operand) {
+        self.trace_header_start.push(PackedOperand::new(&op));
     }
 
     /// Store the entry live variables of the root traces so we can copy this side-trace's live
@@ -609,8 +612,9 @@ impl Module {
         self.root_entry_vars.extend_from_slice(entry_vars);
     }
 
-    pub(crate) fn loop_jump_vars(&self) -> &[Operand] {
-        &self.loop_jump_vars
+    /// Return the loop jump operands.
+    pub(crate) fn trace_body_end(&self) -> &[PackedOperand] {
+        &self.trace_body_end
     }
 
     /// Get the entry live variables of the root trace.
@@ -618,8 +622,8 @@ impl Module {
         &self.root_entry_vars
     }
 
-    pub(crate) fn push_loop_jump_var(&mut self, op: Operand) {
-        self.loop_jump_vars.push(op);
+    pub(crate) fn push_header_end_var(&mut self, op: Operand) {
+        self.trace_header_end.push(PackedOperand::new(&op));
     }
 
     /// Get the address of the root trace. This is where we need jump to at the end of a
@@ -632,20 +636,6 @@ impl Module {
     /// side-trace.
     pub(crate) fn set_root_jump_addr(&mut self, ptr: *const libc::c_void) {
         self.root_jump_ptr = ptr;
-    }
-
-    pub(crate) fn inst_vals_alive_until(&self) -> Vec<InstIdx> {
-        let mut alives = vec![InstIdx::try_from(0).unwrap(); self.insts_len()];
-        for iidx in self.iter_all_inst_idxs() {
-            let inst = self.inst_raw(iidx);
-            inst.map_operand_locals(self, &mut |x| {
-                let (x, _) = self.inst_decopy(x);
-                debug_assert!(alives[usize::from(x)] <= iidx);
-                alives[usize::from(x)] = iidx;
-            });
-        }
-
-        alives
     }
 }
 
@@ -675,35 +665,6 @@ impl fmt::Display for Module {
         }
 
         Ok(())
-    }
-}
-
-/// An iterator over instructions that skips `Const`, `Copy`, and `Tombstone` instructions.
-///
-/// This implicitly deduplicates the callers view of instructions (since `Copy` and `Const`
-/// instructions are skipped), but note that the indices, while strictly monotonically increasing,
-/// may be non-consecutive (because of skipping).
-pub(crate) struct SkippingInstsIterator<'a> {
-    m: &'a Module,
-    cur: usize,
-}
-
-impl<'a> Iterator for SkippingInstsIterator<'a> {
-    type Item = (InstIdx, &'a Inst);
-    /// Return the next instruction index and its associated instruction or `None` if the end has
-    /// been reached.
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(x) = self.m.insts.get(self.cur) {
-            // We know that `self.cur` must fit in `InstIdx`, as otherwise `m.insts` wouldn't have
-            // had the instruction in the first place, so the `unchecked_from` is safe.
-            let old = InstIdx::unchecked_from(self.cur);
-            self.cur += 1;
-            match x {
-                Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => (),
-                _ => return Some((old, &self.m.insts[usize::from(old)])),
-            }
-        }
-        None
     }
 }
 
@@ -824,6 +785,11 @@ macro_rules! index_16bit {
     ($struct:ident) => {
         #[allow(dead_code)]
         impl $struct {
+            /// What is the maximum value this index type can represent?
+            pub(crate) fn max() -> Self {
+                Self(u16::MAX)
+            }
+
             /// Create an instance of `$struct` without checking whether `v` exceeds the underlying
             /// type's bounds. If it does exceed those bounds, the result will be an instance of
             /// this struct whose values is the `MAX` value the underlying type can represent.
@@ -896,7 +862,7 @@ index_16bit!(ArgsIdx);
 /// A constant index.
 ///
 /// One of these is an index into the [Module::consts].
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub(crate) struct ConstIdx(u16);
 index_16bit!(ConstIdx);
 
@@ -915,12 +881,15 @@ index_24bit!(GlobalDeclIdx);
 pub(crate) struct IndirectCallIdx(U24);
 index_24bit!(IndirectCallIdx);
 
-/// An instruction index.
-///
-/// One of these is an index into the [Module::insts].
+/// An index into [Module::insts].
 #[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct InstIdx(u16);
 index_16bit!(InstIdx);
+
+/// An index into [Module::params].
+#[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct ParamIdx(u16);
+index_16bit!(ParamIdx);
 
 /// A function's type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -942,7 +911,7 @@ impl FuncTy {
         }
     }
 
-    /// Return the number of paramaters the function accepts (not including varargs).
+    /// Return the number of parameters the function accepts (not including varargs).
     #[cfg(any(debug_assertions, test))]
     pub(crate) fn num_params(&self) -> usize {
         self.param_tyidxs.len()
@@ -954,7 +923,7 @@ impl FuncTy {
         &self.param_tyidxs
     }
 
-    /// Returns whether the function type has vararg arguments.
+    /// Returns whether the function type has vararg parameters.
     pub(crate) fn is_vararg(&self) -> bool {
         self.is_vararg
     }
@@ -1154,21 +1123,10 @@ impl PackedOperand {
             Operand::Const(ConstIdx(self.0 & OPERAND_IDX_MASK))
         }
     }
-
-    /// If this [PackedOperand] represents a local instruction, call `f` with its `InstIdx`. Note
-    /// that this does not perform any kind of decopying.
-    fn map_iidx<F>(&self, f: &mut F)
-    where
-        F: FnMut(InstIdx),
-    {
-        if (self.0 & !OPERAND_IDX_MASK) == 0 {
-            f(InstIdx(self.0))
-        }
-    }
 }
 
 /// An operand.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Operand {
     /// This operand references another SSA variable.
     Var(InstIdx),
@@ -1338,9 +1296,12 @@ pub(crate) struct GuardInfo {
     bid: aot_ir::BBlockId,
     /// Live variables, mapping AOT vars to JIT [Operand]s.
     live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
-    // Inlined frames info.
-    // FIXME With this field, the aotlives field is redundant.
+    /// Inlined frames info.
+    /// FIXME With this field, the aotlives field is redundant.
     inlined_frames: Vec<InlinedFrame>,
+    /// What AOT safepoint does this guard correspond to? This is used solely for debugging
+    /// purposes.
+    safepoint_id: u64,
 }
 
 impl GuardInfo {
@@ -1348,11 +1309,13 @@ impl GuardInfo {
         bid: aot_ir::BBlockId,
         live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
         inlined_frames: Vec<InlinedFrame>,
+        safepoint_id: u64,
     ) -> Self {
         Self {
             bid,
             live_vars,
             inlined_frames,
+            safepoint_id,
         }
     }
 
@@ -1384,7 +1347,7 @@ pub(crate) struct InlinedFrame {
     /// The deopt safepoint for [callinst].
     pub(crate) safepoint: &'static aot_ir::DeoptSafepoint,
     /// The [Operand]s passed to [funcidx].
-    pub(crate) args: Vec<Operand>,
+    pub(crate) args: Vec<PackedOperand>,
 }
 
 impl InlinedFrame {
@@ -1398,14 +1361,14 @@ impl InlinedFrame {
             callinst,
             funcidx,
             safepoint,
-            args,
+            args: args.iter().map(PackedOperand::new).collect::<Vec<_>>(),
         }
     }
 }
 
 /// An IR instruction.
+#[derive(Clone, Copy, Debug, EnumCount, EnumDiscriminants)]
 #[repr(u8)]
-#[derive(Clone, Copy, Debug)]
 pub(crate) enum Inst {
     // "Internal" IR instructions: these don't correspond to IR that a user interpreter can
     // express, but are used either for efficient representation of the IR or testing.
@@ -1428,7 +1391,7 @@ pub(crate) enum Inst {
     BinOp(BinOpInst),
     Load(LoadInst),
     LookupGlobal(LookupGlobalInst),
-    LoadTraceInput(LoadTraceInputInst),
+    Param(ParamInst),
     Call(DirectCallInst),
     IndirectCall(IndirectCallIdx),
     PtrAdd(PtrAddInst),
@@ -1436,10 +1399,13 @@ pub(crate) enum Inst {
     Store(StoreInst),
     ICmp(ICmpInst),
     Guard(GuardInst),
+    /// Marks the point where side-traces reenter the root trace.
+    TraceHeaderStart,
+    TraceHeaderEnd,
     /// Marks the place to loop back to at the end of the JITted code.
-    TraceLoopStart,
-    TraceLoopJump,
-    RootJump,
+    TraceBodyStart,
+    TraceBodyEnd,
+    SidetraceEnd,
 
     SExt(SExtInst),
     ZExt(ZExtInst),
@@ -1454,6 +1420,13 @@ pub(crate) enum Inst {
 }
 
 impl Inst {
+    /// What is the numeric discriminant of this [Inst]? These are guaranteed to be consecutive
+    /// integers from `0..Inst::COUNT`.
+    pub(crate) fn discriminant(&self) -> usize {
+        debug_assert!((InstDiscriminants::from(self) as usize) < Self::COUNT);
+        InstDiscriminants::from(self) as usize
+    }
+
     /// Returns the type of the value that the instruction produces (if any).
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Ty> {
         let idx = self.tyidx(m);
@@ -1483,16 +1456,18 @@ impl Inst {
             }
             Self::Load(li) => li.tyidx(),
             Self::LookupGlobal(..) => m.ptr_tyidx(),
-            Self::LoadTraceInput(li) => li.tyidx(),
+            Self::Param(li) => li.tyidx(),
             Self::Call(ci) => m.func_type(ci.target()).ret_tyidx(),
             Self::PtrAdd(..) => m.ptr_tyidx(),
             Self::DynPtrAdd(..) => m.ptr_tyidx(),
             Self::Store(..) => m.void_tyidx(),
             Self::ICmp(_) => m.int1_tyidx(),
             Self::Guard(..) => m.void_tyidx(),
-            Self::TraceLoopStart => m.void_tyidx(),
-            Self::TraceLoopJump => m.void_tyidx(),
-            Self::RootJump => m.void_tyidx(),
+            Self::TraceHeaderStart => m.void_tyidx(),
+            Self::TraceHeaderEnd => m.void_tyidx(),
+            Self::TraceBodyStart => m.void_tyidx(),
+            Self::TraceBodyEnd => m.void_tyidx(),
+            Self::SidetraceEnd => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
             Self::ZExt(si) => si.dest_tyidx(),
             Self::BitCast(i) => i.dest_tyidx(),
@@ -1536,7 +1511,11 @@ impl Inst {
             Inst::Copy(x) => m.inst_raw(*x).is_barrier(m),
             Inst::Guard(_) => true,
             Inst::Call(_) | Inst::IndirectCall(_) => true,
-            Inst::TraceLoopStart | Inst::TraceLoopJump | Inst::RootJump => true,
+            Inst::TraceHeaderStart
+            | Inst::TraceHeaderEnd
+            | Inst::TraceBodyStart
+            | Inst::TraceBodyEnd
+            | Inst::SidetraceEnd => true,
             _ => false,
         }
     }
@@ -1562,7 +1541,7 @@ impl Inst {
             }
             Inst::Load(LoadInst { op, .. }) => op.unpack(m).map_iidx(f),
             Inst::LookupGlobal(_) => (),
-            Inst::LoadTraceInput(_) => (),
+            Inst::Param(_) => (),
             Inst::Call(x) => {
                 for i in x.iter_args_idx() {
                     m.arg(i).map_iidx(f);
@@ -1600,19 +1579,29 @@ impl Inst {
                     pop.unpack(m).map_iidx(f);
                 }
             }
-            Inst::TraceLoopStart => {
-                for x in &m.loop_start_vars {
-                    x.map_iidx(f);
+            Inst::TraceHeaderStart => {
+                for x in &m.trace_header_start {
+                    x.unpack(m).map_iidx(f);
                 }
             }
-            Inst::TraceLoopJump => {
-                for x in &m.loop_jump_vars {
-                    x.map_iidx(f);
+            Inst::TraceHeaderEnd => {
+                for x in &m.trace_header_end {
+                    x.unpack(m).map_iidx(f);
                 }
             }
-            Inst::RootJump => {
-                for x in &m.loop_jump_vars {
-                    x.map_iidx(f);
+            Inst::TraceBodyStart => {
+                for x in &m.trace_body_start {
+                    x.unpack(m).map_iidx(f);
+                }
+            }
+            Inst::TraceBodyEnd => {
+                for x in &m.trace_body_end {
+                    x.unpack(m).map_iidx(f);
+                }
+            }
+            Inst::SidetraceEnd => {
+                for x in &m.trace_header_end {
+                    x.unpack(m).map_iidx(f);
                 }
             }
             Inst::SExt(SExtInst { val, .. }) => val.unpack(m).map_iidx(f),
@@ -1639,115 +1628,191 @@ impl Inst {
         }
     }
 
-    /// Apply the function `f` to each of this instruction's [PackedOperand]s that references a
-    /// local instruction. When an instruction references more than one [PackedOperand], the order
-    /// of traversal is undefined.
-    ///
-    /// Note that this function does not perform decopying, and thus must only be used when you
-    /// know that you want to know which local an instruction's operands directly refers to (e.g.
-    /// for dead code elimination).
-    pub(crate) fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
+    /// Duplicate this [Inst] while applying function `f` to each operand.
+    pub(crate) fn dup_and_remap_locals<F>(
+        &self,
+        m: &mut Module,
+        f: &F,
+    ) -> Result<Self, CompilationError>
     where
-        F: FnMut(InstIdx),
+        F: Fn(InstIdx) -> Operand,
     {
-        match self {
+        let mapper = |m: &Module, x: &PackedOperand| match x.unpack(m) {
+            Operand::Var(iidx) => PackedOperand::new(&f(iidx)),
+            Operand::Const(_) => *x,
+        };
+        let op_mapper = |x: &Operand| match x {
+            Operand::Var(iidx) => f(*iidx),
+            Operand::Const(c) => Operand::Const(*c),
+        };
+        let inst = match self {
             #[cfg(test)]
             Inst::BlackBox(BlackBoxInst { op }) => {
-                op.map_iidx(f);
+                Inst::BlackBox(BlackBoxInst { op: mapper(m, op) })
             }
-            Inst::Const(_) => (),
-            Inst::Copy(iidx) => f(*iidx),
-            Inst::Tombstone => (),
-            Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
-                lhs.map_iidx(f);
-                rhs.map_iidx(f);
+            Inst::BinOp(BinOpInst { lhs, binop, rhs }) => Inst::BinOp(BinOpInst {
+                lhs: mapper(m, lhs),
+                binop: *binop,
+                rhs: mapper(m, rhs),
+            }),
+            Inst::Call(dc) => {
+                // Clone and map arguments.
+                let args = dc
+                    .iter_args_idx()
+                    .map(|x| op_mapper(&m.arg(x)))
+                    .collect::<Vec<_>>();
+                let dc = DirectCallInst::new(m, dc.target, args)?;
+                Inst::Call(dc)
             }
-            Inst::Load(LoadInst { op, .. }) => op.map_iidx(f),
-            Inst::LookupGlobal(_) => (),
-            Inst::LoadTraceInput(_) => (),
-            Inst::Call(x) => {
-                for i in x.iter_args_idx() {
-                    m.arg_packed(i).map_iidx(f);
-                }
+            Inst::IndirectCall(iidx) => {
+                let ic = m.indirect_call(*iidx);
+                // Clone and map arguments.
+                let args = ic
+                    .iter_args_idx()
+                    .map(|x| op_mapper(&m.arg(x)))
+                    .collect::<Vec<_>>();
+                let icnew = IndirectCallInst::new(m, ic.ftyidx, op_mapper(&ic.target(m)), args)?;
+                let idx = m.push_indirect_call(icnew)?;
+                Inst::IndirectCall(idx)
             }
-            Inst::IndirectCall(x) => {
-                let ici = m.indirect_call(*x);
-                let IndirectCallInst { target, .. } = ici;
-                target.map_iidx(f);
-                for i in ici.iter_args_idx() {
-                    m.arg_packed(i).map_iidx(f);
-                }
+            Inst::Const(c) => Inst::Const(*c),
+            Inst::Copy(iidx) => match f(*iidx) {
+                Operand::Var(iidx) => Inst::Copy(iidx),
+                Operand::Const(cidx) => Inst::Const(cidx),
+            },
+            Inst::DynPtrAdd(inst) => {
+                let ptr = inst.ptr;
+                let num_elems = inst.num_elems;
+                Inst::DynPtrAdd(DynPtrAddInst {
+                    ptr: mapper(m, &ptr),
+                    num_elems: mapper(m, &num_elems),
+                    elem_size: inst.elem_size,
+                })
             }
-            Inst::PtrAdd(x) => {
-                let ptr = x.ptr;
-                ptr.map_iidx(f);
+            Inst::FPToSI(FPToSIInst { val, dest_tyidx }) => Inst::FPToSI(FPToSIInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::FPExt(FPExtInst { val, dest_tyidx }) => Inst::FPExt(FPExtInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::FCmp(FCmpInst { lhs, pred, rhs }) => Inst::FCmp(FCmpInst {
+                lhs: mapper(m, lhs),
+                pred: *pred,
+                rhs: mapper(m, rhs),
+            }),
+            Inst::Guard(GuardInst { cond, expect, gidx }) => {
+                let ginfo = &m.guard_info[usize::from(*gidx)];
+                let newlives = ginfo
+                    .live_vars()
+                    .iter()
+                    .map(|(aot, jit)| (aot.clone(), mapper(m, jit)))
+                    .collect();
+                let inlined_frames = ginfo
+                    .inlined_frames()
+                    .iter()
+                    .map(|x| {
+                        InlinedFrame::new(
+                            x.callinst.clone(),
+                            x.funcidx,
+                            x.safepoint,
+                            x.args
+                                .iter()
+                                .map(|x| op_mapper(&x.unpack(m)))
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let newginfo = GuardInfo::new(
+                    ginfo.bid().clone(),
+                    newlives,
+                    inlined_frames,
+                    ginfo.safepoint_id,
+                );
+                let newgidx = m.push_guardinfo(newginfo).unwrap();
+                Inst::Guard(GuardInst {
+                    cond: mapper(m, cond),
+                    expect: *expect,
+                    gidx: newgidx,
+                })
             }
-            Inst::DynPtrAdd(x) => {
-                let ptr = x.ptr;
-                ptr.map_iidx(f);
-                let num_elems = x.num_elems;
-                num_elems.map_iidx(f);
+            Inst::ICmp(ICmpInst { lhs, pred, rhs }) => Inst::ICmp(ICmpInst {
+                lhs: mapper(m, lhs),
+                pred: *pred,
+                rhs: mapper(m, rhs),
+            }),
+            Inst::Load(LoadInst {
+                op,
+                tyidx,
+                volatile,
+            }) => Inst::Load(LoadInst {
+                op: mapper(m, op),
+                tyidx: *tyidx,
+                volatile: *volatile,
+            }),
+            Inst::Param(x) => Inst::Param(*x),
+            Inst::LookupGlobal(g) => Inst::LookupGlobal(*g),
+            Inst::PtrAdd(inst) => {
+                let ptr = inst.ptr;
+                Inst::PtrAdd(PtrAddInst {
+                    ptr: mapper(m, &ptr),
+                    off: inst.off,
+                })
             }
-            Inst::Store(StoreInst { tgt, val, .. }) => {
-                tgt.map_iidx(f);
-                val.map_iidx(f);
+            Inst::SidetraceEnd => {
+                // This instruction only exists in side-traces, which don't have loops we can peel
+                // off.
+                unreachable!()
             }
-            Inst::ICmp(ICmpInst { lhs, pred: _, rhs }) => {
-                lhs.map_iidx(f);
-                rhs.map_iidx(f);
-            }
-            Inst::Guard(x @ GuardInst { cond, .. }) => {
-                cond.map_iidx(f);
-                for (_, pop) in x.guard_info(m).live_vars() {
-                    pop.map_iidx(f);
-                }
-            }
-            Inst::TraceLoopStart => {
-                for val in &m.loop_start_vars {
-                    match val {
-                        Operand::Var(iidx) => f(*iidx),
-                        _ => panic!(),
-                    }
-                }
-            }
-            Inst::TraceLoopJump => {
-                for val in &m.loop_jump_vars {
-                    match val {
-                        Operand::Var(iidx) => f(*iidx),
-                        Operand::Const(_) => (),
-                    }
-                }
-            }
-            Inst::RootJump => {
-                for val in &m.loop_jump_vars {
-                    match val {
-                        Operand::Var(iidx) => f(*iidx),
-                        Operand::Const(_) => (),
-                    }
-                }
-            }
-            Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
-            Inst::ZExt(ZExtInst { val, .. }) => val.map_iidx(f),
-            Inst::BitCast(BitCastInst { val, .. }) => val.map_iidx(f),
-            Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
             Inst::Select(SelectInst {
                 cond,
                 trueval,
                 falseval,
-            }) => {
-                cond.map_iidx(f);
-                trueval.map_iidx(f);
-                falseval.map_iidx(f);
+            }) => Inst::Select(SelectInst {
+                cond: mapper(m, cond),
+                trueval: mapper(m, trueval),
+                falseval: mapper(m, falseval),
+            }),
+            Inst::SExt(SExtInst { val, dest_tyidx }) => Inst::SExt(SExtInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::SIToFP(SIToFPInst { val, dest_tyidx }) => Inst::SIToFP(SIToFPInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::Store(StoreInst { tgt, val, volatile }) => Inst::Store(StoreInst {
+                tgt: mapper(m, tgt),
+                val: mapper(m, val),
+                volatile: *volatile,
+            }),
+            Inst::Tombstone => Inst::Tombstone,
+            Inst::TraceHeaderStart => {
+                // Copy the header label into the body while remapping the operands.
+                m.trace_body_start = m
+                    .trace_header_start
+                    .iter()
+                    .map(|op| mapper(m, op))
+                    .collect();
+                Inst::TraceBodyStart
             }
-            Inst::SIToFP(SIToFPInst { val, .. }) => val.map_iidx(f),
-            Inst::FPExt(FPExtInst { val, .. }) => val.map_iidx(f),
-            Inst::FCmp(FCmpInst { lhs, pred: _, rhs }) => {
-                lhs.map_iidx(f);
-                rhs.map_iidx(f);
+            Inst::TraceHeaderEnd => {
+                // Copy the header label into the body while remapping the operands.
+                m.trace_body_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::TraceBodyEnd
             }
-            Inst::FPToSI(FPToSIInst { val, .. }) => val.map_iidx(f),
-            Inst::FNeg(FNegInst { val }) => val.map_iidx(f),
-        }
+            Inst::Trunc(TruncInst { val, dest_tyidx }) => Inst::Trunc(TruncInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::ZExt(ZExtInst { val, dest_tyidx }) => Inst::ZExt(ZExtInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            e => todo!("{:?}", e),
+        };
+        Ok(inst)
     }
 
     /// Returns the size of the local variable that this instruction defines (if any).
@@ -1793,7 +1858,7 @@ impl Inst {
             (Self::Load(x), Self::Load(y)) => x.decopy_eq(m, y),
             (Self::Store(x), Self::Store(y)) => x.decopy_eq(m, y),
             (Self::LookupGlobal(x), Self::LookupGlobal(y)) => x.decopy_eq(y),
-            (Self::LoadTraceInput(x), Self::LoadTraceInput(y)) => x.decopy_eq(y),
+            (Self::Param(x), Self::Param(y)) => x.decopy_eq(y),
             (Self::PtrAdd(x), Self::PtrAdd(y)) => x.decopy_eq(m, y),
             (Self::DynPtrAdd(x), Self::DynPtrAdd(y)) => x.decopy_eq(m, y),
             (Self::ICmp(x), Self::ICmp(y)) => x.decopy_eq(m, y),
@@ -1902,15 +1967,9 @@ impl fmt::Display for DisplayableInst<'_> {
                 x.lhs(self.m).display(self.m),
                 x.rhs(self.m).display(self.m)
             ),
-            Inst::Guard(
-                x @ GuardInst {
-                    cond,
-                    expect,
-                    gidx: _,
-                },
-            ) => {
-                let live_vars = x
-                    .guard_info(self.m)
+            Inst::Guard(x @ GuardInst { cond, expect, gidx }) => {
+                let gi = x.guard_info(self.m);
+                let live_vars = gi
                     .live_vars()
                     .iter()
                     .map(|(x, y)| {
@@ -1919,56 +1978,75 @@ impl fmt::Display for DisplayableInst<'_> {
                             usize::from(x.funcidx()),
                             usize::from(x.bbidx()),
                             usize::from(x.iidx()),
-                            y.unpack(self.m).display(self.m)
+                            y.unpack(self.m).display(self.m),
                         )
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(
                     f,
-                    "guard {}, {}, [{live_vars}]",
+                    "guard {}, {}, [{live_vars}] ; trace_gidx {gidx} safepoint_id {}",
                     if *expect { "true" } else { "false" },
                     cond.unpack(self.m).display(self.m),
+                    gi.safepoint_id
                 )
             }
-            Inst::LoadTraceInput(x) => {
-                write!(
-                    f,
-                    "load_ti {:?}",
-                    self.m.tilocs[usize::try_from(x.locidx()).unwrap()]
-                )
+            Inst::Param(x) => {
+                write!(f, "param {:?}", self.m.params[usize::from(x.paramidx())])
             }
-            Inst::TraceLoopStart => {
+            Inst::TraceHeaderStart => {
                 // Just marks a location, so we format it to look like a label.
-                write!(f, "tloop_start [")?;
-                for var in &self.m.loop_start_vars {
-                    write!(f, "{}", var.display(self.m))?;
-                    if var != self.m.loop_start_vars.last().unwrap() {
+                write!(f, "header_start [")?;
+                for var in &self.m.trace_header_start {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if var != self.m.trace_header_start.last().unwrap() {
                         write!(f, ", ")?;
                     }
                 }
-                write!(f, "]:")
+                write!(f, "]")
             }
-            Inst::TraceLoopJump => {
+            Inst::TraceHeaderEnd => {
                 // Just marks a location, so we format it to look like a label.
-                write!(f, "tloop_jump [")?;
-                for var in &self.m.loop_jump_vars {
-                    write!(f, "{}", var.display(self.m))?;
-                    if var != self.m.loop_jump_vars.last().unwrap() {
+                write!(f, "header_end [")?;
+                for var in &self.m.trace_header_end {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if var != self.m.trace_header_end.last().unwrap() {
                         write!(f, ", ")?;
                     }
                 }
-                write!(f, "]:")
+                write!(f, "]")
             }
-            Inst::RootJump => {
-                write!(f, "parent_jump {:?} [", self.m.root_jump_ptr)?;
-                for var in &self.m.loop_jump_vars {
-                    write!(f, "{}", var.display(self.m))?;
-                    if var != self.m.loop_jump_vars.last().unwrap() {
+            Inst::TraceBodyStart => {
+                // Just marks a location, so we format it to look like a label.
+                write!(f, "body_start [")?;
+                for (i, var) in self.m.trace_body_start.iter().enumerate() {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if i + 1 < self.m.trace_body_start.len() {
                         write!(f, ", ")?;
                     }
                 }
-                write!(f, "]:")
+                write!(f, "]")
+            }
+            Inst::TraceBodyEnd => {
+                // Just marks a location, so we format it to look like a label.
+                write!(f, "body_end [")?;
+                for (i, var) in self.m.trace_body_end.iter().enumerate() {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if i + 1 < self.m.trace_body_end.len() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")
+            }
+            Inst::SidetraceEnd => {
+                write!(f, "sidetrace_end {:?} [", self.m.root_jump_ptr)?;
+                for (i, var) in self.m.trace_header_end.iter().enumerate() {
+                    write!(f, "{}", var.unpack(self.m).display(self.m))?;
+                    if i + 1 < self.m.trace_header_end.len() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")
             }
             Inst::SExt(i) => {
                 write!(f, "sext {}", i.val(self.m).display(self.m),)
@@ -2020,7 +2098,7 @@ inst!(BlackBox, BlackBoxInst);
 inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
-inst!(LoadTraceInput, LoadTraceInputInst);
+inst!(Param, ParamInst);
 inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(DynPtrAdd, DynPtrAddInst);
@@ -2155,40 +2233,35 @@ impl LoadInst {
     }
 }
 
-/// The `LoadTraceInput` instruction.
+/// The `Param` instruction.
 ///
 /// ## Semantics
 ///
-/// Loads a trace input out of the trace input struct. The variable is loaded from the specified
-/// offset (`off`) and the resulting local variable is of the type indicated by the `tyidx`.
-///
-/// FIXME (maybe): If we added a third `TraceInput` storage class to the register allocator, could
-/// we kill this instruction kind entirely?
+/// Specifies the [yksmp::Location] of a run-time argument.
 #[derive(Clone, Copy, Debug)]
-#[repr(packed)]
-pub struct LoadTraceInputInst {
-    /// The [yksmp::Location] of this input.
-    locidx: u32,
+pub struct ParamInst {
+    /// The [ParamIdx] of the [yksmp::Location] parameter.
+    pidx: ParamIdx,
     /// The type of the resulting local variable.
     tyidx: TyIdx,
 }
 
-impl LoadTraceInputInst {
-    pub(crate) fn new(locidx: u32, tyidx: TyIdx) -> LoadTraceInputInst {
-        Self { locidx, tyidx }
+impl ParamInst {
+    pub(crate) fn new(pidx: ParamIdx, tyidx: TyIdx) -> ParamInst {
+        Self { pidx, tyidx }
     }
 
     pub(crate) fn decopy_eq(&self, other: Self) -> bool {
-        self.locidx == other.locidx && self.tyidx == other.tyidx
+        self.pidx == other.pidx && self.tyidx == other.tyidx
     }
 
     pub(crate) fn tyidx(&self) -> TyIdx {
         self.tyidx
     }
 
-    /// The [yksmp::Location] of this input.
-    pub(crate) fn locidx(&self) -> u32 {
-        self.locidx
+    /// Return The [InstIdx] of the [yksmp::Location] parameter.
+    pub(crate) fn paramidx(&self) -> ParamIdx {
+        self.pidx
     }
 }
 
@@ -2954,8 +3027,8 @@ mod tests {
     #[test]
     fn use_case_update_inst() {
         let mut prog: Vec<Inst> = vec![
-            LoadTraceInputInst::new(0, TyIdx::try_from(0).unwrap()).into(),
-            LoadTraceInputInst::new(8, TyIdx::try_from(0).unwrap()).into(),
+            ParamInst::new(ParamIdx::try_from(0).unwrap(), TyIdx::try_from(0).unwrap()).into(),
+            ParamInst::new(ParamIdx::try_from(8).unwrap(), TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
                 Operand::Var(InstIdx(0)),
                 TyIdx(U24::try_from(0).unwrap()),
@@ -2994,12 +3067,21 @@ mod tests {
             Operand::Var(InstIdx(1)),
             Operand::Var(InstIdx(2)),
         ];
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(0, i32_tyidx)))
-            .unwrap();
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(1, i32_tyidx)))
-            .unwrap();
-        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(2, i32_tyidx)))
-            .unwrap();
+        m.push(Inst::Param(ParamInst::new(
+            ParamIdx::try_from(0).unwrap(),
+            i32_tyidx,
+        )))
+        .unwrap();
+        m.push(Inst::Param(ParamInst::new(
+            ParamIdx::try_from(1).unwrap(),
+            i32_tyidx,
+        )))
+        .unwrap();
+        m.push(Inst::Param(ParamInst::new(
+            ParamIdx::try_from(2).unwrap(),
+            i32_tyidx,
+        )))
+        .unwrap();
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
@@ -3125,8 +3207,8 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push(LoadTraceInputInst::new(0, m.int8_tyidx()).into())
+        m.push_param(yksmp::Location::Register(3, 1, vec![]));
+        m.push(ParamInst::new(ParamIdx::try_from(0).unwrap(), m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
@@ -3147,7 +3229,7 @@ mod tests {
             "global_decl tls @some_thread_local",
             "",
             "entry:",
-            "    %0: i8 = load_ti Register(3, 1, 0, [])",
+            "    %0: i8 = param Register(3, 1, [])",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);
@@ -3167,41 +3249,26 @@ mod tests {
     }
 
     #[test]
-    fn alive_until() {
+    fn iter_skipping_insts() {
         let m = Module::from_str(
             "
-            entry:
-              %0: i8 = load_ti 0
-              tloop_start [%0]
-              %2: i8 = %0
-              tloop_jump [%2]
-            ",
+        entry:
+          %0: i8 = param 0
+          %1: i8 = param 1
+          %2: i8 = param 2
+          %3: i8 = param 3
+          %4: i8 = param 4
+          %5: i8 = param 5
+        ",
         );
-        assert_eq!(
-            m.inst_vals_alive_until(),
-            vec![3, 0, 0, 0]
-                .iter()
-                .map(|x: &usize| InstIdx::try_from(*x).unwrap())
-                .collect::<Vec<_>>()
-        );
-
-        let m = Module::from_str(
-            "
-            entry:
-              %0: i8 = load_ti 0
-              tloop_start [%0]
-              %2: i8 = add %0, %0
-              %3: i8 = add %0, %0
-              %4: i8 = %2
-              tloop_jump [%4]
-            ",
-        );
-        assert_eq!(
-            m.inst_vals_alive_until(),
-            vec![3, 0, 5, 0, 0, 0]
-                .iter()
-                .map(|x: &usize| InstIdx::try_from(*x).unwrap())
-                .collect::<Vec<_>>()
-        );
+        let mut iter = m.iter_skipping_insts();
+        assert_eq!(Some(0), iter.next().map(|x| usize::from(x.0)));
+        assert_eq!(Some(5), iter.next_back().map(|x| usize::from(x.0)));
+        assert_eq!(Some(4), iter.next_back().map(|x| usize::from(x.0)));
+        assert_eq!(Some(1), iter.next().map(|x| usize::from(x.0)));
+        assert_eq!(Some(2), iter.next().map(|x| usize::from(x.0)));
+        assert_eq!(Some(3), iter.next().map(|x| usize::from(x.0)));
+        assert!(iter.next().is_none());
+        assert!(iter.next_back().is_none());
     }
 }

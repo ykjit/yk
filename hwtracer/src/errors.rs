@@ -24,6 +24,8 @@ pub enum TemporaryErrorKind {
     TraceBufferOverflow,
     /// The trace was interrupted.
     TraceInterrupted,
+    /// Perf can't set itself up.
+    PerfBusy,
 }
 
 impl Display for TemporaryErrorKind {
@@ -32,6 +34,7 @@ impl Display for TemporaryErrorKind {
             TemporaryErrorKind::CantAllocate => write!(f, "Unable to allocate memory"),
             TemporaryErrorKind::TraceBufferOverflow => write!(f, "Trace buffer overflow"),
             TemporaryErrorKind::TraceInterrupted => write!(f, "Trace interrupted"),
+            TemporaryErrorKind::PerfBusy => write!(f, "Perf busy"),
         }
     }
 }

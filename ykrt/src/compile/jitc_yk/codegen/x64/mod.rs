@@ -23,10 +23,10 @@
 use super::{
     super::{
         int_signs::{SignExtend, Truncate},
-        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, Ty},
+        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
         CompilationError,
     },
-    reg_alloc::{self, StackDirection, VarLocation},
+    reg_alloc::{self, VarLocation},
     CodeGen,
 };
 #[cfg(any(debug_assertions, test))]
@@ -60,11 +60,12 @@ use std::{
     slice,
     sync::{Arc, Weak},
 };
+use vob::Vob;
 use ykaddr::addr::symbol_to_ptr;
-use yksmp;
 
 mod deopt;
-mod lsregalloc;
+pub(super) mod lsregalloc;
+mod rev_analyse;
 
 use deopt::{__yk_deopt, __yk_guardcheck};
 use lsregalloc::{LSRegAlloc, RegConstraint};
@@ -139,9 +140,6 @@ static RBP_DWARF_NUM: u16 = 6;
 /// The x64 SysV ABI requires a 16-byte aligned stack prior to any call.
 const SYSV_CALL_STACK_ALIGN: usize = 16;
 
-/// On x64 the stack grows down.
-const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
-
 /// A function that we can put a debugger breakpoint on.
 /// FIXME: gross hack.
 #[cfg(debug_assertions)]
@@ -176,8 +174,10 @@ impl X64CodeGen {
 struct Assemble<'a> {
     m: &'a jit_ir::Module,
     ra: LSRegAlloc<'a>,
-    /// The locations of the live variables at the beginning of the loop.
-    loop_start_locs: Vec<VarLocation>,
+    /// The locations of the live variables at the begining of the trace header.
+    header_start_locs: Vec<VarLocation>,
+    /// The locations of the live variables at the beginning of the trace body.
+    body_start_locs: Vec<VarLocation>,
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
     deoptinfo: HashMap<usize, DeoptInfo>,
@@ -195,6 +195,15 @@ struct Assemble<'a> {
     /// The stack pointer offset of the root trace's frame from the base pointer of the interpreter
     /// frame. If this is the root trace, this will be None.
     root_offset: Option<usize>,
+    /// Does this Load/Store instruction reference a [PtrAddInst]?
+    ptradds: Vec<Option<PtrAddInst>>,
+    /// For each instruction, does this code generator use its value? This is implicitly a second
+    /// layer of dead-code elimination: it doesn't cause JIT IR instructions to be removed, but
+    /// it will stop any code being (directly) generated for some of them.
+    used_insts: Vob,
+    /// The offset after the trace's prologue. This is the re-entry point when returning from
+    /// side-traces.
+    prologue_offset: AssemblyOffset,
 }
 
 impl<'a> Assemble<'a> {
@@ -242,15 +251,21 @@ impl<'a> Assemble<'a> {
             }
         };
 
+        let (inst_vals_alive_until, used_insts, ptradds, vloc_hints) = rev_analyse::rev_analyse(m)?;
+
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, sp_offset),
+            ra: LSRegAlloc::new(m, inst_vals_alive_until, vloc_hints, sp_offset),
             asm,
-            loop_start_locs: Vec::new(),
+            header_start_locs: Vec::new(),
+            body_start_locs: Vec::new(),
             deoptinfo: HashMap::new(),
             comments: Cell::new(IndexMap::new()),
             sp_offset,
             root_offset,
+            used_insts,
+            ptradds,
+            prologue_offset: AssemblyOffset(0),
         }))
     }
 
@@ -279,10 +294,6 @@ impl<'a> Assemble<'a> {
         }
 
         let alloc_off = self.emit_prologue();
-        // The instruction offset after we've emitted the prologue (i.e. updated the stack
-        // pointer). We will later adjust this offset to also include one iteration of the trace
-        // so we can jump directly to the peeled loop.
-        let prologue_offset = self.asm.offset();
 
         self.cg_insts()?;
 
@@ -441,8 +452,8 @@ impl<'a> Assemble<'a> {
             deoptinfo: self.deoptinfo,
             prevguards,
             sp_offset: self.ra.stack_size(),
-            prologue_offset: prologue_offset.0,
-            entry_vars: self.loop_start_locs.clone(),
+            prologue_offset: self.prologue_offset.0,
+            entry_vars: self.header_start_locs.clone(),
             hl: Arc::downgrade(&hl),
             comments: self.comments.take(),
             #[cfg(any(debug_assertions, test))]
@@ -454,53 +465,34 @@ impl<'a> Assemble<'a> {
     fn cg_insts(&mut self) -> Result<(), CompilationError> {
         let mut iter = self.m.iter_skipping_insts();
         let mut next = iter.next();
+        let mut in_header = true;
         while let Some((iidx, inst)) = next {
-            self.ra.expire_regs(iidx);
             self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
+            if !self.used_insts[usize::from(iidx)] {
+                next = iter.next();
+                continue;
+            }
+            self.ra.expire_regs(iidx);
 
-            match inst {
+            match &inst {
                 #[cfg(test)]
-                jit_ir::Inst::BlackBox(_) => unreachable!(),
+                jit_ir::Inst::BlackBox(_) => (),
                 jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
                     unreachable!();
                 }
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
-                jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
-                jit_ir::Inst::Load(i) => self.cg_load(iidx, i, 0),
-                jit_ir::Inst::PtrAdd(pa_inst) => {
-                    next = iter.next();
-                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
-                    // by a `load` *and* the result of the `PtrAdd` isn't used again.
-                    if let Some((next_iidx, Inst::Load(l_inst))) = next {
-                        if let Operand::Var(op_iidx) = l_inst.operand(self.m) {
-                            if op_iidx == iidx
-                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
-                            {
-                                self.cg_ptradd_load(iidx, pa_inst, next_iidx, l_inst);
-                                next = iter.next();
-                                continue;
-                            }
-                        }
+                jit_ir::Inst::Param(i) => {
+                    // Right now, `Param`s in the body contain dummy values, and shouldn't be
+                    // processed.
+                    if in_header {
+                        self.cg_param(iidx, i);
                     }
-                    // We have a special optimisation for `PtrAdd`s iff they're immediately followed
-                    // by a `store` *and* the result of the `PtrAdd` isn't used again.
-                    if let Some((next_iidx, Inst::Store(s_inst))) = next {
-                        if let Operand::Var(tgt_iidx) = s_inst.tgt(self.m) {
-                            if tgt_iidx == iidx
-                                && !self.ra.is_inst_var_still_used_after(next_iidx, iidx)
-                            {
-                                self.cg_ptradd_store(iidx, pa_inst, next_iidx, s_inst);
-                                next = iter.next();
-                                continue;
-                            }
-                        }
-                    }
-                    self.cg_ptradd(iidx, pa_inst);
-                    continue;
                 }
+                jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+                jit_ir::Inst::PtrAdd(pa_inst) => self.cg_ptradd(iidx, pa_inst),
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
-                jit_ir::Inst::Store(i) => self.cg_store(iidx, i, 0),
+                jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
                 jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
                 jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
                 jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
@@ -510,7 +502,11 @@ impl<'a> Assemble<'a> {
                     // by a `Guard`.
                     if let Some((next_iidx, Inst::Guard(g_inst))) = next {
                         if let Operand::Var(cond_idx) = g_inst.cond(self.m) {
-                            if cond_idx == iidx {
+                            // NOTE: If the value of the condition will be used later, we have to
+                            // materialise it.
+                            if cond_idx == iidx
+                                && !self.ra.is_inst_var_still_used_after(next_iidx, cond_idx)
+                            {
                                 self.cg_icmp_guard(iidx, ic_inst, next_iidx, g_inst);
                                 next = iter.next();
                                 continue;
@@ -521,9 +517,14 @@ impl<'a> Assemble<'a> {
                     continue;
                 }
                 jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
-                jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
-                jit_ir::Inst::TraceLoopJump => self.cg_traceloopjump(),
-                jit_ir::Inst::RootJump => self.cg_rootjump(self.m.root_jump_addr()),
+                jit_ir::Inst::TraceHeaderStart => self.cg_header_start(),
+                jit_ir::Inst::TraceHeaderEnd => {
+                    self.cg_header_end();
+                    in_header = false;
+                }
+                jit_ir::Inst::TraceBodyStart => self.cg_body_start(),
+                jit_ir::Inst::TraceBodyEnd => self.cg_body_end(iidx),
+                jit_ir::Inst::SidetraceEnd => self.cg_sidetrace_end(iidx, self.m.root_jump_addr()),
                 jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
                 jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
                 jit_ir::Inst::BitCast(i) => self.cg_bitcast(iidx, i),
@@ -922,7 +923,7 @@ impl<'a> Assemble<'a> {
                     [
                         // 64-bit (or 32-bit) signed division with idiv operates on RDX:RAX
                         // (EDX:EAX) and stores the remainder in RDX (EDX). We ignore the
-                        // remainder stored into RAX (EAX).
+                        // quotient stored into RAX (EAX).
                         RegConstraint::InputIntoRegAndClobber(lhs, Rq::RAX),
                         RegConstraint::Input(rhs),
                         RegConstraint::OutputFromReg(Rq::RDX),
@@ -1074,84 +1075,11 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    /// Codegen a [jit_ir::LoadTraceInputInst]. This only informs the register allocator about the
+    /// Codegen a [jit_ir::ParamInst]. This only informs the register allocator about the
     /// locations of live variables without generating any actual machine code.
-    fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
-        let m = match &self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
-            yksmp::Location::Register(0, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RAX))
-            }
-            yksmp::Location::Register(1, ..) => {
-                // Since the control point passes the stackmap ID via RDX this case only happens in
-                // side-traces.
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RDX))
-            }
-            yksmp::Location::Register(2, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RCX))
-            }
-            yksmp::Location::Register(3, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RBX))
-            }
-            yksmp::Location::Register(4, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RSI))
-            }
-            yksmp::Location::Register(5, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::RDI))
-            }
-            yksmp::Location::Register(8, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R8))
-            }
-            yksmp::Location::Register(9, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R9))
-            }
-            yksmp::Location::Register(10, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R10))
-            }
-            yksmp::Location::Register(11, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R11))
-            }
-            yksmp::Location::Register(12, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R12))
-            }
-            yksmp::Location::Register(13, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R13))
-            }
-            yksmp::Location::Register(14, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R14))
-            }
-            yksmp::Location::Register(15, ..) => {
-                VarLocation::Register(reg_alloc::Register::GP(Rq::R15))
-            }
-            yksmp::Location::Register(x, ..) if *x >= 17 && *x <= 32 => VarLocation::Register(
-                reg_alloc::Register::FP(lsregalloc::FP_REGS[usize::from(x - 17)]),
-            ),
-            yksmp::Location::Direct(6, off, size) => VarLocation::Direct {
-                frame_off: *off,
-                size: usize::from(*size),
-            },
-            // Since the trace shares the same stack frame as the main interpreter loop, we can
-            // translate indirect locations into normal stack locations. Note that while stackmaps
-            // use negative offsets, we use positive offsets for stack locations.
-            yksmp::Location::Indirect(6, off, size) => VarLocation::Stack {
-                frame_off: u32::try_from(*off * -1).unwrap(),
-                size: usize::from(*size),
-            },
-            yksmp::Location::Constant(v) => {
-                // FIXME: This isn't fine-grained enough, as there may be constants of any
-                // bit-size.
-                let byte_size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
-                debug_assert!(byte_size <= 8);
-                VarLocation::ConstInt {
-                    bits: u32::try_from(byte_size).unwrap() * 8,
-                    v: u64::from(*v),
-                }
-            }
-            e => {
-                todo!("{:?}", e);
-            }
-        };
-        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
-        debug_assert!(size <= REG64_BYTESIZE);
+    fn cg_param(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::ParamInst) {
+        let m = VarLocation::from_yksmp_location(self.m, iidx, self.m.param(inst.paramidx()));
+        debug_assert!(self.m.inst(iidx).def_byte_size(self.m) <= REG64_BYTESIZE);
         match m {
             VarLocation::Register(reg_alloc::Register::GP(reg)) => {
                 self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
@@ -1175,65 +1103,40 @@ impl<'a> Assemble<'a> {
 
     /// Generate code for a [LoadInst], loading from a `register + off`. `off` should only be
     /// non-zero if the [LoadInst] references a [PtrAddInst].
-    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst, off: i32) {
+    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+        let (ptr_op, off) = match self.ptradds[usize::from(iidx)] {
+            Some(x) => (x.ptr(self.m), x.off()),
+            None => (inst.operand(self.m), 0),
+        };
+
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
-                let op = inst.operand(self.m);
-                if let Operand::Var(op_iidx) = op {
-                    if self.ra.is_inst_var_still_used_after(iidx, op_iidx) {
-                        // If the operand value is still live after the current instruction, avoid
-                        // clobbering it, in the hope that it can be reused.
-                        let [in_reg, out_reg] = self.ra.assign_gp_regs(
-                            &mut self.asm,
-                            iidx,
-                            [
-                                RegConstraint::Input(inst.operand(self.m)),
-                                RegConstraint::Output,
-                            ],
-                        );
-                        let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
-                        debug_assert!(size <= REG64_BYTESIZE);
-                        match size {
-                            1 => {
-                                dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code()) + off])
-                            }
-                            2 => {
-                                dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code()) + off])
-                            }
-                            4 => {
-                                dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code()) + off])
-                            }
-                            8 => {
-                                dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code()) + off])
-                            }
-                            _ => todo!("{}", size),
-                        };
-                        return;
-                    }
-                }
-                // The input operand is dead after this instruction, so reuse the same register for
-                // input and output.
-                let [reg] = self.ra.assign_gp_regs(
+                let [in_reg, out_reg] = self.ra.assign_gp_regs(
                     &mut self.asm,
                     iidx,
-                    [RegConstraint::InputOutput(inst.operand(self.m))],
+                    [
+                        RegConstraint::Input(ptr_op.clone()),
+                        RegConstraint::OutputCanBeSameAsInput(ptr_op),
+                    ],
                 );
-                let size = self.m.inst_no_copies(iidx).def_byte_size(self.m);
+                let size = self.m.inst(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_BYTESIZE);
                 match size {
-                    1 => dynasm!(self.asm ; movzx Rq(reg.code()), BYTE [Rq(reg.code()) + off]),
-                    2 => dynasm!(self.asm ; movzx Rq(reg.code()), WORD [Rq(reg.code()) + off]),
-                    4 => dynasm!(self.asm ; mov Rd(reg.code()), [Rq(reg.code()) + off]),
-                    8 => dynasm!(self.asm ; mov Rq(reg.code()), [Rq(reg.code()) + off]),
+                    1 => {
+                        dynasm!(self.asm ; movzx Rq(out_reg.code()), BYTE [Rq(in_reg.code()) + off])
+                    }
+                    2 => {
+                        dynasm!(self.asm ; movzx Rq(out_reg.code()), WORD [Rq(in_reg.code()) + off])
+                    }
+                    4 => dynasm!(self.asm ; mov Rd(out_reg.code()), [Rq(in_reg.code()) + off]),
+                    8 => dynasm!(self.asm ; mov Rq(out_reg.code()), [Rq(in_reg.code()) + off]),
                     _ => todo!("{}", size),
                 };
             }
             Ty::Float(fty) => {
-                let [src_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::Input(inst.operand(self.m))],
-                );
+                let [src_reg] =
+                    self.ra
+                        .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(ptr_op)]);
                 let [tgt_reg] =
                     self.ra
                         .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
@@ -1250,66 +1153,22 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    /// Optimise `PtrAdd` followed by `Load`. This has the following preconditions:
-    ///   1. The `Load` must consume the result of the `PtrAdd`.
-    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Load` is the sole
-    ///      consumer of the `PtrAdd`s result).
-    fn cg_ptradd_load(
-        &mut self,
-        pa_iidx: InstIdx,
-        pa_inst: &jit_ir::PtrAddInst,
-        l_iidx: InstIdx,
-        l_inst: &jit_ir::LoadInst,
-    ) {
-        let [_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            pa_iidx,
-            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
-        );
-        self.ra.expire_regs(l_iidx);
-        self.comment(
-            self.asm.offset(),
-            Inst::Load(*l_inst).display(l_iidx, self.m).to_string(),
-        );
-        self.cg_load(l_iidx, l_inst, pa_inst.off());
-    }
-
-    /// Optimise `PtrAdd` followed by `Store`. This has the following preconditions:
-    ///   1. The `Load` must consume the result of the `PtrAdd`.
-    ///   2. The result of the `PtrAdd` must not be used later (i.e. the `Store` is the sole
-    ///      consumer of the `PtrAdd`s result).
-    fn cg_ptradd_store(
-        &mut self,
-        pa_iidx: InstIdx,
-        pa_inst: &jit_ir::PtrAddInst,
-        s_iidx: InstIdx,
-        s_inst: &jit_ir::StoreInst,
-    ) {
-        let [_ptr_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            pa_iidx,
-            [RegConstraint::InputOutput(pa_inst.ptr(self.m))],
-        );
-        self.ra.expire_regs(s_iidx);
-        self.comment(
-            self.asm.offset(),
-            Inst::Store(*s_inst).display(s_iidx, self.m).to_string(),
-        );
-        self.cg_store(s_iidx, s_inst, pa_inst.off());
-    }
-
     fn cg_ptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         // LLVM semantics dictate that the offset should be sign-extended/truncated up/down to the
         // size of the LLVM pointer index type. For address space zero on x86, truncation can't
         // happen, and when an immediate second operand is used for x86_64 `add`, it is implicitly
         // sign extended.
-        let [reg] = self.ra.assign_gp_regs(
+        let ptr_op = inst.ptr(self.m);
+        let [in_reg, out_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
-            [RegConstraint::InputOutput(inst.ptr(self.m))],
+            [
+                RegConstraint::Input(ptr_op.clone()),
+                RegConstraint::OutputCanBeSameAsInput(ptr_op),
+            ],
         );
 
-        dynasm!(self.asm ; add Rq(reg.code()), inst.off());
+        dynasm!(self.asm ; lea Rq(out_reg.code()), [Rq(in_reg.code()) + inst.off()]);
     }
 
     fn cg_dynptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::DynPtrAddInst) {
@@ -1356,17 +1215,20 @@ impl<'a> Assemble<'a> {
 
     /// Generate code for a [StoreInst], storing it at a `register + off`. `off` should only be
     /// non-zero if the [StoreInst] references a [PtrAddInst].
-    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst, off: i32) {
+    fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
+        let (tgt_op, off) = match self.ptradds[usize::from(iidx)] {
+            Some(x) => (x.ptr(self.m), x.off()),
+            None => (inst.tgt(self.m), 0),
+        };
+
         let val = inst.val(self.m);
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
                 let byte_size = val.byte_size(self.m);
                 if let Some(imm) = self.op_to_immediate(&val) {
-                    let [tgt_reg] = self.ra.assign_gp_regs(
-                        &mut self.asm,
-                        iidx,
-                        [RegConstraint::Input(inst.tgt(self.m))],
-                    );
+                    let [tgt_reg] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
                     match (imm, byte_size) {
                         (Immediate::I8(v), 1) => {
                             dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code()) + off], v)
@@ -1386,10 +1248,7 @@ impl<'a> Assemble<'a> {
                     let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
                         &mut self.asm,
                         iidx,
-                        [
-                            RegConstraint::Input(inst.tgt(self.m)),
-                            RegConstraint::Input(val),
-                        ],
+                        [RegConstraint::Input(tgt_op), RegConstraint::Input(val)],
                     );
                     match byte_size {
                         1 => dynasm!(self.asm ; mov [Rq(tgt_reg.code()) + off], Rb(val_reg.code())),
@@ -1401,11 +1260,9 @@ impl<'a> Assemble<'a> {
                 }
             }
             Ty::Float(fty) => {
-                let [tgt_reg] = self.ra.assign_gp_regs(
-                    &mut self.asm,
-                    iidx,
-                    [RegConstraint::Input(inst.tgt(self.m))],
-                );
+                let [tgt_reg] =
+                    self.ra
+                        .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
                 let [val_reg] =
                     self.ra
                         .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(val)]);
@@ -1510,11 +1367,13 @@ impl<'a> Assemble<'a> {
                         RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg);
                     num_float_args += 1;
                 }
-                _ => {
+                Ty::Integer(_) | Ty::Ptr | Ty::Func(_) => {
                     let reg = gp_regs.next().unwrap();
                     let gp_i = CALLER_CLOBBER_REGS.iter().position(|x| x == reg).unwrap();
                     gp_cnstrs[gp_i] = RegConstraint::InputIntoRegAndClobber(arg.clone(), *reg);
                 }
+                Ty::Void => unreachable!(),
+                Ty::Unimplemented(_) => todo!(),
             }
         }
 
@@ -1559,18 +1418,28 @@ impl<'a> Assemble<'a> {
         match (callee, callee_op) {
             (Some(p), None) => {
                 // Direct call
-                gp_cnstrs.push(RegConstraint::Temporary);
-                let [_, _, _, _, _, _, _, _, _, tmp_reg] =
-                    self.ra
-                        .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
 
-                if fty.is_vararg() {
-                    dynasm!(self.asm; mov rax, num_float_args); // SysV x64 ABI
+                if !fty.is_vararg() {
+                    let [_, _, _, _, _, _, _, _, _] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+                    // rax is considered clobbered, but isn't used to pass an argument, so we can
+                    // safely use it for the function pointer.
+                    dynasm!(self.asm
+                        ; mov rax, QWORD p as i64
+                        ; call rax
+                    );
+                } else {
+                    gp_cnstrs.push(RegConstraint::Temporary);
+                    let [_, _, _, _, _, _, _, _, _, tmp_reg] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+                    dynasm!(self.asm
+                        ; mov rax, num_float_args
+                        ; mov Rq(tmp_reg.code()), QWORD p as i64
+                        ; call Rq(tmp_reg.code())
+                    );
                 }
-                dynasm!(self.asm
-                    ; mov Rq(tmp_reg.code()), QWORD p as i64
-                    ; call Rq(tmp_reg.code())
-                );
             }
             (None, Some(op)) => {
                 // Indirect call
@@ -1587,6 +1456,26 @@ impl<'a> Assemble<'a> {
         }
 
         Ok(())
+    }
+
+    /// Return the [VarLocation] an [Operand] relates to.
+    fn op_to_var_location(&self, op: Operand) -> VarLocation {
+        match op {
+            Operand::Var(iidx) => self.ra.var_location(iidx),
+            Operand::Const(cidx) => match self.m.const_(cidx) {
+                Const::Float(_, v) => VarLocation::ConstFloat(*v),
+                Const::Int(tyidx, v) => {
+                    let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                        panic!()
+                    };
+                    VarLocation::ConstInt {
+                        bits: *bit_size,
+                        v: *v,
+                    }
+                }
+                Const::Ptr(v) => VarLocation::ConstPtr(*v),
+            },
+        }
     }
 
     /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
@@ -1708,8 +1597,10 @@ impl<'a> Assemble<'a> {
         ic_iidx: InstIdx,
         ic_inst: &jit_ir::ICmpInst,
         g_iidx: InstIdx,
-        g_inst: &jit_ir::GuardInst,
+        g_inst: jit_ir::GuardInst,
     ) {
+        debug_assert!(!self.ra.is_inst_var_still_used_after(g_iidx, ic_iidx));
+
         // Codegen ICmp
         let (lhs, pred, rhs) = (
             ic_inst.lhs(self.m),
@@ -1735,9 +1626,9 @@ impl<'a> Assemble<'a> {
         self.ra.expire_regs(g_iidx);
         self.comment(
             self.asm.offset(),
-            Inst::Guard(*g_inst).display(g_iidx, self.m).to_string(),
+            Inst::Guard(g_inst).display(g_iidx, self.m).to_string(),
         );
-        let fail_label = self.guard_to_deopt(g_inst);
+        let fail_label = self.guard_to_deopt(&g_inst);
 
         if g_inst.expect() {
             match pred {
@@ -1900,18 +1791,27 @@ impl<'a> Assemble<'a> {
     /// # Arguments
     ///
     /// * `tgt_vars` - The target locations. If `None` use `self.loop_start_locs` instead.
-    fn write_jump_vars(&mut self, tgt_vars: Option<&[VarLocation]>) {
+    fn write_jump_vars(&mut self, iidx: InstIdx, is_sidetrace: bool) {
+        let (tgt_vars, src_ops) = if is_sidetrace {
+            // Side-traces don't have a body and store these variables in `trace_header_end`.
+            (self.m.root_entry_vars(), self.m.trace_header_end())
+        } else {
+            (self.body_start_locs.as_slice(), self.m.trace_body_end())
+        };
         // If we pass in `None` use `self.loop_start_locs` instead. We need to do this since we
         // can't pass in `&self.loop_start_locs` directly due to borrowing restrictions.
-        let tgt_vars = tgt_vars.unwrap_or(self.loop_start_locs.as_slice());
-        for (i, op) in self.m.loop_jump_vars().iter().enumerate() {
-            let (iidx, src) = match op {
-                Operand::Var(iidx) => {
-                    let iidx = self.m.inst_decopy(*iidx).0;
-                    (iidx, self.ra.var_location(iidx))
-                }
-                _ => panic!(),
-            };
+        let mut gp_regs = lsregalloc::GP_REGS
+            .iter()
+            .map(|_| RegConstraint::None)
+            .collect::<Vec<_>>();
+        let mut fp_regs = lsregalloc::FP_REGS
+            .iter()
+            .map(|_| RegConstraint::None)
+            .collect::<Vec<_>>();
+        for (i, op) in src_ops.iter().enumerate() {
+            // FIXME: This is completely broken: see the FIXME later.
+            let op = op.unpack(self.m);
+            let src = self.op_to_var_location(op.clone());
             let dst = tgt_vars[i];
             if dst == src {
                 // The value is already in the correct place, so there's nothing we need to
@@ -1927,6 +1827,9 @@ impl<'a> Assemble<'a> {
                         VarLocation::Register(reg_alloc::Register::GP(reg)) => match size_dst {
                             8 => dynasm!(self.asm;
                                 mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
+                            ),
+                            4 => dynasm!(self.asm;
+                                mov DWORD [rbp - i32::try_from(off_dst).unwrap()], Rd(reg.code())
                             ),
                             _ => todo!(),
                         },
@@ -1948,7 +1851,13 @@ impl<'a> Assemble<'a> {
                                 mov QWORD [rbp - i32::try_from(off_dst).unwrap()], rax;
                                 pop rax
                             ),
-                            _ => todo!(),
+                            4 => dynasm!(self.asm;
+                                push rax;
+                                mov eax, DWORD [rbp - i32::try_from(off_src).unwrap()];
+                                mov DWORD [rbp - i32::try_from(off_dst).unwrap()], eax;
+                                pop rax
+                            ),
+                            e => todo!("{:?}", e),
                         },
                         e => todo!("{:?}", e),
                     }
@@ -1959,40 +1868,34 @@ impl<'a> Assemble<'a> {
                     // somewhere else (register/normal stack) so dst and src no longer
                     // match. But since the value can't change we can safely ignore this.
                 }
-                VarLocation::Register(reg) => {
-                    // Copy the value into a register. We can ask the register allocator to
-                    // this for us, but telling it to load the source operand into the
-                    // target register.
-                    match reg {
-                        reg_alloc::Register::GP(r) => {
-                            let [_] = self.ra.assign_gp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::InputIntoReg(op.clone(), r)],
-                            );
-                        }
-                        reg_alloc::Register::FP(r) => {
-                            let [_] = self.ra.assign_fp_regs(
-                                &mut self.asm,
-                                iidx,
-                                [RegConstraint::InputIntoReg(op.clone(), r)],
-                            );
-                        }
+                VarLocation::Register(reg) => match reg {
+                    reg_alloc::Register::GP(r) => {
+                        gp_regs[usize::from(r.code())] = RegConstraint::InputIntoReg(op.clone(), r);
                     }
-                }
+                    reg_alloc::Register::FP(r) => {
+                        fp_regs[usize::from(r.code())] = RegConstraint::InputIntoReg(op.clone(), r);
+                    }
+                },
                 _ => todo!(),
             }
         }
+
+        let _: [_; lsregalloc::GP_REGS.len()] =
+            self.ra
+                .assign_gp_regs(&mut self.asm, iidx, gp_regs.try_into().unwrap());
+        let _: [_; lsregalloc::FP_REGS.len()] =
+            self.ra
+                .assign_fp_regs(&mut self.asm, iidx, fp_regs.try_into().unwrap());
     }
 
-    fn cg_traceloopjump(&mut self) {
+    fn cg_body_end(&mut self, iidx: InstIdx) {
         // Loop the JITted code if the `tloop_start` label is present (not relevant for IR created
         // by a test or a side-trace).
         let label = StaticLabel::global("tloop_start");
         match self.asm.labels().resolve_static(&label) {
             Ok(_) => {
                 // Found the label, emit a jump to it.
-                self.write_jump_vars(None);
+                self.write_jump_vars(iidx, false);
                 dynasm!(self.asm; jmp ->tloop_start);
             }
             Err(DynasmError::UnknownLabel(_)) => {
@@ -2013,10 +1916,10 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_rootjump(&mut self, addr: *const libc::c_void) {
+    fn cg_sidetrace_end(&mut self, iidx: InstIdx, addr: *const libc::c_void) {
         // The end of a side-trace. Map live variables of this side-trace to the entry variables of
         // the root parent trace, then jump to it.
-        self.write_jump_vars(Some(self.m.root_entry_vars()));
+        self.write_jump_vars(iidx, true);
         self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
 
         dynasm!(self.asm
@@ -2029,66 +1932,133 @@ impl<'a> Assemble<'a> {
             ; jmp rdi);
     }
 
-    fn cg_traceloopstart(&mut self) {
-        debug_assert_eq!(self.loop_start_locs.len(), 0);
-        // Remember the locations of the live variables at the beginning of the trace. When we loop
-        // back around here we need to write the live variables back into these same locations.
-        for var in self.m.loop_start_vars() {
-            let loc = match var {
-                Operand::Var(iidx) => {
-                    debug_assert_eq!(*iidx, self.m.inst_decopy(*iidx).0);
-                    self.ra.var_location(*iidx)
-                }
+    fn cg_header_start(&mut self) {
+        debug_assert_eq!(self.header_start_locs.len(), 0);
+        // Remember the locations of the live variables at the beginning of the trace. When we
+        // re-enter the trace from a side-trace, we need to write the live variables back into
+        // these same locations.
+        for var in self.m.trace_header_start() {
+            let loc = match var.unpack(self.m) {
+                Operand::Var(iidx) => self.ra.var_location(iidx),
                 _ => panic!(),
             };
-            self.loop_start_locs.push(loc);
+            self.header_start_locs.push(loc);
         }
-        // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
-        // When doing so, update the jump target inside side-traces.
+        dynasm!(self.asm; ->reentry:);
+        self.prologue_offset = self.asm.offset();
+    }
+
+    fn cg_header_end(&mut self) {
+        // FIXME: This is a bit of a roundabout way of doing things. Especially, since it means
+        // that the [ParamInst]s in the trace body are just placeholders. While, since a recent
+        // change, the register allocator makes sure the values automatically end up in the
+        // [VarLocation]s expected by the loop start, this only works for registers right now. We
+        // can extend this to spill locations as well, but won't be able to do so for variables
+        // that have become constants during the trace header. So we will always have to either
+        // update the [ParamInst]s of the trace body, which isn't ideal since it requires the
+        // [Module] the be mutable. Or we do what we do below just for constants.
+        let mut varlocs = Vec::new();
+        for var in self.m.trace_header_end().iter() {
+            let varloc = self.op_to_var_location(var.unpack(self.m));
+            varlocs.push(varloc);
+        }
+        // Reset the register allocator before priming it with information about the trace body
+        // inputs.
+        self.ra.reset();
+        for (i, op) in self.m.trace_body_start().iter().enumerate() {
+            // By definition these can only be variables.
+            let iidx = match op.unpack(self.m) {
+                Operand::Var(iidx) => iidx,
+                _ => panic!(),
+            };
+            let varloc = varlocs[i];
+
+            // Write the varlocations from the head jump to the body start.
+            // FIXME: This is copied verbatim from `cg_param` and can be reused.
+            match varloc {
+                VarLocation::Register(reg_alloc::Register::GP(reg)) => {
+                    self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
+                }
+                VarLocation::Register(reg_alloc::Register::FP(reg)) => {
+                    self.ra.force_assign_inst_fp_reg(iidx, reg);
+                }
+                VarLocation::Direct { frame_off, size: _ } => {
+                    self.ra.force_assign_inst_direct(iidx, frame_off);
+                }
+                VarLocation::Stack { frame_off, size: _ } => {
+                    self.ra
+                        .force_assign_inst_indirect(iidx, i32::try_from(frame_off).unwrap());
+                }
+                VarLocation::ConstInt { bits, v } => {
+                    self.ra.assign_const(iidx, bits, v);
+                }
+                e => panic!("{:?}", e),
+            }
+        }
+    }
+
+    fn cg_body_start(&mut self) {
+        debug_assert_eq!(self.body_start_locs.len(), 0);
+        // Remember the locations of the live variables at the beginning of the trace loop. When we
+        // loop back around here we need to write the live variables back into these same
+        // locations.
+        for var in self.m.trace_body_start() {
+            let loc = self.op_to_var_location(var.unpack(self.m));
+            self.body_start_locs.push(loc);
+        }
         dynasm!(self.asm; ->tloop_start:);
     }
 
-    fn cg_sext(&mut self, iidx: InstIdx, i: &jit_ir::SExtInst) {
-        let [reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [RegConstraint::InputOutput(i.val(self.m))],
-        );
-
-        let src_val = i.val(self.m);
+    fn cg_sext(&mut self, iidx: InstIdx, sinst: &jit_ir::SExtInst) {
+        let src_val = sinst.val(self.m);
         let src_type = self.m.type_(src_val.tyidx(self.m));
         let Ty::Integer(src_bitsize) = src_type else {
             unreachable!(); // must be an integer
         };
 
-        let dest_type = self.m.type_(i.dest_tyidx());
+        let dest_type = self.m.type_(sinst.dest_tyidx());
         let Ty::Integer(dest_bitsize) = dest_type else {
             unreachable!(); // must be an integer
         };
 
         if *dest_bitsize <= u32::try_from(REG64_BITSIZE).unwrap() {
-            // If it fits in a register, we can just sign extend up to the entire register width.
-            self.sign_extend_to_reg64(reg, u8::try_from(*src_bitsize).unwrap());
+            if *src_bitsize == 64 {
+                // The 64 bit registers are implicitly sign extended.
+                self.ra
+                    .assign_gp_pass_through(&mut self.asm, iidx, sinst.val(self.m));
+            } else {
+                let [reg] = self.ra.assign_gp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::InputOutput(sinst.val(self.m))],
+                );
+                self.sign_extend_to_reg64(reg, u8::try_from(*src_bitsize).unwrap());
+            }
         } else {
             todo!("{} {}", src_bitsize, dest_bitsize);
         }
     }
 
-    fn cg_zext(&mut self, iidx: InstIdx, i: &jit_ir::ZExtInst) {
-        let [reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [RegConstraint::InputOutput(i.val(self.m))],
-        );
-
-        let src_type = self.m.type_(i.val(self.m).tyidx(self.m));
+    fn cg_zext(&mut self, iidx: InstIdx, zinst: &jit_ir::ZExtInst) {
+        let src_type = self.m.type_(zinst.val(self.m).tyidx(self.m));
         let src_bitsize = src_type.bit_size().unwrap();
-        let dest_type = self.m.type_(i.dest_tyidx());
+        let dest_type = self.m.type_(zinst.dest_tyidx());
         let dest_bitsize = dest_type.bit_size().unwrap();
 
         if dest_bitsize <= REG64_BITSIZE {
-            // If it fits in a register, we can just sign extend up to the entire register width.
-            self.zero_extend_to_reg64(reg, u8::try_from(src_bitsize).unwrap());
+            if src_bitsize == 32 || src_bitsize == 64 {
+                // The 32 and 64 bit registers are implicitly zero extended on x64.
+                self.ra
+                    .assign_gp_pass_through(&mut self.asm, iidx, zinst.val(self.m));
+            } else {
+                let [reg] = self.ra.assign_gp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::InputOutput(zinst.val(self.m))],
+                );
+
+                self.zero_extend_to_reg64(reg, u8::try_from(src_bitsize).unwrap());
+            }
         } else {
             todo!("{} {}", src_bitsize, dest_bitsize);
         }
@@ -2407,9 +2377,10 @@ impl CompiledTrace for X64CompiledTrace {
             .collect();
         let callframes = deoptinfo.inlined_frames.clone();
 
-        // Calculate the address inside the root trace we want side-traces to jump to. Currently
-        // this is directly after the prologue. Later we will change this to jump to after the
-        // preamble and before the peeled loop.
+        // Calculate the address inside the root trace we want side-traces to jump. Since the
+        // side-trace finishes at the control point we need to re-enter via the trace header and
+        // cannot jump back directly into the trace body.
+        // FIXME: Check if RPython has found a solution to this (if there is any).
         let root_addr = unsafe { root_ctr.entry().add(root_ctr.prologue_offset) };
 
         // Pass along [GuardIdx]'s of previous guard failures and add this guard failure's
@@ -2524,7 +2495,7 @@ enum Immediate {
 mod tests {
     use super::{Assemble, X64CompiledTrace};
     use crate::compile::{
-        jitc_yk::jit_ir::{self, Module},
+        jitc_yk::jit_ir::{self, Inst, Module, ParamIdx},
         CompiledTrace,
     };
     use crate::location::{HotLocation, HotLocationKind};
@@ -2729,8 +2700,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = param 0
                 %1: ptr = load %0
+                black_box %1
             ",
             "
                 ...
@@ -2747,8 +2719,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = param 0
                 %1: i8 = load %0
+                black_box %1
             ",
             "
                 ...
@@ -2765,8 +2738,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i32 = load %0
+                black_box %1
             ",
             "
                 ...
@@ -2783,7 +2757,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = param 0
                 *%0 = 0x0
             ",
             "
@@ -2802,13 +2776,14 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = param 0
                 %1: i32 = ptr_add %0, 64
+                black_box %1
             ",
             "
                 ...
                 ; %1: ptr = ptr_add %0, 64
-                add r.64.x, 0x40
+                lea r.64.x, [r.64._+0x40]
                 ...
                 ",
             false,
@@ -2820,13 +2795,16 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: ptr = load_ti 1
+                %0: ptr = param 0
+                %1: ptr = param 1
                 %2: ptr = ptr_add %0, 64
                 %3: i64 = load %2
                 %4: ptr = ptr_add %1, 32
                 %5: i64 = load %4
                 %6: ptr = ptr_add %4, 1
+                black_box %3
+                black_box %5
+                black_box %6
             ",
             "
                 ...
@@ -2834,9 +2812,9 @@ mod tests {
                 ; %3: i64 = load %2
                 mov r.64.x, [rbx+{{_}}]
                 ; %4: ptr = ptr_add %1, 32
-                add r.64.y, 0x20
+                lea r.64.y, [r.64.z+0x20]
                 ; %5: i64 = load %4
-                mov r.64._, [r.64.y]
+                mov r.64._, [r.64.z+0x20]
                 ...
                 ",
             false,
@@ -2848,24 +2826,25 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: ptr = load_ti 1
+                %0: ptr = param 0
+                %1: ptr = param 1
                 %2: ptr = ptr_add %0, 64
                 *%2 = 1i8
                 %4: ptr = ptr_add %1, 32
                 %5: i64 = load %4
                 *%4 = 2i8
+                black_box %5
             ",
             "
                 ...
                 ; *%2 = 1i8
                 mov byte ptr [rbx+{{_}}], 0x01
                 ; %4: ptr = ptr_add %1, 32
-                add r.64.x, 0x20
                 ; %5: i64 = load %4
-                mov r.64.y, [r.64.x]
+                mov r.64.y, [r.64.x+0x20]
                 ; *%4 = 2i8
-                mov byte ptr [r.64.x], 0x02
+                mov byte ptr [r.64.x+0x20], 0x02
+                ...
                 ",
             false,
         );
@@ -2876,9 +2855,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 1
+                black_box %2
             ",
             "
                 ...
@@ -2892,9 +2872,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 2
+                black_box %2
             ",
             "
                 ...
@@ -2908,9 +2889,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 4
+                black_box %2
             ",
             "
                 ...
@@ -2924,9 +2906,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 5
+                black_box %2
             ",
             "
                 ...
@@ -2941,9 +2924,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 16
+                black_box %2
             ",
             "
                 ...
@@ -2958,9 +2942,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: i32 = load_ti 1
+                %0: ptr = param 0
+                %1: i32 = param 1
                 %2: ptr = dyn_ptr_add %0, %1, 77
+                black_box %2
             ",
             "
                 ...
@@ -2978,14 +2963,14 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
-                %1: ptr = load_ti 1
+                %0: ptr = param 0
+                %1: ptr = param 1
                 *%1 = %0
             ",
             "
                 ...
-                ; %0: ptr = load_ti ...
-                ; %1: ptr = load_ti ...
+                ; %0: ptr = param ...
+                ; %1: ptr = param ...
                 ; *%1 = %0
                 mov [r.64.x], r.64.y
                 ...
@@ -2999,7 +2984,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = load_ti 0
+                %0: ptr = param 0
                 *%0 = 1i8
                 *%0 = 2i16
                 *%0 = 3i32
@@ -3007,7 +2992,7 @@ mod tests {
             ",
             "
                 ...
-                ; %0: ptr = load_ti ...
+                ; %0: ptr = param ...
                 ; *%0 = 1i8
                 mov byte ptr [r.64.x], 0x01
                 ; *%0 = 2i16
@@ -3027,9 +3012,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %3: i16 = add %0, %1
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i16 = add %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -3046,9 +3032,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
-                %1: i64 = load_ti 1
-                %3: i64 = add %0, %1
+                %0: i64 = param 0
+                %1: i64 = param 1
+                %2: i64 = add %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -3065,8 +3052,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = param 0
                 %1: i64 = add %0, 1i64
+                black_box %1
             ",
             "
                 ...
@@ -3083,8 +3071,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = param 0
                 %1: i64 = add %0, 18446744073709551615i64
+                black_box %1
             ",
             "
                 ...
@@ -3102,8 +3091,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = param 0
                 %1: i64 = add %0, 2147483647i64
+                black_box %1
             ",
             "
                 ...
@@ -3120,8 +3110,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
+                %0: i64 = param 0
                 %1: i64 = add %0, 2147483648i64
+                black_box %1
             ",
             "
                 ...
@@ -3139,8 +3130,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i32 = add %0, 1i32
+                black_box %1
             ",
             "
                 ...
@@ -3157,8 +3149,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i32 = add %0, 4294967295i32
+                black_box %1
             ",
             "
                 ...
@@ -3175,15 +3168,18 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = and %0, %1
                 %7: i32 = and %2, %3
                 %8: i63 = and %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3204,12 +3200,15 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i16 = ashr %0, 1i16
                 %4: i32 = ashr %1, 2i32
                 %5: i63 = ashr %2, 3i63
+                black_box %3
+                black_box %4
+                black_box %5
             ",
             "
                 ...
@@ -3236,12 +3235,15 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i16 = lshr %0, 1i16
                 %4: i32 = lshr %1, 2i32
                 %5: i63 = lshr %2, 3i63
+                black_box %3
+                black_box %4
+                black_box %5
             ",
             "
                 ...
@@ -3268,13 +3270,17 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i16 = shl %0, 1i16
                 %4: i32 = shl %1, 2i32
                 %5: i63 = shl %2, 3i63
                 %6: i32 = shl %1, %4
+                black_box %3
+                black_box %4
+                black_box %5
+                black_box %6
             ",
             "
                 ...
@@ -3285,11 +3291,10 @@ mod tests {
                 ...
                 shl r.32.a, 0x02
                 ; %5: i63 = shl %2, 3i63
-                ...
                 shl r.64.b, 0x03
                 ; %6: i32 = shl %1, %4
-                ......
                 shl r.32.b, cl
+                ...
                 ",
             false,
         );
@@ -3300,15 +3305,18 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = mul %0, %1
                 %7: i32 = mul %2, %3
                 %8: i63 = mul %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3316,12 +3324,10 @@ mod tests {
                 mov rax, ...
                 mul r.64.a
                 ; %7: i32 = mul %2, %3
-                ...
-                mov rax, ...
+                ......
                 mul r.64.b
                 ; %8: i63 = mul %4, %5
-                ...
-                mov rax, ...
+                ......
                 mul r.64.c
                 ...
                 ",
@@ -3334,15 +3340,18 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = or %0, %1
                 %7: i32 = or %2, %3
                 %8: i63 = or %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3363,15 +3372,18 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = sdiv %0, %1
                 %7: i32 = sdiv %2, %3
                 %8: i63 = sdiv %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3404,15 +3416,18 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = srem %0, %1
                 %7: i32 = srem %2, %3
                 %8: i63 = srem %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3445,16 +3460,20 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = sub %0, %1
                 %7: i32 = sub %2, %3
                 %8: i63 = sub %4, %5
                 %9: i32 = sub 0i32, %7
+                black_box %6
+                black_box %7
+                black_box %8
+                black_box %9
             ",
             "
                 ...
@@ -3471,7 +3490,9 @@ mod tests {
                 sar r.64.f, 0x01
                 sub r.64.e, r.64.f
                 ; %9: i32 = sub 0i32, %7
+                ......
                 neg r.32.c
+                ...
                 ",
             false,
         );
@@ -3482,15 +3503,18 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = xor %0, %1
                 %7: i32 = xor %2, %3
                 %8: i63 = xor %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3511,15 +3535,18 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i32 = load_ti 3
-                %4: i63 = load_ti 4
-                %5: i63 = load_ti 5
+                %0: i16 = param 0
+                %1: i16 = param 1
+                %2: i32 = param 2
+                %3: i32 = param 3
+                %4: i63 = param 4
+                %5: i63 = param 5
                 %6: i16 = udiv %0, %1
                 %7: i32 = udiv %2, %3
                 %8: i63 = udiv %4, %5
+                black_box %6
+                black_box %7
+                black_box %8
             ",
             "
                 ...
@@ -3561,8 +3588,8 @@ mod tests {
                 "
                 ...
                 ; call @puts()
-                mov r.64.x, 0x{sym_addr:X}
-                call r.64.x
+                mov rax, 0x{sym_addr:X}
+                call rax
                 ...
             "
             ),
@@ -3578,9 +3605,9 @@ mod tests {
               func_decl puts (i32, i32, i32)
 
               entry:
-                %0: i32 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i32 = load_ti 2
+                %0: i32 = param 0
+                %1: i32 = param 1
+                %2: i32 = param 2
                 call @puts(%0, %1, %2)
             ",
             &format!(
@@ -3607,9 +3634,9 @@ mod tests {
               func_decl puts (i8, i16, ptr)
 
               entry:
-                %0: i8 = load_ti 0
-                %1: i16 = load_ti 1
-                %2: ptr = load_ti 2
+                %0: i8 = param 0
+                %1: i16 = param 1
+                %2: ptr = param 2
                 call @puts(%0, %1, %2)
             ",
             &format!(
@@ -3666,14 +3693,17 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
-                tloop_start [%0, %1, %2]
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
+                header_start [%0, %1, %2]
                 %4: i1 = eq %0, %0
                 %5: i1 = eq %1, %1
                 %6: i1 = eq %2, %2
-                tloop_jump [%0, %1, %2]
+                black_box %4
+                black_box %5
+                black_box %6
+                header_end [%0, %1, %2]
             ",
             "
                 ...
@@ -3710,12 +3740,15 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i32 = sext %0
                 %4: i64 = sext %1
                 %5: i64 = sext %2
+                black_box %3
+                black_box %4
+                black_box %5
                 ",
             "
                 ...
@@ -3726,6 +3759,7 @@ mod tests {
                 ; %5: i64 = sext %2
                 shl r.64.c, 0x01
                 sar r.64.c, 0x01
+                ...
                 ",
             false,
         );
@@ -3736,12 +3770,15 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i63 = load_ti 2
+                %0: i16 = param 0
+                %1: i32 = param 1
+                %2: i63 = param 2
                 %3: i32 = zext %0
                 %4: i64 = zext %1
                 %5: i64 = zext %2
+                black_box %3
+                black_box %4
+                black_box %5
                 ",
             "
                 ...
@@ -3752,6 +3789,7 @@ mod tests {
                 ; %5: i64 = zext %2
                 shl r.64.c, 0x01
                 shr r.64.c, 0x01
+                ...
                 ",
             false,
         );
@@ -3762,17 +3800,20 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = load_ti 0
-                %1: i32 = load_ti 1
+                %0: i64 = param 0
+                %1: i32 = param 1
                 %2: double = bitcast %0
                 %3: float = bitcast %1
+                black_box %2
+                black_box %3
                 ",
             "
             ...
             ; %2: double = bitcast %0
             cvtsi2sd fp.128.x, r.64.x
             ; %3: float = bitcast %1
-            cvtsi2ss fp.128.x, r.32.x
+            cvtsi2ss fp.128.y, r.32.y
+            ...
             ",
             false,
         );
@@ -3783,12 +3824,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = load_ti 0
+                %0: i1 = param 0
                 guard true, %0, []
             ",
             "
                 ...
-                ; guard true, %0, []
+                ; guard true, %0, [] ; ...
                 cmp r.8.b, 0x01
                 jnz 0x...
                 ...
@@ -3812,12 +3853,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = load_ti 0
+                %0: i1 = param 0
                 guard false, %0, []
             ",
             "
                 ...
-                ; guard false, %0, []
+                ; guard false, %0, [] ; ...
                 cmp r.8.b, 0x00
                 jnz 0x...
                 ...
@@ -3841,7 +3882,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = load_ti 0
+                %0: i1 = param 0
                 %1: i8 = 10i8
                 %2: i8 = 32i8
                 %3: i8 = add %1, %2
@@ -3849,7 +3890,7 @@ mod tests {
             ",
             "
                 ...
-                ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8]
+                ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8] ; trace_gidx 0 safepoint_id 0
                 cmp r.8.b, 0x00
                 jnz 0x...
                 ...
@@ -3873,8 +3914,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
-                %2: i1 = eq %0, 3i8
+                %0: i8 = param 0
+                %1: i1 = eq %0, 3i8
+                black_box %1
             ",
             "
                 ...
@@ -3894,17 +3936,48 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
-                %2: i1 = eq %0, 3i8
-                guard true, %2, []
+                %0: i8 = param 0
+                %1: i1 = eq %0, 3i8
+                guard true, %1, []
             ",
             "
                 ...
                 ; %1: i1 = eq %0, 3i8
                 movzx r.64.x, r.8._
                 cmp r.64.x, 0x03
-                ; guard true, %1, []
+                ; guard true, %1, [] ; ...
                 jnz 0x...
+                ...
+            ",
+            false,
+        );
+    }
+
+    /// Check we don't optimise icmp+guard if the result of the icmp is needed later.
+    #[test]
+    fn cg_icmp_guard_reused() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = param 0
+                %1: i1 = eq %0, 3i8
+                guard true, %1, []
+                %3: i8 = sext %1
+                black_box %3
+            ",
+            "
+                ...
+                ; %1: i1 = eq %0, 3i8
+                movzx r.64.x, r.8._
+                cmp r.64.x, 0x03
+                setz bl
+                ; guard true, %1, [] ; ...
+                cmp bl, 0x01
+                jnz 0x...
+                ; %3: i8 = sext %1
+                shl rbx, 0x3f
+                sar rbx, 0x3f
+                ; black_box %3
                 ...
             ",
             false,
@@ -3916,7 +3989,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                 tloop_jump []
+                 body_end []
                 ",
             "
                 ...
@@ -3933,13 +4006,13 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                tloop_start []
-                tloop_jump []
+                body_start []
+                body_end []
             ",
             "
                 ...
-                ; tloop_start []:
-                ; tloop_jump []:
+                ; body_start []
+                ; body_end []
                 jmp {{target}}
             ",
             false,
@@ -3951,20 +4024,21 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
-                tloop_start [%0]
+                %0: i8 = param 0
+                body_start [%0]
                 %2: i8 = add %0, %0
-                tloop_jump [%0]
+                black_box %2
+                body_end [%0]
             ",
             "
                 ...
-                ; %0: i8 = load_ti ...
+                ; %0: i8 = param ...
                 ...
-                ; tloop_start [%0]:
+                ; body_start [%0]
                 ; %2: i8 = add %0, %0
                 {{_}} {{off}}: ...
                 ...
-                ; tloop_jump [%0]:
+                ; body_end [%0]
                 ...
                 {{_}} {{_}}: jmp 0x00000000{{off}}
             ",
@@ -3977,9 +4051,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
-                %1: i8 = load_ti 1
+                %0: i8 = param 0
+                %1: i8 = param 1
                 %2: i8 = srem %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4000,9 +4075,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i56 = load_ti 0
-                %1: i56 = load_ti 1
+                %0: i56 = param 0
+                %1: i56 = param 1
                 %2: i56 = srem %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4025,14 +4101,15 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i8 = trunc %0
                 %2: i8 = trunc %0
                 %3: i8 = add %2, %1
+                black_box %3
             ",
             "
                 ...
-                ; %0: i32 = load_ti ...
+                ; %0: i32 = param ...
                 ...
                 ; %1: i8 = trunc %0
                 mov r.64.x, r.64.y
@@ -4047,8 +4124,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: i32 = %0 ? 1i32 : 2i32
+                black_box %1
             ",
             "
                 ...
@@ -4068,9 +4146,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
+                %0: i8 = param 0
                 %1: i8 = 1i8
                 %2: i8 = add %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4087,8 +4166,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: float = si_to_fp %0
+                black_box %1
             ",
             "
                 ...
@@ -4105,8 +4185,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = load_ti 0
+                %0: i32 = param 0
                 %1: double = si_to_fp %0
+                black_box %1
             ",
             "
                 ...
@@ -4123,12 +4204,13 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = param 0
                 %1: double = fp_ext %0
+                black_box %1
             ",
             "
                 ...
-                ; %0: float = load_ti ...
+                ; %0: float = param ...
                 ; %1: double = fp_ext %0
                 cvtss2sd fp.128.x, fp.128.x
                 ...
@@ -4142,8 +4224,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
+                %0: float = param 0
                 %1: i32 = fp_to_si %0
+                black_box %1
             ",
             "
                 ...
@@ -4160,8 +4243,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
+                %0: double = param 0
                 %1: i32 = fp_to_si %0
+                black_box %1
             ",
             "
                 ...
@@ -4178,9 +4262,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: float = fdiv %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4197,9 +4282,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: double = fdiv %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4216,9 +4302,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: float = fadd %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4235,9 +4322,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: double = fadd %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4254,9 +4342,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: float = fsub %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4273,9 +4362,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: double = fsub %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4292,9 +4382,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: float = fmul %0, %1
+                %3: float = fmul %1, %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
@@ -4311,9 +4404,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: double = fmul %0, %1
+                black_box %2
             ",
             "
                 ...
@@ -4330,10 +4424,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: float = load_ti 1
+                %0: float = param 0
+                %1: float = param 1
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
@@ -4344,9 +4440,9 @@ mod tests {
                 and r.8.x, r.8.y
                 ; %3: i1 = f_ugt %0, %1
                 ucomiss fp.128.x, fp.128.y
-                setnbe r.8.x
-                setnp r.8.y
-                and r.8.x, r.8.y
+                setnbe r.8._
+                setnp r.8._
+                and r.8._, r.8._
                 ...
                 ",
             false,
@@ -4358,10 +4454,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = load_ti 0
-                %1: double = load_ti 1
+                %0: double = param 0
+                %1: double = param 1
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
@@ -4372,9 +4470,9 @@ mod tests {
                 and r.8.x, r.8.y
                 ; %3: i1 = f_ugt %0, %1
                 ucomisd fp.128.x, fp.128.y
-                setnbe r.8.x
-                setnp r.8.y
-                and r.8.x, r.8.y
+                setnbe r.8._
+                setnp r.8._
+                and r.8._, r.8._
                 ...
                 ",
             false,
@@ -4387,6 +4485,7 @@ mod tests {
             "
               entry:
                 %0: float = fadd 1.2float, 3.4float
+                black_box %0
             ",
             "
                 ...
@@ -4411,6 +4510,7 @@ mod tests {
             "
               entry:
                 %0: double = fadd 1.2double, 3.4double
+                black_box %0
             ",
             "
                 ...
@@ -4430,17 +4530,17 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = load_ti 0
-                tloop_start [%0]
-                %1: i8 = 42i8
-                tloop_jump [%1]
+                %0: i8 = param 0
+                body_start [%0]
+                %2: i8 = 42i8
+                body_end [%2]
             ",
             "
                 ...
-                ; %0: i8 = load_ti ...
+                ; %0: i8 = param ...
                 ...
-                ; tloop_start [%0]:
-                ; tloop_jump [42i8]:
+                ; body_start [%0]
+                ; body_end [42i8]
                 mov r.64.x, 0x2a
                 jmp ...
             ",
@@ -4453,10 +4553,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = load_ti 0
-                %1: double = load_ti 1
+                %0: float = param 0
+                %1: double = param 1
                 %2: float = fneg %0
                 %3: double = fneg %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
@@ -4468,21 +4570,28 @@ mod tests {
                 mov r.64.x, 0x8000000000000000
                 movq fp.128.y, r.64.x
                 xorpd fp.128.a, fp.128.y
+                ...
             ",
             false,
         );
     }
 
     #[test]
-    fn cg_aliasing_loadtis() {
+    fn cg_aliasing_params() {
         let mut m = jit_ir::Module::new(0, 0).unwrap();
 
-        // Create two trace inputs whose locations alias.
-        let loc = yksmp::Location::Register(13, 1, 0, [].into());
-        m.push_tiloc(loc);
-        let ti_inst = jit_ir::LoadTraceInputInst::new(0, m.int8_tyidx());
-        let op1 = m.push_and_make_operand(ti_inst.clone().into()).unwrap();
-        let op2 = m.push_and_make_operand(ti_inst.into()).unwrap();
+        // Create two trace paramaters whose locations alias.
+        let loc = yksmp::Location::Register(13, 1, [].into());
+        m.push_param(loc.clone());
+        let pinst1: Inst =
+            jit_ir::ParamInst::new(ParamIdx::try_from(0).unwrap(), m.int8_tyidx()).into();
+        m.push(pinst1.clone()).unwrap();
+        m.push_param(loc);
+        let pinst2: Inst =
+            jit_ir::ParamInst::new(ParamIdx::try_from(1).unwrap(), m.int8_tyidx()).into();
+        m.push(pinst2.clone()).unwrap();
+        let op1 = m.push_and_make_operand(pinst1).unwrap();
+        let op2 = m.push_and_make_operand(pinst2).unwrap();
 
         let add_inst = jit_ir::BinOpInst::new(op1, jit_ir::BinOp::Add, op2);
         m.push(add_inst.into()).unwrap();

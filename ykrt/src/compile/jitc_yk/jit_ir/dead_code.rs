@@ -1,6 +1,6 @@
 //! Dead code elimination.
 
-use super::{Inst, Module};
+use super::{Inst, InstIdx, Module};
 use vob::Vob;
 
 impl Module {
@@ -10,19 +10,23 @@ impl Module {
         // We perform a simple reverse reachability analysis, tracking what's alive with a single
         // bit.
         let mut used = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
-        for iidx in self.iter_all_inst_idxs().rev() {
-            let inst = self.inst_raw(iidx);
+        let mut tombstone = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
+        for (iidx, inst) in self.iter_skipping_insts().rev() {
             if used.get(usize::from(iidx)).unwrap()
                 || inst.has_store_effect(self)
                 || inst.is_barrier(self)
             {
                 used.set(usize::from(iidx), true);
-                inst.map_packed_operand_locals(self, &mut |x| {
+                inst.map_operand_locals(self, &mut |x| {
                     used.set(usize::from(x), true);
                 });
             } else {
-                self.replace(iidx, Inst::Tombstone);
+                tombstone.set(usize::from(iidx), true);
             }
+        }
+
+        for iidx in tombstone.iter_set_bits(..) {
+            self.replace(InstIdx::unchecked_from(iidx), Inst::Tombstone);
         }
     }
 }
@@ -36,8 +40,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = param 0
+            %1: i8 = param 1
             black_box %1
         ",
             |mut m| {
@@ -47,7 +51,7 @@ mod test {
             "
           ...
           entry:
-            %1: i8 = load_ti ...
+            %1: i8 = param ...
             black_box %1
         ",
         );
@@ -55,7 +59,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = add %0, %0
             %2: i8 = add %0, %0
             black_box %2
@@ -67,7 +71,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = param ...
             %2: i8 = add %0, %0
             black_box %2
         ",
@@ -76,8 +80,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = param 0
+            %1: i8 = param 1
             %2: i8 = add %1, %0
             %3: i8 = add %1, %0
             black_box %3
@@ -89,8 +93,8 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
-            %1: i8 = load_ti ...
+            %0: i8 = param ...
+            %1: i8 = param ...
             %3: i8 = add %1, %0
             black_box %3
         ",
@@ -99,8 +103,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = param 0
+            %1: i8 = param 1
             %2: i1 = ult %0, %0
             %3: i1 = ult %1, %1
             black_box %3
@@ -112,7 +116,7 @@ mod test {
             "
           ...
           entry:
-            %1: i8 = load_ti ...
+            %1: i8 = param ...
             %3: i1 = ult %1, %1
             black_box %3
         ",
@@ -121,7 +125,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i1 = ult %0, 1i8
             guard true, %1, []
             black_box %1
@@ -133,9 +137,9 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = param ...
             %1: i1 = ult %0, 1i8
-            guard true, %1, []
+            guard true, %1, [] ; ...
             black_box %1
         ",
         );
@@ -144,8 +148,8 @@ mod test {
             "
           func_decl f(i8)
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = param 0
+            %1: i8 = param 1
             call @f(%0)
         ",
             |mut m| {
@@ -155,7 +159,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = param ...
             call @f(%0)
         ",
         );
@@ -164,9 +168,9 @@ mod test {
             "
           func_type t1(i8)
           entry:
-            %0: ptr = load_ti 0
-            %1: i8 = load_ti 1
-            %2: i8 = load_ti 2
+            %0: ptr = param 0
+            %1: i8 = param 1
+            %2: i8 = param 2
             icall<t1> %0(%1)
         ",
             |mut m| {
@@ -176,8 +180,8 @@ mod test {
             "
           ...
           entry:
-            %0: ptr = load_ti ...
-            %1: i8 = load_ti ...
+            %0: ptr = param ...
+            %1: i8 = param ...
             icall %0(%1)
         ",
         );
@@ -186,7 +190,7 @@ mod test {
             "
           func_type t1(i8)
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = %0
             black_box %1
         ",
@@ -197,7 +201,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti ...
+            %0: i8 = param ...
             black_box %0
         ",
         );

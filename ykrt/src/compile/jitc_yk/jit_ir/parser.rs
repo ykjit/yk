@@ -11,9 +11,9 @@ use super::super::{
     jit_ir::{
         BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
         FNegInst, FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
-        IndirectCallInst, Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand,
-        PackedOperand, PtrAddInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty,
-        TyIdx, ZExtInst,
+        IndirectCallInst, Inst, InstIdx, LoadInst, Module, Operand, PackedOperand, ParamIdx,
+        ParamInst, PtrAddInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
+        ZExtInst,
     },
 };
 use fm::FMBuilder;
@@ -204,6 +204,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 aot_ir::BBlockId::new(0.into(), 0.into()),
                                 live_vars,
                                 Vec::new(),
+                                0,
                             ))
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(cond)?, is_true, gidx);
@@ -305,7 +306,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         );
                         self.push_assign(inst.into(), assign)?;
                     }
-                    ASTInst::LoadTraceInput {
+                    ASTInst::Param {
                         assign,
                         type_,
                         tiidx,
@@ -313,9 +314,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let off = self
                             .lexer
                             .span_str(tiidx)
-                            .parse::<u32>()
+                            .parse::<usize>()
                             .map_err(|e| self.error_at_span(tiidx, &e.to_string()))?;
-                        assert_eq!(self.m.tilocs.len(), usize::try_from(off).unwrap());
+                        assert_eq!(self.m.params.len(), usize::try_from(off).unwrap());
                         let type_ = self.process_type(type_)?;
                         let size = self.m.type_(type_).byte_size().ok_or_else(|| {
                             self.error_at_span(
@@ -329,10 +330,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 if gp_reg_off == 15 {
                                     panic!("out of gp registers");
                                 }
-                                self.m.push_tiloc(yksmp::Location::Register(
+                                self.m.push_param(yksmp::Location::Register(
                                     gp_reg_off,
                                     u16::try_from(size).unwrap(),
-                                    0,
                                     vec![],
                                 ));
                                 gp_reg_off += 1;
@@ -345,17 +345,16 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 if fp_reg_off == 32 {
                                     panic!("out of fp regisers");
                                 }
-                                self.m.push_tiloc(yksmp::Location::Register(
+                                self.m.push_param(yksmp::Location::Register(
                                     fp_reg_off,
                                     u16::try_from(size).unwrap(),
-                                    0,
                                     vec![],
                                 ));
                                 fp_reg_off += 1;
                             }
                             Ty::Unimplemented(_) => todo!(),
                         }
-                        let inst = LoadTraceInputInst::new(off, type_);
+                        let inst = ParamInst::new(ParamIdx::try_from(off).unwrap(), type_);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::PtrAdd {
@@ -439,19 +438,33 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let inst = BlackBoxInst::new(self.process_operand(op)?);
                         self.m.push(inst.into()).unwrap();
                     }
-                    ASTInst::TraceLoopStart(ops) => {
+                    ASTInst::TraceBodyStart(ops) => {
                         for op in ops {
                             let op = self.process_operand(op)?;
-                            self.m.loop_start_vars.push(op);
+                            self.m.trace_body_start.push(PackedOperand::new(&op));
                         }
-                        self.m.push(Inst::TraceLoopStart).unwrap();
+                        self.m.push(Inst::TraceBodyStart).unwrap();
                     }
-                    ASTInst::TraceLoopJump(ops) => {
+                    ASTInst::TraceBodyEnd(ops) => {
                         for op in ops {
                             let op = self.process_operand(op)?;
-                            self.m.loop_jump_vars.push(op);
+                            self.m.trace_body_end.push(PackedOperand::new(&op));
                         }
-                        self.m.push(Inst::TraceLoopJump).unwrap();
+                        self.m.push(Inst::TraceBodyEnd).unwrap();
+                    }
+                    ASTInst::TraceHeaderStart(ops) => {
+                        for op in ops {
+                            let op = self.process_operand(op)?;
+                            self.m.trace_header_start.push(PackedOperand::new(&op));
+                        }
+                        self.m.push(Inst::TraceHeaderStart).unwrap();
+                    }
+                    ASTInst::TraceHeaderEnd(ops) => {
+                        for op in ops {
+                            let op = self.process_operand(op)?;
+                            self.m.trace_header_end.push(PackedOperand::new(&op));
+                        }
+                        self.m.push(Inst::TraceHeaderEnd).unwrap();
                     }
                     ASTInst::Trunc {
                         assign,
@@ -667,15 +680,22 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
     /// function to capture cases where users try referencing the variable itself (e.g. `%0 = %0`
     /// will be caught as an error by this function).
     fn push_assign(&mut self, inst: Inst, span: Span) -> Result<(), Box<dyn Error>> {
-        let idx = self.lexer.span_str(span)[1..]
+        let iidx = self.lexer.span_str(span)[1..]
             .parse::<usize>()
             .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-        let idx = InstIdx::try_from(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
-        self.m.push(inst).unwrap();
-        match self.inst_idx_map.insert(idx, self.m.last_inst_idx()) {
-            None => Ok(()),
-            Some(_) => Err(format!("Local operand '%{idx}' redefined").into()),
+        let iidx = InstIdx::try_from(iidx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
+
+        if usize::from(iidx) != self.m.insts_len() {
+            return Err(self.error_at_span(
+                span,
+                &format!("Assignment should be '%{}'", self.m.insts_len()),
+            ));
         }
+
+        self.m.push(inst).unwrap();
+        debug_assert!(self.inst_idx_map.get(&iidx).is_none());
+        self.inst_idx_map.insert(iidx, self.m.last_inst_idx());
+        Ok(())
     }
 
     /// Return an error message pinpointing `span` as the culprit.
@@ -766,7 +786,7 @@ enum ASTInst {
         val: ASTOperand,
         volatile: bool,
     },
-    LoadTraceInput {
+    Param {
         assign: Span,
         type_: ASTType,
         tiidx: Span,
@@ -829,8 +849,10 @@ enum ASTInst {
         volatile: bool,
     },
     BlackBox(ASTOperand),
-    TraceLoopStart(Vec<ASTOperand>),
-    TraceLoopJump(Vec<ASTOperand>),
+    TraceBodyStart(Vec<ASTOperand>),
+    TraceBodyEnd(Vec<ASTOperand>),
+    TraceHeaderStart(Vec<ASTOperand>),
+    TraceHeaderEnd(Vec<ASTOperand>),
     Trunc {
         assign: Span,
         type_: ASTType,
@@ -872,18 +894,18 @@ mod tests {
     use crate::compile::jitc_yk::jit_ir::{FuncTy, Ty};
 
     #[test]
-    #[ignore] // Requires changing the parser to parse the new load_ti format.
+    #[ignore] // Requires changing the parser to parse the new param format.
     fn roundtrip() {
         let mut m = Module::new_testing();
         let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
 
-        m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
-        m.push_tiloc(yksmp::Location::Register(3, 1, 0, vec![]));
+        m.push_param(yksmp::Location::Register(3, 1, vec![]));
+        m.push_param(yksmp::Location::Register(3, 1, vec![]));
         let op1 = m
-            .push_and_make_operand(LoadTraceInputInst::new(0, i16_tyidx).into())
+            .push_and_make_operand(ParamInst::new(ParamIdx::try_from(0).unwrap(), i16_tyidx).into())
             .unwrap();
         let op2 = m
-            .push_and_make_operand(LoadTraceInputInst::new(1, i16_tyidx).into())
+            .push_and_make_operand(ParamInst::new(ParamIdx::try_from(1).unwrap(), i16_tyidx).into())
             .unwrap();
         let op3 = m
             .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op2.clone()).into())
@@ -903,16 +925,16 @@ mod tests {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i16 = load_ti 0
-            %1: i16 = load_ti 1
+            %0: i16 = param 0
+            %1: i16 = param 1
             %2: i16 = add %0, %1
         ",
             |m| m,
             "
           ...
           entry:
-            %{{0}}: i16 = load_ti ...
-            %{{1}}: i16 = load_ti ...
+            %{{0}}: i16 = param ...
+            %{{1}}: i16 = param ...
             %{{_}}: i16 = add %{{0}}, %{{1}}
         ",
         );
@@ -928,71 +950,71 @@ mod tests {
             func_decl f3(i8, i32, ...) -> i64
             func_decl f4(...)
             entry:
-              %0: i32 = load_ti 0
-              %5: i8 = load_ti 1
-              %7: i32 = load_ti 2
-              %9: ptr = load_ti 3
-              %1999: float = load_ti 4
-              %30: i8 = load_ti 5
-              %31: i16 = load_ti 6
-              %32: i32 = load_ti 7
-              %33: i64 = load_ti 8
-              %48: i32 = load_ti 9
-              %1: i32 = trunc %33
-              %2: i32 = add %0, %1
-              %4: i1 = eq %1, %2
-              tloop_start [%0, %5]
-              guard true, %4, [%0, %1, %2, 1i8]
+              %0: i32 = param 0
+              %1: i8 = param 1
+              %2: i32 = param 2
+              %3: ptr = param 3
+              %4: float = param 4
+              %5: i8 = param 5
+              %6: i16 = param 6
+              %7: i32 = param 7
+              %8: i64 = param 8
+              %9: i32 = param 9
+              %10: i32 = trunc %8
+              %11: i32 = add %7, %9
+              %12: i1 = eq %0, %2
+              body_start [%0, %6]
+              guard true, %12, [%0, %1, %2, 1i8]
               call @f1()
-              %6: i32 = call @f2(%5)
-              %8: i64 = call @f3(%5, %7, %0)
+              %16: i32 = call @f2(%5)
+              %17: i64 = call @f3(%5, %7, %0)
               call @f4(%0, %1)
-              *%9 = %8
-              %10: i32 = load %9
-              %11: i64 = sext %10
-              %111: i64 = zext %10
-              %12: i32 = add %0, %1
-              %13: i32 = sub %0, %1
-              %14: i32 = mul %0, %1
-              %15: i32 = or %0, %1
-              %16: i32 = and %0, %1
-              %17: i32 = xor %0, %1
-              %18: i32 = shl %0, %1
-              %19: i32 = ashr %0, %1
-              %20: float = fadd %1999, %1999
-              %21: float = fdiv %1999, %1999
-              %22: float = fmul %1999, %1999
-              %23: float = frem %1999, %1999
-              %24: float = fsub %1999, %1999
-              %25: i32 = lshr %0, %1
-              %26: i32 = sdiv %0, %1
-              %27: i32 = srem %0, %1
-              %28: i32 = udiv %0, %1
-              %29: i32 = urem %0, %1
-              %34: i8 = add %30, 255i8
-              %35: i16 = add %31, 32768i16
-              %36: i32 = add %32, 2147483648i32
-              %37: i64 = add %33, 9223372036854775808i64
-              *%9 = 0x0
-              *%9 = 0xFFFFFFFF
-              %38: i1 = ne %1, %2
-              %40: i1 = ugt %1, %2
-              %41: i1 = uge %1, %2
-              %42: i1 = ult %1, %2
-              %43: i1 = ule %1, %2
-              %44: i1 = sgt %1, %2
-              %45: i1 = sge %1, %2
-              %46: i1 = slt %1, %2
-              %47: i1 = sle %1, %2
-              %49: float = si_to_fp %48
-              %50: double = fp_ext %49
-              %500: i32 = fp_to_si %49
-              %51: double = fadd 1double, 2.345double
-              %52: float = fadd 1float, 2.345float
-              %53: i64 = icall<ft1> %9(%5, %7, %0)
-              tloop_jump [%12, %6]
-              %54: float = bitcast %7
-              %55: float = fneg %54
+              *%3 = %8
+              %20: i32 = load %9
+              %21: i64 = sext %10
+              %22: i64 = zext %10
+              %23: i32 = add %7, %9
+              %24: i32 = sub %7, %9
+              %25: i32 = mul %7, %9
+              %26: i32 = or %7, %9
+              %27: i32 = and %7, %9
+              %28: i32 = xor %7, %9
+              %29: i32 = shl %7, %9
+              %30: i32 = ashr %7, %9
+              %31: float = fadd %4, %4
+              %32: float = fdiv %4, %4
+              %33: float = fmul %4, %4
+              %34: float = frem %4, %4
+              %35: float = fsub %4, %4
+              %36: i32 = lshr %0, 2i32
+              %37: i32 = sdiv %0, 2i32
+              %38: i32 = srem %0, 2i32
+              %39: i32 = udiv %0, 2i32
+              %40: i32 = urem %0, 2i32
+              %41: i8 = add %1, 255i8
+              %42: i16 = add %6, 32768i16
+              %43: i32 = add %10, 2147483648i32
+              %44: i64 = add %21, 9223372036854775808i64
+              *%3 = 0x0
+              *%3 = 0xFFFFFFFF
+              %47: i1 = ne %0, %2
+              %48: i1 = ugt %0, %2
+              %49: i1 = uge %0, %2
+              %50: i1 = ult %0, %2
+              %51: i1 = ule %0, %2
+              %52: i1 = sgt %0, %2
+              %53: i1 = sge %0, %2
+              %54: i1 = slt %0, %2
+              %55: i1 = sle %0, %2
+              %56: float = si_to_fp %43
+              %57: double = fp_ext %56
+              %58: i32 = fp_to_si %56
+              %59: double = fadd 1double, 2.345double
+              %60: float = fadd 1float, 2.345float
+              %61: i64 = icall<ft1> %9(%5, %7, %0)
+              %62: float = bitcast %7
+              %63: float = fneg %54
+              body_end [%43, %58]
         ",
         );
     }
@@ -1095,21 +1117,14 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Assignment should be '%1'")]
     fn discontinuous_operand_ids() {
-        Module::assert_ir_transform_eq(
+        Module::from_str(
             "
           entry:
-            %7: i16 = load_ti 0
-            %3: i16 = load_ti 1
+            %0: i16 = param 0
+            %3: i16 = param 1
             %19: i16 = add %7, %3
-        ",
-            |m| m,
-            "
-          ...
-          entry:
-            %0: i16 = load_ti ...
-            %1: i16 = load_ti ...
-            %2: i16 = add %0, %1
         ",
         );
     }
@@ -1120,20 +1135,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %19: i16 = add %7, %3
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "Local operand '%3' redefined")]
-    fn repeated_local_operand_definition() {
-        Module::from_str(
-            "
-          entry:
-            %3: i16 = load_ti 0
-            %4: i16 = load_ti 1
-            %3: i16 = load_ti 2
+            %0: i16 = add %7, %3
         ",
         );
     }
@@ -1146,7 +1148,7 @@ mod tests {
           func_type t1()
           func_type t1()
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
         ",
         );
     }
@@ -1158,7 +1160,7 @@ mod tests {
             "
           func_type t1()
           entry:
-            %0: ptr = load_ti 0
+            %0: ptr = param 0
             icall<t2> %0()
         ",
         );
@@ -1181,7 +1183,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = add %0, -128i8
             %2: i8 = add %0, -129i8
             ",
@@ -1194,7 +1196,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = param 0
             %1: i8 = add %0, 255i8
             %2: i8 = add %0, 256i8
             ",
@@ -1218,7 +1220,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i1 = load_ti 0
+            %0: i1 = param 0
             guard true, %0, [%1]
             ",
         );

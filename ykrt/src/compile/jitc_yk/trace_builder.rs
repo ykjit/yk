@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const, Operand, PackedOperand},
+    jit_ir::{self, Const, Operand, PackedOperand, ParamIdx},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -23,8 +23,8 @@ pub(crate) struct TraceBuilder {
     local_map: HashMap<aot_ir::InstID, jit_ir::Operand>,
     /// BBlock containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BBlockId>,
-    /// Index of the first traceinput instruction.
-    first_ti_idx: usize,
+    /// Index of the first [ParameterInst].
+    first_paraminst_idx: usize,
     /// Inlined calls.
     frames: Vec<InlinedFrame>,
     /// The block at which to stop outlining.
@@ -58,7 +58,7 @@ impl TraceBuilder {
             jit_mod: jit_ir::Module::new(ctr_id, aot_mod.global_decls_len())?,
             local_map: HashMap::new(),
             cp_block: None,
-            first_ti_idx: 0,
+            first_paraminst_idx: 0,
             // We have to set the funcidx to None here as we don't know what it is yet. We'll
             // update it as soon as we do.
             frames: vec![InlinedFrame {
@@ -117,24 +117,23 @@ impl TraceBuilder {
         for idx in 0..safepoint.lives.len() {
             let aot_op = &safepoint.lives[idx];
             let input_tyidx = self.handle_type(aot_op.type_(self.aot_mod))?;
-            let load_ti_inst =
-                jit_ir::LoadTraceInputInst::new(u32::try_from(idx).unwrap(), input_tyidx).into();
-            self.jit_mod.push(load_ti_inst)?;
 
             // Get the location for this input variable.
             let var = &rec.live_vars[idx];
             if var.len() > 1 {
                 todo!("Deal with multi register locations");
             }
-            self.jit_mod.push_tiloc(var.get(0).unwrap().clone());
+            let param_inst = jit_ir::ParamInst::new(ParamIdx::try_from(idx)?, input_tyidx).into();
+            self.jit_mod.push(param_inst)?;
+            self.jit_mod.push_param(var.get(0).unwrap().clone());
             self.local_map.insert(
                 aot_op.to_inst_id(),
                 jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
             );
             self.jit_mod
-                .push_loop_start_var(jit_ir::Operand::Var(self.jit_mod.last_inst_idx()));
+                .push_body_start_var(jit_ir::Operand::Var(self.jit_mod.last_inst_idx()));
         }
-        self.jit_mod.push(jit_ir::Inst::TraceLoopStart)?;
+        self.jit_mod.push(jit_ir::Inst::TraceHeaderStart)?;
         Ok(())
     }
 
@@ -204,7 +203,7 @@ impl TraceBuilder {
                     dyn_elem_sizes,
                     ..
                 } => {
-                    if self.cp_block.as_ref() == Some(bid) && iidx == self.first_ti_idx {
+                    if self.cp_block.as_ref() == Some(bid) && iidx == self.first_paraminst_idx {
                         // We've reached the trace inputs part of the control point block. There's
                         // no point in copying these instructions over and we can just skip to the
                         // next block.
@@ -270,7 +269,7 @@ impl TraceBuilder {
                     let jitop = &self.frames.last().unwrap().args[*arg_idx];
                     let aot_iid =
                         aot_ir::InstID::new(bid.funcidx(), bid.bbidx(), aot_ir::InstIdx::new(iidx));
-                    self.local_map.insert(aot_iid, jitop.clone());
+                    self.local_map.insert(aot_iid, jitop.unpack(&self.jit_mod));
                     Ok(())
                 }
                 aot_ir::Inst::FCmp { lhs, pred, rhs, .. } => {
@@ -549,12 +548,11 @@ impl TraceBuilder {
                                     }
                                 }
                             }
-                            jit_ir::Operand::Const(_) => {
-                                // Since we are forcing constants into `Inst::Const`s during
-                                // inlining, this case should never happen. If you see this panic,
-                                // then look for a safepoint live variable that maps to a constant
-                                // and make the builder insert an `Inst::Const` for it instead.
-                                panic!("Constant encountered while building guardinfo!")
+                            jit_ir::Operand::Const(cidx) => {
+                                live_vars.push((
+                                    iid.clone(),
+                                    PackedOperand::new(&jit_ir::Operand::Const(cidx)),
+                                ));
                             }
                         }
                     }
@@ -563,7 +561,7 @@ impl TraceBuilder {
             }
         }
 
-        let gi = jit_ir::GuardInfo::new(bid.clone(), live_vars, callframes);
+        let gi = jit_ir::GuardInfo::new(bid.clone(), live_vars, callframes, safepoint.id);
         let gi_idx = self.jit_mod.push_guardinfo(gi).unwrap();
 
         Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))
@@ -590,8 +588,10 @@ impl TraceBuilder {
         _aot_inst_idx: usize,
         val: &Option<aot_ir::Operand>,
     ) -> Result<(), CompilationError> {
-        // FIXME: Map return value to AOT call instruction.
+        // If this `unwrap` fails, it means that early return detection in `mt.rs` is not working
+        // as expected.
         let frame = self.frames.pop().unwrap();
+        // FIXME: Map return value to AOT call instruction.
         if let Some(val) = val {
             let op = self.handle_operand(val)?;
             self.local_map.insert(frame.callinst.unwrap(), op);
@@ -761,7 +761,7 @@ impl TraceBuilder {
                 funcidx: Some(*callee),
                 callinst: Some(aot_iid),
                 safepoint: None,
-                args: jit_args,
+                args: jit_args.iter().map(PackedOperand::new).collect::<Vec<_>>(),
             });
             Ok(())
         } else {
@@ -1181,10 +1181,9 @@ impl TraceBuilder {
                 let aotinst = self.aot_mod.inst(aotid);
                 let aotty = aotinst.def_type(self.aot_mod).unwrap();
                 let tyidx = self.handle_type(aotty)?;
-                let load_ti_inst =
-                    jit_ir::LoadTraceInputInst::new(u32::try_from(idx).unwrap(), tyidx).into();
-                self.jit_mod.push(load_ti_inst)?;
-                self.jit_mod.push_tiloc(loc.clone());
+                let param_inst = jit_ir::ParamInst::new(ParamIdx::try_from(idx)?, tyidx).into();
+                self.jit_mod.push(param_inst)?;
+                self.jit_mod.push_param(loc.clone());
                 self.local_map.insert(
                     aotid.clone(),
                     jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
@@ -1390,19 +1389,19 @@ impl TraceBuilder {
             for idx in 0..safepoint.lives.len() {
                 let aot_op = &safepoint.lives[idx];
                 let jit_op = &self.local_map[&aot_op.to_inst_id()];
-                self.jit_mod.push_loop_jump_var(jit_op.clone());
+                self.jit_mod.push_header_end_var(jit_op.clone());
             }
             self.jit_mod.set_root_jump_addr(sti.unwrap().root_addr.0);
-            self.jit_mod.push(jit_ir::Inst::RootJump)?;
+            self.jit_mod.push(jit_ir::Inst::SidetraceEnd)?;
         } else {
             // For normal traces insert a jump back to the loop start.
             let safepoint = cpcall.safepoint().unwrap();
             for idx in 0..safepoint.lives.len() {
                 let aot_op = &safepoint.lives[idx];
                 let jit_op = &self.local_map[&aot_op.to_inst_id()];
-                self.jit_mod.push_loop_jump_var(jit_op.clone());
+                self.jit_mod.push_header_end_var(jit_op.clone());
             }
-            self.jit_mod.push(jit_ir::Inst::TraceLoopJump)?;
+            self.jit_mod.push(jit_ir::Inst::TraceHeaderEnd)?;
         }
 
         Ok(self.jit_mod)
@@ -1416,7 +1415,7 @@ struct InlinedFrame {
     funcidx: Option<aot_ir::FuncIdx>,
     callinst: Option<aot_ir::InstID>,
     safepoint: Option<&'static aot_ir::DeoptSafepoint>,
-    args: Vec<Operand>,
+    args: Vec<PackedOperand>,
 }
 
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.

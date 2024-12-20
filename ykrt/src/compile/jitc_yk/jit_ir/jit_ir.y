@@ -80,8 +80,8 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "GUARD" "FALSE" "," Operand "," "[" OperandsList "]" {
       Ok(ASTInst::Guard{cond: $4?, is_true: false, operands: $7?})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "UINT" {
-      Ok(ASTInst::LoadTraceInput{assign: $1?.span(), type_: $3?, tiidx: $6?.span()})
+  | "LOCAL_OPERAND" ":" Type "=" "PARAM" "UINT" {
+      Ok(ASTInst::Param{assign: $1?.span(), type_: $3?, tiidx: $6?.span()})
     }
   | "LOCAL_OPERAND" ":" Type "=" BinOp Operand "," Operand  {
       Ok(ASTInst::BinOp{assign: $1?.span(), type_: $3?, bin_op: $5?, lhs: $6?, rhs: $8?})
@@ -146,8 +146,10 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" Operand {
       Ok(ASTInst::Assign{assign: $1?.span(), val: $5? })
     }
-  | "TLOOP_START" "[" OperandsList "]" { Ok(ASTInst::TraceLoopStart($3?)) }
-  | "TLOOP_JUMP"  "[" OperandsList "]" { Ok(ASTInst::TraceLoopJump($3?)) }
+  | "HEADER_START" "[" OperandsList "]" { Ok(ASTInst::TraceHeaderStart($3?)) }
+  | "HEADER_END"  "[" OperandsList "]" { Ok(ASTInst::TraceHeaderEnd($3?)) }
+  | "BODY_START" "[" OperandsList "]" { Ok(ASTInst::TraceBodyStart($3?)) }
+  | "BODY_END"  "[" OperandsList "]" { Ok(ASTInst::TraceBodyEnd($3?)) }
   ;
 
 Operand -> Result<ASTOperand, Box<dyn Error>>:

@@ -52,6 +52,11 @@ impl From<PerfPTCError> for HWTracerError {
                 HWTracerError::Unrecoverable("PerfPTCErrorKind::Unknown".into())
             }
             PerfPTCErrorKind::Errno => {
+                #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+                if err.code == 16 {
+                    return HWTracerError::Temporary(TemporaryErrorKind::PerfBusy);
+                }
+
                 HWTracerError::Unrecoverable(format!("c set errno {}", err.code))
             }
             #[cfg(pt)]

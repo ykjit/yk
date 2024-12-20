@@ -18,7 +18,11 @@ pub(super) struct Analyse {
 impl Analyse {
     pub(super) fn new(m: &Module) -> Analyse {
         Analyse {
-            values: vec![Value::Unknown; m.insts_len()],
+            // When we want to do loop peeling, we don't know actual size of the module at this
+            // point. What we do know is that it is at most two times the size (though since we
+            // don't copy over [Tombstone]s and [Copy]s it will be slightly less than that.
+            // FIXME: Can we calculate this more accurately?
+            values: vec![Value::Unknown; m.insts_len() * 2],
         }
     }
 
@@ -30,7 +34,7 @@ impl Analyse {
                 Value::Unknown => {
                     // Since we last saw an `ICmp` instruction, we may have gathered new knowledge
                     // that allows us to turn it into a constant.
-                    if let (iidx, Inst::ICmp(inst)) = m.inst_decopy(iidx) {
+                    if let Inst::ICmp(inst) = m.inst(iidx) {
                         let lhs = self.op_map(m, inst.lhs(m));
                         let pred = inst.predicate();
                         let rhs = self.op_map(m, inst.rhs(m));
@@ -59,7 +63,7 @@ impl Analyse {
     /// Use the guard `inst` to update our knowledge about the variable used as its condition.
     pub(super) fn guard(&mut self, m: &Module, g_inst: GuardInst) {
         if let Operand::Var(iidx) = g_inst.cond(m) {
-            if let (_, Inst::ICmp(ic_inst)) = m.inst_decopy(iidx) {
+            if let Inst::ICmp(ic_inst) = m.inst(iidx) {
                 let lhs = self.op_map(m, ic_inst.lhs(m));
                 let pred = ic_inst.predicate();
                 let rhs = self.op_map(m, ic_inst.rhs(m));

@@ -31,6 +31,7 @@ use crate::{
         stats::{Stats, TimingState},
         Log, Verbosity,
     },
+    stack::{StackDirection, STACK_DIRECTION},
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
 };
 
@@ -405,14 +406,20 @@ impl MT {
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn control_point(
-        self: &Arc<Self>,
-        loc: &Location,
-        frameaddr: *mut c_void,
-        smid: u64,
-    ){
-        match self.transition_control_point(loc) {
+    pub fn control_point(self: &Arc<Self>, loc: &Location, frameaddr: *mut c_void, smid: u64) {
+        match self.transition_control_point(loc, frameaddr) {
             TransitionControlPoint::NoAction => (),
+            TransitionControlPoint::AbortTracing => {
+                let thread_tracer =
+                    MTThread::with(
+                        |mtt| match mtt.tstate.replace(MTThreadState::Interpreting) {
+                            MTThreadState::Tracing { thread_tracer, .. } => thread_tracer,
+                            _ => unreachable!(),
+                        },
+                    );
+                thread_tracer.stop().ok();
+                self.log.log(Verbosity::JITEvent, "tracing-aborted");
+            }
             TransitionControlPoint::Execute(ctr) => {
                 self.log.log(Verbosity::JITEvent, "enter-jit-code");
                 self.stats.trace_executed();
@@ -462,9 +469,31 @@ impl MT {
                             hl,
                             thread_tracer: tt,
                             promotions: Vec::new(),
+                            frameaddr,
                         };
                     }),
-                    Err(e) => todo!("{e:?}"),
+                    Err(e) => {
+                        // FIXME: start_recorder needs a way of signalling temporary errors.
+                        #[cfg(tracer_hwt)]
+                        match e.downcast::<hwtracer::HWTracerError>() {
+                            Ok(e) => {
+                                if let hwtracer::HWTracerError::Temporary(_) = *e {
+                                    let mut lk = hl.lock();
+                                    debug_assert_matches!(lk.kind, HotLocationKind::Tracing);
+                                    lk.tracecompilation_error(self);
+                                    // FIXME: This is stupidly brutal.
+                                    lk.kind = HotLocationKind::DontTrace;
+                                    drop(lk);
+                                    self.log.log(Verbosity::JITEvent, "start-tracing-abort");
+                                } else {
+                                    todo!("{e:?}");
+                                }
+                            }
+                            Err(e) => todo!("{e:?}"),
+                        }
+                        #[cfg(not(tracer_hwt))]
+                        todo!("{e:?}");
+                    }
                 }
                 #[cfg(tracer_swt)]
                 unsafe {
@@ -492,7 +521,11 @@ impl MT {
                                 hl,
                                 thread_tracer,
                                 promotions,
-                            } => (hl, thread_tracer, promotions),
+                                frameaddr: tracing_frameaddr,
+                            } => {
+                                assert_eq!(frameaddr, tracing_frameaddr);
+                                (hl, thread_tracer, promotions)
+                            }
                             _ => unreachable!(),
                         },
                     );
@@ -537,7 +570,11 @@ impl MT {
                                 hl,
                                 thread_tracer,
                                 promotions,
-                            } => (hl, thread_tracer, promotions),
+                                frameaddr: tracing_frameaddr,
+                            } => {
+                                assert_eq!(frameaddr, tracing_frameaddr);
+                                (hl, thread_tracer, promotions)
+                            }
                             _ => unreachable!(),
                         },
                     );
@@ -567,7 +604,11 @@ impl MT {
 
     /// Perform the next step to `loc` in the `Location` state-machine for a control point. If
     /// `loc` moves to the Compiled state, return a pointer to a [CompiledTrace] object.
-    fn transition_control_point(self: &Arc<Self>, loc: &Location) -> TransitionControlPoint {
+    fn transition_control_point(
+        self: &Arc<Self>,
+        loc: &Location,
+        frameaddr: *mut c_void,
+    ) -> TransitionControlPoint {
         MTThread::with(|mtt| {
             let is_tracing = mtt.is_tracing();
             match loc.hot_location() {
@@ -630,16 +671,49 @@ impl MT {
                         HotLocationKind::Tracing => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             match &*mtt.tstate.borrow() {
-                                MTThreadState::Tracing { hl: thread_hl, .. } => {
+                                MTThreadState::Tracing {
+                                    hl: thread_hl,
+                                    frameaddr: tracing_frameaddr,
+                                    ..
+                                } => {
                                     // This thread is tracing something...
                                     if !Arc::ptr_eq(thread_hl, &hl) {
                                         // ...but not this Location.
                                         TransitionControlPoint::NoAction
                                     } else {
-                                        // ...and it's this location: we have therefore finished
-                                        // tracing the loop.
-                                        lk.kind = HotLocationKind::Compiling;
-                                        TransitionControlPoint::StopTracing
+                                        // ...and it's this location...
+                                        match STACK_DIRECTION {
+                                            StackDirection::GrowsToHigherAddress => todo!(),
+                                            StackDirection::GrowsToLowerAddress => {
+                                                if frameaddr <= *tracing_frameaddr {
+                                                    // We've completed a full iteration, either
+                                                    // within the same frame, or in a recursive
+                                                    // call. Either way, we do not want to unroll
+                                                    // the loop / recursion!
+                                                    lk.kind = HotLocationKind::Compiling;
+                                                    TransitionControlPoint::StopTracing
+                                                } else {
+                                                    debug_assert!(frameaddr > *tracing_frameaddr);
+                                                    // We fell through to a caller frame. In other
+                                                    // words, the frame that started tracing
+                                                    // `return`ed before it stopped tracing. It's
+                                                    // probably the case that we've unluckily
+                                                    // started tracing at the point in a recursive
+                                                    // algorithm where it's reached the culmination
+                                                    // point and is now returning many levels deep.
+                                                    // If we immediately restart tracing in such a
+                                                    // case, we'll just end up aborting again and
+                                                    // again. So we don't consider retrying and
+                                                    // instead abort tracing, and hope we can start
+                                                    // at a more propitious point in the future.
+                                                    self.stats.trace_recorded_err();
+                                                    // FIXME: We will endless retry tracing this
+                                                    // [HotLocation]. There should be a `Counting`
+                                                    // state.
+                                                    TransitionControlPoint::AbortTracing
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 _ => {
@@ -660,6 +734,7 @@ impl MT {
                                                 TransitionControlPoint::StartTracing(hl)
                                             }
                                             TraceFailed::DontTrace => {
+                                                // FIXME: This is stupidly brutal.
                                                 lk.kind = HotLocationKind::DontTrace;
                                                 TransitionControlPoint::NoAction
                                             }
@@ -678,27 +753,63 @@ impl MT {
                         } => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             match &*mtt.tstate.borrow() {
-                                MTThreadState::Tracing { hl: thread_hl, .. } => {
+                                MTThreadState::Tracing {
+                                    hl: thread_hl,
+                                    frameaddr: tracing_frameaddr,
+                                    ..
+                                } => {
                                     // This thread is tracing something...
                                     if !Arc::ptr_eq(thread_hl, &hl) {
                                         // ...but not this Location.
-                                        TransitionControlPoint::Execute(Arc::clone(root_ctr))
+                                        TransitionControlPoint::NoAction
                                     } else {
-                                        // ...and it's this location: we have therefore finished
-                                        // tracing the loop.
-                                        let parent_ctr = Arc::clone(parent_ctr);
-                                        let root_ctr_cl = Arc::clone(root_ctr);
-                                        lk.kind = HotLocationKind::Compiled(Arc::clone(root_ctr));
-                                        drop(lk);
-                                        TransitionControlPoint::StopSideTracing {
-                                            gidx,
-                                            parent_ctr,
-                                            root_ctr: root_ctr_cl,
+                                        match STACK_DIRECTION {
+                                            StackDirection::GrowsToHigherAddress => todo!(),
+                                            StackDirection::GrowsToLowerAddress => {
+                                                if frameaddr <= *tracing_frameaddr {
+                                                    // ...and it's this location: we have therefore
+                                                    // finished tracing back to the control point,
+                                                    // either within the same frame, or in a
+                                                    // recursive call. Either way, we do not want
+                                                    // to unroll the loop / recursion!
+                                                    let parent_ctr = Arc::clone(parent_ctr);
+                                                    let root_ctr_cl = Arc::clone(root_ctr);
+                                                    lk.kind = HotLocationKind::Compiled(
+                                                        Arc::clone(root_ctr),
+                                                    );
+                                                    drop(lk);
+                                                    TransitionControlPoint::StopSideTracing {
+                                                        gidx,
+                                                        parent_ctr,
+                                                        root_ctr: root_ctr_cl,
+                                                    }
+                                                } else {
+                                                    debug_assert!(frameaddr > *tracing_frameaddr);
+                                                    // We fell through to a caller frame. In other
+                                                    // words, the frame that started tracing
+                                                    // `return`ed before it stopped tracing. It's
+                                                    // probably the case that we've unluckily
+                                                    // started tracing at the point in a recursive
+                                                    // algorithm where it's reached the culmination
+                                                    // point and is now returning many levels deep.
+                                                    // If we immediately restart tracing in such a
+                                                    // case, we'll just end up aborting again and
+                                                    // again. So we don't consider retrying and
+                                                    // instead abort tracing, and hope we can start
+                                                    // at a more propitious point in the future.
+                                                    self.stats.trace_recorded_err();
+                                                    lk.kind = HotLocationKind::Compiled(
+                                                        Arc::clone(root_ctr),
+                                                    );
+                                                    TransitionControlPoint::AbortTracing
+                                                }
+                                            }
                                         }
                                     }
                                 }
                                 _ => {
                                     // This thread isn't tracing anything.
+                                    assert!(!is_tracing);
                                     TransitionControlPoint::Execute(Arc::clone(root_ctr))
                                 }
                             }
@@ -785,7 +896,12 @@ impl MT {
     // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
     // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
     // and a trace compiled for case A won't work for case B.
-    pub(crate) fn guard_failure(self: &Arc<Self>, parent: Arc<dyn CompiledTrace>, gidx: GuardIdx) {
+    pub(crate) fn guard_failure(
+        self: &Arc<Self>,
+        parent: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
+        frameaddr: *mut c_void,
+    ) {
         match self.transition_guard_failure(parent, gidx) {
             TransitionGuardFailure::NoAction => (),
             TransitionGuardFailure::StartSideTracing(hl) => {
@@ -800,6 +916,7 @@ impl MT {
                             hl,
                             thread_tracer: tt,
                             promotions: Vec::new(),
+                            frameaddr,
                         };
                     }),
                     Err(e) => todo!("{e:?}"),
@@ -849,6 +966,7 @@ pub(crate) unsafe extern "C" fn __yk_exec_trace(
 
 /// [MTThread]'s major job is to record what state in the "interpreting/tracing/executing"
 /// state-machine this thread is in. This enum contains the states.
+#[derive(Debug)]
 enum MTThreadState {
     /// This thread is executing in the normal interpreter: it is not executing a trace or
     /// recording a trace.
@@ -862,6 +980,9 @@ enum MTThreadState {
         thread_tracer: Box<dyn TraceRecorder>,
         /// Records the content of data recorded via `yk_promote`.
         promotions: Vec<u8>,
+        /// The `frameaddr` when tracing started. This allows us to tell if we're finishing tracing
+        /// at the same point that we started.
+        frameaddr: *mut c_void,
     },
     /// This thread is executing a trace. Note that the `dyn CompiledTrace` serves two different purposes:
     ///
@@ -1014,6 +1135,7 @@ impl MTThread {
 #[derive(Debug)]
 enum TransitionControlPoint {
     NoAction,
+    AbortTracing,
     Execute(Arc<dyn CompiledTrace>),
     StartTracing(Arc<Mutex<HotLocation>>),
     StopTracing,
@@ -1039,7 +1161,7 @@ mod tests {
         compile::{CompiledTraceTestingBasicTransitions, CompiledTraceTestingMinimal},
         trace::TraceRecorderError,
     };
-    use std::hint::black_box;
+    use std::{hint::black_box, ptr};
     use test::bench::Bencher;
 
     // We only implement enough of the equality function for the tests we have.
@@ -1059,6 +1181,7 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
     struct DummyTraceRecorder;
 
     impl TraceRecorder for DummyTraceRecorder {
@@ -1068,7 +1191,9 @@ mod tests {
     }
 
     fn expect_start_tracing(mt: &Arc<MT>, loc: &Location) {
-        let TransitionControlPoint::StartTracing(hl) = mt.transition_control_point(loc) else {
+        let TransitionControlPoint::StartTracing(hl) =
+            mt.transition_control_point(loc, ptr::null_mut())
+        else {
             panic!()
         };
         MTThread::with(|mtt| {
@@ -1076,12 +1201,14 @@ mod tests {
                 hl,
                 thread_tracer: Box::new(DummyTraceRecorder),
                 promotions: Vec::new(),
+                frameaddr: ptr::null_mut(),
             };
         });
     }
 
     fn expect_stop_tracing(mt: &Arc<MT>, loc: &Location) {
-        let TransitionControlPoint::StopTracing = mt.transition_control_point(loc) else {
+        let TransitionControlPoint::StopTracing = mt.transition_control_point(loc, ptr::null_mut())
+        else {
             panic!()
         };
         MTThread::with(|mtt| {
@@ -1100,6 +1227,7 @@ mod tests {
                 hl,
                 thread_tracer: Box::new(DummyTraceRecorder),
                 promotions: Vec::new(),
+                frameaddr: ptr::null_mut(),
             };
         });
     }
@@ -1113,7 +1241,7 @@ mod tests {
         let loc = Location::new();
         for i in 0..mt.hot_threshold() {
             assert_eq!(
-                mt.transition_control_point(&loc),
+                mt.transition_control_point(&loc, ptr::null_mut()),
                 TransitionControlPoint::NoAction
             );
             assert_eq!(loc.count(), Some(i + 1));
@@ -1133,12 +1261,12 @@ mod tests {
         )));
         loc.hot_location().unwrap().lock().kind = HotLocationKind::Compiled(ctr.clone());
         assert!(matches!(
-            mt.transition_control_point(&loc),
+            mt.transition_control_point(&loc, ptr::null_mut()),
             TransitionControlPoint::Execute(_)
         ));
         expect_start_side_tracing(&mt, ctr);
 
-        match mt.transition_control_point(&loc) {
+        match mt.transition_control_point(&loc, ptr::null_mut()) {
             TransitionControlPoint::StopSideTracing { .. } => {
                 MTThread::with(|mtt| {
                     *mtt.tstate.borrow_mut() = MTThreadState::Interpreting;
@@ -1151,7 +1279,7 @@ mod tests {
             _ => unreachable!(),
         }
         assert!(matches!(
-            mt.transition_control_point(&loc),
+            mt.transition_control_point(&loc, ptr::null_mut()),
             TransitionControlPoint::Execute(_)
         ));
     }
@@ -1175,25 +1303,25 @@ mod tests {
                 // otherwise tracing will start, and the assertions will fail.
                 for _ in 0..hot_thrsh / (num_threads * 4) {
                     assert_eq!(
-                        mt.transition_control_point(&loc),
+                        mt.transition_control_point(&loc, ptr::null_mut()),
                         TransitionControlPoint::NoAction
                     );
                     let c1 = loc.count();
                     assert!(c1.is_some());
                     assert_eq!(
-                        mt.transition_control_point(&loc),
+                        mt.transition_control_point(&loc, ptr::null_mut()),
                         TransitionControlPoint::NoAction
                     );
                     let c2 = loc.count();
                     assert!(c2.is_some());
                     assert_eq!(
-                        mt.transition_control_point(&loc),
+                        mt.transition_control_point(&loc, ptr::null_mut()),
                         TransitionControlPoint::NoAction
                     );
                     let c3 = loc.count();
                     assert!(c3.is_some());
                     assert_eq!(
-                        mt.transition_control_point(&loc),
+                        mt.transition_control_point(&loc, ptr::null_mut()),
                         TransitionControlPoint::NoAction
                     );
                     let c4 = loc.count();
@@ -1213,7 +1341,7 @@ mod tests {
         // at or below the threshold: it could even be (although it's rather unlikely) 0!
         assert!(loc.count().is_some());
         loop {
-            match mt.transition_control_point(&loc) {
+            match mt.transition_control_point(&loc, ptr::null_mut()) {
                 TransitionControlPoint::NoAction => (),
                 TransitionControlPoint::StartTracing(hl) => {
                     MTThread::with(|mtt| {
@@ -1221,6 +1349,7 @@ mod tests {
                             hl,
                             thread_tracer: Box::new(DummyTraceRecorder),
                             promotions: Vec::new(),
+                            frameaddr: ptr::null_mut(),
                         };
                     });
                     break;
@@ -1245,7 +1374,7 @@ mod tests {
         // Get the location to the point of being hot.
         for _ in 0..THRESHOLD {
             assert_eq!(
-                mt.transition_control_point(&loc),
+                mt.transition_control_point(&loc, ptr::null_mut()),
                 TransitionControlPoint::NoAction
             );
         }
@@ -1277,7 +1406,7 @@ mod tests {
             HotLocationKind::Tracing
         ));
         assert_eq!(
-            mt.transition_control_point(&loc),
+            mt.transition_control_point(&loc, ptr::null_mut()),
             TransitionControlPoint::NoAction
         );
         assert!(matches!(
@@ -1298,7 +1427,7 @@ mod tests {
         // Get the location to the point of being hot.
         for _ in 0..THRESHOLD {
             assert_eq!(
-                mt.transition_control_point(&loc),
+                mt.transition_control_point(&loc, ptr::null_mut()),
                 TransitionControlPoint::NoAction
             );
         }
@@ -1356,17 +1485,17 @@ mod tests {
 
         for _ in 0..THRESHOLD {
             assert_eq!(
-                mt.transition_control_point(&loc1),
+                mt.transition_control_point(&loc1, ptr::null_mut()),
                 TransitionControlPoint::NoAction
             );
             assert_eq!(
-                mt.transition_control_point(&loc2),
+                mt.transition_control_point(&loc2, ptr::null_mut()),
                 TransitionControlPoint::NoAction
             );
         }
         expect_start_tracing(&mt, &loc1);
         assert_eq!(
-            mt.transition_control_point(&loc2),
+            mt.transition_control_point(&loc2, ptr::null_mut()),
             TransitionControlPoint::NoAction
         );
         assert!(matches!(
@@ -1403,8 +1532,9 @@ mod tests {
             let num_starts = Arc::clone(&num_starts);
             thrs.push(thread::spawn(move || {
                 for _ in 0..THRESHOLD {
-                    match mt.transition_control_point(&loc) {
+                    match mt.transition_control_point(&loc, ptr::null_mut()) {
                         TransitionControlPoint::NoAction => (),
+                        TransitionControlPoint::AbortTracing => panic!(),
                         TransitionControlPoint::Execute(_) => (),
                         TransitionControlPoint::StartTracing(hl) => {
                             num_starts.fetch_add(1, Ordering::Relaxed);
@@ -1413,6 +1543,7 @@ mod tests {
                                     hl,
                                     thread_tracer: Box::new(DummyTraceRecorder),
                                     promotions: Vec::new(),
+                                    frameaddr: ptr::null_mut(),
                                 };
                             });
                             assert!(matches!(
@@ -1425,7 +1556,7 @@ mod tests {
                                 HotLocationKind::Compiling
                             ));
                             assert_eq!(
-                                mt.transition_control_point(&loc),
+                                mt.transition_control_point(&loc, ptr::null_mut()),
                                 TransitionControlPoint::NoAction
                             );
                             assert!(matches!(
@@ -1437,7 +1568,7 @@ mod tests {
                             );
                             loop {
                                 if let TransitionControlPoint::Execute(_) =
-                                    mt.transition_control_point(&loc)
+                                    mt.transition_control_point(&loc, ptr::null_mut())
                                 {
                                     break;
                                 }
@@ -1472,11 +1603,11 @@ mod tests {
 
         for _ in 0..THRESHOLD {
             assert_eq!(
-                mt.transition_control_point(&loc1),
+                mt.transition_control_point(&loc1, ptr::null_mut()),
                 TransitionControlPoint::NoAction
             );
             assert_eq!(
-                mt.transition_control_point(&loc2),
+                mt.transition_control_point(&loc2, ptr::null_mut()),
                 TransitionControlPoint::NoAction
             );
         }
@@ -1491,7 +1622,7 @@ mod tests {
 
         expect_start_tracing(&mt, &loc2);
         assert_eq!(
-            mt.transition_control_point(&loc1),
+            mt.transition_control_point(&loc1, ptr::null_mut()),
             TransitionControlPoint::NoAction
         );
         expect_stop_tracing(&mt, &loc2);
@@ -1513,7 +1644,7 @@ mod tests {
         fn to_compiled(mt: &Arc<MT>, loc: &Location) -> Arc<dyn CompiledTrace> {
             for _ in 0..THRESHOLD {
                 assert_eq!(
-                    mt.transition_control_point(loc),
+                    mt.transition_control_point(loc, ptr::null_mut()),
                     TransitionControlPoint::NoAction
                 );
             }
@@ -1547,11 +1678,11 @@ mod tests {
 
         expect_start_side_tracing(&mt, ctr2);
         assert!(matches!(
-            dbg!(mt.transition_control_point(&loc1)),
-            TransitionControlPoint::Execute(_)
+            dbg!(mt.transition_control_point(&loc1, ptr::null_mut())),
+            TransitionControlPoint::NoAction
         ));
         assert!(matches!(
-            mt.transition_control_point(&loc2),
+            mt.transition_control_point(&loc2, ptr::null_mut()),
             TransitionControlPoint::StopSideTracing { .. }
         ));
     }
@@ -1562,7 +1693,7 @@ mod tests {
         let loc = Location::new();
         b.iter(|| {
             for _ in 0..100000 {
-                black_box(mt.transition_control_point(&loc));
+                black_box(mt.transition_control_point(&loc, ptr::null_mut()));
             }
         });
     }
@@ -1578,7 +1709,7 @@ mod tests {
                 let mt = Arc::clone(&mt);
                 thrs.push(thread::spawn(move || {
                     for _ in 0..100 {
-                        black_box(mt.transition_control_point(&loc));
+                        black_box(mt.transition_control_point(&loc, ptr::null_mut()));
                     }
                 }));
             }
@@ -1609,14 +1740,14 @@ mod tests {
         // https://github.com/ykjit/yk/issues/519
         expect_start_tracing(&mt, &loc2);
         assert!(matches!(
-            mt.transition_control_point(&loc1),
+            mt.transition_control_point(&loc1, ptr::null_mut()),
             TransitionControlPoint::NoAction
         ));
 
         // But once we stop tracing for `loc2`, we should be able to execute the trace for `loc1`.
         expect_stop_tracing(&mt, &loc2);
         assert!(matches!(
-            mt.transition_control_point(&loc1),
+            mt.transition_control_point(&loc1, ptr::null_mut()),
             TransitionControlPoint::Execute(_)
         ));
     }
