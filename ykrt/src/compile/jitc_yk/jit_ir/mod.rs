@@ -114,6 +114,18 @@ use ykaddr::addr::symbol_to_ptr;
 // This is simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::{BinOp, FloatPredicate, FloatTy, Predicate};
 
+/// What kind of trace does this module represent?
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) enum TraceKind {
+    /// A trace which contains only a header: the trace must loop back to the very start every
+    /// time.
+    HeaderOnly,
+    /// A trace with a header and a body: the trace must loop back to the start of the body.
+    HeaderAndBody,
+    /// A sidetrace: the trace must loop back to the root of the trace tree.
+    Sidetrace,
+}
+
 /// The `Module` is the top-level container for JIT IR.
 ///
 /// The IR is conceptually a list of word-sized instructions containing indices into auxiliary
@@ -125,6 +137,8 @@ pub(crate) use super::aot_ir::{BinOp, FloatPredicate, FloatTy, Predicate};
 /// - you may NOT remove an instruction.
 #[derive(Debug)]
 pub(crate) struct Module {
+    /// What kind of trace does this module represent?
+    tracekind: TraceKind,
     /// The ID of the compiled trace.
     ///
     /// See the [Self::ctr_id] method for details.
@@ -191,8 +205,28 @@ pub(crate) struct Module {
 
 impl Module {
     /// Create a new [Module].
-    pub(crate) fn new(ctr_id: u64, global_decls_len: usize) -> Result<Self, CompilationError> {
-        Self::new_internal(ctr_id, global_decls_len)
+    pub(crate) fn new(
+        tracekind: TraceKind,
+        ctr_id: u64,
+        global_decls_len: usize,
+    ) -> Result<Self, CompilationError> {
+        Self::new_internal(tracekind, ctr_id, global_decls_len)
+    }
+
+    /// Returns this module's current [TraceKind]. Note: this can change as a result of calling
+    /// [Self::set_tracekind]!
+    pub(crate) fn tracekind(&self) -> TraceKind {
+        self.tracekind
+    }
+
+    /// Returns this module's current [TraceKind]. Currently the only transition allowed is from
+    /// [TraceKind::HeaderOnly] to [TraceKind::HeaderAndBody].
+    pub(crate) fn set_tracekind(&mut self, tracekind: TraceKind) {
+        match (self.tracekind, tracekind) {
+            (TraceKind::HeaderOnly, TraceKind::HeaderAndBody) => (),
+            (from, to) => panic!("Can't transition from a {from:?} trace to a {to:?} trace"),
+        }
+        self.tracekind = tracekind;
     }
 
     /// Returns the ID of the module.
@@ -207,10 +241,11 @@ impl Module {
 
     #[cfg(test)]
     pub(crate) fn new_testing() -> Self {
-        Self::new_internal(0, 0).unwrap()
+        Self::new_internal(TraceKind::HeaderOnly, 0, 0).unwrap()
     }
 
     pub(crate) fn new_internal(
+        tracekind: TraceKind,
         ctr_id: u64,
         global_decls_len: usize,
     ) -> Result<Self, CompilationError> {
@@ -250,6 +285,7 @@ impl Module {
         assert_eq!(global_decls_len, 0);
 
         Ok(Self {
+            tracekind,
             ctr_id,
             insts: Vec::new(),
             args: Vec::new(),

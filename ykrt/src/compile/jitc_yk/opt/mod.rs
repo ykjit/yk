@@ -10,7 +10,7 @@ use super::{
     int_signs::{SignExtend, Truncate},
     jit_ir::{
         BinOp, BinOpInst, Const, ConstIdx, ICmpInst, Inst, InstIdx, Module, Operand, Predicate,
-        PtrAddInst, Ty,
+        PtrAddInst, TraceKind, Ty,
     },
 };
 use crate::compile::CompilationError;
@@ -68,6 +68,9 @@ impl Opt {
         if !peel {
             return Ok(self.m);
         }
+
+        debug_assert_eq!(self.m.tracekind(), TraceKind::HeaderOnly);
+        self.m.set_tracekind(TraceKind::HeaderAndBody);
 
         // Now that we've processed the trace header, duplicate it to create the loop body.
         let mut iidx_map = vec![InstIdx::max(); base];

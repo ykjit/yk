@@ -294,7 +294,7 @@ impl Module {
 
 #[cfg(test)]
 mod tests {
-    use super::{BinOp, BinOpInst, Const, Inst, Module, Operand};
+    use super::{super::TraceKind, BinOp, BinOpInst, Const, Inst, Module, Operand};
 
     #[should_panic(expected = "Instruction at position 0 passing too few arguments")]
     #[test]
@@ -365,7 +365,7 @@ mod tests {
     fn cg_add_wrong_types() {
         // The parser will reject a binop with a result type different from either operand, so to
         // get the test we want, we can't use the parser.
-        let mut m = Module::new(0, 0).unwrap();
+        let mut m = Module::new(TraceKind::HeaderOnly, 0, 0).unwrap();
         let c1 = m.insert_const(Const::Int(m.int1_tyidx(), 0)).unwrap();
         let c2 = m.insert_const(Const::Int(m.int8_tyidx(), 0)).unwrap();
         m.push(Inst::BinOp(BinOpInst::new(

@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
-    jit_ir::{self, Const, Operand, PackedOperand, ParamIdx},
+    jit_ir::{self, Const, Operand, PackedOperand, ParamIdx, TraceKind},
     AOT_MOD,
 };
 use crate::aotsmp::AOT_STACKMAPS;
@@ -49,13 +49,14 @@ impl TraceBuilder {
     ///  - `mtrace`: The mapped trace.
     ///  - `promotions`: Values promoted to constants during runtime.
     fn new(
+        tracekind: TraceKind,
         ctr_id: u64,
         aot_mod: &'static Module,
         promotions: Box<[u8]>,
     ) -> Result<Self, CompilationError> {
         Ok(Self {
             aot_mod,
-            jit_mod: jit_ir::Module::new(ctr_id, aot_mod.global_decls_len())?,
+            jit_mod: jit_ir::Module::new(tracekind, ctr_id, aot_mod.global_decls_len())?,
             local_map: HashMap::new(),
             cp_block: None,
             first_paraminst_idx: 0,
@@ -1426,5 +1427,10 @@ pub(super) fn build(
     sti: Option<Arc<YkSideTraceInfo>>,
     promotions: Box<[u8]>,
 ) -> Result<jit_ir::Module, CompilationError> {
-    TraceBuilder::new(ctr_id, aot_mod, promotions)?.build(ta_iter, sti)
+    let tracekind = if sti.is_some() {
+        TraceKind::Sidetrace
+    } else {
+        TraceKind::HeaderOnly
+    };
+    TraceBuilder::new(tracekind, ctr_id, aot_mod, promotions)?.build(ta_iter, sti)
 }
