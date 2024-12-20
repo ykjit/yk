@@ -661,7 +661,7 @@ impl fmt::Display for Module {
         }
         write!(f, "\nentry:")?;
         for (iidx, inst) in self.iter_skipping_insts() {
-            write!(f, "\n    {}", inst.display(iidx, self))?
+            write!(f, "\n    {}", inst.display(self, iidx))?
         }
 
         Ok(())
@@ -1880,7 +1880,7 @@ impl Inst {
         }
     }
 
-    pub(crate) fn display<'a>(&'a self, iidx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
+    pub(crate) fn display<'a>(&'a self, m: &'a Module, iidx: InstIdx) -> DisplayableInst<'a> {
         DisplayableInst {
             inst: self,
             iidx,

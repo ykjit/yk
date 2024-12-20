@@ -467,7 +467,7 @@ impl<'a> Assemble<'a> {
         let mut next = iter.next();
         let mut in_header = true;
         while let Some((iidx, inst)) = next {
-            self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
+            self.comment(self.asm.offset(), inst.display(self.m, iidx).to_string());
             if !self.used_insts[usize::from(iidx)] {
                 next = iter.next();
                 continue;
@@ -1626,7 +1626,7 @@ impl<'a> Assemble<'a> {
         self.ra.expire_regs(g_iidx);
         self.comment(
             self.asm.offset(),
-            Inst::Guard(g_inst).display(g_iidx, self.m).to_string(),
+            Inst::Guard(g_inst).display(self.m, g_iidx).to_string(),
         );
         let fail_label = self.guard_to_deopt(&g_inst);
 
