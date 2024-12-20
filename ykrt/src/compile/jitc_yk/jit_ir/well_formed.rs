@@ -42,7 +42,7 @@ impl Module {
                 if let Inst::Tombstone = self.insts[usize::from(x)] {
                     panic!(
                         "Instruction at position {iidx} uses undefined value (%{x})\n  {}",
-                        self.inst(iidx).display(iidx, self)
+                        self.inst(iidx).display(self, iidx)
                     );
                 }
             });
@@ -52,7 +52,7 @@ impl Module {
                     if lhs_tyidx != rhs.unpack(self).tyidx(self) {
                         panic!(
                             "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                     match binop {
@@ -72,7 +72,7 @@ impl Module {
                             if matches!(self.type_(lhs_tyidx), Ty::Float(_)) {
                                 panic!(
                                     "Integer binop at position {iidx} operates on float operands\n  {}",
-                                    self.inst(iidx).display(iidx, self)
+                                    self.inst(iidx).display(self, iidx)
                                 );
                             }
                         }
@@ -80,7 +80,7 @@ impl Module {
                             if !matches!(self.type_(lhs_tyidx), Ty::Float(_)) {
                                 panic!(
                                     "Float binop at position {iidx} operates on integer operands\n  {}",
-                                    self.inst(iidx).display(iidx, self)
+                                    self.inst(iidx).display(self, iidx)
                                 );
                             }
                         }
@@ -95,13 +95,13 @@ impl Module {
                     if x.num_args() < fty.num_params() {
                         panic!(
                             "Instruction at position {iidx} passing too few arguments:\n  {}",
-                            inst.display(iidx, self)
+                            inst.display(self, iidx)
                         );
                     }
                     if x.num_args() > fty.num_params() && !fty.is_vararg() {
                         panic!(
                             "Instruction at position {iidx} passing too many arguments:\n  {}",
-                            inst.display(iidx, self)
+                            inst.display(self, iidx)
                         );
                     }
 
@@ -116,7 +116,7 @@ impl Module {
                             panic!("Instruction at position {iidx} passing argument {j} of wrong type ({}, but should be {})\n  {}",
                                 self.type_(arg_ty).display(self),
                                 self.type_(*par_ty).display(self),
-                                inst.display(iidx, self));
+                                inst.display(self, iidx));
                         }
                     }
                 }
@@ -126,7 +126,7 @@ impl Module {
                     let Ty::Integer(1) = self.type_(tyidx) else {
                         panic!(
                             "Guard at position {iidx} does not have 'cond' of type 'i1'\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         )
                     };
                     if let Operand::Const(x) = cond {
@@ -136,7 +136,7 @@ impl Module {
                         if (expect && *v == 0) || (!expect && *v == 1) {
                             panic!(
                                 "Guard at position {iidx} references a constant that is at odds with the guard itself\n  {}",
-                                inst.display(iidx, self)
+                                inst.display(self, iidx)
                             );
                         }
                     }
@@ -145,7 +145,7 @@ impl Module {
                     if x.lhs(self).tyidx(self) != x.rhs(self).tyidx(self) {
                         panic!(
                             "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                 }
@@ -159,7 +159,7 @@ impl Module {
                     if val_bitsize >= dest_bitsize {
                         panic!(
                             "Instruction at position {iidx} trying to sign extend from an equal-or-larger-than integer type\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                 }
@@ -168,7 +168,7 @@ impl Module {
                     if !matches!(val_ty, Ty::Integer(_)) && !matches!(val_ty, Ty::Ptr) {
                         panic!(
                             "Instruction at position {iidx} trying to zero extend from a non-integer-or-ptr type\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                     let val_bitsize = val_ty.bit_size().unwrap();
@@ -177,7 +177,7 @@ impl Module {
                     if !matches!(dest_ty, Ty::Integer(_)) && !matches!(dest_ty, Ty::Ptr) {
                         panic!(
                             "Instruction at position {iidx} trying to zero extend to a non-integer-or-ptr type\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                     let dest_bitsize = dest_ty.bit_size().unwrap();
@@ -189,7 +189,7 @@ impl Module {
                     if val_bitsize > dest_bitsize {
                         panic!(
                             "Instruction at position {iidx} trying to zero extend to a smaller integer type\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                 }
@@ -201,7 +201,7 @@ impl Module {
                     if matches!(val_ty, Ty::Ptr) && !matches!(dest_ty, Ty::Ptr) {
                         panic!(
                             "Instruction at position {iidx} trying to bitcast from a pointer type to a non-pointer type\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                     // LLVM semantics: "The bit sizes of [source] value and the destination type
@@ -211,23 +211,23 @@ impl Module {
                     if val_bitsize != dest_bitsize {
                         panic!(
                             "Instruction at position {iidx} trying to bitcast to a differently-sized type\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                 }
                 Inst::Trunc(x) => {
                     let Ty::Integer(val_bitsize) = self.type_(x.val(self).tyidx(self)) else {
                         panic!("Instruction at position {iidx} trying to convert from a non-integer type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     };
                     let Ty::Integer(dest_bitsize) = self.type_(x.dest_tyidx()) else {
                         panic!("Instruction at position {iidx} trying to convert to a non-integer type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     };
                     if dest_bitsize >= val_bitsize {
                         panic!(
                             "Instruction at position {iidx} trying to truncate to an equal-or-larger-than type\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst(iidx).display(self, iidx)
                         );
                     }
                 }
@@ -237,15 +237,15 @@ impl Module {
 
                     if !matches!(from_type, Ty::Integer(_)) {
                         panic!("Instruction at position {iidx} trying to convert a non-integer type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     }
                     if !matches!(to_type, Ty::Float(_)) {
                         panic!("Instruction at position {iidx} trying to convert to a non-float type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     }
                     if to_type.byte_size() < from_type.byte_size() {
                         panic!("Instruction at position {iidx} trying to convert to a smaller-sized float\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     }
                 }
                 Inst::FPExt(x) => {
@@ -253,15 +253,15 @@ impl Module {
                     let to_type = self.type_(x.dest_tyidx());
                     if !matches!(from_type, Ty::Float(_)) {
                         panic!("Instruction at position {iidx} trying to extend from a non-float type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     }
                     if !matches!(to_type, Ty::Float(_)) {
                         panic!("Instruction at position {iidx} trying to extend to a non-float type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     }
                     if to_type.byte_size() <= from_type.byte_size() {
                         panic!("Instruction at position {iidx} trying to extend to a smaller-sized float\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     }
                 }
                 Inst::FPToSI(x) => {
@@ -270,18 +270,18 @@ impl Module {
 
                     if !matches!(from_type, Ty::Float(_)) {
                         panic!("Instruction at position {iidx} trying to convert a non-float type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     }
                     if !matches!(to_type, Ty::Integer(_)) {
                         panic!("Instruction at position {iidx} trying to convert to a non-integer type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst(iidx).display(self, iidx));
                     }
                 }
                 Inst::Param(_) => {
                     if let Some(i) = last_inst {
                         if !matches!(i, Inst::Param(_) | Inst::TraceHeaderEnd) {
                             panic!("Param instruction may only appear at the beginning of a trace or after another Param instruction, or after the trace header jump\n  {}",
-                                self.inst(iidx).display(iidx, self));
+                                self.inst(iidx).display(self, iidx));
                         }
                     }
                 }
