@@ -34,17 +34,26 @@ impl Opt {
 
     fn opt(mut self) -> Result<Module, CompilationError> {
         let base = self.m.insts_len();
-        let peel = match self.m.inst(self.m.last_inst_idx()) {
-            // If this is a sidetrace, we perform optimisations up to, but including, loop peeling.
-            Inst::SidetraceEnd => false,
-            Inst::TraceHeaderEnd => true,
-            #[cfg(test)]
-            // Not all tests create "fully valid" traces, in the sense that -- to keep things
-            // simple -- they don't end with `TraceHeaderEnd`. We don't want to peel such traces,
-            // but nor, in testing mode, do we consider them ill-formed.
-            _ => false,
-            #[cfg(not(test))]
-            _ => panic!(),
+        let peel = match self.m.tracekind() {
+            TraceKind::HeaderOnly => {
+                #[cfg(not(test))]
+                {
+                    true
+                }
+
+                #[cfg(test)]
+                {
+                    // Not all tests create "fully valid" traces, in the sense that -- to keep
+                    // things simple -- they don't end with `TraceHeaderEnd`. We don't want to peel
+                    // such traces, but nor, in testing mode, do we consider them ill-formed.
+                    matches!(self.m.inst(self.m.last_inst_idx()), Inst::TraceHeaderEnd)
+                }
+            }
+            // If we hit this case, someone's tried to run the optimiser twice.
+            TraceKind::HeaderAndBody => unreachable!(),
+            // If this is a sidetrace, we perform optimisations up to, but not including, loop
+            // peeling.
+            TraceKind::Sidetrace => false,
         };
 
         // Note that since we will apply loop peeling here, the list of instructions grows as this
