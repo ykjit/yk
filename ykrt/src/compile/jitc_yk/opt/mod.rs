@@ -399,6 +399,34 @@ impl Opt {
                     }
                     (Operand::Var(_), Operand::Var(_)) => (),
                 },
+                BinOp::Sub => match (
+                    self.an.op_map(&self.m, x.lhs(&self.m)),
+                    self.an.op_map(&self.m, x.rhs(&self.m)),
+                ) {
+                    (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
+                        if let Const::Int(_, 0) = self.m.const_(op_cidx) {
+                            // Replace `x - 0` with `x`.
+                            self.m.replace(iidx, Inst::Copy(op_iidx));
+                        }
+                    }
+                    (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
+                        match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
+                            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                                debug_assert_eq!(lhs_tyidx, rhs_tyidx);
+                                let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
+                                    panic!()
+                                };
+                                let cidx = self.m.insert_const_int(
+                                    *lhs_tyidx,
+                                    (lhs_v.wrapping_sub(*rhs_v)).truncate(*bits),
+                                )?;
+                                self.m.replace(iidx, Inst::Const(cidx));
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    (Operand::Const(_), Operand::Var(_)) | (Operand::Var(_), Operand::Var(_)) => (),
+                },
                 _ => (),
             },
             Inst::DynPtrAdd(x) => {
@@ -752,6 +780,37 @@ mod test {
           entry:
             black_box 1i8
             black_box 2i64
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_sub_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param 0
+            %1: i8 = 0i8
+            %2: i8 = sub %1, 1i8
+            %3: i64 = 18446744073709551614i64
+            %4: i64 = sub %3, 4i64
+            %5: i8 = sub %0, 0i8
+            %6: i8 = sub 0i8, %0
+            black_box %2
+            black_box %4
+            black_box %5
+            black_box %6
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            %6: i8 = sub 0i8, %0
+            black_box 255i8
+            black_box 18446744073709551610i64
+            black_box %0
+            black_box %6
         ",
         );
     }
