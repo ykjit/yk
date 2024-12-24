@@ -865,7 +865,10 @@ impl LSRegAlloc<'_> {
                 32 => {
                     dynasm!(asm; mov Rd(reg.code()), v as i32)
                 }
-                _ => todo!(),
+                8 => {
+                    dynasm!(asm; mov Rd(reg.code()), v as i32)
+                }
+                _ => todo!("{bits}"),
             },
         }
     }
