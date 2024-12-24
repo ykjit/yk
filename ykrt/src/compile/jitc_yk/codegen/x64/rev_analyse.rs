@@ -54,6 +54,9 @@ impl<'a> RevAnalyse<'a> {
                             continue;
                         }
                     }
+                    Inst::TraceHeaderEnd => {
+                        self.an_header_end();
+                    }
                     Inst::TraceBodyEnd => {
                         self.an_body_end();
                     }
@@ -177,6 +180,30 @@ impl<'a> RevAnalyse<'a> {
             }
         }
         false
+    }
+
+    fn an_header_end(&mut self) {
+        let mut param_vlocs = Vec::new();
+        for (iidx, inst) in self.m.iter_skipping_insts() {
+            match inst {
+                Inst::Param(pinst) => {
+                    param_vlocs.push(VarLocation::from_yksmp_location(
+                        self.m,
+                        iidx,
+                        self.m.param(pinst.paramidx()),
+                    ));
+                }
+                _ => break,
+            }
+        }
+
+        debug_assert_eq!(param_vlocs.len(), self.m.trace_header_end().len());
+
+        for (param_vloc, jump_op) in param_vlocs.into_iter().zip(self.m.trace_header_end()) {
+            if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
+                self.vloc_hints[usize::from(op_iidx)] = Some(param_vloc);
+            }
+        }
     }
 
     fn an_body_end(&mut self) {
