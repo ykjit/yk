@@ -14,7 +14,7 @@ struct RevAnalyse<'a> {
     inst_vals_alive_until: Vec<InstIdx>,
     ptradds: Vec<Option<PtrAddInst>>,
     used_insts: Vob,
-    reg_hints: Vec<Option<VarLocation>>,
+    reg_hints: Vec<Option<Register>>,
 }
 
 impl<'a> RevAnalyse<'a> {
@@ -93,14 +93,12 @@ impl<'a> RevAnalyse<'a> {
                     self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
                 }
                 if let Operand::Var(op_iidx) = binst.rhs(self.m) {
-                    self.reg_hints[usize::from(op_iidx)] =
-                        Some(VarLocation::Register(Register::GP(Rq::RCX)));
+                    self.reg_hints[usize::from(op_iidx)] = Some(Register::GP(Rq::RCX));
                 }
             }
             BinOp::Mul | BinOp::SDiv | BinOp::UDiv => {
                 if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                    self.reg_hints[usize::from(op_iidx)] =
-                        Some(VarLocation::Register(Register::GP(Rq::RAX)));
+                    self.reg_hints[usize::from(op_iidx)] = Some(Register::GP(Rq::RAX));
                 }
             }
             BinOp::Sub => match (binst.lhs(self.m), binst.rhs(self.m)) {
@@ -183,49 +181,39 @@ impl<'a> RevAnalyse<'a> {
     }
 
     fn an_header_end(&mut self) {
-        let mut param_vlocs = Vec::new();
-        for (iidx, inst) in self.m.iter_skipping_insts() {
+        for ((iidx, inst), jump_op) in self.m.iter_skipping_insts().zip(self.m.trace_header_end()) {
             match inst {
                 Inst::Param(pinst) => {
-                    param_vlocs.push(VarLocation::from_yksmp_location(
+                    if let VarLocation::Register(reg) = VarLocation::from_yksmp_location(
                         self.m,
                         iidx,
                         self.m.param(pinst.paramidx()),
-                    ));
+                    ) {
+                        if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
+                            self.reg_hints[usize::from(op_iidx)] = Some(reg);
+                        }
+                    }
                 }
                 _ => break,
-            }
-        }
-
-        debug_assert_eq!(param_vlocs.len(), self.m.trace_header_end().len());
-
-        for (param_vloc, jump_op) in param_vlocs.into_iter().zip(self.m.trace_header_end()) {
-            if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                self.reg_hints[usize::from(op_iidx)] = Some(param_vloc);
             }
         }
     }
 
     fn an_body_end(&mut self) {
-        let mut param_vlocs = Vec::new();
-        for (iidx, inst) in self.m.iter_skipping_insts() {
+        for ((iidx, inst), jump_op) in self.m.iter_skipping_insts().zip(self.m.trace_body_end()) {
             match inst {
                 Inst::Param(pinst) => {
-                    param_vlocs.push(VarLocation::from_yksmp_location(
+                    if let VarLocation::Register(reg) = VarLocation::from_yksmp_location(
                         self.m,
                         iidx,
                         self.m.param(pinst.paramidx()),
-                    ));
+                    ) {
+                        if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
+                            self.reg_hints[usize::from(op_iidx)] = Some(reg);
+                        }
+                    }
                 }
                 _ => break,
-            }
-        }
-
-        debug_assert_eq!(param_vlocs.len(), self.m.trace_body_end().len());
-
-        for (param_vloc, jump_op) in param_vlocs.into_iter().zip(self.m.trace_body_end()) {
-            if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                self.reg_hints[usize::from(op_iidx)] = Some(param_vloc);
             }
         }
     }
@@ -238,7 +226,9 @@ impl<'a> RevAnalyse<'a> {
 
         for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
             if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                self.reg_hints[usize::from(op_iidx)] = Some(*vloc);
+                if let VarLocation::Register(reg) = *vloc {
+                    self.reg_hints[usize::from(op_iidx)] = Some(reg);
+                }
             }
         }
     }
@@ -289,7 +279,7 @@ pub(super) fn rev_analyse(
         Vec<InstIdx>,
         Vob,
         Vec<Option<PtrAddInst>>,
-        Vec<Option<VarLocation>>,
+        Vec<Option<Register>>,
     ),
     CompilationError,
 > {
