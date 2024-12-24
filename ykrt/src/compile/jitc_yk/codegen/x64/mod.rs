@@ -251,11 +251,11 @@ impl<'a> Assemble<'a> {
             }
         };
 
-        let (inst_vals_alive_until, used_insts, ptradds, vloc_hints) = rev_analyse::rev_analyse(m)?;
+        let (inst_vals_alive_until, used_insts, ptradds, reg_hints) = rev_analyse::rev_analyse(m)?;
 
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, inst_vals_alive_until, vloc_hints, sp_offset),
+            ra: LSRegAlloc::new(m, inst_vals_alive_until, reg_hints, sp_offset),
             asm,
             header_start_locs: Vec::new(),
             body_start_locs: Vec::new(),

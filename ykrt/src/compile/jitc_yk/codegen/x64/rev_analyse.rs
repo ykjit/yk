@@ -14,7 +14,7 @@ struct RevAnalyse<'a> {
     inst_vals_alive_until: Vec<InstIdx>,
     ptradds: Vec<Option<PtrAddInst>>,
     used_insts: Vob,
-    vloc_hints: Vec<Option<VarLocation>>,
+    reg_hints: Vec<Option<VarLocation>>,
 }
 
 impl<'a> RevAnalyse<'a> {
@@ -24,7 +24,7 @@ impl<'a> RevAnalyse<'a> {
             inst_vals_alive_until: vec![InstIdx::try_from(0).unwrap(); m.insts_len()],
             ptradds: vec![None; m.insts_len()],
             used_insts: Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1),
-            vloc_hints: vec![None; m.insts_len()],
+            reg_hints: vec![None; m.insts_len()],
         }
     }
 
@@ -85,34 +85,34 @@ impl<'a> RevAnalyse<'a> {
         match binst.binop() {
             BinOp::Add | BinOp::And | BinOp::Or | BinOp::Xor => {
                 if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                    self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+                    self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
                 }
             }
             BinOp::AShr | BinOp::LShr | BinOp::Shl => {
                 if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                    self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+                    self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
                 }
                 if let Operand::Var(op_iidx) = binst.rhs(self.m) {
-                    self.vloc_hints[usize::from(op_iidx)] =
+                    self.reg_hints[usize::from(op_iidx)] =
                         Some(VarLocation::Register(Register::GP(Rq::RCX)));
                 }
             }
             BinOp::Mul | BinOp::SDiv | BinOp::UDiv => {
                 if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                    self.vloc_hints[usize::from(op_iidx)] =
+                    self.reg_hints[usize::from(op_iidx)] =
                         Some(VarLocation::Register(Register::GP(Rq::RAX)));
                 }
             }
             BinOp::Sub => match (binst.lhs(self.m), binst.rhs(self.m)) {
                 (_, Operand::Const(_)) => {
                     if let Operand::Var(op_iidx) = binst.rhs(self.m) {
-                        assert!(self.vloc_hints[usize::from(iidx)].is_none());
-                        self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+                        assert!(self.reg_hints[usize::from(iidx)].is_none());
+                        self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
                     }
                 }
                 (Operand::Var(_), _) => {
                     if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                        self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+                        self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
                     }
                 }
                 _ => (),
@@ -123,19 +123,19 @@ impl<'a> RevAnalyse<'a> {
 
     fn an_icmp(&mut self, iidx: InstIdx, icinst: ICmpInst) {
         if let Operand::Var(op_iidx) = icinst.lhs(self.m) {
-            self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
         }
     }
 
     fn an_ptradd(&mut self, iidx: InstIdx, painst: PtrAddInst) {
         if let Operand::Var(op_iidx) = painst.ptr(self.m) {
-            self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
         }
     }
 
     fn an_dynptradd(&mut self, iidx: InstIdx, painst: DynPtrAddInst) {
         if let Operand::Var(op_iidx) = painst.num_elems(self.m) {
-            self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
         }
     }
 
@@ -148,7 +148,7 @@ impl<'a> RevAnalyse<'a> {
                 if let Operand::Var(y) = pa_inst.ptr(self.m) {
                     if self.inst_vals_alive_until[usize::from(y)] < iidx {
                         self.inst_vals_alive_until[usize::from(y)] = iidx;
-                        self.vloc_hints[usize::from(y)] = self.vloc_hints[usize::from(iidx)];
+                        self.reg_hints[usize::from(y)] = self.reg_hints[usize::from(iidx)];
                     }
                     self.used_insts.set(usize::from(y), true);
                 }
@@ -201,7 +201,7 @@ impl<'a> RevAnalyse<'a> {
 
         for (param_vloc, jump_op) in param_vlocs.into_iter().zip(self.m.trace_header_end()) {
             if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                self.vloc_hints[usize::from(op_iidx)] = Some(param_vloc);
+                self.reg_hints[usize::from(op_iidx)] = Some(param_vloc);
             }
         }
     }
@@ -225,7 +225,7 @@ impl<'a> RevAnalyse<'a> {
 
         for (param_vloc, jump_op) in param_vlocs.into_iter().zip(self.m.trace_body_end()) {
             if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                self.vloc_hints[usize::from(op_iidx)] = Some(param_vloc);
+                self.reg_hints[usize::from(op_iidx)] = Some(param_vloc);
             }
         }
     }
@@ -238,32 +238,32 @@ impl<'a> RevAnalyse<'a> {
 
         for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
             if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                self.vloc_hints[usize::from(op_iidx)] = Some(*vloc);
+                self.reg_hints[usize::from(op_iidx)] = Some(*vloc);
             }
         }
     }
 
     fn an_sext(&mut self, iidx: InstIdx, seinst: SExtInst) {
         if let Operand::Var(op_iidx) = seinst.val(self.m) {
-            self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
         }
     }
 
     fn an_zext(&mut self, iidx: InstIdx, zeinst: ZExtInst) {
         if let Operand::Var(op_iidx) = zeinst.val(self.m) {
-            self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
         }
     }
 
     fn an_trunc(&mut self, iidx: InstIdx, tinst: TruncInst) {
         if let Operand::Var(op_iidx) = tinst.val(self.m) {
-            self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
         }
     }
 
     fn an_select(&mut self, iidx: InstIdx, sinst: SelectInst) {
         if let Operand::Var(op_iidx) = sinst.trueval(self.m) {
-            self.vloc_hints[usize::from(op_iidx)] = self.vloc_hints[usize::from(iidx)];
+            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
         }
     }
 }
@@ -299,7 +299,7 @@ pub(super) fn rev_analyse(
         rean.inst_vals_alive_until,
         rean.used_insts,
         rean.ptradds,
-        rean.vloc_hints,
+        rean.reg_hints,
     ))
 }
 

@@ -124,7 +124,7 @@ pub(crate) struct LSRegAlloc<'a> {
     /// The abstract stack: shared between general purpose and floating point registers.
     stack: AbstractStack,
     /// What [VarLocation] should an instruction aim to put its output to?
-    vloc_hints: Vec<Option<VarLocation>>,
+    reg_hints: Vec<Option<VarLocation>>,
 }
 
 impl<'a> LSRegAlloc<'a> {
@@ -133,7 +133,7 @@ impl<'a> LSRegAlloc<'a> {
     pub(crate) fn new(
         m: &'a Module,
         inst_vals_alive_until: Vec<InstIdx>,
-        vloc_hints: Vec<Option<VarLocation>>,
+        reg_hints: Vec<Option<VarLocation>>,
         interp_stack_len: usize,
     ) -> Self {
         #[cfg(debug_assertions)]
@@ -169,7 +169,7 @@ impl<'a> LSRegAlloc<'a> {
             fp_regset: RegSet::with_fp_reserved(),
             fp_reg_states,
             inst_vals_alive_until,
-            vloc_hints,
+            reg_hints,
             spills: vec![SpillState::Empty; m.insts_len()],
             stack,
         }
@@ -439,7 +439,7 @@ impl LSRegAlloc<'_> {
         for i in 0..constraints.len() {
             if let RegConstraint::OutputCanBeSameAsInput(search_op) = constraints[i].clone() {
                 if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
-                    self.vloc_hints[usize::from(iidx)]
+                    self.reg_hints[usize::from(iidx)]
                 {
                     if avoid.is_set(reg) {
                         continue;
@@ -470,7 +470,7 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::InputOutput(_) => {
                     if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
-                        self.vloc_hints[usize::from(iidx)]
+                        self.reg_hints[usize::from(iidx)]
                     {
                         if !avoid.is_set(reg) {
                             *cnstr = match cnstr {
@@ -756,7 +756,7 @@ impl LSRegAlloc<'_> {
                     let mut new_reg = None;
                     // Try to use `query_iidx`s hint, if there is one, and it's not in use...
                     if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
-                        self.vloc_hints[usize::from(query_iidx)]
+                        self.reg_hints[usize::from(query_iidx)]
                     {
                         if !self.gp_regset.is_set(reg) && !avoid.is_set(reg) {
                             new_reg = Some(reg);
