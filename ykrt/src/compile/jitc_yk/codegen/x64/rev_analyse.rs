@@ -81,37 +81,39 @@ impl<'a> RevAnalyse<'a> {
         }
     }
 
+    /// Propagate the hint for the instruction being processed at `iidx` to `op`, if appropriate
+    /// for `op`.
+    fn push_reg_hint(&mut self, iidx: InstIdx, op: Operand) {
+        if let Operand::Var(op_iidx) = op {
+            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
+        }
+    }
+
+    /// Set the hint for to `op` to `reg`, if appropriate for `op`.
+    fn push_reg_hint_fixed(&mut self, op: Operand, reg: Register) {
+        if let Operand::Var(op_iidx) = op {
+            self.reg_hints[usize::from(op_iidx)] = Some(reg);
+        }
+    }
+
     fn an_binop(&mut self, iidx: InstIdx, binst: BinOpInst) {
         match binst.binop() {
             BinOp::Add | BinOp::And | BinOp::Or | BinOp::Xor => {
-                if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                    self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-                }
+                self.push_reg_hint(iidx, binst.lhs(self.m));
             }
             BinOp::AShr | BinOp::LShr | BinOp::Shl => {
-                if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                    self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-                }
-                if let Operand::Var(op_iidx) = binst.rhs(self.m) {
-                    self.reg_hints[usize::from(op_iidx)] = Some(Register::GP(Rq::RCX));
-                }
+                self.push_reg_hint(iidx, binst.lhs(self.m));
+                self.push_reg_hint_fixed(binst.rhs(self.m), Register::GP(Rq::RCX));
             }
             BinOp::Mul | BinOp::SDiv | BinOp::UDiv => {
-                if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                    self.reg_hints[usize::from(op_iidx)] = Some(Register::GP(Rq::RAX));
-                }
+                self.push_reg_hint_fixed(binst.lhs(self.m), Register::GP(Rq::RAX));
             }
             BinOp::Sub => match (binst.lhs(self.m), binst.rhs(self.m)) {
                 (_, Operand::Const(_)) => {
-                    if let Operand::Var(op_iidx) = binst.rhs(self.m) {
-                        assert!(self.reg_hints[usize::from(iidx)].is_none());
-                        self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-                    }
+                    self.push_reg_hint(iidx, binst.rhs(self.m));
                 }
                 (Operand::Var(_), _) => {
-                    if let Operand::Var(op_iidx) = binst.lhs(self.m) {
-                        self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-                    }
+                    self.push_reg_hint(iidx, binst.lhs(self.m));
                 }
                 _ => (),
             },
@@ -120,21 +122,15 @@ impl<'a> RevAnalyse<'a> {
     }
 
     fn an_icmp(&mut self, iidx: InstIdx, icinst: ICmpInst) {
-        if let Operand::Var(op_iidx) = icinst.lhs(self.m) {
-            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-        }
+        self.push_reg_hint(iidx, icinst.lhs(self.m));
     }
 
     fn an_ptradd(&mut self, iidx: InstIdx, painst: PtrAddInst) {
-        if let Operand::Var(op_iidx) = painst.ptr(self.m) {
-            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-        }
+        self.push_reg_hint(iidx, painst.ptr(self.m));
     }
 
-    fn an_dynptradd(&mut self, iidx: InstIdx, painst: DynPtrAddInst) {
-        if let Operand::Var(op_iidx) = painst.num_elems(self.m) {
-            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-        }
+    fn an_dynptradd(&mut self, iidx: InstIdx, dpainst: DynPtrAddInst) {
+        self.push_reg_hint(iidx, dpainst.num_elems(self.m));
     }
 
     /// Analyse a [LoadInst]. Returns `true` if it has been inlined and should not go through the
@@ -146,7 +142,7 @@ impl<'a> RevAnalyse<'a> {
                 if let Operand::Var(y) = pa_inst.ptr(self.m) {
                     if self.inst_vals_alive_until[usize::from(y)] < iidx {
                         self.inst_vals_alive_until[usize::from(y)] = iidx;
-                        self.reg_hints[usize::from(y)] = self.reg_hints[usize::from(iidx)];
+                        self.push_reg_hint(iidx, pa_inst.ptr(self.m));
                     }
                     self.used_insts.set(usize::from(y), true);
                 }
@@ -189,9 +185,7 @@ impl<'a> RevAnalyse<'a> {
                         iidx,
                         self.m.param(pinst.paramidx()),
                     ) {
-                        if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                            self.reg_hints[usize::from(op_iidx)] = Some(reg);
-                        }
+                        self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
                     }
                 }
                 _ => break,
@@ -208,9 +202,7 @@ impl<'a> RevAnalyse<'a> {
                         iidx,
                         self.m.param(pinst.paramidx()),
                     ) {
-                        if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                            self.reg_hints[usize::from(op_iidx)] = Some(reg);
-                        }
+                        self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
                     }
                 }
                 _ => break,
@@ -225,36 +217,26 @@ impl<'a> RevAnalyse<'a> {
         debug_assert_eq!(vlocs.len(), self.m.trace_header_end().len());
 
         for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
-            if let Operand::Var(op_iidx) = jump_op.unpack(self.m) {
-                if let VarLocation::Register(reg) = *vloc {
-                    self.reg_hints[usize::from(op_iidx)] = Some(reg);
-                }
+            if let VarLocation::Register(reg) = *vloc {
+                self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
             }
         }
     }
 
     fn an_sext(&mut self, iidx: InstIdx, seinst: SExtInst) {
-        if let Operand::Var(op_iidx) = seinst.val(self.m) {
-            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-        }
+        self.push_reg_hint(iidx, seinst.val(self.m));
     }
 
     fn an_zext(&mut self, iidx: InstIdx, zeinst: ZExtInst) {
-        if let Operand::Var(op_iidx) = zeinst.val(self.m) {
-            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-        }
+        self.push_reg_hint(iidx, zeinst.val(self.m));
     }
 
     fn an_trunc(&mut self, iidx: InstIdx, tinst: TruncInst) {
-        if let Operand::Var(op_iidx) = tinst.val(self.m) {
-            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-        }
+        self.push_reg_hint(iidx, tinst.val(self.m));
     }
 
     fn an_select(&mut self, iidx: InstIdx, sinst: SelectInst) {
-        if let Operand::Var(op_iidx) = sinst.trueval(self.m) {
-            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
-        }
+        self.push_reg_hint(iidx, sinst.trueval(self.m));
     }
 }
 
@@ -269,7 +251,7 @@ impl<'a> RevAnalyse<'a> {
 ///      instructions to be removed, but it will stop any code being (directly) generated for some
 ///      of them.
 ///
-///   2. A `Vec<Option<PtrAddInst>>` that "inlines" pointer additions into load/stores. The
+///   3. A `Vec<Option<PtrAddInst>>` that "inlines" pointer additions into load/stores. The
 ///      `PtrAddInst` is not marked as used, for such instructions: note that it might be marked as
 ///      used by other instructions!
 pub(super) fn rev_analyse(
