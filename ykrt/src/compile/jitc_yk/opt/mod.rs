@@ -70,9 +70,6 @@ impl Opt {
                 }
             }
         }
-        // FIXME: When code generation supports backwards register allocation, we won't need to
-        // explicitly perform dead code elimination and this function can be made `#[cfg(test)]` only.
-        self.m.dead_code_elimination();
 
         if !peel {
             return Ok(self.m);
@@ -149,8 +146,6 @@ impl Opt {
             }
         }
 
-        // FIXME: Apply CSE and run another pass of optimisations on the peeled loop.
-        self.m.dead_code_elimination();
         Ok(self.m)
     }
 
@@ -687,6 +682,14 @@ pub(super) fn opt(m: Module) -> Result<Module, CompilationError> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn opt(m: Module) -> Result<Module, CompilationError> {
+        Opt::new(m).opt().map(|mut m| {
+            // Testing is much easier if we explicitly run DCE.
+            m.dead_code_elimination();
+            m
+        })
+    }
 
     #[test]
     fn opt_const_guard() {
