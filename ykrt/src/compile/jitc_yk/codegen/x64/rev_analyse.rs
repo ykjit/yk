@@ -1,24 +1,34 @@
+//! Perform a reverse analysis on a module's instructions.
+
 use super::reg_alloc::{Register, VarLocation};
-use crate::compile::{
-    jitc_yk::jit_ir::{
-        BinOp, BinOpInst, DynPtrAddInst, ICmpInst, Inst, InstIdx, LoadInst, Module, Operand,
-        PtrAddInst, SExtInst, SelectInst, StoreInst, TruncInst, ZExtInst,
-    },
-    CompilationError,
+use crate::compile::jitc_yk::jit_ir::{
+    BinOp, BinOpInst, DynPtrAddInst, ICmpInst, Inst, InstIdx, LoadInst, Module, Operand,
+    PtrAddInst, SExtInst, SelectInst, StoreInst, TruncInst, ZExtInst,
 };
 use dynasmrt::x64::Rq;
 use vob::Vob;
 
-struct RevAnalyse<'a> {
+pub(crate) struct RevAnalyse<'a> {
     m: &'a Module,
-    inst_vals_alive_until: Vec<InstIdx>,
-    ptradds: Vec<Option<PtrAddInst>>,
-    used_insts: Vob,
-    reg_hints: Vec<Option<Register>>,
+    /// A `Vec<InstIdx>` with one entry per instruction. Each denotes the last instruction that the
+    /// value produced by an instruction is used. By definition this must either be unused (if an
+    /// instruction does not produce a value) or `>=` the offset in this vector.
+    pub(crate) inst_vals_alive_until: Vec<InstIdx>,
+    /// A `Vec<Option<PtrAddInst>>` that "inlines" pointer additions into load/stores. The
+    /// `PtrAddInst` is not marked as used, for such instructions: note that it might be marked as
+    /// used by other instructions!
+    pub(crate) ptradds: Vec<Option<PtrAddInst>>,
+    /// A `Vob` with one entry per instruction, denoting whether the code generator use its
+    /// value. This is implicitly a layer of dead-code elimination: it doesn't cause JIT IR
+    /// instructions to be removed, but it will stop any code being (directly) generated for
+    /// some of them.
+    pub(crate) used_insts: Vob,
+    /// What [Register] should an instruction aim to put its output to?
+    pub(crate) reg_hints: Vec<Option<Register>>,
 }
 
 impl<'a> RevAnalyse<'a> {
-    fn new(m: &'a Module) -> RevAnalyse<'a> {
+    pub(crate) fn new(m: &'a Module) -> RevAnalyse<'a> {
         Self {
             m,
             inst_vals_alive_until: vec![InstIdx::try_from(0).unwrap(); m.insts_len()],
@@ -28,7 +38,7 @@ impl<'a> RevAnalyse<'a> {
         }
     }
 
-    fn analyse(&mut self) {
+    pub(crate) fn analyse(&mut self) {
         for (iidx, inst) in self.m.iter_skipping_insts().rev() {
             if self.used_insts.get(usize::from(iidx)).unwrap()
                 || inst.has_store_effect(self.m)
@@ -79,6 +89,12 @@ impl<'a> RevAnalyse<'a> {
                 });
             }
         }
+    }
+
+    /// Is the instruction at [iidx] a tombstone or otherwise known to be dead (i.e. equivalent to
+    /// a tombstone)?
+    pub(crate) fn is_inst_tombstone(&self, iidx: InstIdx) -> bool {
+        !self.used_insts[usize::from(iidx)]
     }
 
     /// Propagate the hint for the instruction being processed at `iidx` to `op`, if appropriate
@@ -240,46 +256,17 @@ impl<'a> RevAnalyse<'a> {
     }
 }
 
-/// Perform a reverse analysis on a module's instructions returning, in order:
-///
-///   1. A `Vec<InstIdx>` with one entry per instruction. Each denotes the last instruction that
-///      the value produced by an instruction is used. By definition this must either be unused (if
-///      an instruction does not produce a value) or `>=` the offset in this vector.
-///
-///   2. A `Vob` with one entry per instruction, denoting whether the code generator use its value.
-///      This is implicitly a second layer of dead-code elimination: it doesn't cause JIT IR
-///      instructions to be removed, but it will stop any code being (directly) generated for some
-///      of them.
-///
-///   3. A `Vec<Option<PtrAddInst>>` that "inlines" pointer additions into load/stores. The
-///      `PtrAddInst` is not marked as used, for such instructions: note that it might be marked as
-///      used by other instructions!
-pub(super) fn rev_analyse(
-    m: &Module,
-) -> Result<
-    (
-        Vec<InstIdx>,
-        Vob,
-        Vec<Option<PtrAddInst>>,
-        Vec<Option<Register>>,
-    ),
-    CompilationError,
-> {
-    let mut rean = RevAnalyse::new(m);
-    rean.analyse();
-    Ok((
-        rean.inst_vals_alive_until,
-        rean.used_insts,
-        rean.ptradds,
-        rean.reg_hints,
-    ))
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
     use std::assert_matches::assert_matches;
     use vob::vob;
+
+    fn rev_analyse<'a>(m: &'a Module) -> RevAnalyse<'a> {
+        let mut rev_an = RevAnalyse::new(m);
+        rev_an.analyse();
+        rev_an
+    }
 
     #[test]
     fn alive_until() {
@@ -292,9 +279,9 @@ mod test {
               body_end [%2]
             ",
         );
-        let alives = rev_analyse(&m).unwrap().0;
+        let rev_an = rev_analyse(&m);
         assert_eq!(
-            alives,
+            rev_an.inst_vals_alive_until,
             vec![3, 0, 0, 0]
                 .iter()
                 .map(|x: &usize| InstIdx::try_from(*x).unwrap())
@@ -312,9 +299,9 @@ mod test {
               body_end [%4]
             ",
         );
-        let alives = rev_analyse(&m).unwrap().0;
+        let rev_an = rev_analyse(&m);
         assert_eq!(
-            alives,
+            rev_an.inst_vals_alive_until,
             vec![2, 0, 5, 0, 0, 0]
                 .iter()
                 .map(|x: &usize| InstIdx::try_from(*x).unwrap())
@@ -336,16 +323,19 @@ mod test {
               black_box %3
             ",
         );
-        let (_, used, ptradds, _) = rev_analyse(&m).unwrap();
-        assert_eq!(used, vob![true, false, true, true, true, true, true]);
+        let rev_an = rev_analyse(&m);
+        assert_eq!(
+            rev_an.used_insts,
+            vob![true, false, true, true, true, true, true]
+        );
         assert_matches!(
-            ptradds.as_slice(),
+            rev_an.ptradds.as_slice(),
             &[None, None, Some(_), None, Some(_), None, None]
         );
-        let ptradd = ptradds[2].unwrap();
+        let ptradd = rev_an.ptradds[2].unwrap();
         assert_eq!(ptradd.ptr(&m), Operand::Var(InstIdx::try_from(0).unwrap()));
         assert_eq!(ptradd.off(), 8);
-        let ptradd = ptradds[4].unwrap();
+        let ptradd = rev_an.ptradds[4].unwrap();
         assert_eq!(ptradd.ptr(&m), Operand::Var(InstIdx::try_from(0).unwrap()));
         assert_eq!(ptradd.off(), 8);
     }
