@@ -1,4 +1,16 @@
 //! Perform a reverse analysis on a module's instructions.
+//!
+//! This is used for for the following purposes:
+//!   1. To pass hints to the register allocator about which variables should end up in which
+//!      registers. In order to do that, this file has to be kept carefully in sync with
+//!      `ls_regalloc.rs`. Failure to do so won't impact correctness, but it will impact
+//!      performance, as inaccurate hints will lead the register allocator to generate suboptimal
+//!      code.
+//!   2. To inline `PtrAdd`s into `Load`s/`Store`s when possible.
+//!   3. In part because of (3) -- which is platform specific and thus not part of "normal" module
+//!      optimisations -- perform dead-code analysis. Note: the DCE in this module entirely
+//!      subsumes the functionality of `dead_code.rs`, so if you use this module for you don't need
+//!      to use `dead_code.rs` as well.
 
 use super::reg_alloc::{Register, VarLocation};
 use crate::compile::jitc_yk::jit_ir::{
@@ -200,6 +212,8 @@ impl<'a> RevAnalyse<'a> {
     /// special help from the register allocator, move a value.
     fn push_reg_hint_outputcanbesameasinput(&mut self, iidx: InstIdx, op: Operand) {
         if let Operand::Var(op_iidx) = op {
+            // This needs to be kept carefully in sync with the logic in
+            // [ls_regalloc::RegConstraint::OutputCanBeSameAsInput].
             if !self.is_inst_var_still_used_after(iidx, op_iidx) {
                 self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
             }
