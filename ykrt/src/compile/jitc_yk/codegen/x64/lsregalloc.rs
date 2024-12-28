@@ -154,7 +154,7 @@ impl<'a> LSRegAlloc<'a> {
         stack.grow(interp_stack_len);
 
         let mut rev_an = RevAnalyse::new(m);
-        rev_an.analyse();
+        rev_an.analyse_header();
         LSRegAlloc {
             m,
             rev_an,
@@ -185,6 +185,8 @@ impl<'a> LSRegAlloc<'a> {
             self.fp_reg_states[usize::from(reg.code())] = RegState::Reserved;
         }
         self.fp_regset = RegSet::with_fp_reserved();
+
+        self.rev_an.analyse_body();
     }
 
     /// Before generating code for the instruction at `iidx`, see which registers are no longer

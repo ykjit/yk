@@ -3,7 +3,7 @@
 use super::reg_alloc::{Register, VarLocation};
 use crate::compile::jitc_yk::jit_ir::{
     BinOp, BinOpInst, DynPtrAddInst, ICmpInst, Inst, InstIdx, LoadInst, Module, Operand,
-    PtrAddInst, SExtInst, SelectInst, StoreInst, TruncInst, ZExtInst,
+    PtrAddInst, SExtInst, SelectInst, StoreInst, TraceKind, TruncInst, ZExtInst,
 };
 use dynasmrt::x64::Rq;
 use vob::Vob;
@@ -38,56 +38,95 @@ impl<'a> RevAnalyse<'a> {
         }
     }
 
-    pub(crate) fn analyse(&mut self) {
-        for (iidx, inst) in self.m.iter_skipping_insts().rev() {
-            if self.used_insts.get(usize::from(iidx)).unwrap()
-                || inst.has_store_effect(self.m)
-                || inst.is_barrier(self.m)
-            {
-                self.used_insts.set(usize::from(iidx), true);
-
-                match inst {
-                    Inst::BinOp(x) => self.an_binop(iidx, x),
-                    Inst::ICmp(x) => self.an_icmp(iidx, x),
-                    Inst::PtrAdd(x) => self.an_ptradd(iidx, x),
-                    Inst::DynPtrAdd(x) => self.an_dynptradd(iidx, x),
-                    // "Inline" `PtrAdd`s into loads/stores, and don't mark the `PtrAdd` as used. This
-                    // means that some (though not all) `PtrAdd`s will not lead to actual code being
-                    // generated.
-                    Inst::Load(x) => {
-                        if self.an_load(iidx, x) {
-                            continue;
-                        }
+    /// Analyse a trace header. If the trace is [TraceKind::HeaderAndBody], you must call
+    /// [Self::analyse_body] as soon as you have processed the trace header.
+    pub fn analyse_header(&mut self) {
+        let mut iter = self.m.iter_skipping_insts().rev();
+        match self.m.tracekind() {
+            TraceKind::HeaderOnly | TraceKind::Sidetrace => {
+                for (iidx, inst) in self.m.iter_skipping_insts().rev() {
+                    self.analyse(iidx, inst);
+                }
+            }
+            TraceKind::HeaderAndBody => {
+                // OPT: We could pass the index for `TraceHeaderEnd` around, perhaps in the
+                // `TraceKind` to avoid having to find it this way.
+                let mut next = iter.next();
+                while let Some((_, inst)) = next {
+                    if let Inst::TraceHeaderEnd = inst {
+                        break;
                     }
-                    Inst::Store(x) => {
-                        if self.an_store(iidx, x) {
-                            continue;
-                        }
-                    }
-                    Inst::TraceHeaderEnd => {
-                        self.an_header_end();
-                    }
-                    Inst::TraceBodyEnd => {
-                        self.an_body_end();
-                    }
-                    Inst::SidetraceEnd => {
-                        self.an_sidetrace_end();
-                    }
-                    Inst::SExt(x) => self.an_sext(iidx, x),
-                    Inst::ZExt(x) => self.an_zext(iidx, x),
-                    Inst::Select(x) => self.an_select(iidx, x),
-                    Inst::Trunc(x) => self.an_trunc(iidx, x),
-                    _ => (),
+                    next = iter.next();
                 }
 
-                // Calculate inst_vals_alive_until
-                inst.map_operand_vars(self.m, &mut |x| {
-                    self.used_insts.set(usize::from(x), true);
-                    if self.inst_vals_alive_until[usize::from(x)] < iidx {
-                        self.inst_vals_alive_until[usize::from(x)] = iidx;
-                    }
-                });
+                while let Some((iidx, inst)) = next {
+                    self.analyse(iidx, inst);
+                    next = iter.next();
+                }
             }
+        }
+    }
+
+    /// Analyse a trace body. This must be called iff both of the following are true:
+    ///   1. the trace is [TraceKind::HeaderAndBody]
+    ///   2. [Self::analyse_header] has already been called.
+    pub fn analyse_body(&mut self) {
+        for (iidx, inst) in self.m.iter_skipping_insts().rev() {
+            if let Inst::TraceHeaderEnd = inst {
+                break;
+            }
+            self.analyse(iidx, inst);
+        }
+    }
+
+    fn analyse(&mut self, iidx: InstIdx, inst: Inst) {
+        if self.used_insts.get(usize::from(iidx)).unwrap()
+            || inst.has_store_effect(self.m)
+            || inst.is_barrier(self.m)
+        {
+            self.used_insts.set(usize::from(iidx), true);
+
+            match inst {
+                Inst::BinOp(x) => self.an_binop(iidx, x),
+                Inst::ICmp(x) => self.an_icmp(iidx, x),
+                Inst::PtrAdd(x) => self.an_ptradd(iidx, x),
+                Inst::DynPtrAdd(x) => self.an_dynptradd(iidx, x),
+                // "Inline" `PtrAdd`s into loads/stores, and don't mark the `PtrAdd` as used. This
+                // means that some (though not all) `PtrAdd`s will not lead to actual code being
+                // generated.
+                Inst::Load(x) => {
+                    if self.an_load(iidx, x) {
+                        return;
+                    }
+                }
+                Inst::Store(x) => {
+                    if self.an_store(iidx, x) {
+                        return;
+                    }
+                }
+                Inst::TraceHeaderEnd => {
+                    self.an_header_end();
+                }
+                Inst::TraceBodyEnd => {
+                    self.an_body_end();
+                }
+                Inst::SidetraceEnd => {
+                    self.an_sidetrace_end();
+                }
+                Inst::SExt(x) => self.an_sext(iidx, x),
+                Inst::ZExt(x) => self.an_zext(iidx, x),
+                Inst::Select(x) => self.an_select(iidx, x),
+                Inst::Trunc(x) => self.an_trunc(iidx, x),
+                _ => (),
+            }
+
+            // Calculate inst_vals_alive_until
+            inst.map_operand_vars(self.m, &mut |x| {
+                self.used_insts.set(usize::from(x), true);
+                if self.inst_vals_alive_until[usize::from(x)] < iidx {
+                    self.inst_vals_alive_until[usize::from(x)] = iidx;
+                }
+            });
         }
     }
 
@@ -262,9 +301,9 @@ mod test {
     use std::assert_matches::assert_matches;
     use vob::vob;
 
-    fn rev_analyse<'a>(m: &'a Module) -> RevAnalyse<'a> {
+    fn rev_analyse_header<'a>(m: &'a Module) -> RevAnalyse<'a> {
         let mut rev_an = RevAnalyse::new(m);
-        rev_an.analyse();
+        rev_an.analyse_header();
         rev_an
     }
 
@@ -274,12 +313,12 @@ mod test {
             "
             entry:
               %0: i8 = param 0
-              body_start [%0]
+              header_start [%0]
               %2: i8 = %0
-              body_end [%2]
+              header_end [%2]
             ",
         );
-        let rev_an = rev_analyse(&m);
+        let rev_an = rev_analyse_header(&m);
         assert_eq!(
             rev_an.inst_vals_alive_until,
             vec![3, 0, 0, 0]
@@ -292,14 +331,14 @@ mod test {
             "
             entry:
               %0: i8 = param 0
-              body_start [%0]
+              header_start [%0]
               %2: i8 = add %0, %0
               %3: i8 = add %0, %0
               %4: i8 = %2
-              body_end [%4]
+              header_end [%4]
             ",
         );
-        let rev_an = rev_analyse(&m);
+        let rev_an = rev_analyse_header(&m);
         assert_eq!(
             rev_an.inst_vals_alive_until,
             vec![2, 0, 5, 0, 0, 0]
@@ -323,7 +362,7 @@ mod test {
               black_box %3
             ",
         );
-        let rev_an = rev_analyse(&m);
+        let rev_an = rev_analyse_header(&m);
         assert_eq!(
             rev_an.used_insts,
             vob![true, false, true, true, true, true, true]
