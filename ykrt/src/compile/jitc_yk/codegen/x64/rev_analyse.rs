@@ -175,11 +175,34 @@ impl<'a> RevAnalyse<'a> {
         !self.used_insts[usize::from(iidx)]
     }
 
+    /// Is the value produced by instruction `query_iidx` used after (but not including!)
+    /// instruction `cur_idx`?
+    pub(crate) fn is_inst_var_still_used_after(
+        &self,
+        cur_iidx: InstIdx,
+        query_iidx: InstIdx,
+    ) -> bool {
+        usize::from(cur_iidx) < usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
+    }
+
     /// Propagate the hint for the instruction being processed at `iidx` to `op`, if appropriate
     /// for `op`.
     fn push_reg_hint(&mut self, iidx: InstIdx, op: Operand) {
         if let Operand::Var(op_iidx) = op {
             self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
+        }
+    }
+
+    /// Propagate the hint for the [RegConstraint::OutputCanBeSameAsInput] instruction being
+    /// processed at `iidx` to `op`, if appropriate for `op`.
+    ///
+    /// Note: this function should only be used for situations where an instruction can, with no
+    /// special help from the register allocator, move a value.
+    fn push_reg_hint_outputcanbesameasinput(&mut self, iidx: InstIdx, op: Operand) {
+        if let Operand::Var(op_iidx) = op {
+            if !self.is_inst_var_still_used_after(iidx, op_iidx) {
+                self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
+            }
         }
     }
 
@@ -203,13 +226,12 @@ impl<'a> RevAnalyse<'a> {
                 self.push_reg_hint_fixed(binst.lhs(self.m), Register::GP(Rq::RAX));
             }
             BinOp::Sub => match (binst.lhs(self.m), binst.rhs(self.m)) {
-                (_, Operand::Const(_)) => {
+                (Operand::Const(_), _) => {
+                    self.push_reg_hint(iidx, binst.rhs(self.m));
+                }
+                _ => {
                     self.push_reg_hint(iidx, binst.lhs(self.m));
                 }
-                (Operand::Var(_), _) => {
-                    self.push_reg_hint(iidx, binst.lhs(self.m));
-                }
-                _ => (),
             },
             _ => (),
         }
@@ -220,7 +242,7 @@ impl<'a> RevAnalyse<'a> {
     }
 
     fn an_ptradd(&mut self, iidx: InstIdx, painst: PtrAddInst) {
-        self.push_reg_hint(iidx, painst.ptr(self.m));
+        self.push_reg_hint_outputcanbesameasinput(iidx, painst.ptr(self.m));
     }
 
     fn an_dynptradd(&mut self, iidx: InstIdx, dpainst: DynPtrAddInst) {
@@ -236,7 +258,7 @@ impl<'a> RevAnalyse<'a> {
                 if let Operand::Var(y) = pa_inst.ptr(self.m) {
                     if self.inst_vals_alive_until[usize::from(y)] < iidx {
                         self.inst_vals_alive_until[usize::from(y)] = iidx;
-                        self.push_reg_hint(iidx, pa_inst.ptr(self.m));
+                        self.push_reg_hint_outputcanbesameasinput(iidx, pa_inst.ptr(self.m));
                     }
                     self.used_insts.set(usize::from(y), true);
                 }

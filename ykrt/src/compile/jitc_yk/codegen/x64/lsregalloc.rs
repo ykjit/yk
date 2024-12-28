@@ -269,8 +269,8 @@ impl<'a> LSRegAlloc<'a> {
         cur_iidx: InstIdx,
         query_iidx: InstIdx,
     ) -> bool {
-        usize::from(cur_iidx)
-            < usize::from(self.rev_an.inst_vals_alive_until[usize::from(query_iidx)])
+        self.rev_an
+            .is_inst_var_still_used_after(cur_iidx, query_iidx)
     }
 
     /// Is the value produced by instruction `query_iidx` used at or after instruction `cur_idx`?
