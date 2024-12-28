@@ -169,7 +169,7 @@ impl<'a> LSRegAlloc<'a> {
 
     /// Reset the register allocator. We use this when moving from the trace header into the trace
     /// body.
-    pub(crate) fn reset(&mut self) {
+    pub(crate) fn reset(&mut self, header_end_vlocs: &[VarLocation]) {
         for rs in self.gp_reg_states.iter_mut() {
             *rs = RegState::Empty;
         }
@@ -186,7 +186,7 @@ impl<'a> LSRegAlloc<'a> {
         }
         self.fp_regset = RegSet::with_fp_reserved();
 
-        self.rev_an.analyse_body();
+        self.rev_an.analyse_body(header_end_vlocs);
     }
 
     /// Before generating code for the instruction at `iidx`, see which registers are no longer

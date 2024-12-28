@@ -41,6 +41,45 @@ impl<'a> RevAnalyse<'a> {
     /// Analyse a trace header. If the trace is [TraceKind::HeaderAndBody], you must call
     /// [Self::analyse_body] as soon as you have processed the trace header.
     pub fn analyse_header(&mut self) {
+        // First we populate the register hints for the end of the trace...
+        match self.m.tracekind() {
+            TraceKind::HeaderOnly => {
+                for ((iidx, inst), jump_op) in
+                    self.m.iter_skipping_insts().zip(self.m.trace_header_end())
+                {
+                    match inst {
+                        Inst::Param(pinst) => {
+                            if let VarLocation::Register(reg) = VarLocation::from_yksmp_location(
+                                self.m,
+                                iidx,
+                                self.m.param(pinst.paramidx()),
+                            ) {
+                                self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            TraceKind::HeaderAndBody => {
+                // We don't care where the register allocator ends at the end of the header, so we
+                // don't propagate backwards from `TraceHeaderEnd`.
+            }
+            TraceKind::Sidetrace => {
+                let vlocs = self.m.root_entry_vars();
+                // Side-traces don't have a trace body since we don't apply loop peeling and thus use
+                // `trace_header_end` to store the jump variables.
+                debug_assert_eq!(vlocs.len(), self.m.trace_header_end().len());
+
+                for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
+                    if let VarLocation::Register(reg) = *vloc {
+                        self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
+                    }
+                }
+            }
+        }
+
+        // ...and then we perform the rest of the reverse analysis.
         let mut iter = self.m.iter_skipping_insts().rev();
         match self.m.tracekind() {
             TraceKind::HeaderOnly | TraceKind::Sidetrace => {
@@ -70,7 +109,13 @@ impl<'a> RevAnalyse<'a> {
     /// Analyse a trace body. This must be called iff both of the following are true:
     ///   1. the trace is [TraceKind::HeaderAndBody]
     ///   2. [Self::analyse_header] has already been called.
-    pub fn analyse_body(&mut self) {
+    pub fn analyse_body(&mut self, header_end_vlocs: &[VarLocation]) {
+        for (jump_op, vloc) in self.m.trace_body_end().iter().zip(header_end_vlocs) {
+            if let VarLocation::Register(reg) = vloc {
+                self.push_reg_hint_fixed(jump_op.unpack(self.m), *reg);
+            }
+        }
+
         for (iidx, inst) in self.m.iter_skipping_insts().rev() {
             if let Inst::TraceHeaderEnd = inst {
                 break;
@@ -87,6 +132,9 @@ impl<'a> RevAnalyse<'a> {
             self.used_insts.set(usize::from(iidx), true);
 
             match inst {
+                Inst::TraceHeaderEnd | Inst::TraceBodyEnd | Inst::SidetraceEnd => {
+                    // These are handled in [Self::analyse_header] or [Self::analyse_body].
+                }
                 Inst::BinOp(x) => self.an_binop(iidx, x),
                 Inst::ICmp(x) => self.an_icmp(iidx, x),
                 Inst::PtrAdd(x) => self.an_ptradd(iidx, x),
@@ -103,15 +151,6 @@ impl<'a> RevAnalyse<'a> {
                     if self.an_store(iidx, x) {
                         return;
                     }
-                }
-                Inst::TraceHeaderEnd => {
-                    self.an_header_end();
-                }
-                Inst::TraceBodyEnd => {
-                    self.an_body_end();
-                }
-                Inst::SidetraceEnd => {
-                    self.an_sidetrace_end();
                 }
                 Inst::SExt(x) => self.an_sext(iidx, x),
                 Inst::ZExt(x) => self.an_zext(iidx, x),
@@ -165,7 +204,7 @@ impl<'a> RevAnalyse<'a> {
             }
             BinOp::Sub => match (binst.lhs(self.m), binst.rhs(self.m)) {
                 (_, Operand::Const(_)) => {
-                    self.push_reg_hint(iidx, binst.rhs(self.m));
+                    self.push_reg_hint(iidx, binst.lhs(self.m));
                 }
                 (Operand::Var(_), _) => {
                     self.push_reg_hint(iidx, binst.lhs(self.m));
@@ -229,53 +268,6 @@ impl<'a> RevAnalyse<'a> {
             }
         }
         false
-    }
-
-    fn an_header_end(&mut self) {
-        for ((iidx, inst), jump_op) in self.m.iter_skipping_insts().zip(self.m.trace_header_end()) {
-            match inst {
-                Inst::Param(pinst) => {
-                    if let VarLocation::Register(reg) = VarLocation::from_yksmp_location(
-                        self.m,
-                        iidx,
-                        self.m.param(pinst.paramidx()),
-                    ) {
-                        self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
-                    }
-                }
-                _ => break,
-            }
-        }
-    }
-
-    fn an_body_end(&mut self) {
-        for ((iidx, inst), jump_op) in self.m.iter_skipping_insts().zip(self.m.trace_body_end()) {
-            match inst {
-                Inst::Param(pinst) => {
-                    if let VarLocation::Register(reg) = VarLocation::from_yksmp_location(
-                        self.m,
-                        iidx,
-                        self.m.param(pinst.paramidx()),
-                    ) {
-                        self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
-                    }
-                }
-                _ => break,
-            }
-        }
-    }
-
-    fn an_sidetrace_end(&mut self) {
-        let vlocs = self.m.root_entry_vars();
-        // Side-traces don't have a trace body since we don't apply loop peeling and thus use
-        // `trace_header_end` to store the jump variables.
-        debug_assert_eq!(vlocs.len(), self.m.trace_header_end().len());
-
-        for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
-            if let VarLocation::Register(reg) = *vloc {
-                self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
-            }
-        }
     }
 
     fn an_sext(&mut self, iidx: InstIdx, seinst: SExtInst) {

@@ -1961,14 +1961,15 @@ impl<'a> Assemble<'a> {
                 // that have become constants during the trace header. So we will always have to either
                 // update the [ParamInst]s of the trace body, which isn't ideal since it requires the
                 // [Module] the be mutable. Or we do what we do below just for constants.
-                let mut varlocs = Vec::new();
-                for var in self.m.trace_header_end().iter() {
-                    let varloc = self.op_to_var_location(var.unpack(self.m));
-                    varlocs.push(varloc);
-                }
+                let varlocs = self
+                    .m
+                    .trace_header_end()
+                    .iter()
+                    .map(|pop| self.op_to_var_location(pop.unpack(self.m)))
+                    .collect::<Vec<_>>();
                 // Reset the register allocator before priming it with information about the trace body
                 // inputs.
-                self.ra.reset();
+                self.ra.reset(varlocs.as_slice());
                 for (i, op) in self.m.trace_body_start().iter().enumerate() {
                     // By definition these can only be variables.
                     let iidx = match op.unpack(self.m) {
