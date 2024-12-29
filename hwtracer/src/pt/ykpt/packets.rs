@@ -227,7 +227,7 @@ impl ShortTNTPacket {
         let mut push = false;
         let mut tnts = Vec::new();
         for i in (0..7).rev() {
-            let bit = self.branches >> i & 0x1;
+            let bit = (self.branches >> i) & 0x1;
             if !push && bit == 1 {
                 // We are witnessing the stop bit. Push from now on.
                 push = true;
