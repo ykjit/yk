@@ -52,8 +52,7 @@ fn clang_format(check_only: bool) {
                                             Some(format!("returned exit code {c}:\n\n{stderr}"))
                                     }
                                     None => {
-                                        err_msg =
-                                            Some("terminated by signal:\n\n{stderr}".to_owned())
+                                        err_msg = Some(format!("terminated by signal:\n\n{stderr}"))
                                     }
                                 }
                             }
