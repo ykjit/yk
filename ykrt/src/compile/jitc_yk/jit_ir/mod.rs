@@ -758,7 +758,7 @@ const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
 /// A packed 24-bit unsigned integer.
-#[repr(packed)]
+#[repr(Rust, packed)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct U24([u8; 3]);
 
@@ -2435,7 +2435,7 @@ impl IndirectCallInst {
 ///
 /// Perform a call to an external or AOT function.
 #[derive(Clone, Copy, Debug)]
-#[repr(packed)]
+#[repr(Rust, packed)]
 pub struct DirectCallInst {
     /// The callee.
     target: FuncDeclIdx,
@@ -2614,7 +2614,7 @@ impl FNegInst {
 /// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
 /// in the LLVM pointer indexing type.
 #[derive(Clone, Copy, Debug)]
-#[repr(packed)]
+#[repr(Rust, packed)]
 pub struct PtrAddInst {
     /// The pointer to offset
     ptr: PackedOperand,
@@ -2661,7 +2661,7 @@ impl PtrAddInst {
 /// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
 /// in the LLVM pointer indexing type.
 #[derive(Clone, Copy, Debug)]
-#[repr(packed)]
+#[repr(Rust, packed)]
 pub struct DynPtrAddInst {
     /// The pointer to offset
     ptr: PackedOperand,
