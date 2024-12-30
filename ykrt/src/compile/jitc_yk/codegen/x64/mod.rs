@@ -23,7 +23,7 @@
 use super::{
     super::{
         int_signs::{SignExtend, Truncate},
-        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, TraceKind, Ty},
+        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, TraceKind, Ty},
         CompilationError,
     },
     reg_alloc::{self, VarLocation},
@@ -60,7 +60,6 @@ use std::{
     slice,
     sync::{Arc, Weak},
 };
-use vob::Vob;
 use ykaddr::addr::symbol_to_ptr;
 
 mod deopt;
@@ -195,12 +194,6 @@ struct Assemble<'a> {
     /// The stack pointer offset of the root trace's frame from the base pointer of the interpreter
     /// frame. If this is the root trace, this will be None.
     root_offset: Option<usize>,
-    /// Does this Load/Store instruction reference a [PtrAddInst]?
-    ptradds: Vec<Option<PtrAddInst>>,
-    /// For each instruction, does this code generator use its value? This is implicitly a second
-    /// layer of dead-code elimination: it doesn't cause JIT IR instructions to be removed, but
-    /// it will stop any code being (directly) generated for some of them.
-    used_insts: Vob,
     /// The offset after the trace's prologue. This is the re-entry point when returning from
     /// side-traces.
     prologue_offset: AssemblyOffset,
@@ -251,11 +244,9 @@ impl<'a> Assemble<'a> {
             }
         };
 
-        let (inst_vals_alive_until, used_insts, ptradds, vloc_hints) = rev_analyse::rev_analyse(m)?;
-
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, inst_vals_alive_until, vloc_hints, sp_offset),
+            ra: LSRegAlloc::new(m, sp_offset),
             asm,
             header_start_locs: Vec::new(),
             body_start_locs: Vec::new(),
@@ -263,8 +254,6 @@ impl<'a> Assemble<'a> {
             comments: Cell::new(IndexMap::new()),
             sp_offset,
             root_offset,
-            used_insts,
-            ptradds,
             prologue_offset: AssemblyOffset(0),
         }))
     }
@@ -468,7 +457,7 @@ impl<'a> Assemble<'a> {
         let mut in_header = true;
         while let Some((iidx, inst)) = next {
             self.comment(self.asm.offset(), inst.display(self.m, iidx).to_string());
-            if !self.used_insts[usize::from(iidx)] {
+            if self.ra.is_inst_tombstone(iidx) {
                 next = iter.next();
                 continue;
             }
@@ -1104,7 +1093,7 @@ impl<'a> Assemble<'a> {
     /// Generate code for a [LoadInst], loading from a `register + off`. `off` should only be
     /// non-zero if the [LoadInst] references a [PtrAddInst].
     fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
-        let (ptr_op, off) = match self.ptradds[usize::from(iidx)] {
+        let (ptr_op, off) = match self.ra.ptradd(iidx) {
             Some(x) => (x.ptr(self.m), x.off()),
             None => (inst.operand(self.m), 0),
         };
@@ -1216,7 +1205,7 @@ impl<'a> Assemble<'a> {
     /// Generate code for a [StoreInst], storing it at a `register + off`. `off` should only be
     /// non-zero if the [StoreInst] references a [PtrAddInst].
     fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
-        let (tgt_op, off) = match self.ptradds[usize::from(iidx)] {
+        let (tgt_op, off) = match self.ra.ptradd(iidx) {
             Some(x) => (x.ptr(self.m), x.off()),
             None => (inst.tgt(self.m), 0),
         };
@@ -1972,14 +1961,15 @@ impl<'a> Assemble<'a> {
                 // that have become constants during the trace header. So we will always have to either
                 // update the [ParamInst]s of the trace body, which isn't ideal since it requires the
                 // [Module] the be mutable. Or we do what we do below just for constants.
-                let mut varlocs = Vec::new();
-                for var in self.m.trace_header_end().iter() {
-                    let varloc = self.op_to_var_location(var.unpack(self.m));
-                    varlocs.push(varloc);
-                }
+                let varlocs = self
+                    .m
+                    .trace_header_end()
+                    .iter()
+                    .map(|pop| self.op_to_var_location(pop.unpack(self.m)))
+                    .collect::<Vec<_>>();
                 // Reset the register allocator before priming it with information about the trace body
                 // inputs.
-                self.ra.reset();
+                self.ra.reset(varlocs.as_slice());
                 for (i, op) in self.m.trace_body_start().iter().enumerate() {
                     // By definition these can only be variables.
                     let iidx = match op.unpack(self.m) {

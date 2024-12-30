@@ -144,6 +144,7 @@ impl JITCYk {
         if *YKD_OPT {
             jit_mod = opt::opt(jit_mod)?;
             if should_log_ir(IRPhase::PostOpt) {
+                jit_mod.dead_code_elimination();
                 log_ir(&format!(
                     "--- Begin jit-post-opt ---\n{jit_mod}\n--- End jit-post-opt ---\n",
                 ));

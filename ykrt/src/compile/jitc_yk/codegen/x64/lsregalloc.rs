@@ -27,13 +27,14 @@
 //! where it has spilled an instruction's value: it guarantees to spill an instruction to at most
 //! one place on the stack.
 
+use super::rev_analyse::RevAnalyse;
 use crate::compile::jitc_yk::{
     codegen::{
         abs_stack::AbstractStack,
         reg_alloc::{self, VarLocation},
         x64::REG64_BYTESIZE,
     },
-    jit_ir::{Const, ConstIdx, FloatTy, Inst, InstIdx, Module, Operand, Ty},
+    jit_ir::{Const, ConstIdx, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
 };
 use dynasmrt::{
     dynasm,
@@ -106,6 +107,7 @@ static RESERVED_FP_REGS: [Rx; 0] = [];
 /// A linear scan register allocator.
 pub(crate) struct LSRegAlloc<'a> {
     m: &'a Module,
+    rev_an: RevAnalyse<'a>,
     /// Which general purpose registers are active?
     gp_regset: RegSet<Rq>,
     /// In what state are the general purpose registers?
@@ -114,28 +116,17 @@ pub(crate) struct LSRegAlloc<'a> {
     fp_regset: RegSet<Rx>,
     /// In what state are the floating point registers?
     fp_reg_states: [RegState; FP_REGS_LEN],
-    /// Record the [InstIdx] of the last instruction that the value produced by an instruction is
-    /// used. By definition this must either be unused (if an instruction does not produce a value)
-    /// or `>=` the offset in this vector.
-    inst_vals_alive_until: Vec<InstIdx>,
     /// Where on the stack is an instruction's value spilled? Set to `usize::MAX` if that offset is
     /// currently unknown. Note: multiple instructions can alias to the same [SpillState].
     spills: Vec<SpillState>,
     /// The abstract stack: shared between general purpose and floating point registers.
     stack: AbstractStack,
-    /// What [VarLocation] should an instruction aim to put its output to?
-    vloc_hints: Vec<Option<VarLocation>>,
 }
 
 impl<'a> LSRegAlloc<'a> {
     /// Create a new register allocator, with the existing interpreter frame spanning
     /// `interp_stack_len` bytes.
-    pub(crate) fn new(
-        m: &'a Module,
-        inst_vals_alive_until: Vec<InstIdx>,
-        vloc_hints: Vec<Option<VarLocation>>,
-        interp_stack_len: usize,
-    ) -> Self {
+    pub(crate) fn new(m: &'a Module, interp_stack_len: usize) -> Self {
         #[cfg(debug_assertions)]
         {
             // We rely on the registers in GP_REGS being numbered 0..15 (inc.) for correctness.
@@ -162,14 +153,15 @@ impl<'a> LSRegAlloc<'a> {
         let mut stack = AbstractStack::default();
         stack.grow(interp_stack_len);
 
+        let mut rev_an = RevAnalyse::new(m);
+        rev_an.analyse_header();
         LSRegAlloc {
             m,
+            rev_an,
             gp_regset: RegSet::with_gp_reserved(),
             gp_reg_states,
             fp_regset: RegSet::with_fp_reserved(),
             fp_reg_states,
-            inst_vals_alive_until,
-            vloc_hints,
             spills: vec![SpillState::Empty; m.insts_len()],
             stack,
         }
@@ -177,7 +169,7 @@ impl<'a> LSRegAlloc<'a> {
 
     /// Reset the register allocator. We use this when moving from the trace header into the trace
     /// body.
-    pub(crate) fn reset(&mut self) {
+    pub(crate) fn reset(&mut self, header_end_vlocs: &[VarLocation]) {
         for rs in self.gp_reg_states.iter_mut() {
             *rs = RegState::Empty;
         }
@@ -193,6 +185,8 @@ impl<'a> LSRegAlloc<'a> {
             self.fp_reg_states[usize::from(reg.code())] = RegState::Reserved;
         }
         self.fp_regset = RegSet::with_fp_reserved();
+
+        self.rev_an.analyse_body(header_end_vlocs);
     }
 
     /// Before generating code for the instruction at `iidx`, see which registers are no longer
@@ -262,6 +256,12 @@ impl<'a> LSRegAlloc<'a> {
         self.stack.size()
     }
 
+    /// Is the instruction at [iidx] a tombstone or otherwise known to be dead (i.e. equivalent to
+    /// a tombstone)?
+    pub(crate) fn is_inst_tombstone(&self, iidx: InstIdx) -> bool {
+        self.rev_an.is_inst_tombstone(iidx)
+    }
+
     /// Is the value produced by instruction `query_iidx` used after (but not including!)
     /// instruction `cur_idx`?
     pub(crate) fn is_inst_var_still_used_after(
@@ -269,17 +269,24 @@ impl<'a> LSRegAlloc<'a> {
         cur_iidx: InstIdx,
         query_iidx: InstIdx,
     ) -> bool {
-        usize::from(cur_iidx) < usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
+        self.rev_an
+            .is_inst_var_still_used_after(cur_iidx, query_iidx)
     }
 
     /// Is the value produced by instruction `query_iidx` used at or after instruction `cur_idx`?
     fn is_inst_var_still_used_at(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
-        usize::from(cur_iidx) <= usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
+        usize::from(cur_iidx)
+            <= usize::from(self.rev_an.inst_vals_alive_until[usize::from(query_iidx)])
     }
 
     #[cfg(test)]
     pub(crate) fn inst_vals_alive_until(&self) -> &Vec<InstIdx> {
-        &self.inst_vals_alive_until
+        &self.rev_an.inst_vals_alive_until
+    }
+
+    /// Return the inline [PtrAddInst] for a load/store, if there is one.
+    pub(crate) fn ptradd(&self, iidx: InstIdx) -> Option<PtrAddInst> {
+        self.rev_an.ptradds[usize::from(iidx)]
     }
 }
 
@@ -438,8 +445,7 @@ impl LSRegAlloc<'_> {
         // Deal with `OutputCanBeSameAsInput`.
         for i in 0..constraints.len() {
             if let RegConstraint::OutputCanBeSameAsInput(search_op) = constraints[i].clone() {
-                if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
-                    self.vloc_hints[usize::from(iidx)]
+                if let Some(reg_alloc::Register::GP(reg)) = self.rev_an.reg_hints[usize::from(iidx)]
                 {
                     if avoid.is_set(reg) {
                         continue;
@@ -469,8 +475,8 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Output
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::InputOutput(_) => {
-                    if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
-                        self.vloc_hints[usize::from(iidx)]
+                    if let Some(reg_alloc::Register::GP(reg)) =
+                        self.rev_an.reg_hints[usize::from(iidx)]
                     {
                         if !avoid.is_set(reg) {
                             *cnstr = match cnstr {
@@ -564,8 +570,9 @@ impl LSRegAlloc<'_> {
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
-                                    if self.inst_vals_alive_until[usize::from(from_iidx)]
-                                        >= self.inst_vals_alive_until[usize::from(furthest_iidx)]
+                                    if self.rev_an.inst_vals_alive_until[usize::from(from_iidx)]
+                                        >= self.rev_an.inst_vals_alive_until
+                                            [usize::from(furthest_iidx)]
                                     {
                                         furthest = Some((reg, from_iidx))
                                     }
@@ -755,8 +762,8 @@ impl LSRegAlloc<'_> {
                 if self.is_inst_var_still_used_after(cur_iidx, query_iidx) {
                     let mut new_reg = None;
                     // Try to use `query_iidx`s hint, if there is one, and it's not in use...
-                    if let Some(VarLocation::Register(reg_alloc::Register::GP(reg))) =
-                        self.vloc_hints[usize::from(query_iidx)]
+                    if let Some(reg_alloc::Register::GP(reg)) =
+                        self.rev_an.reg_hints[usize::from(query_iidx)]
                     {
                         if !self.gp_regset.is_set(reg) && !avoid.is_set(reg) {
                             new_reg = Some(reg);
@@ -1094,8 +1101,9 @@ impl LSRegAlloc<'_> {
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
-                                    if self.inst_vals_alive_until[usize::from(from_iidx)]
-                                        >= self.inst_vals_alive_until[usize::from(furthest_iidx)]
+                                    if self.rev_an.inst_vals_alive_until[usize::from(from_iidx)]
+                                        >= self.rev_an.inst_vals_alive_until
+                                            [usize::from(furthest_iidx)]
                                     {
                                         furthest = Some((reg, from_iidx))
                                     }
