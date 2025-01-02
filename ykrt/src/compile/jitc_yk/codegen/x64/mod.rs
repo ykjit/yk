@@ -456,11 +456,11 @@ impl<'a> Assemble<'a> {
         let mut next = iter.next();
         let mut in_header = true;
         while let Some((iidx, inst)) = next {
-            self.comment(self.asm.offset(), inst.display(self.m, iidx).to_string());
             if self.ra.is_inst_tombstone(iidx) {
                 next = iter.next();
                 continue;
             }
+            self.comment_inst(self.asm.offset(), iidx, inst);
             self.ra.expire_regs(iidx);
 
             match &inst {
@@ -531,9 +531,48 @@ impl<'a> Assemble<'a> {
         Ok(())
     }
 
-    /// Add a comment to the trace, for use when disassembling its native code.
+    /// Add a comment to the trace. Note: for instructions, use [Self::comment_inst] which formats
+    /// things more appropriately for instructions.
     fn comment(&mut self, off: AssemblyOffset, line: String) {
         self.comments.get_mut().entry(off.0).or_default().push(line);
+    }
+
+    /// Add a comment to the trace for a "JIT IR" instruction. This function will format some
+    /// instructions differently to the normal trace IR, because this x64 backend has some
+    /// non-generic optimisations / modifications.
+    fn comment_inst(&mut self, off: AssemblyOffset, iidx: InstIdx, inst: Inst) {
+        match inst {
+            Inst::Load(_) => {
+                if let Some(painst) = self.ra.ptradd(iidx) {
+                    self.comment(
+                        off,
+                        format!(
+                            "%{iidx}: {} = load {} + {}",
+                            self.m.type_(inst.tyidx(self.m)).display(self.m),
+                            painst.ptr(self.m).display(self.m),
+                            painst.off()
+                        ),
+                    );
+                    return;
+                }
+            }
+            Inst::Store(sinst) => {
+                if let Some(painst) = self.ra.ptradd(iidx) {
+                    self.comment(
+                        off,
+                        format!(
+                            "*({} + {}) = {}",
+                            painst.ptr(self.m).display(self.m),
+                            painst.off(),
+                            sinst.val(self.m).display(self.m)
+                        ),
+                    );
+                    return;
+                }
+            }
+            _ => (),
+        }
+        self.comment(off, inst.display(self.m, iidx).to_string())
     }
 
     /// Emit the prologue of the JITted code.
@@ -2819,12 +2858,12 @@ mod tests {
             ",
             "
                 ...
-                ; %2: ptr = ptr_add %0, 64
-                ; %3: i64 = load %2
+                ; %1: ...
+                ; %3: i64 = load %0 + 64
                 mov r.64.x, [rbx+{{_}}]
                 ; %4: ptr = ptr_add %1, 32
                 lea r.64.y, [r.64.z+0x20]
-                ; %5: i64 = load %4
+                ; %5: i64 = load %1 + 32
                 mov r.64._, [r.64.z+0x20]
                 ...
                 ",
@@ -2848,12 +2887,11 @@ mod tests {
             ",
             "
                 ...
-                ; *%2 = 1i8
+                ; *(%0 + 64) = 1i8
                 mov byte ptr [rbx+{{_}}], 0x01
-                ; %4: ptr = ptr_add %1, 32
-                ; %5: i64 = load %4
+                ; %5: i64 = load %1 + 32
                 mov r.64.y, [r.64.x+0x20]
-                ; *%4 = 2i8
+                ; *(%1 + 32) = 2i8
                 mov byte ptr [r.64.x+0x20], 0x02
                 ...
                 ",
