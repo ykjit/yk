@@ -438,7 +438,6 @@ impl MT {
                     mtt.set_running_trace(Some(ctr), None);
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
-                // TODO: switch here to unopt
                 #[cfg(tracer_swt)]
                 unsafe {
                     control_point_transition(ControlPointTransition{

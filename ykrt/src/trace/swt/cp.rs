@@ -200,13 +200,13 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         match dst_location {
             Indirect(_dst_reg_num, dst_off, dst_val_size) => {
                 match src_location {
-                    Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg) => {
+                    Register(src_reg_num, src_val_size, src_add_locs) => {
                         assert!(
                             dst_val_size == src_val_size,
                             "Indirect to Register - src and dst val size must match. got src: {} and dst: {}",
                             src_val_size, dst_val_size
                         );
-                        assert!(*src_add_locs == 0, "deal with additional info");
+                        assert!(src_add_locs.len() == 0, "deal with additional info");
                         let src_offset = reg_num_to__ykrt_control_point_stack_offset(*src_reg_num)
                             - src_rsp_offset;
                         match *src_val_size {
@@ -267,11 +267,11 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                     _ => panic!("Unsupported source location: {:?}", src_location),
                 }
             }
-            Register(dst_reg_num, dst_val_size, dst_add_locs, _dst_add_loc_reg) => {
+            Register(dst_reg_num, dst_val_size, dst_add_locs) => {
                 match src_location {
-                    Register(src_reg_num, src_val_size, src_add_locs, _src_add_loc_reg) => {
+                    Register(src_reg_num, src_val_size, src_add_locs) => {
                         assert!(
-                            *src_add_locs == 0 && *dst_add_locs == 0,
+                            src_add_locs.len() == 0 && dst_add_locs.len() == 0,
                             "Register to Register - deal with additional info"
                         );
                         assert!(
