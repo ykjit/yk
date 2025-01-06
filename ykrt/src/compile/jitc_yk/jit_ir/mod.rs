@@ -114,6 +114,18 @@ use ykaddr::addr::symbol_to_ptr;
 // This is simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::{BinOp, FloatPredicate, FloatTy, Predicate};
 
+/// What kind of trace does this module represent?
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) enum TraceKind {
+    /// A trace which contains only a header: the trace must loop back to the very start every
+    /// time.
+    HeaderOnly,
+    /// A trace with a header and a body: the trace must loop back to the start of the body.
+    HeaderAndBody,
+    /// A sidetrace: the trace must loop back to the root of the trace tree.
+    Sidetrace,
+}
+
 /// The `Module` is the top-level container for JIT IR.
 ///
 /// The IR is conceptually a list of word-sized instructions containing indices into auxiliary
@@ -125,6 +137,8 @@ pub(crate) use super::aot_ir::{BinOp, FloatPredicate, FloatTy, Predicate};
 /// - you may NOT remove an instruction.
 #[derive(Debug)]
 pub(crate) struct Module {
+    /// What kind of trace does this module represent?
+    tracekind: TraceKind,
     /// The ID of the compiled trace.
     ///
     /// See the [Self::ctr_id] method for details.
@@ -169,10 +183,10 @@ pub(crate) struct Module {
     /// Live variables at the beginning of the root trace.
     root_entry_vars: Vec<VarLocation>,
     /// Live variables at the beginning of the trace body.
-    trace_body_start: Vec<PackedOperand>,
+    pub(crate) trace_body_start: Vec<PackedOperand>,
     /// The ordered sequence of operands at the end of the trace body: there will be one per
     /// [Operand] at the start of the loop.
-    trace_body_end: Vec<PackedOperand>,
+    pub(crate) trace_body_end: Vec<PackedOperand>,
     /// Live variables at the beginning the trace header.
     trace_header_start: Vec<PackedOperand>,
     /// Live variables at the end of the trace header.
@@ -191,8 +205,28 @@ pub(crate) struct Module {
 
 impl Module {
     /// Create a new [Module].
-    pub(crate) fn new(ctr_id: u64, global_decls_len: usize) -> Result<Self, CompilationError> {
-        Self::new_internal(ctr_id, global_decls_len)
+    pub(crate) fn new(
+        tracekind: TraceKind,
+        ctr_id: u64,
+        global_decls_len: usize,
+    ) -> Result<Self, CompilationError> {
+        Self::new_internal(tracekind, ctr_id, global_decls_len)
+    }
+
+    /// Returns this module's current [TraceKind]. Note: this can change as a result of calling
+    /// [Self::set_tracekind]!
+    pub(crate) fn tracekind(&self) -> TraceKind {
+        self.tracekind
+    }
+
+    /// Returns this module's current [TraceKind]. Currently the only transition allowed is from
+    /// [TraceKind::HeaderOnly] to [TraceKind::HeaderAndBody].
+    pub(crate) fn set_tracekind(&mut self, tracekind: TraceKind) {
+        match (self.tracekind, tracekind) {
+            (TraceKind::HeaderOnly, TraceKind::HeaderAndBody) => (),
+            (from, to) => panic!("Can't transition from a {from:?} trace to a {to:?} trace"),
+        }
+        self.tracekind = tracekind;
     }
 
     /// Returns the ID of the module.
@@ -207,10 +241,11 @@ impl Module {
 
     #[cfg(test)]
     pub(crate) fn new_testing() -> Self {
-        Self::new_internal(0, 0).unwrap()
+        Self::new_internal(TraceKind::HeaderOnly, 0, 0).unwrap()
     }
 
     pub(crate) fn new_internal(
+        tracekind: TraceKind,
         ctr_id: u64,
         global_decls_len: usize,
     ) -> Result<Self, CompilationError> {
@@ -250,6 +285,7 @@ impl Module {
         assert_eq!(global_decls_len, 0);
 
         Ok(Self {
+            tracekind,
             ctr_id,
             insts: Vec::new(),
             args: Vec::new(),
@@ -661,7 +697,7 @@ impl fmt::Display for Module {
         }
         write!(f, "\nentry:")?;
         for (iidx, inst) in self.iter_skipping_insts() {
-            write!(f, "\n    {}", inst.display(iidx, self))?
+            write!(f, "\n    {}", inst.display(self, iidx))?
         }
 
         Ok(())
@@ -722,7 +758,7 @@ const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
 /// A packed 24-bit unsigned integer.
-#[repr(packed)]
+#[repr(Rust, packed)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct U24([u8; 3]);
 
@@ -1521,9 +1557,9 @@ impl Inst {
     }
 
     /// Apply the function `f` to each of this instruction's [Operand]s iff they are of type
-    /// [Operand::Local]. When an instruction references more than one [Operand], the order of
+    /// [Operand::Var]. When an instruction references more than one [Operand], the order of
     /// traversal is undefined.
-    pub(crate) fn map_operand_locals<F>(&self, m: &Module, f: &mut F)
+    pub(crate) fn map_operand_vars<F>(&self, m: &Module, f: &mut F)
     where
         F: FnMut(InstIdx),
     {
@@ -1628,21 +1664,25 @@ impl Inst {
         }
     }
 
-    /// Duplicate this [Inst] while applying function `f` to each operand.
-    pub(crate) fn dup_and_remap_locals<F>(
+    /// Duplicate this [Inst] and, during that process, apply the function `f` to each of this
+    /// instruction's [Operand]s iff they are of type [Operand::Var]. When an instruction
+    /// references more than one [Operand], the order of traversal is undefined.
+    ///
+    /// Note: for `TraceBody*` and `TraceHeader*` functions, this function is not idempotent.
+    pub(crate) fn dup_and_remap_vars<F>(
         &self,
         m: &mut Module,
-        f: &F,
+        f: F,
     ) -> Result<Self, CompilationError>
     where
-        F: Fn(InstIdx) -> Operand,
+        F: Fn(&Module, InstIdx) -> Operand,
     {
         let mapper = |m: &Module, x: &PackedOperand| match x.unpack(m) {
-            Operand::Var(iidx) => PackedOperand::new(&f(iidx)),
+            Operand::Var(iidx) => PackedOperand::new(&f(m, iidx)),
             Operand::Const(_) => *x,
         };
-        let op_mapper = |x: &Operand| match x {
-            Operand::Var(iidx) => f(*iidx),
+        let op_mapper = |m: &Module, x: &Operand| match x {
+            Operand::Var(iidx) => f(m, *iidx),
             Operand::Const(c) => Operand::Const(*c),
         };
         let inst = match self {
@@ -1659,7 +1699,7 @@ impl Inst {
                 // Clone and map arguments.
                 let args = dc
                     .iter_args_idx()
-                    .map(|x| op_mapper(&m.arg(x)))
+                    .map(|x| op_mapper(m, &m.arg(x)))
                     .collect::<Vec<_>>();
                 let dc = DirectCallInst::new(m, dc.target, args)?;
                 Inst::Call(dc)
@@ -1669,14 +1709,14 @@ impl Inst {
                 // Clone and map arguments.
                 let args = ic
                     .iter_args_idx()
-                    .map(|x| op_mapper(&m.arg(x)))
+                    .map(|x| op_mapper(m, &m.arg(x)))
                     .collect::<Vec<_>>();
-                let icnew = IndirectCallInst::new(m, ic.ftyidx, op_mapper(&ic.target(m)), args)?;
+                let icnew = IndirectCallInst::new(m, ic.ftyidx, op_mapper(m, &ic.target(m)), args)?;
                 let idx = m.push_indirect_call(icnew)?;
                 Inst::IndirectCall(idx)
             }
             Inst::Const(c) => Inst::Const(*c),
-            Inst::Copy(iidx) => match f(*iidx) {
+            Inst::Copy(iidx) => match f(m, *iidx) {
                 Operand::Var(iidx) => Inst::Copy(iidx),
                 Operand::Const(cidx) => Inst::Const(cidx),
             },
@@ -1719,7 +1759,7 @@ impl Inst {
                             x.safepoint,
                             x.args
                                 .iter()
-                                .map(|x| op_mapper(&x.unpack(m)))
+                                .map(|x| op_mapper(m, &x.unpack(m)))
                                 .collect::<Vec<_>>(),
                         )
                     })
@@ -1760,11 +1800,6 @@ impl Inst {
                     off: inst.off,
                 })
             }
-            Inst::SidetraceEnd => {
-                // This instruction only exists in side-traces, which don't have loops we can peel
-                // off.
-                unreachable!()
-            }
             Inst::Select(SelectInst {
                 cond,
                 trueval,
@@ -1788,19 +1823,23 @@ impl Inst {
                 volatile: *volatile,
             }),
             Inst::Tombstone => Inst::Tombstone,
-            Inst::TraceHeaderStart => {
-                // Copy the header label into the body while remapping the operands.
-                m.trace_body_start = m
-                    .trace_header_start
-                    .iter()
-                    .map(|op| mapper(m, op))
-                    .collect();
+            Inst::TraceBodyStart => {
+                m.trace_body_start = m.trace_body_start.iter().map(|op| mapper(m, op)).collect();
                 Inst::TraceBodyStart
+            }
+            Inst::TraceBodyEnd => {
+                m.trace_body_end = m.trace_body_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::TraceBodyEnd
             }
             Inst::TraceHeaderEnd => {
                 // Copy the header label into the body while remapping the operands.
-                m.trace_body_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
-                Inst::TraceBodyEnd
+                m.trace_header_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::TraceHeaderEnd
+            }
+            Inst::SidetraceEnd => {
+                // Copy the header label into the body while remapping the operands.
+                m.trace_header_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
+                Inst::SidetraceEnd
             }
             Inst::Trunc(TruncInst { val, dest_tyidx }) => Inst::Trunc(TruncInst {
                 val: mapper(m, val),
@@ -1877,7 +1916,7 @@ impl Inst {
         }
     }
 
-    pub(crate) fn display<'a>(&'a self, iidx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
+    pub(crate) fn display<'a>(&'a self, m: &'a Module, iidx: InstIdx) -> DisplayableInst<'a> {
         DisplayableInst {
             inst: self,
             iidx,
@@ -2396,7 +2435,7 @@ impl IndirectCallInst {
 ///
 /// Perform a call to an external or AOT function.
 #[derive(Clone, Copy, Debug)]
-#[repr(packed)]
+#[repr(Rust, packed)]
 pub struct DirectCallInst {
     /// The callee.
     target: FuncDeclIdx,
@@ -2575,7 +2614,7 @@ impl FNegInst {
 /// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
 /// in the LLVM pointer indexing type.
 #[derive(Clone, Copy, Debug)]
-#[repr(packed)]
+#[repr(Rust, packed)]
 pub struct PtrAddInst {
     /// The pointer to offset
     ptr: PackedOperand,
@@ -2622,7 +2661,7 @@ impl PtrAddInst {
 /// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
 /// in the LLVM pointer indexing type.
 #[derive(Clone, Copy, Debug)]
-#[repr(packed)]
+#[repr(Rust, packed)]
 pub struct DynPtrAddInst {
     /// The pointer to offset
     ptr: PackedOperand,

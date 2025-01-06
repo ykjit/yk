@@ -23,7 +23,7 @@
 use super::{
     super::{
         int_signs::{SignExtend, Truncate},
-        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
+        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, TraceKind, Ty},
         CompilationError,
     },
     reg_alloc::{self, VarLocation},
@@ -60,7 +60,6 @@ use std::{
     slice,
     sync::{Arc, Weak},
 };
-use vob::Vob;
 use ykaddr::addr::symbol_to_ptr;
 
 mod deopt;
@@ -195,12 +194,6 @@ struct Assemble<'a> {
     /// The stack pointer offset of the root trace's frame from the base pointer of the interpreter
     /// frame. If this is the root trace, this will be None.
     root_offset: Option<usize>,
-    /// Does this Load/Store instruction reference a [PtrAddInst]?
-    ptradds: Vec<Option<PtrAddInst>>,
-    /// For each instruction, does this code generator use its value? This is implicitly a second
-    /// layer of dead-code elimination: it doesn't cause JIT IR instructions to be removed, but
-    /// it will stop any code being (directly) generated for some of them.
-    used_insts: Vob,
     /// The offset after the trace's prologue. This is the re-entry point when returning from
     /// side-traces.
     prologue_offset: AssemblyOffset,
@@ -251,11 +244,9 @@ impl<'a> Assemble<'a> {
             }
         };
 
-        let (inst_vals_alive_until, used_insts, ptradds, vloc_hints) = rev_analyse::rev_analyse(m)?;
-
         Ok(Box::new(Self {
             m,
-            ra: LSRegAlloc::new(m, inst_vals_alive_until, vloc_hints, sp_offset),
+            ra: LSRegAlloc::new(m, sp_offset),
             asm,
             header_start_locs: Vec::new(),
             body_start_locs: Vec::new(),
@@ -263,8 +254,6 @@ impl<'a> Assemble<'a> {
             comments: Cell::new(IndexMap::new()),
             sp_offset,
             root_offset,
-            used_insts,
-            ptradds,
             prologue_offset: AssemblyOffset(0),
         }))
     }
@@ -467,11 +456,11 @@ impl<'a> Assemble<'a> {
         let mut next = iter.next();
         let mut in_header = true;
         while let Some((iidx, inst)) = next {
-            self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
-            if !self.used_insts[usize::from(iidx)] {
+            if self.ra.is_inst_tombstone(iidx) {
                 next = iter.next();
                 continue;
             }
+            self.comment_inst(self.asm.offset(), iidx, inst);
             self.ra.expire_regs(iidx);
 
             match &inst {
@@ -519,7 +508,7 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
                 jit_ir::Inst::TraceHeaderStart => self.cg_header_start(),
                 jit_ir::Inst::TraceHeaderEnd => {
-                    self.cg_header_end();
+                    self.cg_header_end(iidx);
                     in_header = false;
                 }
                 jit_ir::Inst::TraceBodyStart => self.cg_body_start(),
@@ -542,9 +531,48 @@ impl<'a> Assemble<'a> {
         Ok(())
     }
 
-    /// Add a comment to the trace, for use when disassembling its native code.
+    /// Add a comment to the trace. Note: for instructions, use [Self::comment_inst] which formats
+    /// things more appropriately for instructions.
     fn comment(&mut self, off: AssemblyOffset, line: String) {
         self.comments.get_mut().entry(off.0).or_default().push(line);
+    }
+
+    /// Add a comment to the trace for a "JIT IR" instruction. This function will format some
+    /// instructions differently to the normal trace IR, because this x64 backend has some
+    /// non-generic optimisations / modifications.
+    fn comment_inst(&mut self, off: AssemblyOffset, iidx: InstIdx, inst: Inst) {
+        match inst {
+            Inst::Load(_) => {
+                if let Some(painst) = self.ra.ptradd(iidx) {
+                    self.comment(
+                        off,
+                        format!(
+                            "%{iidx}: {} = load {} + {}",
+                            self.m.type_(inst.tyidx(self.m)).display(self.m),
+                            painst.ptr(self.m).display(self.m),
+                            painst.off()
+                        ),
+                    );
+                    return;
+                }
+            }
+            Inst::Store(sinst) => {
+                if let Some(painst) = self.ra.ptradd(iidx) {
+                    self.comment(
+                        off,
+                        format!(
+                            "*({} + {}) = {}",
+                            painst.ptr(self.m).display(self.m),
+                            painst.off(),
+                            sinst.val(self.m).display(self.m)
+                        ),
+                    );
+                    return;
+                }
+            }
+            _ => (),
+        }
+        self.comment(off, inst.display(self.m, iidx).to_string())
     }
 
     /// Emit the prologue of the JITted code.
@@ -1104,7 +1132,7 @@ impl<'a> Assemble<'a> {
     /// Generate code for a [LoadInst], loading from a `register + off`. `off` should only be
     /// non-zero if the [LoadInst] references a [PtrAddInst].
     fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
-        let (ptr_op, off) = match self.ptradds[usize::from(iidx)] {
+        let (ptr_op, off) = match self.ra.ptradd(iidx) {
             Some(x) => (x.ptr(self.m), x.off()),
             None => (inst.operand(self.m), 0),
         };
@@ -1216,7 +1244,7 @@ impl<'a> Assemble<'a> {
     /// Generate code for a [StoreInst], storing it at a `register + off`. `off` should only be
     /// non-zero if the [StoreInst] references a [PtrAddInst].
     fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
-        let (tgt_op, off) = match self.ptradds[usize::from(iidx)] {
+        let (tgt_op, off) = match self.ra.ptradd(iidx) {
             Some(x) => (x.ptr(self.m), x.off()),
             None => (inst.tgt(self.m), 0),
         };
@@ -1626,7 +1654,7 @@ impl<'a> Assemble<'a> {
         self.ra.expire_regs(g_iidx);
         self.comment(
             self.asm.offset(),
-            Inst::Guard(g_inst).display(g_iidx, self.m).to_string(),
+            Inst::Guard(g_inst).display(self.m, g_iidx).to_string(),
         );
         let fail_label = self.guard_to_deopt(&g_inst);
 
@@ -1791,12 +1819,11 @@ impl<'a> Assemble<'a> {
     /// # Arguments
     ///
     /// * `tgt_vars` - The target locations. If `None` use `self.loop_start_locs` instead.
-    fn write_jump_vars(&mut self, iidx: InstIdx, is_sidetrace: bool) {
-        let (tgt_vars, src_ops) = if is_sidetrace {
-            // Side-traces don't have a body and store these variables in `trace_header_end`.
-            (self.m.root_entry_vars(), self.m.trace_header_end())
-        } else {
-            (self.body_start_locs.as_slice(), self.m.trace_body_end())
+    fn write_jump_vars(&mut self, iidx: InstIdx) {
+        let (tgt_vars, src_ops) = match self.m.tracekind() {
+            TraceKind::HeaderOnly => (self.header_start_locs.as_slice(), self.m.trace_header_end()),
+            TraceKind::HeaderAndBody => (self.body_start_locs.as_slice(), self.m.trace_body_end()),
+            TraceKind::Sidetrace => (self.m.root_entry_vars(), self.m.trace_header_end()),
         };
         // If we pass in `None` use `self.loop_start_locs` instead. We need to do this since we
         // can't pass in `&self.loop_start_locs` directly due to borrowing restrictions.
@@ -1889,13 +1916,14 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_body_end(&mut self, iidx: InstIdx) {
+        debug_assert_eq!(self.m.tracekind(), TraceKind::HeaderAndBody);
         // Loop the JITted code if the `tloop_start` label is present (not relevant for IR created
         // by a test or a side-trace).
         let label = StaticLabel::global("tloop_start");
         match self.asm.labels().resolve_static(&label) {
             Ok(_) => {
                 // Found the label, emit a jump to it.
-                self.write_jump_vars(iidx, false);
+                self.write_jump_vars(iidx);
                 dynasm!(self.asm; jmp ->tloop_start);
             }
             Err(DynasmError::UnknownLabel(_)) => {
@@ -1917,9 +1945,10 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_sidetrace_end(&mut self, iidx: InstIdx, addr: *const libc::c_void) {
+        debug_assert_eq!(self.m.tracekind(), TraceKind::Sidetrace);
         // The end of a side-trace. Map live variables of this side-trace to the entry variables of
         // the root parent trace, then jump to it.
-        self.write_jump_vars(iidx, true);
+        self.write_jump_vars(iidx);
         self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
 
         dynasm!(self.asm
@@ -1944,60 +1973,81 @@ impl<'a> Assemble<'a> {
             };
             self.header_start_locs.push(loc);
         }
-        dynasm!(self.asm; ->reentry:);
+        match self.m.tracekind() {
+            TraceKind::HeaderOnly => {
+                dynasm!(self.asm; ->tloop_start:);
+            }
+            TraceKind::HeaderAndBody => {
+                dynasm!(self.asm; ->reentry:);
+            }
+            TraceKind::Sidetrace => todo!(),
+        }
         self.prologue_offset = self.asm.offset();
     }
 
-    fn cg_header_end(&mut self) {
-        // FIXME: This is a bit of a roundabout way of doing things. Especially, since it means
-        // that the [ParamInst]s in the trace body are just placeholders. While, since a recent
-        // change, the register allocator makes sure the values automatically end up in the
-        // [VarLocation]s expected by the loop start, this only works for registers right now. We
-        // can extend this to spill locations as well, but won't be able to do so for variables
-        // that have become constants during the trace header. So we will always have to either
-        // update the [ParamInst]s of the trace body, which isn't ideal since it requires the
-        // [Module] the be mutable. Or we do what we do below just for constants.
-        let mut varlocs = Vec::new();
-        for var in self.m.trace_header_end().iter() {
-            let varloc = self.op_to_var_location(var.unpack(self.m));
-            varlocs.push(varloc);
-        }
-        // Reset the register allocator before priming it with information about the trace body
-        // inputs.
-        self.ra.reset();
-        for (i, op) in self.m.trace_body_start().iter().enumerate() {
-            // By definition these can only be variables.
-            let iidx = match op.unpack(self.m) {
-                Operand::Var(iidx) => iidx,
-                _ => panic!(),
-            };
-            let varloc = varlocs[i];
-
-            // Write the varlocations from the head jump to the body start.
-            // FIXME: This is copied verbatim from `cg_param` and can be reused.
-            match varloc {
-                VarLocation::Register(reg_alloc::Register::GP(reg)) => {
-                    self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
-                }
-                VarLocation::Register(reg_alloc::Register::FP(reg)) => {
-                    self.ra.force_assign_inst_fp_reg(iidx, reg);
-                }
-                VarLocation::Direct { frame_off, size: _ } => {
-                    self.ra.force_assign_inst_direct(iidx, frame_off);
-                }
-                VarLocation::Stack { frame_off, size: _ } => {
-                    self.ra
-                        .force_assign_inst_indirect(iidx, i32::try_from(frame_off).unwrap());
-                }
-                VarLocation::ConstInt { bits, v } => {
-                    self.ra.assign_const(iidx, bits, v);
-                }
-                e => panic!("{:?}", e),
+    fn cg_header_end(&mut self, iidx: InstIdx) {
+        match self.m.tracekind() {
+            TraceKind::HeaderOnly => {
+                self.write_jump_vars(iidx);
+                dynasm!(self.asm; jmp ->tloop_start);
             }
+            TraceKind::HeaderAndBody => {
+                // FIXME: This is a bit of a roundabout way of doing things. Especially, since it means
+                // that the [ParamInst]s in the trace body are just placeholders. While, since a recent
+                // change, the register allocator makes sure the values automatically end up in the
+                // [VarLocation]s expected by the loop start, this only works for registers right now. We
+                // can extend this to spill locations as well, but won't be able to do so for variables
+                // that have become constants during the trace header. So we will always have to either
+                // update the [ParamInst]s of the trace body, which isn't ideal since it requires the
+                // [Module] the be mutable. Or we do what we do below just for constants.
+                let varlocs = self
+                    .m
+                    .trace_header_end()
+                    .iter()
+                    .map(|pop| self.op_to_var_location(pop.unpack(self.m)))
+                    .collect::<Vec<_>>();
+                // Reset the register allocator before priming it with information about the trace body
+                // inputs.
+                self.ra.reset(varlocs.as_slice());
+                for (i, op) in self.m.trace_body_start().iter().enumerate() {
+                    // By definition these can only be variables.
+                    let iidx = match op.unpack(self.m) {
+                        Operand::Var(iidx) => iidx,
+                        _ => panic!(),
+                    };
+                    let varloc = varlocs[i];
+
+                    // Write the varlocations from the head jump to the body start.
+                    // FIXME: This is copied verbatim from `cg_param` and can be reused.
+                    match varloc {
+                        VarLocation::Register(reg_alloc::Register::GP(reg)) => {
+                            self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
+                        }
+                        VarLocation::Register(reg_alloc::Register::FP(reg)) => {
+                            self.ra.force_assign_inst_fp_reg(iidx, reg);
+                        }
+                        VarLocation::Direct { frame_off, size: _ } => {
+                            self.ra.force_assign_inst_direct(iidx, frame_off);
+                        }
+                        VarLocation::Stack { frame_off, size: _ } => {
+                            self.ra.force_assign_inst_indirect(
+                                iidx,
+                                i32::try_from(frame_off).unwrap(),
+                            );
+                        }
+                        VarLocation::ConstInt { bits, v } => {
+                            self.ra.assign_const(iidx, bits, v);
+                        }
+                        e => panic!("{:?}", e),
+                    }
+                }
+            }
+            TraceKind::Sidetrace => todo!(),
         }
     }
 
     fn cg_body_start(&mut self) {
+        debug_assert_eq!(self.m.tracekind(), TraceKind::HeaderAndBody);
         debug_assert_eq!(self.body_start_locs.len(), 0);
         // Remember the locations of the live variables at the beginning of the trace loop. When we
         // loop back around here we need to write the live variables back into these same
@@ -2495,7 +2545,7 @@ enum Immediate {
 mod tests {
     use super::{Assemble, X64CompiledTrace};
     use crate::compile::{
-        jitc_yk::jit_ir::{self, Inst, Module, ParamIdx},
+        jitc_yk::jit_ir::{self, Inst, Module, ParamIdx, TraceKind},
         CompiledTrace,
     };
     use crate::location::{HotLocation, HotLocationKind};
@@ -2808,12 +2858,12 @@ mod tests {
             ",
             "
                 ...
-                ; %2: ptr = ptr_add %0, 64
-                ; %3: i64 = load %2
+                ; %1: ...
+                ; %3: i64 = load %0 + 64
                 mov r.64.x, [rbx+{{_}}]
                 ; %4: ptr = ptr_add %1, 32
                 lea r.64.y, [r.64.z+0x20]
-                ; %5: i64 = load %4
+                ; %5: i64 = load %1 + 32
                 mov r.64._, [r.64.z+0x20]
                 ...
                 ",
@@ -2837,12 +2887,11 @@ mod tests {
             ",
             "
                 ...
-                ; *%2 = 1i8
+                ; *(%0 + 64) = 1i8
                 mov byte ptr [rbx+{{_}}], 0x01
-                ; %4: ptr = ptr_add %1, 32
-                ; %5: i64 = load %4
+                ; %5: i64 = load %1 + 32
                 mov r.64.y, [r.64.x+0x20]
-                ; *%4 = 2i8
+                ; *(%1 + 32) = 2i8
                 mov byte ptr [r.64.x+0x20], 0x02
                 ...
                 ",
@@ -3984,12 +4033,13 @@ mod tests {
         );
     }
 
+    #[should_panic]
     #[test]
     fn unterminated_trace() {
         codegen_and_test(
             "
               entry:
-                 body_end []
+                 header_end []
                 ",
             "
                 ...
@@ -4006,13 +4056,13 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                body_start []
-                body_end []
+                header_start []
+                header_end []
             ",
             "
                 ...
-                ; body_start []
-                ; body_end []
+                ; header_start []
+                ; header_end []
                 jmp {{target}}
             ",
             false,
@@ -4025,20 +4075,20 @@ mod tests {
             "
               entry:
                 %0: i8 = param 0
-                body_start [%0]
+                header_start [%0]
                 %2: i8 = add %0, %0
                 black_box %2
-                body_end [%0]
+                header_end [%0]
             ",
             "
                 ...
                 ; %0: i8 = param ...
                 ...
-                ; body_start [%0]
+                ; header_start [%0]
                 ; %2: i8 = add %0, %0
                 {{_}} {{off}}: ...
                 ...
-                ; body_end [%0]
+                ; header_end [%0]
                 ...
                 {{_}} {{_}}: jmp 0x00000000{{off}}
             ",
@@ -4531,16 +4581,16 @@ mod tests {
             "
               entry:
                 %0: i8 = param 0
-                body_start [%0]
+                header_start [%0]
                 %2: i8 = 42i8
-                body_end [%2]
+                header_end [%2]
             ",
             "
                 ...
                 ; %0: i8 = param ...
                 ...
-                ; body_start [%0]
-                ; body_end [42i8]
+                ; header_start [%0]
+                ; header_end [42i8]
                 mov r.64.x, 0x2a
                 jmp ...
             ",
@@ -4578,7 +4628,7 @@ mod tests {
 
     #[test]
     fn cg_aliasing_params() {
-        let mut m = jit_ir::Module::new(0, 0).unwrap();
+        let mut m = jit_ir::Module::new(TraceKind::HeaderOnly, 0, 0).unwrap();
 
         // Create two trace paramaters whose locations alias.
         let loc = yksmp::Location::Register(13, 1, [].into());
