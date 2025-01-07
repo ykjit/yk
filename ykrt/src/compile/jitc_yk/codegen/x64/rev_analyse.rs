@@ -138,8 +138,9 @@ impl<'a> RevAnalyse<'a> {
 
     fn analyse(&mut self, iidx: InstIdx, inst: Inst) {
         if self.used_insts.get(usize::from(iidx)).unwrap()
+            || inst.is_internal_inst()
+            || inst.is_guard()
             || inst.has_store_effect(self.m)
-            || inst.is_barrier(self.m)
         {
             self.used_insts.set(usize::from(iidx), true);
 

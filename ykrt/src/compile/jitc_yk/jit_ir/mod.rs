@@ -400,11 +400,11 @@ impl Module {
     pub(crate) fn iter_skipping_insts(
         &self,
     ) -> impl DoubleEndedIterator<Item = (InstIdx, Inst)> + '_ {
-        // The `unchecked_from` is safe because we know from `Self::push` that we can't have
-        // exceeded `InstIdx`'s bounds.
         (0..self.insts.len()).filter_map(|i| {
             let inst = &self.insts[i];
             if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
+                // The `unchecked_from` is safe because we know from `Self::push` that we can't have
+                // exceeded `InstIdx`'s bounds.
                 Some((InstIdx::unchecked_from(i), *inst))
             } else {
                 None
@@ -1530,30 +1530,34 @@ impl Inst {
     /// Does this instruction have a store side effect?
     pub(crate) fn has_store_effect(&self, m: &Module) -> bool {
         match self {
+            #[cfg(test)]
+            Inst::BlackBox(_) => true,
             Inst::Copy(x) => m.inst_raw(*x).has_store_effect(m),
             Inst::Store(_) => true,
-            Inst::Call(_) | Inst::IndirectCall(_) => false,
+            Inst::Call(_) | Inst::IndirectCall(_) => true,
             _ => false,
         }
     }
 
-    /// Is this instruction a compiler barrier / fence? Our simple semantics are that barriers
-    /// cannot be reordered at all. Note that load/store effects are not considered
-    /// barriers.
-    pub(crate) fn is_barrier(&self, m: &Module) -> bool {
-        match self {
-            #[cfg(test)]
-            Inst::BlackBox(_) => true,
-            Inst::Copy(x) => m.inst_raw(*x).is_barrier(m),
-            Inst::Guard(_) => true,
-            Inst::Call(_) | Inst::IndirectCall(_) => true,
+    /// Is this instruction an "internal" trace instruction (e.g. `TraceHeaderStart` /
+    /// `TraceHeaderEnd`)? Such instructions must not be removed, and should be thought of as
+    /// similar to a barrier.
+    pub(crate) fn is_internal_inst(&self) -> bool {
+        matches!(
+            self,
             Inst::TraceHeaderStart
-            | Inst::TraceHeaderEnd
-            | Inst::TraceBodyStart
-            | Inst::TraceBodyEnd
-            | Inst::SidetraceEnd => true,
-            _ => false,
-        }
+                | Inst::TraceHeaderEnd
+                | Inst::TraceBodyStart
+                | Inst::TraceBodyEnd
+                | Inst::SidetraceEnd
+        )
+    }
+
+    /// Is this instruction a guard?
+    ///
+    /// This is a convenience function to allow an easy mirror of `is_internal_inst`.
+    pub(crate) fn is_guard(&self) -> bool {
+        matches!(self, Inst::Guard(_))
     }
 
     /// Apply the function `f` to each of this instruction's [Operand]s iff they are of type
@@ -2270,6 +2274,12 @@ impl LoadInst {
     pub(crate) fn tyidx(&self) -> TyIdx {
         self.tyidx
     }
+
+    /// Is this a volatile load?
+    pub(crate) fn is_volatile(&self) -> bool {
+        // FIXME: We don't yet record this in AOT?!
+        false
+    }
 }
 
 /// The `Param` instruction.
@@ -2531,6 +2541,10 @@ impl StoreInst {
     /// Returns the target operand: i.e. where to store [self.val()].
     pub(crate) fn tgt(&self, m: &Module) -> Operand {
         self.tgt.unpack(m)
+    }
+
+    pub(crate) fn is_volatile(&self) -> bool {
+        self.volatile
     }
 }
 

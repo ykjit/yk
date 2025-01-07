@@ -16,9 +16,11 @@ use super::{
 use crate::compile::CompilationError;
 
 mod analyse;
+mod heapvalues;
 mod instll;
 
-use analyse::Analyse;
+use analyse::{Analyse, Value};
+use heapvalues::Address;
 use instll::InstLinkedList;
 
 struct Opt {
@@ -103,7 +105,7 @@ impl Opt {
                             let Operand::Var(op_iidx) = bodyop.unpack(&self.m) else {
                                 panic!()
                             };
-                            self.an.set_value(op_iidx, Value::Const(cidx));
+                            self.an.set_value(&self.m, op_iidx, Value::Const(cidx));
                         }
                     }
                 }
@@ -447,6 +449,9 @@ impl Opt {
                         .replace(iidx, Inst::PtrAdd(PtrAddInst::new(x.ptr(&self.m), off)));
                 }
             }
+            Inst::Call(_) | Inst::IndirectCall(_) => {
+                self.an.heap_barrier();
+            }
             Inst::ICmp(x) => {
                 self.icmp(iidx, x);
             }
@@ -477,10 +482,8 @@ impl Opt {
                     let (Ty::Integer(src_bits), Ty::Integer(dst_bits)) = (src_ty, dst_ty) else {
                         unreachable!()
                     };
-                    let dst_val = match (src_bits, dst_bits) {
-                        (32, 64) => Const::Int(x.dest_tyidx(), src_val.sign_extend(32, 64)),
-                        _ => todo!("{src_bits} {dst_bits}"),
-                    };
+                    let dst_val =
+                        Const::Int(x.dest_tyidx(), src_val.sign_extend(*src_bits, *dst_bits));
                     let dst_cidx = self.m.insert_const(dst_val)?;
                     self.m.replace(iidx, Inst::Const(dst_cidx));
                 }
@@ -490,7 +493,69 @@ impl Opt {
                 // do so yet because of https://github.com/ykjit/yk/issues/1435.
                 if let yksmp::Location::Constant(v) = self.m.param(x.paramidx()) {
                     let cidx = self.m.insert_const(Const::Int(x.tyidx(), u64::from(*v)))?;
-                    self.an.set_value(iidx, Value::Const(cidx));
+                    self.an.set_value(&self.m, iidx, Value::Const(cidx));
+                }
+            }
+            Inst::Load(x) => {
+                if !x.is_volatile() {
+                    let tgt = self.an.op_map(&self.m, x.operand(&self.m));
+                    let bytesize = Inst::Load(x).def_byte_size(&self.m);
+                    match self.an.heapvalue(
+                        &self.m,
+                        Address::from_operand(&self.m, tgt.clone()),
+                        bytesize,
+                    ) {
+                        None => {
+                            self.an.push_heap_load(
+                                &self.m,
+                                Address::from_operand(&self.m, tgt),
+                                Operand::Var(iidx),
+                            );
+                        }
+                        Some(op) => {
+                            let (r_tyidx, r) = match op {
+                                Operand::Var(op_iidx) => (
+                                    self.m.inst_nocopy(op_iidx).unwrap().tyidx(&self.m),
+                                    Inst::Copy(op_iidx),
+                                ),
+                                Operand::Const(op_cidx) => {
+                                    (self.m.const_(op_cidx).tyidx(&self.m), Inst::Const(op_cidx))
+                                }
+                            };
+                            // OPT: If the next check fails, it means that type punning has
+                            // occurred. For example, on x64, we may have last seen a load of an
+                            // `i64`, but now that pointer is being used for a `ptr`. If the
+                            // program is well-formed, we can always deal with such punning. For
+                            // now, we simply don't optimise away the load.
+                            if self.m.inst_nocopy(iidx).unwrap().tyidx(&self.m) == r_tyidx {
+                                self.m.replace(iidx, r);
+                            }
+                        }
+                    };
+                }
+            }
+            Inst::Store(x) => {
+                if !x.is_volatile() {
+                    let tgt = self.an.op_map(&self.m, x.tgt(&self.m));
+                    let val = self.an.op_map(&self.m, x.val(&self.m));
+                    let is_dead = match self.an.heapvalue(
+                        &self.m,
+                        Address::from_operand(&self.m, tgt.clone()),
+                        val.byte_size(&self.m),
+                    ) {
+                        None => false,
+                        Some(Operand::Var(hv_iidx)) => Operand::Var(hv_iidx) == x.val(&self.m),
+                        Some(Operand::Const(hv_cidx)) => match val {
+                            Operand::Var(_) => false,
+                            Operand::Const(cidx) => self.m.const_(cidx) == self.m.const_(hv_cidx),
+                        },
+                    };
+                    if is_dead {
+                        self.m.replace(iidx, Inst::Tombstone);
+                    } else {
+                        self.an
+                            .push_heap_store(&self.m, Address::from_operand(&self.m, tgt), val);
+                    }
                 }
             }
             Inst::ZExt(x) => {
@@ -562,9 +627,11 @@ impl Opt {
             }
             Some(inst) => {
                 // We don't perform CSE on instructions that have / enforce effects.
+                debug_assert!(!inst.is_guard());
                 if inst.has_store_effect(&self.m)
+                    || inst.is_internal_inst()
                     || inst.has_load_effect(&self.m)
-                    || inst.is_barrier(&self.m)
+                    || inst.has_store_effect(&self.m)
                 {
                     return;
                 }
@@ -666,12 +733,6 @@ impl Opt {
             _ => unreachable!(),
         }
     }
-}
-
-#[derive(Clone, Debug)]
-enum Value {
-    Unknown,
-    Const(ConstIdx),
 }
 
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.
@@ -1310,6 +1371,285 @@ mod test {
             body_start [%0, %4, %3]
             %10: i8 = add %4, %3
             body_end [%0, %10, %3]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dead_load() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            %2: i8 = load %0
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            black_box %1
+            black_box %1
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            *%0 = %1
+            %3: i8 = load %0
+            black_box %1
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            black_box %1
+            black_box %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dead_load_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            %2: i1 = eq %1, 3i8
+            guard true, %2, []
+            %4: i8 = load %0
+            black_box %1
+            black_box %4
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            %2: i1 = eq %1, 3i8
+            guard true, %2, ...
+            black_box 3i8
+            black_box 3i8
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            *%0 = %1
+            %3: i8 = load %0
+            black_box %1
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            black_box %1
+            black_box %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dead_store() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            *%0 = %1
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            black_box %1
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            *%0 = %1
+            *%0 = %1
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            black_box %1
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            *%0 = %1
+            *%0 = 3i8
+            *%0 = %1
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            *%0 = 3i8
+            *%0 = %1
+            black_box %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dead_store_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            %2: i1 = eq %1, 3i8
+            guard true, %2, []
+            *%0 = 3i8
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            %2: i1 = eq %1, 3i8
+            guard true, %2, ...
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: i8 = load %0
+            %2: i1 = eq %1, 3i8
+            guard true, %2, []
+            *%0 = 2i8
+            *%0 = 3i8
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: i8 = load %0
+            %2: i1 = eq %1, 3i8
+            guard true, %2, ...
+            *%0 = 2i8
+            *%0 = 3i8
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: ptr = ptr_add %0, 8
+            %2: ptr = ptr_add %0, 9
+            %3: i8 = load %2
+            %4: i1 = eq %3, 3i8
+            guard true, %4, []
+            *%1 = 2i8
+            *%2 = 3i8
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: ptr = ptr_add %0, 8
+            %2: ptr = ptr_add %0, 9
+            %3: i8 = load %2
+            %4: i1 = eq %3, 3i8
+            guard true, %4, ...
+            *%1 = 2i8
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dead_store_overlap() {
+        // Check the inclusive/exclusive ranges
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: ptr = ptr_add %0, 8
+            %2: ptr = ptr_add %0, 16
+            *%1 = 1i64
+            *%2 = 1i64
+            *%1 = 1i64
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: ptr = ptr_add %0, 8
+            %2: ptr = ptr_add %0, 16
+            *%1 = 1i64
+            *%2 = 1i64
+            black_box %1
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param 0
+            %1: ptr = ptr_add %0, 1
+            %2: ptr = ptr_add %0, 8
+            *%1 = 1i8
+            *%2 = 1i64
+            *%1 = 1i8
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: ptr = ptr_add %0, 1
+            %2: ptr = ptr_add %0, 8
+            *%1 = 1i8
+            *%2 = 1i64
+            *%1 = 1i8
+            black_box %1
         ",
         );
     }
