@@ -27,7 +27,7 @@ pub struct ControlPointTransition {
     pub exec_trace_fn: ExecTraceFn,
 }
 
-static VERBOSE: bool = false;
+static VERBOSE: bool = true;
 static STACK_SANDWITCH: bool = false;
 
 // Based on __ykrt_control_point
@@ -111,32 +111,51 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
     if opt_pinfo.hasfp {
         opt_frame_size -= REG64_BYTESIZE;
     }
+    dynasm!(asm
+        ; .arch x64
+        ; int3
+    );
     if VERBOSE {
         println!(
             "@@ unopt_frame_size: 0x{:x}, opt_frame_size: 0x{:x}",
             unopt_frame_size, opt_frame_size
         );
     }
+    let mut src_rbp = frameaddr as i64;
+    let mut dst_rbp = 0;
     if STACK_SANDWITCH {
         // Transition from Unopt -> Opt
         if src_smid == ControlPointStackMapId::UnOpt && dst_smid == ControlPointStackMapId::Opt {
+            dst_rbp = src_rbp - 8 - opt_frame_size as i64;
+            // Stack Diagram:
+            // +---------------------------------+ <- Higher Memory Addresses
+            // |       ... Previous ...          |
+            // +---------------------------------+
+            // |       Unoptimized Frame         |
+            // +---------------------------------+
+            // |       Unoptimised rbp           |
+            // +---------------------------------+
+            // |       New Frame Pointer (`rbp`) |
+            // +---------------------------------+
+            // |       Optimized Frame           |
+            // +---------------------------------+
             dynasm!(asm
                 ; .arch x64
                 // ; int3
-                ; mov rbp, QWORD frameaddr as i64                   // src - set rbp
-                ; mov rsp, QWORD frameaddr as i64                   // src - set rsp
-                ; sub rsp, (unopt_frame_size).try_into().unwrap()   // src - alloc stack frame
+                ; mov rbp, QWORD frameaddr as i64                   // set rbp
+                ; mov rsp, QWORD frameaddr as i64                   // set rsp
+                ; sub rsp, (unopt_frame_size).try_into().unwrap()   // alloc stack frame
                 ; push rbp                                          // dst - save src rbp
-                ; push rbp                                          // dst - save src rbp another time
                 ; mov rbp, rsp                                      // dst - set rbp
                 ; sub rsp, (opt_frame_size).try_into().unwrap()     // dst - alloc stack frame
             );
         }
         // Revert the stack sandwich
         if src_smid == ControlPointStackMapId::Opt && dst_smid == ControlPointStackMapId::UnOpt {
+            dst_rbp = src_rbp + opt_frame_size as i64;
             dynasm!(asm
                 ; .arch x64
-                ; int3
+                // ; int3
                 ; add rsp, (opt_frame_size).try_into().unwrap() // remove the frame allocated under the opt frame
                 ; pop rbp                                        // restore the original rbp
             );
@@ -304,10 +323,20 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                         let src_offset = i32::try_from(*src_off).unwrap();
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *dst_val_size {
-                            1 => dynasm!(asm; mov Rb(dst_reg), BYTE [rbp + src_offset]),
-                            2 => dynasm!(asm; mov Rw(dst_reg), WORD [rbp + src_offset]),
-                            4 => dynasm!(asm; mov Rd(dst_reg), DWORD [rbp + src_offset]),
-                            8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp + src_offset]),
+                            1 => dynasm!(asm; mov Rb(dst_reg), BYTE [rbp - src_offset]),
+                            2 => dynasm!(asm; mov Rw(dst_reg), WORD [rbp - src_offset]),
+                            4 => dynasm!(asm; mov Rd(dst_reg), DWORD [rbp - src_offset]),
+                            8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp - src_offset]),
+                            _ => panic!("Unsupported source value size: {}", src_val_size),
+                        }
+                    }
+                    Direct(src_reg_num, src_off, src_val_size) => {
+                        let dst_reg = u8::try_from(*dst_reg_num).unwrap();
+                        match *dst_val_size {
+                            // 1 => dynasm!(asm; mov Rb(dst_reg), BYTE rbp - src_offset),
+                            // 2 => dynasm!(asm; mov Rw(dst_reg), WORD rbp - src_offset),
+                            // 4 => dynasm!(asm; mov Rd(dst_reg), DWORD rbp - src_offset),
+                            8 => dynasm!(asm; lea Rq(dst_reg), [rbp - src_off]),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
@@ -326,11 +355,11 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
 
     if VERBOSE {
         println!(
-            "@@ dst_size: 0x{:x}, dst_rbp: 0x{:x}, dst addr: 0x{:x}",
+            "@@ dst_size: 0x{:x}, dst_rbp: 0x{:x}, dst_addr: 0x{:x}",
             dst_rec.size as i64, frameaddr as i64, dst_rec.offset
         );
         println!(
-            "@@ src_size: 0x{:x}, src_rbp: 0x{:x}, src addr: 0x{:x}",
+            "@@ src_size: 0x{:x}, src_rbp: 0x{:x}, src_addr: 0x{:x}",
             src_rec.size as i64, frameaddr as i64, src_rec.offset
         );
     }
@@ -339,6 +368,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
         dynasm!(asm
             ; .arch x64
+            // ; int3
             // ; add rsp, TOTAL_STACK_ADJUSTMENT // reserves 128 bytes of space on the stack.
             ; sub rsp, 16 // reserves 16 bytes of space on the stack.
             ; mov [rsp], rax // save rsp
@@ -356,7 +386,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
             ; mov rsi, QWORD rsp as i64    // Second argument
             ; mov rdx, QWORD trace_addr as i64          // Third argument
             ; mov rcx, QWORD exec_trace_fn as i64         // Move function pointer to rcx
-            ; call rcx // Call the function
+            ; call rcx // Call the function - we don't care about rcx because its overriden in the exec_trace_fn
         );
     }
     // TODO: if the flag is false return to the caller
