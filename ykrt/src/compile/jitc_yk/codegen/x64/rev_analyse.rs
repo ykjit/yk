@@ -260,7 +260,7 @@ impl<'a> RevAnalyse<'a> {
         let mut gp_regs = ARG_GP_REGS.iter();
         let mut fp_regs = ARG_FP_REGS.iter();
         for aidx in cinst.iter_args_idx() {
-            match self.m.type_(self.m.arg(aidx).tyidx(&self.m)) {
+            match self.m.type_(self.m.arg(aidx).tyidx(self.m)) {
                 Ty::Void => unreachable!(),
                 Ty::Integer(_) | Ty::Ptr => {
                     if let Some(reg) = gp_regs.next() {

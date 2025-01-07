@@ -963,7 +963,7 @@ impl LSRegAlloc<'_> {
         &mut self,
         asm: &mut Assembler,
         iidx: InstIdx,
-        constraints: [RegConstraint<Rx>; N],
+        mut constraints: [RegConstraint<Rx>; N],
     ) -> [Rx; N] {
         // All constraint operands should be float-typed.
         #[cfg(debug_assertions)]
@@ -1028,6 +1028,35 @@ impl LSRegAlloc<'_> {
         for cnstr in &constraints {
             if let RegConstraint::OutputCanBeSameAsInput(_) = cnstr {
                 todo!();
+            }
+        }
+
+        // If we have a hint for a constraint, use it.
+        for (i, cnstr) in constraints.iter_mut().enumerate() {
+            match cnstr {
+                RegConstraint::Output
+                | RegConstraint::OutputCanBeSameAsInput(_)
+                | RegConstraint::InputOutput(_) => {
+                    if let Some(reg_alloc::Register::FP(reg)) =
+                        self.rev_an.reg_hints[usize::from(iidx)]
+                    {
+                        if !avoid.is_set(reg) {
+                            *cnstr = match cnstr {
+                                RegConstraint::Output => RegConstraint::OutputFromReg(reg),
+                                RegConstraint::OutputCanBeSameAsInput(_) => {
+                                    RegConstraint::OutputFromReg(reg)
+                                }
+                                RegConstraint::InputOutput(op) => {
+                                    RegConstraint::InputOutputIntoReg(op.clone(), reg)
+                                }
+                                _ => unreachable!(),
+                            };
+                            asgn[i] = Some(reg);
+                            avoid.set(reg);
+                        }
+                    }
+                }
+                _ => (),
             }
         }
 
