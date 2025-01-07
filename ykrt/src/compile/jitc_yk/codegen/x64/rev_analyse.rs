@@ -13,9 +13,12 @@
 //!      to use `dead_code.rs` as well.
 
 use super::reg_alloc::{Register, VarLocation};
-use crate::compile::jitc_yk::jit_ir::{
-    BinOp, BinOpInst, DynPtrAddInst, ICmpInst, Inst, InstIdx, LoadInst, Module, Operand,
-    PtrAddInst, SExtInst, SelectInst, StoreInst, TraceKind, TruncInst, ZExtInst,
+use crate::compile::jitc_yk::{
+    codegen::x64::{ARG_FP_REGS, ARG_GP_REGS},
+    jit_ir::{
+        BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, ICmpInst, Inst, InstIdx, LoadInst, Module,
+        Operand, PtrAddInst, SExtInst, SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
+    },
 };
 use dynasmrt::x64::Rq;
 use vob::Vob;
@@ -149,6 +152,7 @@ impl<'a> RevAnalyse<'a> {
                     // These are handled in [Self::analyse_header] or [Self::analyse_body].
                 }
                 Inst::BinOp(x) => self.an_binop(iidx, x),
+                Inst::Call(x) => self.an_call(iidx, x),
                 Inst::ICmp(x) => self.an_icmp(iidx, x),
                 Inst::PtrAdd(x) => self.an_ptradd(iidx, x),
                 Inst::DynPtrAdd(x) => self.an_dynptradd(iidx, x),
@@ -249,6 +253,28 @@ impl<'a> RevAnalyse<'a> {
                 }
             },
             _ => (),
+        }
+    }
+
+    fn an_call(&mut self, _: InstIdx, cinst: DirectCallInst) {
+        let mut gp_regs = ARG_GP_REGS.iter();
+        let mut fp_regs = ARG_FP_REGS.iter();
+        for aidx in cinst.iter_args_idx() {
+            match self.m.type_(self.m.arg(aidx).tyidx(&self.m)) {
+                Ty::Void => unreachable!(),
+                Ty::Integer(_) | Ty::Ptr => {
+                    if let Some(reg) = gp_regs.next() {
+                        self.push_reg_hint_fixed(self.m.arg(aidx), Register::GP(*reg));
+                    }
+                }
+                Ty::Func(_) => todo!(),
+                Ty::Float(_) => {
+                    if let Some(reg) = fp_regs.next() {
+                        self.push_reg_hint_fixed(self.m.arg(aidx), Register::FP(*reg));
+                    }
+                }
+                Ty::Unimplemented(_) => panic!(),
+            }
         }
     }
 
