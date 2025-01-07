@@ -17,7 +17,6 @@ pub enum ControlPointStackMapId {
     Opt = 1,
 }
 
-
 pub struct ControlPointTransition {
     pub src_smid: ControlPointStackMapId,
     pub dst_smid: ControlPointStackMapId,
@@ -29,7 +28,7 @@ pub struct ControlPointTransition {
 }
 
 static VERBOSE: bool = false;
-static stack_sandwich: bool = false;
+static STACK_SANDWITCH: bool = false;
 
 // Based on __ykrt_control_point
 // "push rax",
@@ -81,13 +80,17 @@ pub(crate) type ExecTraceFn = unsafe extern "C" fn(
 ) -> !;
 
 pub unsafe fn control_point_transition(transition: ControlPointTransition) {
-    let ControlPointTransition { src_smid, dst_smid, frameaddr, rsp, trace_addr, exec_trace, exec_trace_fn} = transition;
-
+    let ControlPointTransition {
+        src_smid,
+        dst_smid,
+        frameaddr,
+        rsp,
+        trace_addr,
+        exec_trace,
+        exec_trace_fn,
+    } = transition;
     let frameaddr = frameaddr as usize;
-
     let mut asm = Assembler::new().unwrap();
-    // TODO: find the pushed registers in the control point
-
     let (src_rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid as usize);
     let (dst_rec, dst_rec_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid as usize);
 
@@ -108,38 +111,36 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
     if opt_pinfo.hasfp {
         opt_frame_size -= REG64_BYTESIZE;
     }
-    // breakpoint before the stack adjustment
-    // dynasm!(asm; .arch x64; int3);
     if VERBOSE {
         println!(
             "@@ unopt_frame_size: 0x{:x}, opt_frame_size: 0x{:x}",
             unopt_frame_size, opt_frame_size
         );
     }
-    if stack_sandwich {
-        // Unopt -> Opt
-        // if src_smid == ControlPointStackMapId::UnOpt && dst_smid == ControlPointStackMapId::Opt {
-        //     dynasm!(asm
-        //         ; .arch x64
-        //         // ; int3
-        //         ; mov rbp, QWORD frameaddr as i64                   // src - set rbp
-        //         ; mov rsp, QWORD frameaddr as i64                   // src - set rsp
-        //         ; sub rsp, (unopt_frame_size).try_into().unwrap()   // src - alloc stack frame
-        //         ; push rbp                                          // dst - save src rbp
-        //         ; push rbp                                          // dst - save src rbp another time
-        //         ; mov rbp, rsp                                      // dst - set rbp
-        //         ; sub rsp, (opt_frame_size).try_into().unwrap()     // dst - alloc stack frame
-        //     );
-        // }
-        // // Revert the stack sandwich
-        // if src_smid == ControlPointStackMapId::Opt && dst_smid == ControlPointStackMapId::UnOpt {
-        //     dynasm!(asm
-        //         ; .arch x64
-        //         ; int3
-        //         ; add rsp, (opt_frame_size).try_into().unwrap() // remove the frame allocated under the opt frame
-        //         ; pop rbp                                        // restore the original rbp
-        //     );
-        // }
+    if STACK_SANDWITCH {
+        // Transition from Unopt -> Opt
+        if src_smid == ControlPointStackMapId::UnOpt && dst_smid == ControlPointStackMapId::Opt {
+            dynasm!(asm
+                ; .arch x64
+                // ; int3
+                ; mov rbp, QWORD frameaddr as i64                   // src - set rbp
+                ; mov rsp, QWORD frameaddr as i64                   // src - set rsp
+                ; sub rsp, (unopt_frame_size).try_into().unwrap()   // src - alloc stack frame
+                ; push rbp                                          // dst - save src rbp
+                ; push rbp                                          // dst - save src rbp another time
+                ; mov rbp, rsp                                      // dst - set rbp
+                ; sub rsp, (opt_frame_size).try_into().unwrap()     // dst - alloc stack frame
+            );
+        }
+        // Revert the stack sandwich
+        if src_smid == ControlPointStackMapId::Opt && dst_smid == ControlPointStackMapId::UnOpt {
+            dynasm!(asm
+                ; .arch x64
+                ; int3
+                ; add rsp, (opt_frame_size).try_into().unwrap() // remove the frame allocated under the opt frame
+                ; pop rbp                                        // restore the original rbp
+            );
+        }
     } else {
         let mut dest_rsp = opt_frame_size;
         if dst_smid == ControlPointStackMapId::UnOpt {
@@ -333,7 +334,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
             src_rec.size as i64, frameaddr as i64, src_rec.offset
         );
     }
-    if !exec_trace  {
+    if !exec_trace {
         let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
         let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
         dynasm!(asm
@@ -347,7 +348,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
             // ; int3 // breakpoint
             ; ret // loads 8 bytes from rsp and jumps to it
         );
-    }else{
+    } else {
         // Move the arguments into the appropriate registers
         dynasm!(asm
             ; .arch x64
@@ -364,7 +365,6 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
     let func: unsafe fn() = std::mem::transmute(buffer.as_ptr());
     func();
 }
-
 
 // Example:
 //  CP Record offset points to 0x00000000002023a4, we want to find the
@@ -445,73 +445,3 @@ mod tests {
         Ok(())
     }
 }
-
-// Original code
-// dynasm!(asm
-//     ; .arch x64
-//     ; push r15    // 15 - offset 120
-//     ; push r14    // 14 - offset 112
-//     ; push r13    // 13 - offset 104
-//     ; push r12    // 12 - offset 96
-//     ; push r11    // 11 - offset 88
-//     ; push r10    // 10 - offset 80
-//     ; push r9     // 9 - offset 72
-//     ; push r8     // 8 - offset 64
-//     ; sub rsp, 16 // Allocates 16 bytes of padding for rsp and rbp
-//     ; push rsi    // 5 - offset 40
-//     ; push rdi    // 4 - offset 32
-//     ; push rbx    // 3 - offset 24
-//     ; push rcx    // 2 - offset 16
-//     ; push rdx    // 1 - offset 8
-//     ; push rax    // 0 - offset 0
-// );
-
-// let rsp_offset = -128;
-// const TOTAL_STACK_ADJUSTMENT: i32 = 16 * 8;
-// dynasm!(asm
-//     ; .arch x64
-
-//     ; sub rsp, TOTAL_STACK_ADJUSTMENT
-//     ; int3
-//     // mov r15
-//     ; mov rax, [rsp + rsp_offset + 0x0]
-//     ; mov QWORD [rsp + 0x78], rax
-//     // mov r14
-//     ; mov rax, [rsp + rsp_offset + 0x8]
-//     ; mov QWORD [rsp + 0x70], rax
-//     // mov r13
-//     ; mov rax, [rsp + rsp_offset + 0x10]
-//     ; mov QWORD [rsp + 0x68], rax
-//     // mov r12
-//     ; mov rax, [rsp + rsp_offset + 0x18]
-//     ; mov QWORD [rsp + 0x60], rax
-//     // mov r11
-//     ; mov rax, [rsp + rsp_offset + 0x20]
-//     ; mov QWORD [rsp + 0x58], rax
-//     // mov r10
-//     ; mov rax, [rsp + rsp_offset + 0x28]
-//     ; mov QWORD [rsp + 0x50], rax
-//     // mov r9
-//     ; mov rax, [rsp + rsp_offset + 0x30]
-//     ; mov QWORD [rsp + 0x48], rax
-//     // mov r8
-//     ; mov rax, [rsp + rsp_offset + 0x38]
-//     ; mov QWORD [rsp + 0x40], rax
-//     ; sub rsp, 16 // Allocates 16 bytes of padding for rsp and rbp
-//     // mov rsi
-//     ; mov rax, [rsp + rsp_offset + 0x40]
-//     ; mov QWORD [rsp + 0x28], rax
-//     // mov rdi
-//     ; mov rax, [rsp + rsp_offset + 0x48]
-//     ; mov QWORD [rsp + 0x20], rax
-//     // mov rbx
-//     ; mov rax, [rsp + rsp_offset + 0x50]
-//     ; mov QWORD [rsp + 0x18], rax
-//     // mov rcx
-//     ; mov rax, [rsp + rsp_offset + 0x58]
-//     ; mov QWORD [rsp + 0x10], rax
-//     // Note: rdx is not saved
-//     // ; mov QWORD [rsp + 0x8], 0x0
-//     ; mov rax, [rsp + rsp_offset + 0x60]
-//     ; mov QWORD [rsp + 0x0], rax
-// );
