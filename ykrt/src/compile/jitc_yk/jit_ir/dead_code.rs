@@ -13,8 +13,9 @@ impl Module {
         let mut tombstone = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
         for (iidx, inst) in self.iter_skipping_insts().rev() {
             if used.get(usize::from(iidx)).unwrap()
+                || inst.is_internal_inst()
+                || inst.is_guard()
                 || inst.has_store_effect(self)
-                || inst.is_barrier(self)
             {
                 used.set(usize::from(iidx), true);
                 inst.map_operand_vars(self, &mut |x| {

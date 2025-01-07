@@ -80,7 +80,7 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "GUARD" "FALSE" "," Operand "," "[" OperandsList "]" {
       Ok(ASTInst::Guard{cond: $4?, is_true: false, operands: $7?})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "PARAM" "UINT" {
+  | "LOCAL_OPERAND" ":" Type "=" "PARAM" "INT" {
       Ok(ASTInst::Param{assign: $1?.span(), type_: $3?, tiidx: $6?.span()})
     }
   | "LOCAL_OPERAND" ":" Type "=" BinOp Operand "," Operand  {
@@ -110,10 +110,10 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand "," "VOLATILE" {
       Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?, volatile: true})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "PTR_ADD" Operand "," "UINT" {
+  | "LOCAL_OPERAND" ":" Type "=" "PTR_ADD" Operand "," "INT" {
       Ok(ASTInst::PtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, off: $8?.span()})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "DYN_PTR_ADD" Operand "," Operand "," "UINT" {
+  | "LOCAL_OPERAND" ":" Type "=" "DYN_PTR_ADD" Operand "," Operand "," "INT" {
       Ok(ASTInst::DynPtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, num_elems: $8?, elem_size: $10?.span()})
     }
   | "LOCAL_OPERAND" ":" Type "=" "SEXT" Operand {
