@@ -4,6 +4,7 @@ set breakpoint pending on
 # break ykrt::trace::swt::cp::debug_return_into_unopt_cp
 # break ykrt::trace::swt::cp::debug_return_into_opt_cp
 
+break ykrt::trace::mt
 # break __yk_clone_main
 break main
 # break /home/pd/yk-fork/tests/c/simple.c:44.c:17
@@ -15,3 +16,5 @@ break *0x0000000000202b9a
 break *0x0000000000202b9d
 
 break ykrt/src/mt.rs:428
+
+# break ykcapi::__ykrt_control_point_real
