@@ -131,7 +131,7 @@ pub extern "C" fn __ykrt_control_point_real(
         let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
         let arc = unsafe { Arc::from_raw(mt) };
-        let jump = arc.control_point(loc, frameaddr, smid);
+        arc.control_point(loc, frameaddr, smid);
         forget(arc);
     }
 }

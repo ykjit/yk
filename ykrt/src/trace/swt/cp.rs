@@ -185,7 +185,9 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         }
         assert!(
             src_rec.live_vars.len() == dst_rec.live_vars.len(),
-            "Expected single register location"
+            "Expected single register location, got src: {} and dst: {}",
+            src_rec.live_vars.len(),
+            dst_rec.live_vars.len()
         );
 
         let src_location = &src_var.get(0).unwrap();
