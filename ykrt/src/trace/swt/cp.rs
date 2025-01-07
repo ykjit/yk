@@ -28,7 +28,7 @@ pub struct ControlPointTransition {
     pub exec_trace_fn: ExecTraceFn,
 }
 
-static verbose: bool = false;
+static VERBOSE: bool = false;
 static stack_sandwich: bool = false;
 
 // Based on __ykrt_control_point
@@ -68,7 +68,7 @@ fn reg_num_to__ykrt_control_point_stack_offset(dwarf_reg_num: u16) -> i32 {
         15 => 0x0,  // r15
         _ => panic!("Unsupported register {}", dwarf_reg_num),
     };
-    if verbose {
+    if VERBOSE {
         println!("@@ reg: {}, offset: 0x{:x}", dwarf_reg_num, offset);
     }
     return offset;
@@ -110,7 +110,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
     }
     // breakpoint before the stack adjustment
     // dynasm!(asm; .arch x64; int3);
-    if verbose {
+    if VERBOSE {
         println!(
             "@@ unopt_frame_size: 0x{:x}, opt_frame_size: 0x{:x}",
             unopt_frame_size, opt_frame_size
@@ -146,7 +146,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
             dest_rsp = unopt_frame_size;
         }
 
-        if verbose {
+        if VERBOSE {
             println!(
                 "@@ rsp: 0x{:x}, rbp: 0x{:x}",
                 frameaddr as u64 - dest_rsp as u64,
@@ -162,7 +162,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         );
     }
 
-    if verbose {
+    if VERBOSE {
         println!(
             "@@ from {:?} to {:?} live var count: {}",
             src_smid,
@@ -192,7 +192,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
 
         let src_location = &src_var.get(0).unwrap();
         let dst_location = &dst_var.get(0).unwrap();
-        if verbose {
+        if VERBOSE {
             println!(
                 "@@ dst_location: {:?}, src_location: {:?}",
                 dst_location, src_location
@@ -323,7 +323,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         }
     }
 
-    if verbose {
+    if VERBOSE {
         println!(
             "@@ dst_size: 0x{:x}, dst_rbp: 0x{:x}, dst addr: 0x{:x}",
             dst_rec.size as i64, frameaddr as i64, dst_rec.offset
