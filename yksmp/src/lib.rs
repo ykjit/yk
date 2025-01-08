@@ -45,7 +45,7 @@ impl Record {
 }
 
 /// Describes where live variables are stored at specific times during execution.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Location {
     /// The live variable is stored in a register. Note, that LLVM's stackmap only stores one
     /// location per live variable, which is enough for reading them out. For deoptimisation
@@ -64,7 +64,7 @@ pub enum Location {
     /// pointer. To get the value, we first need to compute the pointer via `rbp - offset` and then
     /// dereference it. For example, the following C-code is likely going to produce an indirect
     /// variable:
-    /// ```
+    /// ```ignore
     /// int x = 0;
     /// control_point()   // Live vars: [x]
     /// printf("%p", &x); // Forces x to be stack allocated.
@@ -79,7 +79,7 @@ pub enum Location {
     /// value itself is a pointer to the stack. This avoids having to spill the variable to the
     /// stack. For example, the following C-code is likely to produce a direct location if there
     /// are no more free registers available:
-    /// ```
+    /// ```ignore
     /// ...
     /// int x = 0;
     /// int* y = &x;

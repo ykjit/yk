@@ -232,8 +232,12 @@ pub(crate) extern "C" fn __yk_deopt(
                 VarLocation::ConstInt { bits: _, v } => v,
                 VarLocation::ConstFloat(f) => f.to_bits(),
                 VarLocation::ConstPtr(v) => u64::try_from(v).unwrap(),
-                VarLocation::Direct { .. } => {
+                VarLocation::Direct { frame_off, size } => {
                     // See comment below: this case never needs to do anything.
+                    debug_assert_eq!(
+                        *aotvar.get(0).unwrap(),
+                        SMLocation::Direct(6, frame_off, u16::try_from(size).unwrap())
+                    );
                     varidx += 1;
                     continue;
                 }
