@@ -82,4 +82,12 @@ long long __yk_promote_c_long_long(long long);
 // Rust defines `usize` to be layout compatible with `uintptr_t`.
 uintptr_t __yk_promote_usize(uintptr_t);
 
+/// Insert a debugging string.
+///
+/// When a call to this function is traced, the dynamic value of `msg` will be
+/// shown when the trace is displayed.
+///
+/// `msg` must be a pointer to a UTF-8 compatible string.
+void yk_debug_str(char *fmt, ...);
+
 #endif

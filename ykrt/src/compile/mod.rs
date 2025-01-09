@@ -49,6 +49,7 @@ pub(crate) trait Compiler: Send + Sync {
         aottrace_iter: Box<dyn AOTTraceIterator>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
+        debug_strs: Vec<String>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 
     /// Compile a mapped root trace into machine code.
@@ -59,6 +60,7 @@ pub(crate) trait Compiler: Send + Sync {
         sti: Arc<dyn SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
+        debug_strs: Vec<String>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 

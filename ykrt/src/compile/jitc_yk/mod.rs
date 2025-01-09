@@ -132,6 +132,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         sti: Option<Arc<dyn SideTraceInfo>>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
+        debug_strs: Vec<String>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         // If either `unwrap` fails, there is no chance of the system working correctly.
         let aot_mod = &*AOT_MOD;
@@ -154,6 +155,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
             aottrace_iter,
             sti,
             promotions,
+            debug_strs,
         )?;
 
         if should_log_ir(IRPhase::PreOpt) {
@@ -201,8 +203,9 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
         aottrace_iter: Box<dyn AOTTraceIterator>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
+        debug_strs: Vec<String>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        self.compile(mt, aottrace_iter, None, hl, promotions)
+        self.compile(mt, aottrace_iter, None, hl, promotions, debug_strs)
     }
 
     fn sidetrace_compile(
@@ -212,8 +215,9 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
         sti: Arc<dyn SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
+        debug_strs: Vec<String>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        self.compile(mt, aottrace_iter, Some(sti), hl, promotions)
+        self.compile(mt, aottrace_iter, Some(sti), hl, promotions, debug_strs)
     }
 }
 

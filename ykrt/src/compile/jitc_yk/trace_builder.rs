@@ -40,6 +40,11 @@ pub(crate) struct TraceBuilder<Register: Send + Sync> {
     /// The trace's current position in the promotions array.
     promote_idx: usize,
     phantom: PhantomData<Register>,
+    /// The dynamically recorded debug strings, in the order that the corresponding
+    /// `yk_debug_str()` calls were encountered in the trace.
+    debug_strs: Vec<String>,
+    /// The trace's current position in the [Self::debug_strs] vector.
+    debug_str_idx: usize,
 }
 
 impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
@@ -49,11 +54,13 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
     ///  - `aot_mod`: The AOT IR module that the trace flows through.
     ///  - `mtrace`: The mapped trace.
     ///  - `promotions`: Values promoted to constants during runtime.
+    ///  - `debug_archors`: Debug strs recorded during runtime.
     fn new(
         tracekind: TraceKind,
         ctr_id: u64,
         aot_mod: &'static Module,
         promotions: Box<[u8]>,
+        debug_strs: Vec<String>,
     ) -> Result<Self, CompilationError> {
         Ok(Self {
             aot_mod,
@@ -74,6 +81,8 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             promotions,
             promote_idx: 0,
             phantom: PhantomData,
+            debug_strs,
+            debug_str_idx: 0,
         })
     }
 
@@ -140,23 +149,33 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         Ok(())
     }
 
-    /// Process promotions inside an otherwise outlined block.
-    fn process_promotions_only(&mut self, bid: &aot_ir::BBlockId) -> Result<(), CompilationError> {
+    /// Process (skip) promotions and debug strings inside an otherwise outlined block.
+    fn process_promotions_and_debug_strs_only(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+    ) -> Result<(), CompilationError> {
         let blk = self.aot_mod.bblock(bid);
 
         for inst in blk.insts.iter() {
-            if let aot_ir::Inst::Promote {
-                val: aot_ir::Operand::LocalVariable(_),
-                tyidx,
-                ..
-            } = inst
-            {
-                let width_bits = match self.aot_mod.type_(*tyidx) {
-                    aot_ir::Ty::Integer(x) => x.bitw(),
-                    _ => unreachable!(),
-                };
-                let width_bytes = usize::try_from(width_bits.div_ceil(8)).unwrap();
-                self.promote_idx += width_bytes;
+            match inst {
+                aot_ir::Inst::Promote {
+                    val: aot_ir::Operand::LocalVariable(_),
+                    tyidx,
+                    ..
+                } => {
+                    // Consume the correct number of bytes from the promoted values array.
+                    let width_bits = match self.aot_mod.type_(*tyidx) {
+                        aot_ir::Ty::Integer(x) => x.bitw(),
+                        _ => unreachable!(),
+                    };
+                    let width_bytes = usize::try_from(width_bits.div_ceil(8)).unwrap();
+                    self.promote_idx += width_bytes;
+                }
+                aot_ir::Inst::DebugStr { .. } => {
+                    // Skip this debug string.
+                    self.debug_str_idx += 1;
+                }
+                _ => (),
             }
         }
         Ok(())
@@ -288,6 +307,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                     self.handle_promote(bid, iidx, val, safepoint, tyidx, nextinst)
                 }
                 aot_ir::Inst::FNeg { val } => self.handle_fneg(bid, iidx, val),
+                aot_ir::Inst::DebugStr { .. } => {
+                    let nextinst = blk.insts.last().unwrap();
+                    self.handle_debug_str(bid, iidx, nextinst)
+                }
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -673,24 +696,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         // "yk_outline". For now we have to be conservative here and outline all indirect calls.
         // One solution would be to stop including the AOT IR for functions annotated with
         // "yk_outline". Any mappable, indirect call is then guaranteed to be inline safe.
-
-        match nextinst {
-            aot_ir::Inst::Br { succ } => {
-                // We can only stop outlining when we see the succesor block and we are not in
-                // the middle of recursion.
-                let succbid = BBlockId::new(bid.funcidx(), *succ);
-                self.outline_target_blk = Some(succbid);
-                self.recursion_count = 0;
-            }
-            aot_ir::Inst::CondBr { .. } => {
-                // Currently, the successor of a call is always an unconditional branch due to
-                // the block spitting pass. However, there's a FIXME in that pass which could
-                // lead to conditional branches showing up here. Leave a todo here so we know
-                // when this happens.
-                todo!()
-            }
-            _ => panic!(),
-        }
+        self.outline_until_after_call(bid, nextinst);
 
         let jit_callop = self.handle_operand(callop)?;
         let jit_tyidx = self.handle_type(self.aot_mod.type_(*ftyidx))?;
@@ -770,23 +776,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
             // call) or the compiler annotated it with `yk_outline`.
-            match nextinst {
-                aot_ir::Inst::Br { succ } => {
-                    // We can only stop outlining when we see the succesor block and we are not in
-                    // the middle of recursion.
-                    let succbid = BBlockId::new(bid.funcidx(), *succ);
-                    self.outline_target_blk = Some(succbid);
-                    self.recursion_count = 0;
-                }
-                aot_ir::Inst::CondBr { .. } => {
-                    // Currently, the successor of a call is always an unconditional branch due to
-                    // the block spitting pass. However, there's a FIXME in that pass which could
-                    // lead to conditional branches showing up here. Leave a todo here so we know
-                    // when this happens.
-                    todo!()
-                }
-                _ => panic!(),
-            }
+            self.outline_until_after_call(bid, nextinst);
             let jit_func_decl_idx = self.handle_func(*callee)?;
             let inst =
                 jit_ir::DirectCallInst::new(&mut self.jit_mod, jit_func_decl_idx, jit_args)?.into();
@@ -1050,16 +1040,14 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         self.copy_inst(inst, bid, aot_inst_idx)
     }
 
-    fn handle_promote(
-        &mut self,
-        bid: &aot_ir::BBlockId,
-        aot_inst_idx: usize,
-        val: &aot_ir::Operand,
-        safepoint: &'static aot_ir::DeoptSafepoint,
-        tyidx: &aot_ir::TyIdx,
-        nextinst: &'static aot_ir::Inst,
-    ) -> Result<(), CompilationError> {
-        match nextinst {
+    /// Turn outlining until the specified call has been consumed from the trace.
+    ///
+    /// `terminst` is the terminating instruction immediately after the call, guaranteed to be
+    /// present due to ykllvm's block splitting pass.
+    ///
+    /// `bid` is the [BBlockId] containing the call.
+    fn outline_until_after_call(&mut self, bid: &BBlockId, terminst: &'static aot_ir::Inst) {
+        match terminst {
             aot_ir::Inst::Br { succ } => {
                 // We can only stop outlining when we see the succesor block and we are not in
                 // the middle of recursion.
@@ -1076,6 +1064,18 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             }
             _ => panic!(),
         }
+    }
+
+    fn handle_promote(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        val: &aot_ir::Operand,
+        safepoint: &'static aot_ir::DeoptSafepoint,
+        tyidx: &aot_ir::TyIdx,
+        nextinst: &'static aot_ir::Inst,
+    ) -> Result<(), CompilationError> {
+        self.outline_until_after_call(bid, nextinst);
         match self.handle_operand(val)? {
             jit_ir::Operand::Var(ref_iidx) => {
                 self.jit_mod.push(jit_ir::Inst::Copy(ref_iidx))?;
@@ -1132,6 +1132,21 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
     ) -> Result<(), CompilationError> {
         let inst = jit_ir::FNegInst::new(self.handle_operand(val)?).into();
         self.copy_inst(inst, bid, aot_inst_idx)
+    }
+
+    fn handle_debug_str(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        nextinst: &'static aot_ir::Inst,
+    ) -> Result<(), CompilationError> {
+        self.outline_until_after_call(bid, nextinst);
+        let msg = self.debug_strs[self.debug_str_idx].to_owned();
+        let inst =
+            jit_ir::Inst::DebugStr(jit_ir::DebugStrInst::new(self.jit_mod.push_debug_str(msg)?));
+        self.copy_inst(inst, bid, aot_inst_idx)?;
+        self.debug_str_idx += 1;
+        Ok(())
     }
 
     /// Entry point for building an IR trace.
@@ -1333,7 +1348,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                                     continue;
                                 }
                             }
-                            self.process_promotions_only(&bid)?;
+                            self.process_promotions_and_debug_strs_only(&bid)?;
                             prev_bid = Some(bid);
                             continue;
                         }
@@ -1388,6 +1403,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         }
 
         debug_assert_eq!(self.promote_idx, self.promotions.len());
+        debug_assert_eq!(self.debug_str_idx, self.debug_strs.len());
         let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
         let cpcall = blk.insts.iter().rev().nth(1).unwrap();
         debug_assert!(cpcall.is_control_point(self.aot_mod));
@@ -1435,11 +1451,13 @@ pub(super) fn build<Register: Send + Sync + 'static>(
     ta_iter: Box<dyn AOTTraceIterator>,
     sti: Option<Arc<YkSideTraceInfo<Register>>>,
     promotions: Box<[u8]>,
+    debug_strs: Vec<String>,
 ) -> Result<jit_ir::Module, CompilationError> {
     let tracekind = if let Some(x) = sti {
         TraceKind::Sidetrace(x)
     } else {
         TraceKind::HeaderOnly
     };
-    TraceBuilder::<Register>::new(tracekind, ctr_id, aot_mod, promotions)?.build(ta_iter)
+    TraceBuilder::<Register>::new(tracekind, ctr_id, aot_mod, promotions, debug_strs)?
+        .build(ta_iter)
 }

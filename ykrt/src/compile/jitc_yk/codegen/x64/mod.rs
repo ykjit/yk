@@ -652,6 +652,7 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
                 jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
                 jit_ir::Inst::FNeg(i) => self.cg_fneg(iidx, i),
+                jit_ir::Inst::DebugStr(..) => (),
             }
 
             next = iter.next();

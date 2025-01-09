@@ -200,6 +200,11 @@ pub(crate) struct Module {
     /// array will be absent.
     #[cfg(not(test))]
     globalvar_ptrs: &'static [*const ()],
+    /// The dynamically recorded debug strings, in the order that the corresponding
+    /// `yk_debug_str()` calls were encountered in the trace.
+    ///
+    /// Indexed by [DebugStrIdx].
+    debug_strs: Vec<String>,
 }
 
 impl Module {
@@ -309,6 +314,7 @@ impl Module {
             trace_header_end: Vec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
+            debug_strs: Vec::new(),
         })
     }
 
@@ -650,6 +656,10 @@ impl Module {
         self.trace_header_start.push(PackedOperand::new(&op));
     }
 
+    pub(crate) fn push_debug_str(&mut self, msg: String) -> Result<DebugStrIdx, CompilationError> {
+        DebugStrIdx::try_from(self.debug_strs.len()).inspect(|_| self.debug_strs.push(msg))
+    }
+
     /// Return the loop jump operands.
     pub(crate) fn trace_body_end(&self) -> &[PackedOperand] {
         &self.trace_body_end
@@ -911,6 +921,11 @@ index_16bit!(InstIdx);
 #[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct ParamIdx(u16);
 index_16bit!(ParamIdx);
+
+/// An index into [Module::debug_strs]
+#[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct DebugStrIdx(u16);
+index_16bit!(DebugStrIdx);
 
 /// A function's type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -1450,6 +1465,7 @@ pub(crate) enum Inst {
     FPToSI(FPToSIInst),
     BitCast(BitCastInst),
     FNeg(FNegInst),
+    DebugStr(DebugStrInst),
 }
 
 impl Inst {
@@ -1511,6 +1527,7 @@ impl Inst {
             Self::FCmp(_) => m.int1_tyidx(),
             Self::FPToSI(i) => i.dest_tyidx(),
             Self::FNeg(i) => i.val(m).tyidx(m),
+            Self::DebugStr(..) => m.void_tyidx(),
         }
     }
 
@@ -1548,6 +1565,7 @@ impl Inst {
                 | Inst::TraceBodyEnd
                 | Inst::SidetraceEnd
                 | Inst::Param(_)
+                | Inst::DebugStr(..)
         )
     }
 
@@ -1663,6 +1681,7 @@ impl Inst {
             }
             Inst::FPToSI(FPToSIInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::FNeg(FNegInst { val }) => val.unpack(m).map_iidx(f),
+            Inst::DebugStr(..) => (),
         }
     }
 
@@ -1851,6 +1870,7 @@ impl Inst {
                 val: mapper(m, val),
                 dest_tyidx: *dest_tyidx,
             }),
+            Inst::DebugStr(DebugStrInst { idx }) => Inst::DebugStr(DebugStrInst { idx: *idx }),
             e => todo!("{:?}", e),
         };
         Ok(inst)
@@ -2138,6 +2158,7 @@ impl fmt::Display for DisplayableInst<'_> {
             ),
             Inst::FPToSI(i) => write!(f, "fp_to_si {}", i.val(self.m).display(self.m)),
             Inst::FNeg(i) => write!(f, "fneg {}", i.val(self.m).display(self.m)),
+            Inst::DebugStr(i) => write!(f, "; debug_str: {}", i.msg(self.m)),
         }
     }
 }
@@ -2174,6 +2195,7 @@ inst!(FCmp, FCmpInst);
 inst!(FPToSI, FPToSIInst);
 inst!(BitCast, BitCastInst);
 inst!(FNeg, FNegInst);
+inst!(DebugStr, DebugStrInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -2632,6 +2654,28 @@ impl FNegInst {
 
     fn decopy_eq(&self, m: &Module, other: Self) -> bool {
         self.val(m) == other.val(m)
+    }
+}
+
+/// The operands for a [Inst::DebugStr]
+///
+/// # Semantics
+///
+/// In terms of program semantics, this instruction is a no-op. It serves only to allow the
+/// insertion of debugging strings into the JIT IR when displayed.
+#[derive(Clone, Copy, Debug)]
+pub struct DebugStrInst {
+    idx: DebugStrIdx,
+}
+
+impl DebugStrInst {
+    pub(crate) fn new(idx: DebugStrIdx) -> Self {
+        Self { idx }
+    }
+
+    /// Returns the message.
+    pub(crate) fn msg<'a>(&self, m: &'a Module) -> &'a str {
+        &m.debug_strs[usize::from(self.idx)]
     }
 }
 
