@@ -6,6 +6,12 @@
 //! The sane solution is to have only one `cdylib` crate in our workspace (this crate) and all
 //! other crates are regular `rlibs`.
 
+// FIXME: This crate was designed to contain the entire public C API surface of Yk. Over time C API
+// functions have leaked elsewhere. For example yk_debug_str() and yk_promote_*() are defined
+// elsewhere. We should either move all the C API back into this file, or maybe move all of the C
+// API into (e.g.) `ykrt::api::c` (and make ykrt a cdylib). The former means you have to `pub`
+// stuff in `ykrt`, so perhaps the latter?
+
 #![allow(clippy::missing_safety_doc)]
 #![feature(naked_functions)]
 
