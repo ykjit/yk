@@ -142,22 +142,22 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
             dynasm!(asm
                 ; .arch x64
                 // ; int3
-                ; mov rbp, QWORD frameaddr as i64                   // set rbp
-                ; mov rsp, QWORD frameaddr as i64                   // set rsp
-                ; sub rsp, (unopt_frame_size).try_into().unwrap()   // alloc stack frame
-                ; push rbp                                          // dst - save src rbp
-                ; mov rbp, rsp                                      // dst - set rbp
-                ; sub rsp, (opt_frame_size).try_into().unwrap()     // dst - alloc stack frame
+                ; mov rbp, QWORD frameaddr as i64
+                ; mov rsp, QWORD frameaddr as i64
+                ; sub rsp, (unopt_frame_size).try_into().unwrap()
+                ; push rbp
+                ; mov rbp, rsp
+                ; sub rsp, (opt_frame_size).try_into().unwrap()
             );
         }
         // Revert the stack sandwich
-        if src_smid == ControlPointStackMapId::Opt && dst_smid == ControlPointStackMapId::UnOpt {
+        else if src_smid == ControlPointStackMapId::Opt && dst_smid == ControlPointStackMapId::UnOpt {
             dst_rbp = src_rbp + opt_frame_size as i64;
             dynasm!(asm
                 ; .arch x64
                 // ; int3
-                ; add rsp, (opt_frame_size).try_into().unwrap() // remove the frame allocated under the opt frame
-                ; pop rbp                                        // restore the original rbp
+                ; add rsp, (opt_frame_size).try_into().unwrap()
+                ; pop rbp
             );
         }
     } else {
@@ -323,20 +323,21 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                         let src_offset = i32::try_from(*src_off).unwrap();
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *dst_val_size {
-                            1 => dynasm!(asm; mov Rb(dst_reg), BYTE [rbp - src_offset]),
-                            2 => dynasm!(asm; mov Rw(dst_reg), WORD [rbp - src_offset]),
-                            4 => dynasm!(asm; mov Rd(dst_reg), DWORD [rbp - src_offset]),
-                            8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp - src_offset]),
+                            1 => dynasm!(asm; mov Rb(dst_reg), BYTE [rbp + src_offset]),
+                            2 => dynasm!(asm; mov Rw(dst_reg), WORD [rbp + src_offset]),
+                            4 => dynasm!(asm; mov Rd(dst_reg), DWORD [rbp + src_offset]),
+                            8 => dynasm!(asm; mov Rq(dst_reg), QWORD [rbp + src_offset]),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
                     Direct(src_reg_num, src_off, src_val_size) => {
+                        let src_offset = i32::try_from(*src_off).unwrap();
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *dst_val_size {
                             // 1 => dynasm!(asm; mov Rb(dst_reg), BYTE rbp - src_offset),
                             // 2 => dynasm!(asm; mov Rw(dst_reg), WORD rbp - src_offset),
                             // 4 => dynasm!(asm; mov Rd(dst_reg), DWORD rbp - src_offset),
-                            8 => dynasm!(asm; lea Rq(dst_reg), [rbp - src_off]),
+                            8 => dynasm!(asm; lea Rq(dst_reg), [rbp + src_offset]),
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
