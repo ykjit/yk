@@ -12,9 +12,9 @@ pub(crate) static REG64_BYTESIZE: u64 = 8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlPointStackMapId {
     // unoptimised (original functions) control point stack map id
-    UnOpt = 0,
+    Opt = 0,
     // optimised (cloned functions) control point stack map id
-    Opt = 1,
+    UnOpt = 1,
 }
 
 pub struct ControlPointTransition {
@@ -27,10 +27,11 @@ pub struct ControlPointTransition {
     pub exec_trace_fn: ExecTraceFn,
 }
 
-static VERBOSE: bool = true;
+pub static CP_TRANSITION_VERBOSE: bool = true;
 static STACK_SANDWITCH: bool = false;
 
-// Based on __ykrt_control_point
+// We use the registers saved by the control point.
+// __ykrt_control_point:
 // "push rax",
 // "push rcx",
 // "push rbx",
@@ -67,7 +68,7 @@ fn reg_num_to__ykrt_control_point_stack_offset(dwarf_reg_num: u16) -> i32 {
         15 => 0x0,  // r15
         _ => panic!("Unsupported register {}", dwarf_reg_num),
     };
-    if VERBOSE {
+    if CP_TRANSITION_VERBOSE {
         println!("@@ reg: {}, offset: 0x{:x}", dwarf_reg_num, offset);
     }
     return offset;
@@ -115,87 +116,96 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         ; .arch x64
         ; int3
     );
-    if VERBOSE {
+    if CP_TRANSITION_VERBOSE {
         println!(
             "@@ unopt_frame_size: 0x{:x}, opt_frame_size: 0x{:x}",
             unopt_frame_size, opt_frame_size
         );
     }
     let mut src_rbp = frameaddr as i64;
-    let mut dst_rbp = 0;
+    let mut dst_rbp = frameaddr as i32;
     if STACK_SANDWITCH {
         // Transition from Unopt -> Opt
-        if src_smid == ControlPointStackMapId::UnOpt && dst_smid == ControlPointStackMapId::Opt {
-            dst_rbp = src_rbp - 8 - opt_frame_size as i64;
-            // Stack Diagram:
-            // +---------------------------------+ <- Higher Memory Addresses
-            // |       ... Previous ...          |
-            // +---------------------------------+
-            // |       Unoptimized Frame         |
-            // +---------------------------------+
-            // |       Unoptimised rbp           |
-            // +---------------------------------+
-            // |       New Frame Pointer (`rbp`) |
-            // +---------------------------------+
-            // |       Optimized Frame           |
-            // +---------------------------------+
-            dynasm!(asm
-                ; .arch x64
-                // ; int3
-                ; mov rbp, QWORD frameaddr as i64
-                ; mov rsp, QWORD frameaddr as i64
-                ; sub rsp, (unopt_frame_size).try_into().unwrap()
-                ; push rbp
-                ; mov rbp, rsp
-                ; sub rsp, (opt_frame_size).try_into().unwrap()
-            );
-        }
-        // Revert the stack sandwich
-        else if src_smid == ControlPointStackMapId::Opt && dst_smid == ControlPointStackMapId::UnOpt {
-            dst_rbp = src_rbp + opt_frame_size as i64;
-            dynasm!(asm
-                ; .arch x64
-                // ; int3
-                ; add rsp, (opt_frame_size).try_into().unwrap()
-                ; pop rbp
-            );
-        }
+        // if src_smid == ControlPointStackMapId::UnOpt && dst_smid == ControlPointStackMapId::Opt {
+        //     dst_rbp = src_rbp - 8 - opt_frame_size as i64;
+        //     // Stack Diagram:
+        //     // +---------------------------------+ <- Higher Memory Addresses
+        //     // |       ... Previous ...          |
+        //     // +---------------------------------+
+        //     // |       Unoptimized Frame         |
+        //     // +---------------------------------+
+        //     // |       Unoptimised rbp           |
+        //     // +---------------------------------+
+        //     // |       New Frame Pointer (`rbp`) |
+        //     // +---------------------------------+
+        //     // |       Optimized Frame           |
+        //     // +---------------------------------+
+        //     dynasm!(asm
+        //         ; .arch x64
+        //         // ; int3
+        //         ; mov rbp, QWORD frameaddr as i64
+        //         ; mov rsp, QWORD frameaddr as i64
+        //         ; sub rsp, (unopt_frame_size).try_into().unwrap()
+        //         ; push rbp
+        //         ; mov rbp, rsp
+        //         ; sub rsp, (opt_frame_size).try_into().unwrap()
+        //     );
+        // }
+        // // Revert the stack sandwich
+        // else if src_smid == ControlPointStackMapId::Opt
+        //     && dst_smid == ControlPointStackMapId::UnOpt
+        // {
+        //     dst_rbp = src_rbp + opt_frame_size as i64;
+        //     dynasm!(asm
+        //         ; .arch x64
+        //         // ; int3
+        //         ; add rsp, (opt_frame_size).try_into().unwrap()
+        //         ; pop rbp
+        //     );
+        // }
     } else {
-        let mut dest_rsp = opt_frame_size;
+        let mut dest_rsp_frame_size = opt_frame_size;
         if dst_smid == ControlPointStackMapId::UnOpt {
-            dest_rsp = unopt_frame_size;
+            dest_rsp_frame_size = unopt_frame_size;
         }
-
-        if VERBOSE {
-            println!(
-                "@@ rsp: 0x{:x}, rbp: 0x{:x}",
-                frameaddr as u64 - dest_rsp as u64,
-                frameaddr as u64
-            );
+        if CP_TRANSITION_VERBOSE {
+            println!("@@ rbp: 0x{:x}, rsp: 0x{:x}", frameaddr as i64, frameaddr as i64 - dest_rsp_frame_size as i64);
         }
         dynasm!(asm
             ; .arch x64
             ; mov rbp, QWORD frameaddr as i64 // reset rbp
             ; mov rsp, QWORD frameaddr as i64 // reset rsp
-            ; sub rsp, (dest_rsp).try_into().unwrap()
-            // ; int3
+            ; sub rsp, (dest_rsp_frame_size).try_into().unwrap() // adjust rsp
+            ; int3 // breakpoint
         );
     }
 
-    if VERBOSE {
-        println!(
-            "@@ from {:?} to {:?} live var count: {}",
-            src_smid,
-            dst_smid,
-            dst_rec.live_vars.len()
-        );
-    }
-
+    // We use src_rsp_offset to find the registers saved by the control
+    // point.
+    // If the copied valies are wrong - check that the REG64_BYTESIZE * X offsets correct
+    // wrt the __ykrt_control_point rsp.
     let mut src_rsp_offset: i32 = 0;
     if src_smid == ControlPointStackMapId::Opt {
-        src_rsp_offset = i32::try_from(unopt_frame_size + REG64_BYTESIZE * 2).unwrap();
+        src_rsp_offset = i32::try_from(unopt_frame_size + REG64_BYTESIZE * 4).unwrap();
     } else if src_smid == ControlPointStackMapId::UnOpt {
+        // TODO: verify that this is correct!
         src_rsp_offset = i32::try_from(opt_frame_size + REG64_BYTESIZE * 6).unwrap();
+    }
+
+    if CP_TRANSITION_VERBOSE {
+        println!("--------------------------------");
+        println!("@@ src live vars - smid: {:?}", src_smid);
+        for (index, src_var) in src_rec.live_vars.iter().enumerate() {
+            let src_location = &src_var.get(0).unwrap();
+            println!("{:?}", src_location);
+        }
+        println!("--------------------------------");
+        println!("@@ dst live vars - smid: {:?}", dst_smid);
+        for (index, dst_var) in dst_rec.live_vars.iter().enumerate() {
+            let dst_location = &dst_var.get(0).unwrap();
+            println!("{:?}", dst_location);
+        }
+        println!("--------------------------------");
     }
 
     for (index, src_var) in src_rec.live_vars.iter().enumerate() {
@@ -212,17 +222,42 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
 
         let src_location = &src_var.get(0).unwrap();
         let dst_location = &dst_var.get(0).unwrap();
-        if VERBOSE {
-            println!(
-                "@@ dst_location: {:?}, src_location: {:?}",
-                dst_location, src_location
-            );
+
+        if CP_TRANSITION_VERBOSE {
+            println!("@@ src: {:?}, dst: {:?}", src_location, dst_location);
         }
 
-        match dst_location {
-            Indirect(_dst_reg_num, dst_off, dst_val_size) => {
-                match src_location {
-                    Register(src_reg_num, src_val_size, src_add_locs) => {
+        match src_location {
+            Register(src_reg_num, src_val_size, src_add_locs) => {
+                match dst_location {
+                    Register(dst_reg_num, dst_val_size, dst_add_locs) => {
+                        assert!(
+                            src_add_locs.len() == 0 && dst_add_locs.len() == 0,
+                            "Register to Register - deal with additional info"
+                        );
+                        assert!(
+                            dst_val_size == src_val_size,
+                            "Register to Register - src and dst val size must match. Got src: {} and dst: {}",
+                            src_val_size, dst_val_size
+                        );
+                        // skip copying to the same register with the same value size
+                        if src_reg_num == dst_reg_num && src_val_size == dst_val_size {
+                            continue;
+                        }
+                        let src_offset = reg_num_to__ykrt_control_point_stack_offset(*src_reg_num)
+                            - src_rsp_offset;
+                        let dest_reg = u8::try_from(*dst_reg_num).unwrap();
+                        match *src_val_size {
+                            1 => dynasm!(asm; mov Rb(dest_reg), BYTE [rsp + src_offset]),
+                            2 => dynasm!(asm; mov Rw(dest_reg), WORD [rsp + src_offset]),
+                            4 => dynasm!(asm; mov Rd(dest_reg), DWORD [rsp + src_offset]),
+                            8 => dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]),
+                            _ => {
+                                todo!("unexpect Register to Register value size {}", src_val_size)
+                            }
+                        }
+                    }
+                    Indirect(_dst_reg_num, dst_off, dst_val_size) => {
                         assert!(
                             dst_val_size == src_val_size,
                             "Indirect to Register - src and dst val size must match. got src: {} and dst: {}",
@@ -260,7 +295,37 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                     LargeConstant(_val) => {
                         todo!("implement Indirect to LargeConstant")
                     }
-                    Indirect(_src_reg_num, src_off, src_val_size) => {
+                    Direct(_dst_reg_num, dst_off, _dst_val_size) => {
+                        // We can't write to a direct location cause its
+                        // a constant reference to a value on the stack
+                        // so we can't copy it to another location
+
+                        // let src_offset = reg_num_to__ykrt_control_point_stack_offset(*src_reg_num)
+                        //     - src_rsp_offset;
+                        // println!(
+                        //     "@@ Reg2Dir  - src_reg_num: {}, src_offset: 0x{:x}",
+                        //     src_reg_num, src_offset
+                        // );
+                        // match *src_val_size {
+                        //     1 => todo!(),
+                        //     2 => todo!(),
+                        //     4 => todo!(),
+                        //     8 => dynasm!(asm
+                        //         ; mov rax, QWORD [rsp + src_offset]
+                        //         ; mov QWORD[rbp + *dst_off], rax
+                        //     ),
+                        //     _ => panic!(
+                        //         "Unexpected Indirect to Register value size: {}",
+                        //         src_val_size
+                        //     ),
+                        // }
+                    }
+                    _ => panic!("Unsupported dst location: {:?}", dst_location),
+                }
+            }
+            Indirect(src_reg_num, src_off, src_val_size) => {
+                match dst_location {
+                    Indirect(_dst_reg_num, dst_off, dst_val_size) => {
                         // TODO: understand what to do where the size value is different
                         let min_size = src_val_size.min(dst_val_size);
                         match min_size {
@@ -286,39 +351,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                             _ => panic!("Unexpected Indirect to Indirect value size: {}", min_size),
                         }
                     }
-                    _ => panic!("Unsupported source location: {:?}", src_location),
-                }
-            }
-            Register(dst_reg_num, dst_val_size, dst_add_locs) => {
-                match src_location {
-                    Register(src_reg_num, src_val_size, src_add_locs) => {
-                        assert!(
-                            src_add_locs.len() == 0 && dst_add_locs.len() == 0,
-                            "Register to Register - deal with additional info"
-                        );
-                        assert!(
-                            dst_val_size == src_val_size,
-                            "Register to Register - src and dst val size must match. Got src: {} and dst: {}",
-                            src_val_size, dst_val_size
-                        );
-                        // skip copying to the same register with the same value size
-                        if src_reg_num == dst_reg_num && src_val_size == dst_val_size {
-                            continue;
-                        }
-                        let src_offset = reg_num_to__ykrt_control_point_stack_offset(*src_reg_num)
-                            - src_rsp_offset;
-                        let dest_reg = u8::try_from(*dst_reg_num).unwrap();
-                        match *src_val_size {
-                            1 => dynasm!(asm; mov Rb(dest_reg), BYTE [rsp + src_offset]),
-                            2 => dynasm!(asm; mov Rw(dest_reg), WORD [rsp + src_offset]),
-                            4 => dynasm!(asm; mov Rd(dest_reg), DWORD [rsp + src_offset]),
-                            8 => dynasm!(asm; mov Rq(dest_reg), QWORD [rsp + src_offset]),
-                            _ => {
-                                todo!("unexpect Register to Register value size {}", src_val_size)
-                            }
-                        }
-                    }
-                    Indirect(src_reg_num, src_off, src_val_size) => {
+                    Register(dst_reg_num, dst_val_size, dst_add_locs) => {
                         assert!(*src_reg_num == 6, "Indirect register is expected to be rbp");
                         let src_offset = i32::try_from(*src_off).unwrap();
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
@@ -330,7 +363,12 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
-                    Direct(src_reg_num, src_off, src_val_size) => {
+                    _ => panic!("Unsupported dst location: {:?}", dst_location),
+                }
+            }
+            Direct(src_reg_num, src_off, src_val_size) => {
+                match dst_location {
+                    Register(dst_reg_num, dst_val_size, dst_add_locs) => {
                         let src_offset = i32::try_from(*src_off).unwrap();
                         let dst_reg = u8::try_from(*dst_reg_num).unwrap();
                         match *dst_val_size {
@@ -341,20 +379,20 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                             _ => panic!("Unsupported source value size: {}", src_val_size),
                         }
                     }
-                    _ => panic!("Unsupported source location: {:?}", src_location),
+                    Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
+                        // Direct locations are read-only, so it doesn't make sense to write to
+                        // them. This is likely a case where the direct value has been moved
+                        // somewhere else (register/normal stack) so dst and src no longer
+                        // match. But since the value can't change we can safely ignore this.
+                    }
+                    _ => panic!("Unsupported dst location: {:?}", dst_location),
                 }
             }
-            Direct(_dst_reg_num, _dst_off, _dst_val_size) => {
-                // Direct locations are read-only, so it doesn't make sense to write to
-                // them. This is likely a case where the direct value has been moved
-                // somewhere else (register/normal stack) so dst and src no longer
-                // match. But since the value can't change we can safely ignore this.
-            }
-            _ => panic!("unexpect dst location: {:?}", dst_location),
+            _ => panic!("Unsupported source location: {:?}", src_location),
         }
     }
 
-    if VERBOSE {
+    if CP_TRANSITION_VERBOSE {
         println!(
             "@@ dst_size: 0x{:x}, dst_rbp: 0x{:x}, dst_addr: 0x{:x}",
             dst_rec.size as i64, frameaddr as i64, dst_rec.offset

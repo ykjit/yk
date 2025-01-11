@@ -21,7 +21,9 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 #[cfg(tracer_swt)]
-use crate::trace::swt::cp::{control_point_transition, ControlPointStackMapId, ControlPointTransition};
+use crate::trace::swt::cp::{
+    control_point_transition, ControlPointStackMapId, ControlPointTransition, CP_TRANSITION_VERBOSE,
+};
 
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
@@ -60,8 +62,6 @@ const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 /// give up trying to trace (or compile...) it?
 const DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD: TraceCompilationErrorThreshold = 5;
 static REG64_SIZE: usize = 8;
-
-static mut IS_IN_OPT: bool = false;
 
 thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
@@ -440,14 +440,19 @@ impl MT {
                 self.stats.timing_state(TimingState::JitExecuting);
                 #[cfg(tracer_swt)]
                 unsafe {
-                    control_point_transition(ControlPointTransition{
+                    if CP_TRANSITION_VERBOSE {
+                        println!("jit.Execute - control_point_transition from Opt to UnOpt");
+                    }
+                    // Transition to unopt before trace execution since
+                    // the trace was collected un unopt version.
+                    control_point_transition(ControlPointTransition {
                         src_smid: ControlPointStackMapId::Opt,
                         dst_smid: ControlPointStackMapId::UnOpt,
                         frameaddr,
                         rsp,
                         trace_addr: trace_addr,
                         exec_trace: true,
-                        exec_trace_fn: __yk_exec_trace
+                        exec_trace_fn: __yk_exec_trace,
                     });
                 }
                 // FIXME: Calling this function overwrites the current (Rust) function frame,
@@ -496,17 +501,20 @@ impl MT {
                 }
                 #[cfg(tracer_swt)]
                 unsafe {
-                    if IS_IN_OPT {
-                        control_point_transition(ControlPointTransition{
-                            src_smid: ControlPointStackMapId::Opt,
-                            dst_smid: ControlPointStackMapId::UnOpt,
-                            frameaddr,
-                            rsp: 0 as *const c_void,
-                            trace_addr: 0 as *const c_void,
-                            exec_trace: false,
-                            exec_trace_fn: __yk_exec_trace
-                        });
+                    if CP_TRANSITION_VERBOSE {
+                        println!("jit.StartTracing - control_point_transition from Opt to UnOpt");
                     }
+                    // Transition to unopt before start tracing cause
+                    // we need the intepreter version with tracing calls..
+                    control_point_transition(ControlPointTransition {
+                        src_smid: ControlPointStackMapId::Opt,
+                        dst_smid: ControlPointStackMapId::UnOpt,
+                        frameaddr,
+                        rsp: 0 as *const c_void,
+                        trace_addr: 0 as *const c_void,
+                        exec_trace: false,
+                        exec_trace_fn: __yk_exec_trace,
+                    });
                 }
                 // self.log.log(Verbosity::JITEvent, "returning into unopt cp");
             }
@@ -543,15 +551,19 @@ impl MT {
                 }
                 #[cfg(tracer_swt)]
                 unsafe {
-                    IS_IN_OPT = true;
-                    control_point_transition(ControlPointTransition{
-                        src_smid: ControlPointStackMapId::Opt,
-                        dst_smid: ControlPointStackMapId::UnOpt,
+                    if CP_TRANSITION_VERBOSE {
+                        println!("StopTracing - control_point_transition from UnOpt to Opt");
+                    }
+                    // Transition into opt interpreter version
+                    // when we stop tracing.
+                    control_point_transition(ControlPointTransition {
+                        src_smid: ControlPointStackMapId::UnOpt,
+                        dst_smid: ControlPointStackMapId::Opt,
                         frameaddr,
                         rsp: 0 as *const c_void,
                         trace_addr: 0 as *const c_void,
                         exec_trace: false,
-                        exec_trace_fn: __yk_exec_trace
+                        exec_trace_fn: __yk_exec_trace,
                     });
                 }
             }
