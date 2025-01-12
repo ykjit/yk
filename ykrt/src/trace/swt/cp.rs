@@ -8,6 +8,10 @@ use yksmp::Location::{Constant, Direct, Indirect, LargeConstant, Register};
 /// The size of a 64-bit register in bytes.
 pub(crate) static REG64_BYTESIZE: u64 = 8;
 
+// Feature flags
+pub static CP_TRANSITION_DEBUG_MODE: bool = true;
+pub static STACK_SANDWITCH: bool = false;
+
 #[repr(usize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlPointStackMapId {
@@ -26,9 +30,6 @@ pub struct ControlPointTransition {
     pub exec_trace: bool,
     pub exec_trace_fn: ExecTraceFn,
 }
-
-pub static CP_TRANSITION_VERBOSE: bool = true;
-static STACK_SANDWITCH: bool = false;
 
 // We use the registers saved by the control point.
 // __ykrt_control_point:
@@ -109,9 +110,10 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
     if opt_pinfo.hasfp {
         opt_frame_size -= REG64_BYTESIZE;
     }
-    // debug breakpoint
-    dynasm!(asm ; .arch x64 ; int3 );
-    if CP_TRANSITION_VERBOSE {
+
+    if CP_TRANSITION_DEBUG_MODE {
+        // debug breakpoint
+        dynasm!(asm ; .arch x64 ; int3 );
         println!(
             "@@ unopt_frame_size: 0x{:x}, opt_frame_size: 0x{:x}",
             unopt_frame_size, opt_frame_size
@@ -163,7 +165,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         if dst_smid == ControlPointStackMapId::UnOpt {
             dest_rsp_frame_size = unopt_frame_size;
         }
-        if CP_TRANSITION_VERBOSE {
+        if CP_TRANSITION_DEBUG_MODE {
             println!("@@ rbp: 0x{:x}, rsp: 0x{:x}", frameaddr as i64, frameaddr as i64 - dest_rsp_frame_size as i64);
         }
         dynasm!(asm
@@ -186,7 +188,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         src_rsp_offset = i32::try_from(opt_frame_size + REG64_BYTESIZE * 6).unwrap();
     }
 
-    if CP_TRANSITION_VERBOSE {
+    if CP_TRANSITION_DEBUG_MODE {
         println!("--------------------------------");
         println!("@@ src live vars - smid: {:?}", src_smid);
         for (index, src_var) in src_rec.live_vars.iter().enumerate() {
@@ -230,7 +232,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                             "Register to Register - src and dst val size must match. Got src: {} and dst: {}",
                             src_val_size, dst_val_size
                         );
-                        if CP_TRANSITION_VERBOSE {
+                        if CP_TRANSITION_DEBUG_MODE {
                             println!("@@ Reg2Reg src: {:?}, dst: {:?}", src_location, dst_location);
                         }
                         // skip copying to the same register with the same value size
@@ -257,7 +259,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                             src_val_size, dst_val_size
                         );
                         assert!(src_add_locs.len() == 0, "deal with additional info");
-                        if CP_TRANSITION_VERBOSE {
+                        if CP_TRANSITION_DEBUG_MODE {
                             println!("@@ Reg2Ind src: {:?}, dst: {:?}", src_location, dst_location);
                         }
                         let src_offset = reg_num_to__ykrt_control_point_stack_offset(*src_reg_num)
@@ -295,8 +297,9 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                         // We can't write to a direct location cause its
                         // a constant reference to a value on the stack
                         // so we can't copy it to another location
-                        // println!("[SKIPPED] Reg2Dir src: {:?}, dst: {:?}", src_location, dst_location);
-                        println!("Reg2Dir src: {:?}, dst: {:?}", src_location, dst_location);
+                        if CP_TRANSITION_DEBUG_MODE {
+                            println!("Reg2Dir src: {:?}, dst: {:?}", src_location, dst_location);
+                        }
                         let src_offset = reg_num_to__ykrt_control_point_stack_offset(*src_reg_num)
                             - src_rsp_offset;
                         match *src_val_size {
@@ -320,7 +323,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
             Indirect(src_reg_num, src_off, src_val_size) => {
                 match dst_location {
                     Indirect(_dst_reg_num, dst_off, dst_val_size) => {
-                        if CP_TRANSITION_VERBOSE {
+                        if CP_TRANSITION_DEBUG_MODE {
                             println!("@@ Ind2Ind src: {:?}, dst: {:?}", src_location, dst_location);
                         }
                         // TODO: understand what to do where the size value is different
@@ -349,7 +352,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                         }
                     }
                     Register(dst_reg_num, dst_val_size, dst_add_locs) => {
-                        if CP_TRANSITION_VERBOSE {
+                        if CP_TRANSITION_DEBUG_MODE {
                             println!("@@ Ind2Reg src: {:?}, dst: {:?}", src_location, dst_location);
                         }
                         assert!(*src_reg_num == 6, "Indirect register is expected to be rbp");
@@ -369,7 +372,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
             Direct(src_reg_num, src_off, src_val_size) => {
                 match dst_location {
                     Register(dst_reg_num, dst_val_size, dst_add_locs) => {
-                        if CP_TRANSITION_VERBOSE {
+                        if CP_TRANSITION_DEBUG_MODE {
                             println!("@@ Dir2Reg src: {:?}, dst: {:?}", src_location, dst_location);
                         }
                         let src_offset = i32::try_from(*src_off).unwrap();
@@ -383,7 +386,9 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
                         }
                     }
                     Direct(_dst_reg_num, dst_off, _dst_val_size) => {
-                        println!("[SKIPPED] Dir2Dir src: {:?}, dst: {:?}", src_location, dst_location);
+                        if CP_TRANSITION_DEBUG_MODE {
+                            println!("[SKIPPED] Dir2Dir src: {:?}, dst: {:?}", src_location, dst_location);
+                        }
                         // Direct locations are read-only, so it doesn't make sense to write to
                         // them. This is likely a case where the direct value has been moved
                         // somewhere else (register/normal stack) so dst and src no longer
@@ -412,14 +417,14 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
         }
     }
 
-    if CP_TRANSITION_VERBOSE {
+    if CP_TRANSITION_DEBUG_MODE {
         println!(
             "@@ dst_size: 0x{:x}, dst_rbp: 0x{:x}, dst_addr: 0x{:x}",
             dst_rec.size as i64, frameaddr as i64, dst_rec.offset
         );
     }
     if exec_trace {
-        if CP_TRANSITION_VERBOSE {
+        if CP_TRANSITION_DEBUG_MODE {
             println!("@@ calling exec_trace");
         }
         // Move the arguments into the appropriate registers
@@ -434,7 +439,7 @@ pub unsafe fn control_point_transition(transition: ControlPointTransition) {
     } else {
         let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
         let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
-        if CP_TRANSITION_VERBOSE {
+        if CP_TRANSITION_DEBUG_MODE {
             println!("@@ transitioning to 0x{:x}", dst_target_addr);
         }
         dynasm!(asm
