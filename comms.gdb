@@ -7,7 +7,9 @@ set breakpoint pending on
 break ykrt::trace::mt
 # break __yk_clone_main
 break main
-# break /home/pd/yk-fork/tests/c/simple.c:44.c:17
+
+break simple2.c:23.c:17
+break simple.c:44.c:17
 # break buffered_vfprintf
 
 # break before cp
