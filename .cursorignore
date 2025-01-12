@@ -1,0 +1,16 @@
+./target
+./bin
+./docs
+.vscode
+.github
+.cargo
+./ykllvm/build
+./ykllvm/llvm/build
+./ykllvm/llvm/build/bin
+./ykllvm/llvm/build/lib
+./ykllvm/llvm/build/lib/libLLVM.a
+./ykllvm/llvm/build/lib/libLLVM.dylib
+./ykllvm/llvm/build/lib/libLLVM.so
+./ykllvm/llvm/build/lib/libLLVM.so.1
+./ykllvm/llvm/build/lib/libLLVM.so.1.0
+
