@@ -12,7 +12,7 @@
 //!      subsumes the functionality of `dead_code.rs`, so if you use this module for you don't need
 //!      to use `dead_code.rs` as well.
 
-use super::reg_alloc::{Register, VarLocation};
+use super::{Register, VarLocation};
 use crate::compile::jitc_yk::{
     codegen::x64::{ARG_FP_REGS, ARG_GP_REGS},
     jit_ir::{

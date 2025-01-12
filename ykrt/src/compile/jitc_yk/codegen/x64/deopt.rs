@@ -1,12 +1,5 @@
-use crate::{
-    aotsmp::AOT_STACKMAPS,
-    compile::{
-        jitc_yk::codegen::reg_alloc::{Register, VarLocation},
-        GuardIdx,
-    },
-    log::Verbosity,
-    mt::MTThread,
-};
+use super::{Register, VarLocation};
+use crate::{aotsmp::AOT_STACKMAPS, compile::GuardIdx, log::Verbosity, mt::MTThread};
 use dynasmrt::Register as _;
 use libc::c_void;
 #[cfg(debug_assertions)]

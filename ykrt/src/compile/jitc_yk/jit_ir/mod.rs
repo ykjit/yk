@@ -98,7 +98,7 @@ mod well_formed;
 
 #[cfg(debug_assertions)]
 use super::int_signs::Truncate;
-use super::{aot_ir, codegen::reg_alloc::VarLocation};
+use super::{aot_ir, VarLocation};
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{

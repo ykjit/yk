@@ -8,7 +8,6 @@ use crate::{
     mt::MT,
     trace::AOTTraceIterator,
 };
-use codegen::reg_alloc::VarLocation;
 use parking_lot::Mutex;
 use std::{
     env,
@@ -27,6 +26,10 @@ mod int_signs;
 pub mod jit_ir;
 mod opt;
 mod trace_builder;
+
+#[cfg(target_arch = "x86_64")]
+/// FIXME: Push the generics down into `Module`.
+type VarLocation = codegen::reg_alloc::VarLocation<codegen::x64::Register>;
 
 /// Should we turn trace optimisations on or off? Defaults to "on".
 static YKD_OPT: LazyLock<bool> = LazyLock::new(|| {
