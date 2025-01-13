@@ -14,6 +14,7 @@ use super::{
     },
 };
 use crate::compile::CompilationError;
+use std::assert_matches::debug_assert_matches;
 
 mod analyse;
 mod heapvalues;
@@ -55,7 +56,7 @@ impl Opt {
             TraceKind::HeaderAndBody => unreachable!(),
             // If this is a sidetrace, we perform optimisations up to, but not including, loop
             // peeling.
-            TraceKind::Sidetrace => false,
+            TraceKind::Sidetrace(_) => false,
         };
 
         // Note that since we will apply loop peeling here, the list of instructions grows as this
@@ -77,7 +78,7 @@ impl Opt {
             return Ok(self.m);
         }
 
-        debug_assert_eq!(self.m.tracekind(), TraceKind::HeaderOnly);
+        debug_assert_matches!(self.m.tracekind(), TraceKind::HeaderOnly);
         self.m.set_tracekind(TraceKind::HeaderAndBody);
 
         // Now that we've processed the trace header, duplicate it to create the loop body.

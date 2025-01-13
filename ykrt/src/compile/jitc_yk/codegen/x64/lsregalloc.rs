@@ -1029,9 +1029,7 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Output
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::InputOutput(_) => {
-                    if let Some(reg_alloc::Register::FP(reg)) =
-                        self.rev_an.reg_hints[usize::from(iidx)]
-                    {
+                    if let Some(Register::FP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
                         if !avoid.is_set(reg) {
                             *cnstr = match cnstr {
                                 RegConstraint::Output => RegConstraint::OutputFromReg(reg),

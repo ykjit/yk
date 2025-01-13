@@ -28,12 +28,17 @@ use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
-        if !self.root_entry_vars.is_empty() {
-            if self.root_entry_vars.len() != self.trace_header_end.len() {
-                panic!("Loop start/end variables have different lengths.");
+        match self.tracekind() {
+            super::TraceKind::HeaderOnly | super::TraceKind::HeaderAndBody => {
+                if self.trace_header_start.len() != self.trace_header_end.len() {
+                    panic!(
+                        "Loop start ({}) / end ({}) variables have different length.",
+                        self.trace_header_start.len(),
+                        self.trace_header_end.len()
+                    );
+                }
             }
-        } else if self.trace_header_start.len() != self.trace_header_end.len() {
-            panic!("Loop start/end variables have different lengths.");
+            super::TraceKind::Sidetrace(_) => (),
         }
 
         let mut last_inst = None;

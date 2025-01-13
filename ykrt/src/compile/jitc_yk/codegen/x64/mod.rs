@@ -53,6 +53,7 @@ use dynasmrt::{
 use indexmap::IndexMap;
 use parking_lot::Mutex;
 use std::{
+    assert_matches::debug_assert_matches,
     cell::Cell,
     collections::HashMap,
     error::Error,
@@ -643,7 +644,7 @@ impl<'a> Assemble<'a> {
                 }
                 jit_ir::Inst::TraceBodyStart => self.cg_body_start(),
                 jit_ir::Inst::TraceBodyEnd => self.cg_body_end(iidx),
-                jit_ir::Inst::SidetraceEnd => self.cg_sidetrace_end(iidx, self.m.root_jump_addr()),
+                jit_ir::Inst::SidetraceEnd => self.cg_sidetrace_end(iidx),
                 jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
                 jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
                 jit_ir::Inst::BitCast(i) => self.cg_bitcast(iidx, i),
@@ -1951,9 +1952,17 @@ impl<'a> Assemble<'a> {
     /// * `tgt_vars` - The target locations. If `None` use `self.loop_start_locs` instead.
     fn write_jump_vars(&mut self, iidx: InstIdx) {
         let (tgt_vars, src_ops) = match self.m.tracekind() {
-            TraceKind::HeaderOnly => (self.header_start_locs.as_slice(), self.m.trace_header_end()),
-            TraceKind::HeaderAndBody => (self.body_start_locs.as_slice(), self.m.trace_body_end()),
-            TraceKind::Sidetrace => (self.m.root_entry_vars(), self.m.trace_header_end()),
+            TraceKind::HeaderOnly => (self.header_start_locs.clone(), self.m.trace_header_end()),
+            TraceKind::HeaderAndBody => (self.body_start_locs.clone(), self.m.trace_body_end()),
+            TraceKind::Sidetrace(sti) => (
+                Arc::clone(sti)
+                    .as_any()
+                    .downcast::<YkSideTraceInfo<Register>>()
+                    .unwrap()
+                    .entry_vars
+                    .clone(),
+                self.m.trace_header_end(),
+            ),
         };
         // If we pass in `None` use `self.loop_start_locs` instead. We need to do this since we
         // can't pass in `&self.loop_start_locs` directly due to borrowing restrictions.
@@ -2046,7 +2055,7 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_body_end(&mut self, iidx: InstIdx) {
-        debug_assert_eq!(self.m.tracekind(), TraceKind::HeaderAndBody);
+        debug_assert_matches!(self.m.tracekind(), TraceKind::HeaderAndBody);
         // Loop the JITted code if the `tloop_start` label is present (not relevant for IR created
         // by a test or a side-trace).
         let label = StaticLabel::global("tloop_start");
@@ -2074,21 +2083,29 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_sidetrace_end(&mut self, iidx: InstIdx, addr: *const libc::c_void) {
-        debug_assert_eq!(self.m.tracekind(), TraceKind::Sidetrace);
-        // The end of a side-trace. Map live variables of this side-trace to the entry variables of
-        // the root parent trace, then jump to it.
-        self.write_jump_vars(iidx);
-        self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
+    fn cg_sidetrace_end(&mut self, iidx: InstIdx) {
+        match self.m.tracekind() {
+            TraceKind::Sidetrace(sti) => {
+                let sti = Arc::clone(sti)
+                    .as_any()
+                    .downcast::<YkSideTraceInfo<Register>>()
+                    .unwrap();
+                // The end of a side-trace. Map live variables of this side-trace to the entry variables of
+                // the root parent trace, then jump to it.
+                self.write_jump_vars(iidx);
+                self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
 
-        dynasm!(self.asm
-            // Reset rsp to the root trace's frame.
-            ; mov rsp, rbp
-            ; sub rsp, i32::try_from(self.root_offset.unwrap()).unwrap()
-            ; mov rdi, QWORD addr as i64
-            // We can safely use RDI here, since the root trace won't expect live variables in this
-            // register since it's being used as an argument to the control point.
-            ; jmp rdi);
+                dynasm!(self.asm
+                    // Reset rsp to the root trace's frame.
+                    ; mov rsp, rbp
+                    ; sub rsp, i32::try_from(sti.root_offset()).unwrap()
+                    ; mov rdi, QWORD sti.root_addr() as i64
+                    // We can safely use RDI here, since the root trace won't expect live variables in this
+                    // register since it's being used as an argument to the control point.
+                    ; jmp rdi);
+            }
+            TraceKind::HeaderOnly | TraceKind::HeaderAndBody => panic!(),
+        }
     }
 
     fn cg_header_start(&mut self) {
@@ -2110,7 +2127,7 @@ impl<'a> Assemble<'a> {
             TraceKind::HeaderAndBody => {
                 dynasm!(self.asm; ->reentry:);
             }
-            TraceKind::Sidetrace => todo!(),
+            TraceKind::Sidetrace(_) => todo!(),
         }
         self.prologue_offset = self.asm.offset();
     }
@@ -2172,12 +2189,12 @@ impl<'a> Assemble<'a> {
                     }
                 }
             }
-            TraceKind::Sidetrace => todo!(),
+            TraceKind::Sidetrace(_) => panic!(),
         }
     }
 
     fn cg_body_start(&mut self) {
-        debug_assert_eq!(self.m.tracekind(), TraceKind::HeaderAndBody);
+        debug_assert_matches!(self.m.tracekind(), &TraceKind::HeaderAndBody);
         debug_assert_eq!(self.body_start_locs.len(), 0);
         // Remember the locations of the live variables at the beginning of the trace loop. When we
         // loop back around here we need to write the live variables back into these same
