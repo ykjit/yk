@@ -30,7 +30,7 @@ pub(crate) struct RevAnalyse<'a> {
     /// A `Vec<InstIdx>` with one entry per instruction. Each denotes the last instruction that the
     /// value produced by an instruction is used. By definition this must either be unused (if an
     /// instruction does not produce a value) or `>=` the offset in this vector.
-    pub(crate) inst_vals_alive_until: Vec<InstIdx>,
+    inst_vals_alive_until: Vec<InstIdx>,
     /// A `Vec<Option<PtrAddInst>>` that "inlines" pointer additions into load/stores. The
     /// `PtrAddInst` is not marked as used, for such instructions: note that it might be marked as
     /// used by other instructions!
@@ -211,6 +211,12 @@ impl<'a> RevAnalyse<'a> {
     /// Is the value produced by instruction `query_iidx` used at or after instruction `cur_idx`?
     pub(super) fn is_inst_var_still_used_at(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
         usize::from(cur_iidx) <= usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
+    }
+
+    /// Is `query_iidx` used later in the trace than `cur_iidx`?
+    pub(super) fn used_later_than(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
+        self.inst_vals_alive_until[usize::from(cur_iidx)]
+            >= self.inst_vals_alive_until[usize::from(query_iidx)]
     }
 
     /// Propagate the hint for the instruction being processed at `iidx` to `op`, if appropriate

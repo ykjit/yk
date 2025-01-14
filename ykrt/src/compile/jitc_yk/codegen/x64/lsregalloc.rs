@@ -556,10 +556,7 @@ impl LSRegAlloc<'_> {
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
-                                    if self.rev_an.inst_vals_alive_until[usize::from(from_iidx)]
-                                        >= self.rev_an.inst_vals_alive_until
-                                            [usize::from(furthest_iidx)]
-                                    {
+                                    if self.rev_an.used_later_than(from_iidx, furthest_iidx) {
                                         furthest = Some((reg, from_iidx))
                                     }
                                 }
@@ -1120,10 +1117,7 @@ impl LSRegAlloc<'_> {
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
-                                    if self.rev_an.inst_vals_alive_until[usize::from(from_iidx)]
-                                        >= self.rev_an.inst_vals_alive_until
-                                            [usize::from(furthest_iidx)]
-                                    {
+                                    if self.rev_an.used_later_than(from_iidx, furthest_iidx) {
                                         furthest = Some((reg, from_iidx))
                                     }
                                 }
