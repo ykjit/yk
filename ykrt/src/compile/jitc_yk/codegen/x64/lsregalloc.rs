@@ -534,8 +534,8 @@ impl LSRegAlloc<'_> {
                 Some(reg) => reg,
                 None => {
                     // We need to find a register to spill. Our heuristic is two-fold:
-                    //   1. Spill the register whose value is used furthest away in the trace. This
-                    //      is a proxy for "the value is less likely to be used soon".
+                    //   1. Spill the register whose value is used furthest away in the trace based
+                    //      on the reverse analyser's (def, use) analysis.
                     //   2. If (1) leads to a tie, spill the "highest" register (e.g. prefer to
                     //      spill R15 over RAX) because "lower" registers are more likely to be
                     //      clobbered by CALLS, and we assume that the more recently we've put a
@@ -550,14 +550,13 @@ impl LSRegAlloc<'_> {
                             RegState::Empty => unreachable!(),
                             RegState::FromConst(_) => todo!(),
                             RegState::FromInst(from_iidx) => {
-                                debug_assert!(self
-                                    .rev_an
-                                    .is_inst_var_still_used_at(iidx, from_iidx));
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
-                                    if self.rev_an.used_later_than(from_iidx, furthest_iidx) {
-                                        furthest = Some((reg, from_iidx))
+                                    if let Some(next_iidx) = self.rev_an.next_use(iidx, from_iidx) {
+                                        if next_iidx > furthest_iidx {
+                                            furthest = Some((reg, from_iidx))
+                                        }
                                     }
                                 }
                             }
@@ -1095,8 +1094,8 @@ impl LSRegAlloc<'_> {
                 Some(reg) => reg,
                 None => {
                     // We need to find a register to spill. Our heuristic is two-fold:
-                    //   1. Spill the register whose value is used furthest away in the trace. This
-                    //      is a proxy for "the value is less likely to be used soon".
+                    //   1. Spill the register whose value is used furthest away in the trace based
+                    //      on the reverse analyser's (def, use) analysis.
                     //   2. If (1) leads to a tie, spill the "highest" register (e.g. prefer to
                     //      spill XMM15 over XMM0) because "lower" registers are more likely to be
                     //      clobbered by CALLS, and we assume that the more recently we've put a
@@ -1117,8 +1116,10 @@ impl LSRegAlloc<'_> {
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
-                                    if self.rev_an.used_later_than(from_iidx, furthest_iidx) {
-                                        furthest = Some((reg, from_iidx))
+                                    if let Some(next_iidx) = self.rev_an.next_use(iidx, from_iidx) {
+                                        if next_iidx > furthest_iidx {
+                                            furthest = Some((reg, from_iidx))
+                                        }
                                     }
                                 }
                             }

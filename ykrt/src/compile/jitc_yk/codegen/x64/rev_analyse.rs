@@ -40,6 +40,10 @@ pub(crate) struct RevAnalyse<'a> {
     /// cause JIT IR instructions to be removed, but it allows a code generator to avoid generating
     /// code for some of them.
     used_insts: Vob,
+    /// For each instruction, record the instructions which use its value. Note: the inner `Vec`
+    /// *must* be sorted in reverse order (see [Self::next_use]) e.g. a valid `def_use` is
+    /// `[[2, 1], [], [4, 3]]` but `[[1, 2], ..]` is invalid.
+    def_use: Vec<Vec<InstIdx>>,
     /// What [Register] should an instruction aim to put its output to?
     pub(crate) reg_hints: Vec<Option<Register>>,
 }
@@ -51,6 +55,7 @@ impl<'a> RevAnalyse<'a> {
             inst_vals_alive_until: vec![InstIdx::try_from(0).unwrap(); m.insts_len()],
             ptradds: vec![None; m.insts_len()],
             used_insts: Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1),
+            def_use: vec![vec![]; m.insts_len()],
             reg_hints: vec![None; m.insts_len()],
         }
     }
@@ -188,6 +193,7 @@ impl<'a> RevAnalyse<'a> {
                 if self.inst_vals_alive_until[usize::from(x)] < iidx {
                     self.inst_vals_alive_until[usize::from(x)] = iidx;
                 }
+                self.push_def_use(x, iidx);
             });
         }
     }
@@ -217,6 +223,36 @@ impl<'a> RevAnalyse<'a> {
     pub(super) fn used_later_than(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
         self.inst_vals_alive_until[usize::from(cur_iidx)]
             >= self.inst_vals_alive_until[usize::from(query_iidx)]
+    }
+
+    /// Record that `use_iidx` is used at instruction `def_iidx`.
+    fn push_def_use(&mut self, def_iidx: InstIdx, use_iidx: InstIdx) {
+        debug_assert!(def_iidx < use_iidx);
+        self.def_use[usize::from(def_iidx)].push(use_iidx);
+    }
+
+    /// When processing the instruction `cur_iidx`, return at which instruction `query_iidx` is
+    /// used *after* (not including!) `cur_iidx` or `None` if it is not used again.
+    ///
+    /// Note: `query_iidx` is *not* required to be used by `cur_iidx` itself.
+    pub(super) fn next_use(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> Option<InstIdx> {
+        // Our algorithm only works if `self.def_use[query_iidx]` is (a) sorted and (b) in reverse
+        // order.
+        debug_assert!(self.def_use[usize::from(query_iidx)]
+            .iter()
+            .rev()
+            .is_sorted());
+        match self.def_use[usize::from(query_iidx)]
+            .iter()
+            .position(|x| *x <= cur_iidx)
+        {
+            // `query_iidx` isn't used again.
+            Some(0) => None,
+            Some(i) => Some(self.def_use[usize::from(query_iidx)][i - 1]),
+            // `query_iidx` has yet to be used. Its "next" use will also be its first use. This
+            // seemingly impossible situation happens for inputs to a trace that are in registers.
+            None => self.def_use[usize::from(query_iidx)].last().cloned(),
+        }
     }
 
     /// Propagate the hint for the instruction being processed at `iidx` to `op`, if appropriate
@@ -319,6 +355,7 @@ impl<'a> RevAnalyse<'a> {
                         self.push_reg_hint_outputcanbesameasinput(iidx, pa_inst.ptr(self.m));
                     }
                     self.used_insts.set(usize::from(y), true);
+                    self.push_def_use(y, iidx);
                 }
                 return true;
             }
@@ -337,12 +374,14 @@ impl<'a> RevAnalyse<'a> {
                         self.inst_vals_alive_until[usize::from(y)] = iidx;
                     }
                     self.used_insts.set(usize::from(y), true);
+                    self.push_def_use(y, iidx);
                 }
                 if let Operand::Var(y) = inst.val(self.m) {
                     if self.inst_vals_alive_until[usize::from(y)] < iidx {
                         self.inst_vals_alive_until[usize::from(y)] = iidx;
                     }
                     self.used_insts.set(usize::from(y), true);
+                    self.push_def_use(y, iidx);
                 }
                 return true;
             }
@@ -421,6 +460,83 @@ mod test {
     }
 
     #[test]
+    fn def_use() {
+        let m = Module::from_str(
+            "
+            entry:
+              %0: ptr = param 0
+              %1: ptr = ptr_add %0, 8
+              %2: i8 = load %1
+              %3: ptr = ptr_add %0, 16
+              *%1 = 1i8
+              black_box %2
+              black_box %3
+            ",
+        );
+        let rev_an = rev_analyse_header(&m);
+        assert_eq!(
+            rev_an.def_use,
+            vec![
+                vec![
+                    InstIdx::unchecked_from(4),
+                    InstIdx::unchecked_from(3),
+                    InstIdx::unchecked_from(2)
+                ],
+                vec![],
+                vec![InstIdx::unchecked_from(5)],
+                vec![InstIdx::unchecked_from(6)],
+                vec![],
+                vec![],
+                vec![]
+            ]
+        );
+
+        // These are triples: does next_use(elem_1, elem_2) == elem3?
+        let next_uses = [
+            // %0
+            (0, 0, Some(2)),
+            (0, 1, None),
+            // %1
+            (1, 0, Some(2)),
+            (1, 1, None),
+            // %2
+            (2, 0, Some(3)),
+            (2, 1, None),
+            (2, 2, Some(5)),
+            // %3
+            (3, 0, Some(4)),
+            (3, 1, None),
+            (3, 2, Some(5)),
+            (3, 3, Some(6)),
+            // %4
+            (4, 0, None),
+            (4, 1, None),
+            (4, 2, Some(5)),
+            (4, 3, Some(6)),
+            (4, 4, None),
+            // %5
+            (5, 0, None),
+            (5, 1, None),
+            (5, 2, None),
+            (5, 3, Some(6)),
+            (5, 4, None),
+            // %6
+            (6, 0, None),
+            (6, 1, None),
+            (6, 2, None),
+            (6, 3, None),
+            (6, 4, None),
+            (6, 5, None),
+        ];
+        for (cur_iidx, query_iidx, next_iidx) in next_uses {
+            let cur_iidx = InstIdx::try_from(cur_iidx).unwrap();
+            let query_iidx = InstIdx::try_from(query_iidx).unwrap();
+            let next_iidx = next_iidx.map(|x| InstIdx::try_from(x).unwrap());
+            assert_eq!(rev_an.next_use(cur_iidx, query_iidx), next_iidx);
+        }
+    }
+
+    #[test]
     fn inline_ptradds() {
         let m = Module::from_str(
             "
@@ -438,6 +554,22 @@ mod test {
         assert_eq!(
             rev_an.used_insts,
             vob![true, false, true, true, true, true, true]
+        );
+        assert_eq!(
+            rev_an.def_use,
+            vec![
+                vec![
+                    InstIdx::unchecked_from(4),
+                    InstIdx::unchecked_from(3),
+                    InstIdx::unchecked_from(2)
+                ],
+                vec![],
+                vec![InstIdx::unchecked_from(5)],
+                vec![InstIdx::unchecked_from(6)],
+                vec![],
+                vec![],
+                vec![]
+            ]
         );
         assert_matches!(
             rev_an.ptradds.as_slice(),
