@@ -107,7 +107,7 @@ static RESERVED_FP_REGS: [Rx; 0] = [];
 /// A linear scan register allocator.
 pub(crate) struct LSRegAlloc<'a> {
     m: &'a Module,
-    rev_an: RevAnalyse<'a>,
+    pub(super) rev_an: RevAnalyse<'a>,
     /// Which general purpose registers are active?
     gp_regset: RegSet<Rq>,
     /// In what state are the general purpose registers?
@@ -209,7 +209,7 @@ impl<'a> LSRegAlloc<'a> {
                 }
                 RegState::FromInst(reg_iidx) => {
                     debug_assert!(self.gp_regset.is_set(reg));
-                    if !self.is_inst_var_still_used_at(iidx, reg_iidx) {
+                    if !self.rev_an.is_inst_var_still_used_at(iidx, reg_iidx) {
                         self.gp_regset.unset(reg);
                         *self.gp_reg_states.get_mut(usize::from(reg.code())).unwrap() =
                             RegState::Empty;
@@ -234,7 +234,7 @@ impl<'a> LSRegAlloc<'a> {
                 }
                 RegState::FromInst(reg_iidx) => {
                     debug_assert!(self.fp_regset.is_set(reg));
-                    if !self.is_inst_var_still_used_at(iidx, reg_iidx) {
+                    if !self.rev_an.is_inst_var_still_used_at(iidx, reg_iidx) {
                         self.fp_regset.unset(reg);
                         *self.fp_reg_states.get_mut(usize::from(reg.code())).unwrap() =
                             RegState::Empty;
@@ -254,29 +254,6 @@ impl<'a> LSRegAlloc<'a> {
     /// the stack pointer offset from the base pointer of the interpreter loop frame).
     pub(crate) fn stack_size(&mut self) -> usize {
         self.stack.size()
-    }
-
-    /// Is the instruction at [iidx] a tombstone or otherwise known to be dead (i.e. equivalent to
-    /// a tombstone)?
-    pub(crate) fn is_inst_tombstone(&self, iidx: InstIdx) -> bool {
-        self.rev_an.is_inst_tombstone(iidx)
-    }
-
-    /// Is the value produced by instruction `query_iidx` used after (but not including!)
-    /// instruction `cur_idx`?
-    pub(crate) fn is_inst_var_still_used_after(
-        &self,
-        cur_iidx: InstIdx,
-        query_iidx: InstIdx,
-    ) -> bool {
-        self.rev_an
-            .is_inst_var_still_used_after(cur_iidx, query_iidx)
-    }
-
-    /// Is the value produced by instruction `query_iidx` used at or after instruction `cur_idx`?
-    fn is_inst_var_still_used_at(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
-        usize::from(cur_iidx)
-            <= usize::from(self.rev_an.inst_vals_alive_until[usize::from(query_iidx)])
     }
 
     #[cfg(test)]
@@ -377,7 +354,7 @@ impl LSRegAlloc<'_> {
                     }
                 }) {
                     Some(reg_i) => {
-                        if self.is_inst_var_still_used_after(iidx, op_iidx) {
+                        if self.rev_an.is_inst_var_still_used_after(iidx, op_iidx) {
                             let mut avoid = RegSet::with_gp_reserved();
                             self.move_or_spill_gp(asm, iidx, &mut avoid, GP_REGS[reg_i]);
                         }
@@ -467,7 +444,10 @@ impl LSRegAlloc<'_> {
                         continue;
                     }
                     if let Operand::Var(search_op_iidx) = search_op {
-                        if !self.is_inst_var_still_used_after(iidx, search_op_iidx) {
+                        if !self
+                            .rev_an
+                            .is_inst_var_still_used_after(iidx, search_op_iidx)
+                        {
                             for j in 0..constraints.len() {
                                 if let RegConstraint::Input(in_op) = constraints[j].clone() {
                                     if search_op == in_op {
@@ -582,7 +562,9 @@ impl LSRegAlloc<'_> {
                             RegState::Empty => unreachable!(),
                             RegState::FromConst(_) => todo!(),
                             RegState::FromInst(from_iidx) => {
-                                debug_assert!(self.is_inst_var_still_used_at(iidx, from_iidx));
+                                debug_assert!(self
+                                    .rev_an
+                                    .is_inst_var_still_used_at(iidx, from_iidx));
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
@@ -629,7 +611,7 @@ impl LSRegAlloc<'_> {
                                 }
                                 RegState::FromConst(_) => todo!(),
                                 RegState::FromInst(query_iidx) => {
-                                    if self.is_inst_var_still_used_at(iidx, query_iidx) {
+                                    if self.rev_an.is_inst_var_still_used_at(iidx, query_iidx) {
                                         self.swap_gp_reg(asm, old_reg, new_reg);
                                     } else {
                                         self.move_gp_reg(asm, old_reg, new_reg);
@@ -775,7 +757,10 @@ impl LSRegAlloc<'_> {
             RegState::Empty => (),
             RegState::FromConst(_) => (),
             RegState::FromInst(query_iidx) => {
-                if self.is_inst_var_still_used_after(cur_iidx, query_iidx) {
+                if self
+                    .rev_an
+                    .is_inst_var_still_used_after(cur_iidx, query_iidx)
+                {
                     let mut new_reg = None;
                     // Try to use `query_iidx`s hint, if there is one, and it's not in use...
                     if let Some(reg_alloc::Register::GP(reg)) =
@@ -1144,7 +1129,9 @@ impl LSRegAlloc<'_> {
                             RegState::Empty => unreachable!(),
                             RegState::FromConst(_) => todo!(),
                             RegState::FromInst(from_iidx) => {
-                                debug_assert!(self.is_inst_var_still_used_at(iidx, from_iidx));
+                                debug_assert!(self
+                                    .rev_an
+                                    .is_inst_var_still_used_at(iidx, from_iidx));
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
@@ -1191,7 +1178,7 @@ impl LSRegAlloc<'_> {
                                 }
                                 RegState::FromConst(_) => todo!(),
                                 RegState::FromInst(query_iidx) => {
-                                    if self.is_inst_var_still_used_at(iidx, query_iidx) {
+                                    if self.rev_an.is_inst_var_still_used_at(iidx, query_iidx) {
                                         self.swap_fp_reg(asm, old_reg, new_reg);
                                     } else {
                                         self.move_fp_reg(asm, old_reg, new_reg);
@@ -1340,7 +1327,10 @@ impl LSRegAlloc<'_> {
             RegState::Empty => (),
             RegState::FromConst(_) => (),
             RegState::FromInst(query_iidx) => {
-                if self.is_inst_var_still_used_after(cur_iidx, query_iidx) {
+                if self
+                    .rev_an
+                    .is_inst_var_still_used_after(cur_iidx, query_iidx)
+                {
                     match self.fp_regset.find_empty_avoiding(*avoid) {
                         Some(new_reg) => {
                             dynasm!(asm; movsd Rx(new_reg.code()), Rx(old_reg.code()));

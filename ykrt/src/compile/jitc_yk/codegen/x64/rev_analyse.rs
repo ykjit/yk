@@ -194,12 +194,17 @@ impl<'a> RevAnalyse<'a> {
 
     /// Is the value produced by instruction `query_iidx` used after (but not including!)
     /// instruction `cur_idx`?
-    pub(crate) fn is_inst_var_still_used_after(
+    pub(super) fn is_inst_var_still_used_after(
         &self,
         cur_iidx: InstIdx,
         query_iidx: InstIdx,
     ) -> bool {
         usize::from(cur_iidx) < usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
+    }
+
+    /// Is the value produced by instruction `query_iidx` used at or after instruction `cur_idx`?
+    pub(super) fn is_inst_var_still_used_at(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
+        usize::from(cur_iidx) <= usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
     }
 
     /// Propagate the hint for the instruction being processed at `iidx` to `op`, if appropriate

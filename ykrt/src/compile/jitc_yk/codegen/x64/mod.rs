@@ -456,7 +456,7 @@ impl<'a> Assemble<'a> {
         let mut next = iter.next();
         let mut in_header = true;
         while let Some((iidx, inst)) = next {
-            if self.ra.is_inst_tombstone(iidx) {
+            if self.ra.rev_an.is_inst_tombstone(iidx) {
                 next = iter.next();
                 continue;
             }
@@ -494,7 +494,10 @@ impl<'a> Assemble<'a> {
                             // NOTE: If the value of the condition will be used later, we have to
                             // materialise it.
                             if cond_idx == iidx
-                                && !self.ra.is_inst_var_still_used_after(next_iidx, cond_idx)
+                                && !self
+                                    .ra
+                                    .rev_an
+                                    .is_inst_var_still_used_after(next_iidx, cond_idx)
                             {
                                 self.cg_icmp_guard(iidx, ic_inst, next_iidx, g_inst);
                                 next = iter.next();
@@ -1636,7 +1639,7 @@ impl<'a> Assemble<'a> {
         g_iidx: InstIdx,
         g_inst: jit_ir::GuardInst,
     ) {
-        debug_assert!(!self.ra.is_inst_var_still_used_after(g_iidx, ic_iidx));
+        debug_assert!(!self.ra.rev_an.is_inst_var_still_used_after(g_iidx, ic_iidx));
 
         // Codegen ICmp
         let (lhs, pred, rhs) = (
