@@ -35,10 +35,10 @@ pub(crate) struct RevAnalyse<'a> {
     /// `PtrAddInst` is not marked as used, for such instructions: note that it might be marked as
     /// used by other instructions!
     pub(crate) ptradds: Vec<Option<PtrAddInst>>,
-    /// A `Vob` with one entry per instruction, denoting whether the code generator use its
-    /// value. This is implicitly a layer of dead-code elimination: it doesn't cause JIT IR
-    /// instructions to be removed, but it will stop any code being (directly) generated for
-    /// some of them.
+    /// A `Vob` with one entry per instruction, denoting whether the value resulting from an
+    /// instruction is used. This implicitly enables a layer of dead-code elimination: it doesn't
+    /// cause JIT IR instructions to be removed, but it allows a code generator to avoid generating
+    /// code for some of them.
     pub(crate) used_insts: Vob,
     /// What [Register] should an instruction aim to put its output to?
     pub(crate) reg_hints: Vec<Option<Register>>,
