@@ -39,7 +39,7 @@ pub(crate) struct RevAnalyse<'a> {
     /// instruction is used. This implicitly enables a layer of dead-code elimination: it doesn't
     /// cause JIT IR instructions to be removed, but it allows a code generator to avoid generating
     /// code for some of them.
-    pub(crate) used_insts: Vob,
+    used_insts: Vob,
     /// What [Register] should an instruction aim to put its output to?
     pub(crate) reg_hints: Vec<Option<Register>>,
 }
