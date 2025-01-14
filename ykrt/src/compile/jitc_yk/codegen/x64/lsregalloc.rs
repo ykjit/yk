@@ -288,6 +288,20 @@ impl<'a> LSRegAlloc<'a> {
     pub(crate) fn ptradd(&self, iidx: InstIdx) -> Option<PtrAddInst> {
         self.rev_an.ptradds[usize::from(iidx)]
     }
+
+    /// Assign registers for the instruction at position `iidx`.
+    pub(crate) fn assign_regs<const NG: usize, const NF: usize>(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        gp_constraints: [RegConstraint<Rq>; NG],
+        fp_constraints: [RegConstraint<Rx>; NF],
+    ) -> ([Rq; NG], [Rx; NF]) {
+        (
+            self.assign_gp_regs(asm, iidx, gp_constraints),
+            self.assign_fp_regs(asm, iidx, fp_constraints),
+        )
+    }
 }
 
 /// The parts of the register allocator needed for general purpose registers.
@@ -378,7 +392,9 @@ impl LSRegAlloc<'_> {
         }
     }
 
-    /// Assign registers for the instruction at position `iidx`.
+    /// Assign general purpose registers for the instruction at position `iidx`.
+    ///
+    /// This is a convenience function for [Self::assign_regs] when there are no FP registers.
     pub(crate) fn assign_gp_regs<const N: usize>(
         &mut self,
         asm: &mut Assembler,
@@ -958,7 +974,9 @@ impl LSRegAlloc<'_> {
 }
 
 impl LSRegAlloc<'_> {
-    /// Assign registers for the instruction at position `iidx`.
+    /// Assign floating point registers for the instruction at position `iidx`.
+    ///
+    /// This is a convenience function for [Self::assign_regs] when there are no GP registers.
     pub(crate) fn assign_fp_regs<const N: usize>(
         &mut self,
         asm: &mut Assembler,
