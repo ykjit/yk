@@ -252,11 +252,6 @@ impl<'a> LSRegAlloc<'a> {
         self.stack.size()
     }
 
-    #[cfg(test)]
-    pub(crate) fn inst_vals_alive_until(&self) -> &Vec<InstIdx> {
-        &self.rev_an.inst_vals_alive_until
-    }
-
     /// Return the inline [PtrAddInst] for a load/store, if there is one.
     pub(crate) fn ptradd(&self, iidx: InstIdx) -> Option<PtrAddInst> {
         self.rev_an.ptradds[usize::from(iidx)]
