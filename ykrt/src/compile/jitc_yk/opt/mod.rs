@@ -264,7 +264,13 @@ impl Opt {
                             self.m.replace(iidx, Inst::Copy(op_iidx));
                         }
                     }
-                    (Operand::Const(_), Operand::Var(_)) => (),
+                    (Operand::Const(op_cidx), Operand::Var(_)) => {
+                        if let Const::Int(tyidx, 0) = self.m.const_(op_cidx) {
+                            // Replace `0 >> x` with `0`.
+                            let new_cidx = self.m.insert_const_int(*tyidx, 0)?;
+                            self.m.replace(iidx, Inst::Const(new_cidx));
+                        }
+                    }
                     (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
                         match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
                             (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
@@ -393,7 +399,13 @@ impl Opt {
                             self.m.replace(iidx, Inst::Copy(op_iidx));
                         }
                     }
-                    (Operand::Const(_), Operand::Var(_)) => (),
+                    (Operand::Const(op_cidx), Operand::Var(_)) => {
+                        if let Const::Int(tyidx, 0) = self.m.const_(op_cidx) {
+                            // Replace `0 << x` with `0`.
+                            let new_cidx = self.m.insert_const_int(*tyidx, 0)?;
+                            self.m.replace(iidx, Inst::Const(new_cidx));
+                        }
+                    }
                     (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
                         match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
                             (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
@@ -978,6 +990,22 @@ mod test {
             black_box %0
         ",
         );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param 0
+            %1: i8 = lshr 0i8, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 0i8
+        ",
+        );
     }
 
     #[test]
@@ -1014,6 +1042,22 @@ mod test {
           entry:
             %0: i8 = param ...
             black_box %0
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param 0
+            %1: i8 = shl 0i8, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 0i8
         ",
         );
     }
