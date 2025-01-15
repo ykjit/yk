@@ -249,7 +249,7 @@ impl Opt {
                                 )?;
                                 self.m.replace(iidx, Inst::Const(cidx));
                             }
-                            _ => todo!(),
+                            _ => panic!(),
                         }
                     }
                     (Operand::Var(_), Operand::Var(_)) => (),
@@ -284,7 +284,7 @@ impl Opt {
                                 )?;
                                 self.m.replace(iidx, Inst::Const(cidx));
                             }
-                            _ => todo!(),
+                            _ => panic!(),
                         }
                     }
                     (Operand::Var(_), Operand::Var(_)) => (),
@@ -384,7 +384,7 @@ impl Opt {
                                 )?;
                                 self.m.replace(iidx, Inst::Const(cidx));
                             }
-                            _ => todo!(),
+                            _ => panic!(),
                         }
                     }
                     (Operand::Var(_), Operand::Var(_)) => (),
@@ -419,7 +419,7 @@ impl Opt {
                                 )?;
                                 self.m.replace(iidx, Inst::Const(cidx));
                             }
-                            _ => todo!(),
+                            _ => panic!(),
                         }
                     }
                     (Operand::Var(_), Operand::Var(_)) => (),
