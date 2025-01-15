@@ -587,7 +587,7 @@ impl<'a> Assemble<'a> {
         let mut next = iter.next();
         let mut in_header = true;
         while let Some((iidx, inst)) = next {
-            if self.ra.is_inst_tombstone(iidx) {
+            if self.ra.rev_an.is_inst_tombstone(iidx) {
                 next = iter.next();
                 continue;
             }
@@ -625,7 +625,10 @@ impl<'a> Assemble<'a> {
                             // NOTE: If the value of the condition will be used later, we have to
                             // materialise it.
                             if cond_idx == iidx
-                                && !self.ra.is_inst_var_still_used_after(next_iidx, cond_idx)
+                                && !self
+                                    .ra
+                                    .rev_an
+                                    .is_inst_var_still_used_after(next_iidx, cond_idx)
                             {
                                 self.cg_icmp_guard(iidx, ic_inst, next_iidx, g_inst);
                                 next = iter.next();
@@ -1293,12 +1296,12 @@ impl<'a> Assemble<'a> {
                 };
             }
             Ty::Float(fty) => {
-                let [src_reg] =
-                    self.ra
-                        .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(ptr_op)]);
-                let [tgt_reg] =
-                    self.ra
-                        .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+                let ([src_reg], [tgt_reg]) = self.ra.assign_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::Input(ptr_op)],
+                    [RegConstraint::Output],
+                );
                 match fty {
                     FloatTy::Float => {
                         dynasm!(self.asm; movss Rx(tgt_reg.code()), [Rq(src_reg.code()) + off])
@@ -1419,12 +1422,12 @@ impl<'a> Assemble<'a> {
                 }
             }
             Ty::Float(fty) => {
-                let [tgt_reg] =
-                    self.ra
-                        .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
-                let [val_reg] =
-                    self.ra
-                        .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(val)]);
+                let ([tgt_reg], [val_reg]) = self.ra.assign_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::Input(tgt_op)],
+                    [RegConstraint::Input(val)],
+                );
                 match fty {
                     FloatTy::Float => {
                         dynasm!(self.asm ; movss [Rq(tgt_reg.code()) + off], Rx(val_reg.code()));
@@ -1567,9 +1570,7 @@ impl<'a> Assemble<'a> {
         }
 
         // We now have all the FP constraints, so assign those.
-        let _: [Rx; 16] =
-            self.ra
-                .assign_fp_regs(&mut self.asm, iidx, fp_cnstrs.try_into().unwrap());
+        let fp_cnstrs: [_; 16] = fp_cnstrs.try_into().unwrap();
         let num_float_args = i32::try_from(num_float_args).unwrap();
 
         // We now have most of the GP constraints, except the call target. We have to handle that
@@ -1579,9 +1580,12 @@ impl<'a> Assemble<'a> {
                 // Direct call
 
                 if !fty.is_vararg() {
-                    let [_, _, _, _, _, _, _, _, _] =
-                        self.ra
-                            .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+                    let _: ([Rq; CALLER_CLOBBER_REGS.len()], [Rx; 16]) = self.ra.assign_regs(
+                        &mut self.asm,
+                        iidx,
+                        gp_cnstrs.try_into().unwrap(),
+                        fp_cnstrs,
+                    );
                     // rax is considered clobbered, but isn't used to pass an argument, so we can
                     // safely use it for the function pointer.
                     dynasm!(self.asm
@@ -1590,9 +1594,13 @@ impl<'a> Assemble<'a> {
                     );
                 } else {
                     gp_cnstrs.push(RegConstraint::Temporary);
-                    let [_, _, _, _, _, _, _, _, _, tmp_reg] =
-                        self.ra
-                            .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+                    let ([.., tmp_reg], _): ([Rq; CALLER_CLOBBER_REGS.len() + 1], [Rx; 16]) =
+                        self.ra.assign_regs(
+                            &mut self.asm,
+                            iidx,
+                            gp_cnstrs.try_into().unwrap(),
+                            fp_cnstrs,
+                        );
                     dynasm!(self.asm
                         ; mov rax, num_float_args
                         ; mov Rq(tmp_reg.code()), QWORD p as i64
@@ -1603,9 +1611,13 @@ impl<'a> Assemble<'a> {
             (None, Some(op)) => {
                 // Indirect call
                 gp_cnstrs.push(RegConstraint::Input(op));
-                let [_, _, _, _, _, _, _, _, _, op_reg] =
-                    self.ra
-                        .assign_gp_regs(&mut self.asm, iidx, gp_cnstrs.try_into().unwrap());
+                let ([.., op_reg], _): ([Rq; CALLER_CLOBBER_REGS.len() + 1], [Rx; 16]) =
+                    self.ra.assign_regs(
+                        &mut self.asm,
+                        iidx,
+                        gp_cnstrs.try_into().unwrap(),
+                        fp_cnstrs,
+                    );
                 if fty.is_vararg() {
                     dynasm!(self.asm; mov rax, num_float_args); // SysV x64 ABI
                 }
@@ -1758,7 +1770,7 @@ impl<'a> Assemble<'a> {
         g_iidx: InstIdx,
         g_inst: jit_ir::GuardInst,
     ) {
-        debug_assert!(!self.ra.is_inst_var_still_used_after(g_iidx, ic_iidx));
+        debug_assert!(!self.ra.rev_an.is_inst_var_still_used_after(g_iidx, ic_iidx));
 
         // Codegen ICmp
         let (lhs, pred, rhs) = (
@@ -1863,14 +1875,12 @@ impl<'a> Assemble<'a> {
     fn cg_fcmp(&mut self, iidx: InstIdx, inst: &jit_ir::FCmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
         let size = lhs.byte_size(self.m);
-        let [lhs_reg, rhs_reg] = self.ra.assign_fp_regs(
+        let ([tgt_reg], [lhs_reg, rhs_reg]) = self.ra.assign_regs(
             &mut self.asm,
             iidx,
+            [RegConstraint::Output],
             [RegConstraint::Input(lhs), RegConstraint::Input(rhs)],
         );
-        let [tgt_reg] = self
-            .ra
-            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
 
         match pred.is_ordered() {
             Some(true) => match size {
@@ -2046,12 +2056,15 @@ impl<'a> Assemble<'a> {
             }
         }
 
-        let _: [_; lsregalloc::GP_REGS.len()] =
-            self.ra
-                .assign_gp_regs(&mut self.asm, iidx, gp_regs.try_into().unwrap());
-        let _: [_; lsregalloc::FP_REGS.len()] =
-            self.ra
-                .assign_fp_regs(&mut self.asm, iidx, fp_regs.try_into().unwrap());
+        let _: (
+            [Rq; lsregalloc::GP_REGS.len()],
+            [Rx; lsregalloc::FP_REGS.len()],
+        ) = self.ra.assign_regs(
+            &mut self.asm,
+            iidx,
+            gp_regs.try_into().unwrap(),
+            fp_regs.try_into().unwrap(),
+        );
     }
 
     fn cg_body_end(&mut self, iidx: InstIdx) {
@@ -2273,14 +2286,12 @@ impl<'a> Assemble<'a> {
                 todo!();
             }
             (gp_ty, jit_ir::Ty::Float(_)) => {
-                let [src_reg] = self.ra.assign_gp_regs(
+                let ([src_reg], [tgt_reg]) = self.ra.assign_regs(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::Input(inst.val(self.m))],
+                    [RegConstraint::Output],
                 );
-                let [tgt_reg] =
-                    self.ra
-                        .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
                 // unwrap safe: IR would be invalid otherwise.
                 match gp_ty.byte_size().unwrap() {
                     4 => dynasm!(self.asm; cvtsi2ss Rx(tgt_reg.code()), Rd(src_reg.code())),
@@ -2293,14 +2304,12 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_sitofp(&mut self, iidx: InstIdx, inst: &jit_ir::SIToFPInst) {
-        let [src_reg] = self.ra.assign_gp_regs(
+        let ([src_reg], [tgt_reg]) = self.ra.assign_regs(
             &mut self.asm,
             iidx,
             [RegConstraint::Input(inst.val(self.m))],
+            [RegConstraint::Output],
         );
-        let [tgt_reg] = self
-            .ra
-            .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
 
         let src_size = inst.val(self.m).byte_size(self.m);
         match self.m.type_(inst.dest_tyidx()) {
@@ -2324,12 +2333,12 @@ impl<'a> Assemble<'a> {
         let from_size = self.m.type_(from_val.tyidx(self.m)).byte_size().unwrap();
         let to_size = to_ty.byte_size().unwrap();
 
-        let [src_reg] =
-            self.ra
-                .assign_fp_regs(&mut self.asm, iidx, [RegConstraint::Input(from_val)]);
-        let [tgt_reg] = self
-            .ra
-            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
+        let ([tgt_reg], [src_reg]) = self.ra.assign_regs(
+            &mut self.asm,
+            iidx,
+            [RegConstraint::Output],
+            [RegConstraint::Input(from_val)],
+        );
 
         match from_size {
             4 => dynasm!(self.asm; cvttss2si Rq(tgt_reg.code()), Rx(src_reg.code())),
@@ -2456,12 +2465,10 @@ impl<'a> Assemble<'a> {
         // There is no dedicated instruction for negating the value in an XMM register, so we flip
         // the sign bit manually. It's a bit of a dance since you can't XORPS with an immediate
         // float.
-        let [tmpi_reg] = self
-            .ra
-            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Temporary]);
-        let [io_reg, tmpf_reg] = self.ra.assign_fp_regs(
+        let ([tmpi_reg], [io_reg, tmpf_reg]) = self.ra.assign_regs(
             &mut self.asm,
             iidx,
+            [RegConstraint::Temporary],
             [RegConstraint::InputOutput(val), RegConstraint::Temporary],
         );
         match ty {
