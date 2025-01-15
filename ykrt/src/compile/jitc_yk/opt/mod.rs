@@ -259,23 +259,9 @@ impl Opt {
                     self.an.op_map(&self.m, x.rhs(&self.m)),
                 ) {
                     (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                        match self.m.const_(op_cidx) {
-                            Const::Int(_, 0) => {
-                                // Replace `x >> 0` with `x`.
-                                self.m.replace(iidx, Inst::Copy(op_iidx));
-                            }
-                            _ => {
-                                // Canonicalise to (Var, Const).
-                                self.m.replace(
-                                    iidx,
-                                    BinOpInst::new(
-                                        Operand::Var(op_iidx),
-                                        BinOp::LShr,
-                                        Operand::Const(op_cidx),
-                                    )
-                                    .into(),
-                                );
-                            }
+                        if let Const::Int(_, 0) = self.m.const_(op_cidx) {
+                            // Replace `x >> 0` with `x`.
+                            self.m.replace(iidx, Inst::Copy(op_iidx));
                         }
                     }
                     (Operand::Const(_), Operand::Var(_)) => (),
