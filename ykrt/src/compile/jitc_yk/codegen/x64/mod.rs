@@ -26,7 +26,6 @@ use super::{
         jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, TraceKind, Ty},
         CompilationError,
     },
-    reg_alloc::{self, VarLocation},
     CodeGen,
 };
 #[cfg(any(debug_assertions, test))]
@@ -49,11 +48,12 @@ use dynasmrt::{
     dynasm,
     x64::{Rq, Rx},
     AssemblyOffset, DynamicLabel, DynasmApi, DynasmError, DynasmLabelApi, ExecutableBuffer,
-    Register,
+    Register as dynasmrtRegister,
 };
 use indexmap::IndexMap;
 use parking_lot::Mutex;
 use std::{
+    assert_matches::debug_assert_matches,
     cell::Cell,
     collections::HashMap,
     error::Error,
@@ -139,12 +139,143 @@ static RBP_DWARF_NUM: u16 = 6;
 /// The x64 SysV ABI requires a 16-byte aligned stack prior to any call.
 const SYSV_CALL_STACK_ALIGN: usize = 16;
 
+/// To stop us having to say `VarLocation<Register>` everywhere, we use this type alias so that
+/// within this `x64` module and its descendants we can just say `VarLocation`.
+pub(crate) type VarLocation = super::reg_alloc::VarLocation<Register>;
+
 /// A function that we can put a debugger breakpoint on.
 /// FIXME: gross hack.
 #[cfg(debug_assertions)]
 #[no_mangle]
 #[inline(never)]
 pub extern "C" fn __yk_break() {}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Register {
+    GP(Rq), // general purpose
+    FP(Rx), // floating point
+}
+
+impl VarLocation {
+    pub(crate) fn from_yksmp_location(m: &Module, iidx: InstIdx, x: &yksmp::Location) -> Self {
+        match x {
+            yksmp::Location::Register(0, ..) => VarLocation::Register(Register::GP(Rq::RAX)),
+            yksmp::Location::Register(1, ..) => {
+                // Since the control point passes the stackmap ID via RDX this case only happens in
+                // side-traces.
+                VarLocation::Register(Register::GP(Rq::RDX))
+            }
+            yksmp::Location::Register(2, ..) => VarLocation::Register(Register::GP(Rq::RCX)),
+            yksmp::Location::Register(3, ..) => VarLocation::Register(Register::GP(Rq::RBX)),
+            yksmp::Location::Register(4, ..) => VarLocation::Register(Register::GP(Rq::RSI)),
+            yksmp::Location::Register(5, ..) => VarLocation::Register(Register::GP(Rq::RDI)),
+            yksmp::Location::Register(8, ..) => VarLocation::Register(Register::GP(Rq::R8)),
+            yksmp::Location::Register(9, ..) => VarLocation::Register(Register::GP(Rq::R9)),
+            yksmp::Location::Register(10, ..) => VarLocation::Register(Register::GP(Rq::R10)),
+            yksmp::Location::Register(11, ..) => VarLocation::Register(Register::GP(Rq::R11)),
+            yksmp::Location::Register(12, ..) => VarLocation::Register(Register::GP(Rq::R12)),
+            yksmp::Location::Register(13, ..) => VarLocation::Register(Register::GP(Rq::R13)),
+            yksmp::Location::Register(14, ..) => VarLocation::Register(Register::GP(Rq::R14)),
+            yksmp::Location::Register(15, ..) => VarLocation::Register(Register::GP(Rq::R15)),
+            yksmp::Location::Register(x, ..) if *x >= 17 && *x <= 32 => VarLocation::Register(
+                Register::FP(super::x64::lsregalloc::FP_REGS[usize::from(x - 17)]),
+            ),
+            yksmp::Location::Direct(6, off, size) => VarLocation::Direct {
+                frame_off: *off,
+                size: usize::from(*size),
+            },
+            // Since the trace shares the same stack frame as the main interpreter loop, we can
+            // translate indirect locations into normal stack locations. Note that while stackmaps
+            // use negative offsets, we use positive offsets for stack locations.
+            yksmp::Location::Indirect(6, off, size) => VarLocation::Stack {
+                frame_off: u32::try_from(*off * -1).unwrap(),
+                size: usize::from(*size),
+            },
+            yksmp::Location::Constant(v) => {
+                // FIXME: This isn't fine-grained enough, as there may be constants of any
+                // bit-size.
+                let byte_size = m.inst(iidx).def_byte_size(m);
+                debug_assert!(byte_size <= 8);
+                VarLocation::ConstInt {
+                    bits: u32::try_from(byte_size).unwrap() * 8,
+                    v: u64::from(*v),
+                }
+            }
+            e => {
+                todo!("{:?}", e);
+            }
+        }
+    }
+}
+
+impl From<&VarLocation> for yksmp::Location {
+    fn from(val: &VarLocation) -> Self {
+        match val {
+            VarLocation::Stack { frame_off, size } => {
+                // A stack location translates is an offset in relation to RBP which has the DWARF
+                // number 6.
+                yksmp::Location::Indirect(
+                    6,
+                    -i32::try_from(*frame_off).unwrap(),
+                    u16::try_from(*size).unwrap(),
+                )
+            }
+            VarLocation::Direct { frame_off, size } => {
+                yksmp::Location::Direct(6, *frame_off, u16::try_from(*size).unwrap())
+            }
+            VarLocation::Register(reg) => {
+                let dwarf = match reg {
+                    Register::GP(reg) => match reg {
+                        Rq::RAX => 0,
+                        Rq::RDX => 1,
+                        Rq::RCX => 2,
+                        Rq::RBX => 3,
+                        Rq::RSI => 4,
+                        Rq::RDI => 5,
+                        Rq::R8 => 8,
+                        Rq::R9 => 9,
+                        Rq::R10 => 10,
+                        Rq::R11 => 11,
+                        Rq::R12 => 12,
+                        Rq::R13 => 13,
+                        Rq::R14 => 14,
+                        Rq::R15 => 15,
+                        e => todo!("{:?}", e),
+                    },
+                    Register::FP(reg) => match reg {
+                        Rx::XMM0 => 17,
+                        Rx::XMM1 => 18,
+                        Rx::XMM2 => 19,
+                        Rx::XMM3 => 20,
+                        Rx::XMM4 => 21,
+                        Rx::XMM5 => 22,
+                        Rx::XMM6 => 23,
+                        Rx::XMM7 => 24,
+                        Rx::XMM8 => 25,
+                        Rx::XMM9 => 26,
+                        Rx::XMM10 => 27,
+                        Rx::XMM11 => 28,
+                        Rx::XMM12 => 29,
+                        Rx::XMM13 => 30,
+                        Rx::XMM14 => 31,
+                        Rx::XMM15 => 32,
+                    },
+                };
+                // We currently only use 8 byte registers, so the size is constant. Since these are
+                // JIT values there are no extra locations we need to worry about.
+                yksmp::Location::Register(dwarf, 8, Vec::new())
+            }
+            VarLocation::ConstInt { bits, v } => {
+                if *bits <= 32 {
+                    yksmp::Location::Constant(u32::try_from(*v).unwrap())
+                } else {
+                    todo!(">32 bit constant")
+                }
+            }
+            e => todo!("{:?}", e),
+        }
+    }
+}
 
 /// A simple front end for the X64 code generator.
 pub(crate) struct X64CodeGen;
@@ -513,7 +644,7 @@ impl<'a> Assemble<'a> {
                 }
                 jit_ir::Inst::TraceBodyStart => self.cg_body_start(),
                 jit_ir::Inst::TraceBodyEnd => self.cg_body_end(iidx),
-                jit_ir::Inst::SidetraceEnd => self.cg_sidetrace_end(iidx, self.m.root_jump_addr()),
+                jit_ir::Inst::SidetraceEnd => self.cg_sidetrace_end(iidx),
                 jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
                 jit_ir::Inst::ZExt(i) => self.cg_zext(iidx, i),
                 jit_ir::Inst::BitCast(i) => self.cg_bitcast(iidx, i),
@@ -1109,10 +1240,10 @@ impl<'a> Assemble<'a> {
         let m = VarLocation::from_yksmp_location(self.m, iidx, self.m.param(inst.paramidx()));
         debug_assert!(self.m.inst(iidx).def_byte_size(self.m) <= REG64_BYTESIZE);
         match m {
-            VarLocation::Register(reg_alloc::Register::GP(reg)) => {
+            VarLocation::Register(Register::GP(reg)) => {
                 self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
             }
-            VarLocation::Register(reg_alloc::Register::FP(reg)) => {
+            VarLocation::Register(Register::FP(reg)) => {
                 self.ra.force_assign_inst_fp_reg(iidx, reg);
             }
             VarLocation::Direct { frame_off, size: _ } => {
@@ -1821,9 +1952,17 @@ impl<'a> Assemble<'a> {
     /// * `tgt_vars` - The target locations. If `None` use `self.loop_start_locs` instead.
     fn write_jump_vars(&mut self, iidx: InstIdx) {
         let (tgt_vars, src_ops) = match self.m.tracekind() {
-            TraceKind::HeaderOnly => (self.header_start_locs.as_slice(), self.m.trace_header_end()),
-            TraceKind::HeaderAndBody => (self.body_start_locs.as_slice(), self.m.trace_body_end()),
-            TraceKind::Sidetrace => (self.m.root_entry_vars(), self.m.trace_header_end()),
+            TraceKind::HeaderOnly => (self.header_start_locs.clone(), self.m.trace_header_end()),
+            TraceKind::HeaderAndBody => (self.body_start_locs.clone(), self.m.trace_body_end()),
+            TraceKind::Sidetrace(sti) => (
+                Arc::clone(sti)
+                    .as_any()
+                    .downcast::<YkSideTraceInfo<Register>>()
+                    .unwrap()
+                    .entry_vars
+                    .clone(),
+                self.m.trace_header_end(),
+            ),
         };
         // If we pass in `None` use `self.loop_start_locs` instead. We need to do this since we
         // can't pass in `&self.loop_start_locs` directly due to borrowing restrictions.
@@ -1851,7 +1990,7 @@ impl<'a> Assemble<'a> {
                     size: size_dst,
                 } => {
                     match src {
-                        VarLocation::Register(reg_alloc::Register::GP(reg)) => match size_dst {
+                        VarLocation::Register(Register::GP(reg)) => match size_dst {
                             8 => dynasm!(self.asm;
                                 mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
                             ),
@@ -1896,10 +2035,10 @@ impl<'a> Assemble<'a> {
                     // match. But since the value can't change we can safely ignore this.
                 }
                 VarLocation::Register(reg) => match reg {
-                    reg_alloc::Register::GP(r) => {
+                    Register::GP(r) => {
                         gp_regs[usize::from(r.code())] = RegConstraint::InputIntoReg(op.clone(), r);
                     }
-                    reg_alloc::Register::FP(r) => {
+                    Register::FP(r) => {
                         fp_regs[usize::from(r.code())] = RegConstraint::InputIntoReg(op.clone(), r);
                     }
                 },
@@ -1916,7 +2055,7 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_body_end(&mut self, iidx: InstIdx) {
-        debug_assert_eq!(self.m.tracekind(), TraceKind::HeaderAndBody);
+        debug_assert_matches!(self.m.tracekind(), TraceKind::HeaderAndBody);
         // Loop the JITted code if the `tloop_start` label is present (not relevant for IR created
         // by a test or a side-trace).
         let label = StaticLabel::global("tloop_start");
@@ -1944,21 +2083,29 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_sidetrace_end(&mut self, iidx: InstIdx, addr: *const libc::c_void) {
-        debug_assert_eq!(self.m.tracekind(), TraceKind::Sidetrace);
-        // The end of a side-trace. Map live variables of this side-trace to the entry variables of
-        // the root parent trace, then jump to it.
-        self.write_jump_vars(iidx);
-        self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
+    fn cg_sidetrace_end(&mut self, iidx: InstIdx) {
+        match self.m.tracekind() {
+            TraceKind::Sidetrace(sti) => {
+                let sti = Arc::clone(sti)
+                    .as_any()
+                    .downcast::<YkSideTraceInfo<Register>>()
+                    .unwrap();
+                // The end of a side-trace. Map live variables of this side-trace to the entry variables of
+                // the root parent trace, then jump to it.
+                self.write_jump_vars(iidx);
+                self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
 
-        dynasm!(self.asm
-            // Reset rsp to the root trace's frame.
-            ; mov rsp, rbp
-            ; sub rsp, i32::try_from(self.root_offset.unwrap()).unwrap()
-            ; mov rdi, QWORD addr as i64
-            // We can safely use RDI here, since the root trace won't expect live variables in this
-            // register since it's being used as an argument to the control point.
-            ; jmp rdi);
+                dynasm!(self.asm
+                    // Reset rsp to the root trace's frame.
+                    ; mov rsp, rbp
+                    ; sub rsp, i32::try_from(sti.root_offset()).unwrap()
+                    ; mov rdi, QWORD sti.root_addr() as i64
+                    // We can safely use RDI here, since the root trace won't expect live variables in this
+                    // register since it's being used as an argument to the control point.
+                    ; jmp rdi);
+            }
+            TraceKind::HeaderOnly | TraceKind::HeaderAndBody => panic!(),
+        }
     }
 
     fn cg_header_start(&mut self) {
@@ -1980,7 +2127,7 @@ impl<'a> Assemble<'a> {
             TraceKind::HeaderAndBody => {
                 dynasm!(self.asm; ->reentry:);
             }
-            TraceKind::Sidetrace => todo!(),
+            TraceKind::Sidetrace(_) => todo!(),
         }
         self.prologue_offset = self.asm.offset();
     }
@@ -2020,10 +2167,10 @@ impl<'a> Assemble<'a> {
                     // Write the varlocations from the head jump to the body start.
                     // FIXME: This is copied verbatim from `cg_param` and can be reused.
                     match varloc {
-                        VarLocation::Register(reg_alloc::Register::GP(reg)) => {
+                        VarLocation::Register(Register::GP(reg)) => {
                             self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
                         }
-                        VarLocation::Register(reg_alloc::Register::FP(reg)) => {
+                        VarLocation::Register(Register::FP(reg)) => {
                             self.ra.force_assign_inst_fp_reg(iidx, reg);
                         }
                         VarLocation::Direct { frame_off, size: _ } => {
@@ -2042,12 +2189,12 @@ impl<'a> Assemble<'a> {
                     }
                 }
             }
-            TraceKind::Sidetrace => todo!(),
+            TraceKind::Sidetrace(_) => panic!(),
         }
     }
 
     fn cg_body_start(&mut self) {
-        debug_assert_eq!(self.m.tracekind(), TraceKind::HeaderAndBody);
+        debug_assert_matches!(self.m.tracekind(), &TraceKind::HeaderAndBody);
         debug_assert_eq!(self.body_start_locs.len(), 0);
         // Remember the locations of the live variables at the beginning of the trace loop. When we
         // loop back around here we need to write the live variables back into these same

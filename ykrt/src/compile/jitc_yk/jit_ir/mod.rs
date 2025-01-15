@@ -96,16 +96,17 @@ mod parser;
 #[cfg(any(debug_assertions, test))]
 mod well_formed;
 
+use super::aot_ir;
 #[cfg(debug_assertions)]
 use super::int_signs::Truncate;
-use super::{aot_ir, codegen::reg_alloc::VarLocation};
-use crate::compile::CompilationError;
+use crate::compile::{CompilationError, SideTraceInfo};
 use indexmap::IndexSet;
 use std::{
     ffi::{c_void, CString},
     fmt,
     hash::Hash,
     mem,
+    sync::Arc,
 };
 use strum::{EnumCount, EnumDiscriminants};
 #[cfg(not(test))]
@@ -115,7 +116,7 @@ use ykaddr::addr::symbol_to_ptr;
 pub(crate) use super::aot_ir::{BinOp, FloatPredicate, FloatTy, Predicate};
 
 /// What kind of trace does this module represent?
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) enum TraceKind {
     /// A trace which contains only a header: the trace must loop back to the very start every
     /// time.
@@ -123,7 +124,7 @@ pub(crate) enum TraceKind {
     /// A trace with a header and a body: the trace must loop back to the start of the body.
     HeaderAndBody,
     /// A sidetrace: the trace must loop back to the root of the trace tree.
-    Sidetrace,
+    Sidetrace(Arc<dyn SideTraceInfo>),
 }
 
 /// The `Module` is the top-level container for JIT IR.
@@ -180,8 +181,6 @@ pub(crate) struct Module {
     guard_info: Vec<GuardInfo>,
     /// Indirect calls.
     indirect_calls: Vec<IndirectCallInst>,
-    /// Live variables at the beginning of the root trace.
-    root_entry_vars: Vec<VarLocation>,
     /// Live variables at the beginning of the trace body.
     pub(crate) trace_body_start: Vec<PackedOperand>,
     /// The ordered sequence of operands at the end of the trace body: there will be one per
@@ -215,15 +214,15 @@ impl Module {
 
     /// Returns this module's current [TraceKind]. Note: this can change as a result of calling
     /// [Self::set_tracekind]!
-    pub(crate) fn tracekind(&self) -> TraceKind {
-        self.tracekind
+    pub(crate) fn tracekind(&self) -> &TraceKind {
+        &self.tracekind
     }
 
     /// Returns this module's current [TraceKind]. Currently the only transition allowed is from
     /// [TraceKind::HeaderOnly] to [TraceKind::HeaderAndBody].
     pub(crate) fn set_tracekind(&mut self, tracekind: TraceKind) {
-        match (self.tracekind, tracekind) {
-            (TraceKind::HeaderOnly, TraceKind::HeaderAndBody) => (),
+        match (&self.tracekind, &tracekind) {
+            (&TraceKind::HeaderOnly, &TraceKind::HeaderAndBody) => (),
             (from, to) => panic!("Can't transition from a {from:?} trace to a {to:?} trace"),
         }
         self.tracekind = tracekind;
@@ -304,7 +303,6 @@ impl Module {
             global_decls: IndexSet::new(),
             guard_info: Vec::new(),
             indirect_calls: Vec::new(),
-            root_entry_vars: Vec::new(),
             trace_body_start: Vec::new(),
             trace_body_end: Vec::new(),
             trace_header_start: Vec::new(),
@@ -642,36 +640,13 @@ impl Module {
         self.trace_header_start.push(PackedOperand::new(&op));
     }
 
-    /// Store the entry live variables of the root traces so we can copy this side-trace's live
-    /// variables to the right place before jumping back to the root trace.
-    pub(crate) fn set_root_entry_vars(&mut self, entry_vars: &[VarLocation]) {
-        self.root_entry_vars.extend_from_slice(entry_vars);
-    }
-
     /// Return the loop jump operands.
     pub(crate) fn trace_body_end(&self) -> &[PackedOperand] {
         &self.trace_body_end
     }
 
-    /// Get the entry live variables of the root trace.
-    pub(crate) fn root_entry_vars(&self) -> &[VarLocation] {
-        &self.root_entry_vars
-    }
-
     pub(crate) fn push_header_end_var(&mut self, op: Operand) {
         self.trace_header_end.push(PackedOperand::new(&op));
-    }
-
-    /// Get the address of the root trace. This is where we need jump to at the end of a
-    /// side-trace.
-    pub(crate) fn root_jump_addr(&self) -> *const libc::c_void {
-        self.root_jump_ptr
-    }
-
-    /// Set the entry address of the root trace. This is where we need jump to at the end of a
-    /// side-trace.
-    pub(crate) fn set_root_jump_addr(&mut self, ptr: *const libc::c_void) {
-        self.root_jump_ptr = ptr;
     }
 }
 

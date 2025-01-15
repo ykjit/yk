@@ -12,15 +12,17 @@
 //!      subsumes the functionality of `dead_code.rs`, so if you use this module for you don't need
 //!      to use `dead_code.rs` as well.
 
-use super::reg_alloc::{Register, VarLocation};
+use super::{Register, VarLocation};
 use crate::compile::jitc_yk::{
     codegen::x64::{ARG_FP_REGS, ARG_GP_REGS},
     jit_ir::{
         BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, ICmpInst, Inst, InstIdx, LoadInst, Module,
         Operand, PtrAddInst, SExtInst, SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
     },
+    YkSideTraceInfo,
 };
 use dynasmrt::x64::Rq;
+use std::sync::Arc;
 use vob::Vob;
 
 pub(crate) struct RevAnalyse<'a> {
@@ -80,8 +82,12 @@ impl<'a> RevAnalyse<'a> {
                 // We don't care where the register allocator ends at the end of the header, so we
                 // don't propagate backwards from `TraceHeaderEnd`.
             }
-            TraceKind::Sidetrace => {
-                let vlocs = self.m.root_entry_vars();
+            TraceKind::Sidetrace(sti) => {
+                let sti = Arc::clone(sti)
+                    .as_any()
+                    .downcast::<YkSideTraceInfo<Register>>()
+                    .unwrap();
+                let vlocs = &sti.entry_vars;
                 // Side-traces don't have a trace body since we don't apply loop peeling and thus use
                 // `trace_header_end` to store the jump variables.
                 debug_assert_eq!(vlocs.len(), self.m.trace_header_end().len());
@@ -97,7 +103,7 @@ impl<'a> RevAnalyse<'a> {
         // ...and then we perform the rest of the reverse analysis.
         let mut iter = self.m.iter_skipping_insts().rev();
         match self.m.tracekind() {
-            TraceKind::HeaderOnly | TraceKind::Sidetrace => {
+            TraceKind::HeaderOnly | TraceKind::Sidetrace(_) => {
                 for (iidx, inst) in self.m.iter_skipping_insts().rev() {
                     self.analyse(iidx, inst);
                 }

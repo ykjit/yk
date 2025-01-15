@@ -8,11 +8,12 @@ use crate::{
     mt::MT,
     trace::AOTTraceIterator,
 };
-use codegen::reg_alloc::VarLocation;
 use parking_lot::Mutex;
 use std::{
     env,
     error::Error,
+    fmt,
+    marker::PhantomData,
     slice,
     sync::{Arc, LazyLock},
 };
@@ -47,7 +48,7 @@ unsafe impl Send for RootTracePtr {}
 unsafe impl Sync for RootTracePtr {}
 
 /// Contains information required for side-tracing.
-struct YkSideTraceInfo {
+struct YkSideTraceInfo<Register: Send + Sync> {
     /// The AOT IR block the failing guard originated from.
     bid: aot_ir::BBlockId,
     /// The `GuardIdx`s of all failing guards leading up to here.
@@ -65,7 +66,7 @@ struct YkSideTraceInfo {
     /// the root trace's frame, before jumping back to it.
     root_offset: usize,
     /// The live variables at the entry point of the root trace.
-    entry_vars: Vec<VarLocation>,
+    entry_vars: Vec<codegen::reg_alloc::VarLocation<Register>>,
     /// Stack pointer offset from the base pointer of the interpreter frame including the
     /// interpreter frame itself and all parent traces. Since all traces execute in the interpreter
     /// frame, each trace adds to this value, making extra space on the stack. This then forms the
@@ -73,13 +74,13 @@ struct YkSideTraceInfo {
     sp_offset: usize,
 }
 
-impl SideTraceInfo for YkSideTraceInfo {
+impl<Register: Send + Sync + 'static> SideTraceInfo for YkSideTraceInfo<Register> {
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
         self
     }
 }
 
-impl YkSideTraceInfo {
+impl<Register: Send + Sync> YkSideTraceInfo<Register> {
     /// Return the live call frames which are required to setup the trace builder during
     /// side-tracing.
     fn callframes(&self) -> &[jit_ir::InlinedFrame] {
@@ -90,19 +91,39 @@ impl YkSideTraceInfo {
     fn lives(&self) -> &[(aot_ir::InstID, Location)] {
         &self.lives
     }
+
+    /// Get the address of the root trace. This is where we need jump to at the end of a
+    /// side-trace.
+    fn root_addr(&self) -> *const libc::c_void {
+        self.root_addr.0
+    }
+
+    fn root_offset(&self) -> usize {
+        self.root_offset
+    }
 }
 
-pub(crate) struct JITCYk {
+impl<Register: Send + Sync> fmt::Debug for YkSideTraceInfo<Register> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "YkSideTraceInfo {{ ... }}")
+    }
+}
+
+pub(crate) struct JITCYk<Register> {
     codegen: Arc<dyn CodeGen>,
+    phantom: PhantomData<Register>,
 }
 
-impl JITCYk {
+impl JITCYk<codegen::x64::Register> {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         Ok(Arc::new(Self {
             codegen: codegen::default_codegen()?,
+            phantom: PhantomData,
         }))
     }
+}
 
+impl<Register: Send + Sync + 'static> JITCYk<Register> {
     // FIXME: This should probably be split into separate root / sidetrace functions.
     fn compile(
         &self,
@@ -122,7 +143,7 @@ impl JITCYk {
             ));
         }
 
-        let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo>().unwrap());
+        let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo<Register>>().unwrap());
         let sp_offset = sti.as_ref().map(|x| x.sp_offset);
         let root_offset = sti.as_ref().map(|x| x.root_offset);
         let guards = sti.as_ref().map(|x| x.guards.clone());
@@ -173,7 +194,7 @@ impl JITCYk {
     }
 }
 
-impl Compiler for JITCYk {
+impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
     fn root_compile(
         &self,
         mt: Arc<MT>,

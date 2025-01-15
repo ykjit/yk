@@ -100,7 +100,7 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
 
 /// Stores information required for compiling a side-trace. Passed down from a (parent) trace
 /// during deoptimisation.
-pub(crate) trait SideTraceInfo {
+pub(crate) trait SideTraceInfo: fmt::Debug {
     /// Upcast this [SideTraceInfo] to `Any`. This method is a hack that's only needed since trait
     /// upcasting in Rust is incomplete.
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;

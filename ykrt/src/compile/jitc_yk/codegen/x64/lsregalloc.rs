@@ -27,13 +27,9 @@
 //! where it has spilled an instruction's value: it guarantees to spill an instruction to at most
 //! one place on the stack.
 
-use super::rev_analyse::RevAnalyse;
+use super::{rev_analyse::RevAnalyse, Register, VarLocation};
 use crate::compile::jitc_yk::{
-    codegen::{
-        abs_stack::AbstractStack,
-        reg_alloc::{self, VarLocation},
-        x64::REG64_BYTESIZE,
-    },
+    codegen::{abs_stack::AbstractStack, x64::REG64_BYTESIZE},
     jit_ir::{Const, ConstIdx, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
 };
 use dynasmrt::{
@@ -41,7 +37,7 @@ use dynasmrt::{
     x64::{
         Assembler, {Rq, Rx},
     },
-    DynasmApi, Register,
+    DynasmApi, Register as dynasmrtRegister,
 };
 use std::{marker::PhantomData, mem};
 
@@ -445,8 +441,7 @@ impl LSRegAlloc<'_> {
         // Deal with `OutputCanBeSameAsInput`.
         for i in 0..constraints.len() {
             if let RegConstraint::OutputCanBeSameAsInput(search_op) = constraints[i].clone() {
-                if let Some(reg_alloc::Register::GP(reg)) = self.rev_an.reg_hints[usize::from(iidx)]
-                {
+                if let Some(Register::GP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
                     if avoid.is_set(reg) {
                         continue;
                     }
@@ -475,9 +470,7 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Output
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::InputOutput(_) => {
-                    if let Some(reg_alloc::Register::GP(reg)) =
-                        self.rev_an.reg_hints[usize::from(iidx)]
-                    {
+                    if let Some(Register::GP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
                         if !avoid.is_set(reg) {
                             *cnstr = match cnstr {
                                 RegConstraint::Output => RegConstraint::OutputFromReg(reg),
@@ -762,8 +755,7 @@ impl LSRegAlloc<'_> {
                 if self.is_inst_var_still_used_after(cur_iidx, query_iidx) {
                     let mut new_reg = None;
                     // Try to use `query_iidx`s hint, if there is one, and it's not in use...
-                    if let Some(reg_alloc::Register::GP(reg)) =
-                        self.rev_an.reg_hints[usize::from(query_iidx)]
+                    if let Some(Register::GP(reg)) = self.rev_an.reg_hints[usize::from(query_iidx)]
                     {
                         if !self.gp_regset.is_set(reg) && !avoid.is_set(reg) {
                             new_reg = Some(reg);
@@ -913,7 +905,7 @@ impl LSRegAlloc<'_> {
                 false
             }
         }) {
-            VarLocation::Register(reg_alloc::Register::GP(GP_REGS[reg_i]))
+            VarLocation::Register(Register::GP(GP_REGS[reg_i]))
         } else if let Some(reg_i) = self.fp_reg_states.iter().position(|x| {
             if let RegState::FromInst(y) = x {
                 *y == iidx
@@ -921,7 +913,7 @@ impl LSRegAlloc<'_> {
                 false
             }
         }) {
-            VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
+            VarLocation::Register(Register::FP(FP_REGS[reg_i]))
         } else {
             let inst = self.m.inst(iidx);
             let size = inst.def_byte_size(self.m);
@@ -1037,9 +1029,7 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Output
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::InputOutput(_) => {
-                    if let Some(reg_alloc::Register::FP(reg)) =
-                        self.rev_an.reg_hints[usize::from(iidx)]
-                    {
+                    if let Some(Register::FP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
                         if !avoid.is_set(reg) {
                             *cnstr = match cnstr {
                                 RegConstraint::Output => RegConstraint::OutputFromReg(reg),
@@ -1446,7 +1436,7 @@ impl LSRegAlloc<'_> {
 /// In the following `R` is a fixed register specified inside the variant, whereas *x* is an
 /// unspecified register determined by the allocator.
 #[derive(Clone, Debug)]
-pub(crate) enum RegConstraint<R: Register> {
+pub(crate) enum RegConstraint<R: dynasmrt::Register> {
     /// Make sure `Operand` is loaded into a register *x* on entry; its value must be unchanged
     /// after the instruction is executed.
     Input(Operand),
@@ -1515,7 +1505,7 @@ enum RegState {
 #[derive(Clone, Copy, Debug)]
 struct RegSet<R>(u16, PhantomData<R>);
 
-impl<R: Register> RegSet<R> {
+impl<R: dynasmrt::Register> RegSet<R> {
     /// Create a [RegSet] with all registers unused.
     fn blank() -> Self {
         Self(0, PhantomData)

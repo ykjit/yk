@@ -11,10 +11,10 @@ use super::{
 use crate::aotsmp::AOT_STACKMAPS;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
-use std::{collections::HashMap, ffi::CString, sync::Arc};
+use std::{collections::HashMap, ffi::CString, marker::PhantomData, sync::Arc};
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
-pub(crate) struct TraceBuilder {
+pub(crate) struct TraceBuilder<Register: Send + Sync> {
     /// The AOT IR.
     aot_mod: &'static Module,
     /// The JIT IR this struct builds.
@@ -39,9 +39,10 @@ pub(crate) struct TraceBuilder {
     promotions: Box<[u8]>,
     /// The trace's current position in the promotions array.
     promote_idx: usize,
+    phantom: PhantomData<Register>,
 }
 
-impl TraceBuilder {
+impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
     /// Create a trace builder.
     ///
     /// Arguments:
@@ -72,6 +73,7 @@ impl TraceBuilder {
             recursion_count: 0,
             promotions,
             promote_idx: 0,
+            phantom: PhantomData,
         })
     }
 
@@ -1142,7 +1144,6 @@ impl TraceBuilder {
     fn build(
         mut self,
         ta_iter: Box<dyn AOTTraceIterator>,
-        sti: Option<Arc<YkSideTraceInfo>>,
     ) -> Result<jit_ir::Module, CompilationError> {
         // Collect the trace first so we can peek at the last element to find the control point
         // block during side-tracing.
@@ -1165,12 +1166,15 @@ impl TraceBuilder {
         // The previous processed block.
         let mut prev_bid = None;
 
-        if let Some(sti) = sti.as_ref() {
+        if let TraceKind::Sidetrace(sti) = self.jit_mod.tracekind() {
+            let sti = Arc::clone(sti)
+                .as_any()
+                .downcast::<YkSideTraceInfo<Register>>()
+                .unwrap();
             // Set the previous block to the last block in the parent trace. Required in order to
             // process phi nodes.
             prev_bid = Some(sti.bid.clone());
 
-            self.jit_mod.set_root_entry_vars(&sti.entry_vars);
             // Setup the trace builder for side-tracing.
             let lastblk = match &tas.last() {
                 Some(b) => self.lookup_aot_block(b),
@@ -1250,29 +1254,32 @@ impl TraceBuilder {
             }
         }
 
-        if sti.is_none() {
-            // Find the block containing the control point call. This is the (sole) predecessor of the
-            // first (guaranteed mappable) block in the trace. Note that empty traces are handled in
-            // the tracing phase so the `unwrap` is safe.
-            let prev = match trace_iter.peek().unwrap() {
-                TraceAction::MappedAOTBBlock { func_name, bb } => {
-                    debug_assert!(*bb > 0);
-                    // It's `- 1` due to the way the ykllvm block splitting pass works.
-                    TraceAction::MappedAOTBBlock {
-                        func_name: func_name.clone(),
-                        bb: bb - 1,
+        match self.jit_mod.tracekind() {
+            TraceKind::HeaderOnly | TraceKind::HeaderAndBody => {
+                // Find the block containing the control point call. This is the (sole) predecessor of the
+                // first (guaranteed mappable) block in the trace. Note that empty traces are handled in
+                // the tracing phase so the `unwrap` is safe.
+                let prev = match trace_iter.peek().unwrap() {
+                    TraceAction::MappedAOTBBlock { func_name, bb } => {
+                        debug_assert!(*bb > 0);
+                        // It's `- 1` due to the way the ykllvm block splitting pass works.
+                        TraceAction::MappedAOTBBlock {
+                            func_name: func_name.clone(),
+                            bb: bb - 1,
+                        }
                     }
-                }
-                TraceAction::UnmappableBBlock => panic!(),
-                TraceAction::Promotion => todo!(),
-            };
+                    TraceAction::UnmappableBBlock => panic!(),
+                    TraceAction::Promotion => todo!(),
+                };
 
-            self.cp_block = self.lookup_aot_block(&prev);
-            self.frames.last_mut().unwrap().funcidx =
-                Some(self.cp_block.as_ref().unwrap().funcidx());
-            // This unwrap can't fail. If it does that means the tracer has given us a mappable block
-            // that doesn't exist in the AOT module.
-            self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
+                self.cp_block = self.lookup_aot_block(&prev);
+                self.frames.last_mut().unwrap().funcidx =
+                    Some(self.cp_block.as_ref().unwrap().funcidx());
+                // This unwrap can't fail. If it does that means the tracer has given us a mappable block
+                // that doesn't exist in the AOT module.
+                self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
+            }
+            TraceKind::Sidetrace(_) => (),
         }
 
         // FIXME: this section of code needs to be refactored.
@@ -1384,25 +1391,27 @@ impl TraceBuilder {
         let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
         let cpcall = blk.insts.iter().rev().nth(1).unwrap();
         debug_assert!(cpcall.is_control_point(self.aot_mod));
-        if sti.is_some() {
-            // This is the end of a side-trace. Create a jump back to the root trace.
-            let safepoint = cpcall.safepoint().unwrap();
-            for idx in 0..safepoint.lives.len() {
-                let aot_op = &safepoint.lives[idx];
-                let jit_op = &self.local_map[&aot_op.to_inst_id()];
-                self.jit_mod.push_header_end_var(jit_op.clone());
+        match self.jit_mod.tracekind() {
+            TraceKind::Sidetrace(_) => {
+                // This is the end of a side-trace. Create a jump back to the root trace.
+                let safepoint = cpcall.safepoint().unwrap();
+                for idx in 0..safepoint.lives.len() {
+                    let aot_op = &safepoint.lives[idx];
+                    let jit_op = &self.local_map[&aot_op.to_inst_id()];
+                    self.jit_mod.push_header_end_var(jit_op.clone());
+                }
+                self.jit_mod.push(jit_ir::Inst::SidetraceEnd)?;
             }
-            self.jit_mod.set_root_jump_addr(sti.unwrap().root_addr.0);
-            self.jit_mod.push(jit_ir::Inst::SidetraceEnd)?;
-        } else {
-            // For normal traces insert a jump back to the loop start.
-            let safepoint = cpcall.safepoint().unwrap();
-            for idx in 0..safepoint.lives.len() {
-                let aot_op = &safepoint.lives[idx];
-                let jit_op = &self.local_map[&aot_op.to_inst_id()];
-                self.jit_mod.push_header_end_var(jit_op.clone());
+            TraceKind::HeaderAndBody | TraceKind::HeaderOnly => {
+                // For normal traces insert a jump back to the loop start.
+                let safepoint = cpcall.safepoint().unwrap();
+                for idx in 0..safepoint.lives.len() {
+                    let aot_op = &safepoint.lives[idx];
+                    let jit_op = &self.local_map[&aot_op.to_inst_id()];
+                    self.jit_mod.push_header_end_var(jit_op.clone());
+                }
+                self.jit_mod.push(jit_ir::Inst::TraceHeaderEnd)?;
             }
-            self.jit_mod.push(jit_ir::Inst::TraceHeaderEnd)?;
         }
 
         Ok(self.jit_mod)
@@ -1420,17 +1429,17 @@ struct InlinedFrame {
 }
 
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.
-pub(super) fn build(
+pub(super) fn build<Register: Send + Sync + 'static>(
     ctr_id: u64,
     aot_mod: &'static Module,
     ta_iter: Box<dyn AOTTraceIterator>,
-    sti: Option<Arc<YkSideTraceInfo>>,
+    sti: Option<Arc<YkSideTraceInfo<Register>>>,
     promotions: Box<[u8]>,
 ) -> Result<jit_ir::Module, CompilationError> {
-    let tracekind = if sti.is_some() {
-        TraceKind::Sidetrace
+    let tracekind = if let Some(x) = sti {
+        TraceKind::Sidetrace(x)
     } else {
         TraceKind::HeaderOnly
     };
-    TraceBuilder::new(tracekind, ctr_id, aot_mod, promotions)?.build(ta_iter, sti)
+    TraceBuilder::<Register>::new(tracekind, ctr_id, aot_mod, promotions)?.build(ta_iter)
 }
