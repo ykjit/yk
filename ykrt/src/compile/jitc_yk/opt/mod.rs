@@ -571,6 +571,24 @@ impl Opt {
                     }
                 }
             },
+            Inst::Select(sinst) => {
+                if let Operand::Const(cidx) = self.an.op_map(&self.m, sinst.cond(&self.m)) {
+                    let Const::Int(_, v) = self.m.const_(cidx) else {
+                        panic!()
+                    };
+                    let op = match v {
+                        0 => sinst.falseval(&self.m),
+                        1 => sinst.trueval(&self.m),
+                        _ => panic!(),
+                    };
+                    self.m.replace_with_op(iidx, op);
+                } else if self.an.op_map(&self.m, sinst.trueval(&self.m))
+                    == self.an.op_map(&self.m, sinst.falseval(&self.m))
+                {
+                    // Both true and false operands are equal, so it doesn't matter which we use.
+                    self.m.replace_with_op(iidx, sinst.trueval(&self.m));
+                }
+            }
             Inst::SExt(x) => {
                 if let Operand::Const(cidx) = self.an.op_map(&self.m, x.val(&self.m)) {
                     let Const::Int(src_ty, src_val) = self.m.const_(cidx) else {
@@ -1433,6 +1451,59 @@ mod test {
             black_box 1i1
             black_box 0i1
             black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_select() {
+        // Test constant condition.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param 0
+            %1: i8 = param 1
+            %2: i8 = 1i1 ? %0 : %1
+            %3: i8 = 0i1 ? %0 : %1
+            black_box %2
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            %1: i8 = param ...
+            black_box %0
+            black_box %1
+        ",
+        );
+
+        // Test equivalent true/false values.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i1 = param 0
+            %1: i8 = param 1
+            %2: i8 = param 2
+            %3: i8 = %0 ? 0i8 : 0i8
+            %4: i8 = %0 ? %1 : %1
+            %5: i8 = %0 ? %1 : %2
+            black_box %3
+            black_box %4
+            black_box %5
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i1 = param ...
+            %1: i8 = param ...
+            %2: i8 = param ...
+            %5: i8 = %0 ? %1 : %2
+            black_box 0i8
+            black_box %1
+            black_box %5
         ",
         );
     }

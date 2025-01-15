@@ -415,6 +415,16 @@ impl Module {
         self.insts[usize::from(iidx)] = inst;
     }
 
+    /// Replace the instruction in `iidx` with an instruction that will generate `op`. In other
+    /// words, `Operand::Var(...)` will become `Inst::Copy` and `Operand::Const` will become
+    /// `Inst::Const`. This is a convenience function over [Self::replace].
+    pub(crate) fn replace_with_op(&mut self, iidx: InstIdx, op: Operand) {
+        match op {
+            Operand::Var(op_iidx) => self.replace(iidx, Inst::Copy(op_iidx)),
+            Operand::Const(cidx) => self.replace(iidx, Inst::Const(cidx)),
+        }
+    }
+
     /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
     /// the value that the instruction defines.
     ///
