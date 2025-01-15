@@ -416,9 +416,18 @@ impl Opt {
                                     let Ty::Integer(bits) = self.m.type_(*lhs_tyidx) else {
                                         panic!()
                                     };
+                                    // If checked_shl fails, we've encountered LLVM poison: we can
+                                    // now choose any value (in this case 0) and know that we're
+                                    // respecting LLVM's semantics. In case the user's program then
+                                    // has UB and uses the poison value, we make it `int::MAX`
+                                    // because there is a small chance that will make the UB more
+                                    // obvious to them.
                                     let cidx = self.m.insert_const_int(
                                         *lhs_tyidx,
-                                        (lhs_v << rhs_v).truncate(*bits),
+                                        (lhs_v
+                                            .checked_shl(u32::try_from(*rhs_v).unwrap())
+                                            .unwrap_or(u64::MAX))
+                                        .truncate(*bits),
                                     )?;
                                     self.m.replace(iidx, Inst::Const(cidx));
                                 }
