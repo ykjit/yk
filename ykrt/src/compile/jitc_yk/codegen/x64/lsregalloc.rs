@@ -278,26 +278,37 @@ impl LSRegAlloc<'_> {
     /// Note that if this register is already used, a spill will be generated instead.
     pub(crate) fn force_assign_inst_gp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
         if self.gp_regset.is_set(reg) {
-            debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
             // Input values alias to a single register. To avoid the rest of the register allocator
             // having to think about this, we "dealias" the values by spilling.
-            let inst = self.m.inst(iidx);
-            let size = inst.def_byte_size(self.m);
-            self.stack.align(size); // FIXME
-            let frame_off = self.stack.grow(size);
-            let off = i32::try_from(frame_off).unwrap();
-            match size {
-                1 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
-                2 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
-                4 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
-                8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
-                _ => unreachable!(),
-            }
-            self.spills[usize::from(iidx)] = SpillState::Stack(off);
+            self.force_assign_and_spill_inst_gp_reg(asm, iidx, reg);
         } else {
             self.gp_regset.set(reg);
             self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
         }
+    }
+
+    /// Forcibly spill the machine register `reg` and assign the spilled value as being produced by
+    /// instruction `iidx`.
+    pub(crate) fn force_assign_and_spill_inst_gp_reg(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        reg: Rq,
+    ) {
+        debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
+        let inst = self.m.inst(iidx);
+        let size = inst.def_byte_size(self.m);
+        self.stack.align(size); // FIXME
+        let frame_off = self.stack.grow(size);
+        let off = i32::try_from(frame_off).unwrap();
+        match size {
+            1 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
+            2 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
+            4 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
+            8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
+            _ => unreachable!(),
+        }
+        self.spills[usize::from(iidx)] = SpillState::Stack(off);
     }
 
     /// Forcibly assign the floating point register `reg`, which must be in the [RegState::Empty] state,

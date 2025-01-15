@@ -1244,7 +1244,25 @@ impl<'a> Assemble<'a> {
         debug_assert!(self.m.inst(iidx).def_byte_size(self.m) <= REG64_BYTESIZE);
         match m {
             VarLocation::Register(Register::GP(reg)) => {
-                self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
+                // If this register is not used by a "meaningful" (i.e. non-`Guard`-or-`*End`)
+                // instruction, we immediately spill it, so that the register allocator has more
+                // free registers to play with from the very beginning.
+                let mut meaningful = false;
+                for iidx in self.ra.rev_an.iter_uses(iidx) {
+                    match self.m.inst(iidx) {
+                        Inst::Guard(_) | Inst::TraceHeaderEnd | Inst::TraceBodyEnd => (),
+                        _ => {
+                            meaningful = true;
+                            break;
+                        }
+                    }
+                }
+                if meaningful {
+                    self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
+                } else {
+                    self.ra
+                        .force_assign_and_spill_inst_gp_reg(&mut self.asm, iidx, reg);
+                }
             }
             VarLocation::Register(Register::FP(reg)) => {
                 self.ra.force_assign_inst_fp_reg(iidx, reg);
@@ -2013,7 +2031,9 @@ impl<'a> Assemble<'a> {
                             32 => dynasm!(self.asm;
                                 mov DWORD [rbp - i32::try_from(off_dst).unwrap()], v as i32
                             ),
-                            _ => todo!(),
+                            8 => dynasm!(self.asm;
+                                mov BYTE [rbp - i32::try_from(off_dst).unwrap()], v as i8),
+                            x => todo!("{x}"),
                         },
                         VarLocation::Stack {
                             frame_off: off_src,
@@ -4033,6 +4053,7 @@ mod tests {
             "
                 ...
                 ; guard true, %0, [] ; ...
+                movzx r.64._, byte ptr ...
                 cmp r.8.b, 0x01
                 jnz 0x...
                 ...
@@ -4062,6 +4083,7 @@ mod tests {
             "
                 ...
                 ; guard false, %0, [] ; ...
+                movzx r.64._, byte ptr ...
                 cmp r.8.b, 0x00
                 jnz 0x...
                 ...
@@ -4094,6 +4116,7 @@ mod tests {
             "
                 ...
                 ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8] ; trace_gidx 0 safepoint_id 0
+                movzx r.64._, byte ptr ...
                 cmp r.8.b, 0x00
                 jnz 0x...
                 ...
@@ -4745,7 +4768,7 @@ mod tests {
                 ...
                 ; header_start [%0]
                 ; header_end [42i8]
-                mov r.64.x, 0x2a
+                mov byte ptr [rbp-0x01], 0x2a
                 jmp ...
             ",
             false,

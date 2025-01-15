@@ -258,6 +258,12 @@ impl<'a> RevAnalyse<'a> {
         }
     }
 
+    /// Iterate, in ascending order, over all uses of `iidx`.
+    pub(crate) fn iter_uses(&self, iidx: InstIdx) -> impl Iterator<Item = InstIdx> + '_ {
+        debug_assert!(self.def_use[usize::from(iidx)].iter().rev().is_sorted());
+        self.def_use[usize::from(iidx)].iter().cloned().rev()
+    }
+
     /// Propagate the hint for the instruction being processed at `iidx` to `op`, if appropriate
     /// for `op`.
     fn push_reg_hint(&mut self, iidx: InstIdx, op: Operand) {
