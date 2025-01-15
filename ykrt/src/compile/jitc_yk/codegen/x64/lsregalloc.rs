@@ -533,14 +533,16 @@ impl LSRegAlloc<'_> {
             let reg = match self.gp_regset.find_empty_avoiding(avoid) {
                 Some(reg) => reg,
                 None => {
-                    // We need to find a register to spill. Our heuristic is two-fold:
-                    //   1. Spill the register whose value is used furthest away in the trace based
+                    // We need to find a register to spill. Our heuristic is (in order):
+                    //   1. If a register's value contains a constant, use that.
+                    //   2. If a register's value is already spilt use that.
+                    //   3. Spill the register whose value is used furthest away in the trace based
                     //      on the reverse analyser's (def, use) analysis.
-                    //   2. If (1) leads to a tie, spill the "highest" register (e.g. prefer to
-                    //      spill R15 over RAX) because "lower" registers are more likely to be
-                    //      clobbered by CALLS, and we assume that the more recently we've put a
-                    //      value into a register, the more likely it is to be used again soon.
-                    let mut furthest = None;
+                    //   4. If (1) or (2) leads to a tie, spill the register whose values is next
+                    //      used furthest away from the current instruction.
+                    let mut cnd_const = None;
+                    let mut cnd_spill = None;
+                    let mut cnd_furthest = None;
                     for reg in GP_REGS {
                         if avoid.is_set(reg) {
                             continue;
@@ -550,12 +552,39 @@ impl LSRegAlloc<'_> {
                             RegState::Empty => unreachable!(),
                             RegState::FromConst(_) => todo!(),
                             RegState::FromInst(from_iidx) => {
-                                if furthest.is_none() {
-                                    furthest = Some((reg, from_iidx));
-                                } else if let Some((_, furthest_iidx)) = furthest {
-                                    if let Some(next_iidx) = self.rev_an.next_use(iidx, from_iidx) {
-                                        if next_iidx > furthest_iidx {
-                                            furthest = Some((reg, from_iidx))
+                                match self.spills[usize::from(from_iidx)] {
+                                    SpillState::Empty => match cnd_furthest {
+                                        None => cnd_furthest = Some((reg, from_iidx)),
+                                        Some((_, furthest_iidx)) => {
+                                            if let Some(next_iidx) =
+                                                self.rev_an.next_use(iidx, from_iidx)
+                                            {
+                                                if next_iidx > furthest_iidx {
+                                                    cnd_furthest = Some((reg, from_iidx))
+                                                }
+                                            }
+                                        }
+                                    },
+                                    SpillState::Stack(_) | SpillState::Direct(_) => match cnd_spill
+                                    {
+                                        None => cnd_spill = Some((reg, from_iidx)),
+                                        Some((_, spill_iidx)) => {
+                                            if let Some(next_iidx) =
+                                                self.rev_an.next_use(iidx, from_iidx)
+                                            {
+                                                if next_iidx > spill_iidx {
+                                                    cnd_spill = Some((reg, from_iidx))
+                                                }
+                                            }
+                                        }
+                                    },
+                                    SpillState::ConstInt { .. } => {
+                                        // Should we encounter multiple constants in registers
+                                        // (which isn't very likely...), we want to spill the one
+                                        // in the lowest register, since that's more likely to be
+                                        // clobbered by a CALL.
+                                        if cnd_const.is_none() {
+                                            cnd_const = Some(reg);
                                         }
                                     }
                                 }
@@ -563,9 +592,14 @@ impl LSRegAlloc<'_> {
                         }
                     }
 
-                    match furthest {
-                        Some((reg, _)) => reg,
-                        None => panic!("Cannot satisfy register constraints: no registers left"),
+                    if let Some(reg) = cnd_const {
+                        reg
+                    } else if let Some((reg, _)) = cnd_spill {
+                        reg
+                    } else if let Some((reg, _)) = cnd_furthest {
+                        reg
+                    } else {
+                        panic!("Cannot satisfy register constraints: no registers left");
                     }
                 }
             };
