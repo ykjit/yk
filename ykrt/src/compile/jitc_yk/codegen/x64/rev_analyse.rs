@@ -193,7 +193,10 @@ impl<'a> RevAnalyse<'a> {
                 if self.inst_vals_alive_until[usize::from(x)] < iidx {
                     self.inst_vals_alive_until[usize::from(x)] = iidx;
                 }
-                self.push_def_use(x, iidx);
+                match inst {
+                    Inst::TraceHeaderStart | Inst::TraceBodyStart => (),
+                    _ => self.push_def_use(x, iidx),
+                }
             });
         }
     }
