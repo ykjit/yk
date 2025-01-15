@@ -446,8 +446,15 @@ impl Opt {
                                 "`DynPtrAdd` offset exceeded `i32` bounds".into(),
                             )
                         })?;
-                    self.m
-                        .replace(iidx, Inst::PtrAdd(PtrAddInst::new(x.ptr(&self.m), off)));
+                    if off == 0 {
+                        match self.an.op_map(&self.m, x.ptr(&self.m)) {
+                            Operand::Var(op_iidx) => self.m.replace(iidx, Inst::Copy(op_iidx)),
+                            Operand::Const(cidx) => self.m.replace(iidx, Inst::Const(cidx)),
+                        }
+                    } else {
+                        self.m
+                            .replace(iidx, Inst::PtrAdd(PtrAddInst::new(x.ptr(&self.m), off)));
+                    }
                 }
             }
             Inst::Call(_) | Inst::IndirectCall(_) => {
@@ -1279,6 +1286,10 @@ mod test {
             black_box %3
             %5: ptr = dyn_ptr_add %0, -8i64, 16
             black_box %5
+            %7: ptr = dyn_ptr_add %0, 0i64, 16
+            black_box %7
+            %9: ptr = dyn_ptr_add 0x1234, 0i64, 16
+            black_box %9
         ",
             |m| opt(m).unwrap(),
             "
@@ -1291,6 +1302,8 @@ mod test {
             black_box %3
             %5: ptr = ptr_add %0, -128
             black_box %5
+            black_box %0
+            black_box 0x1234
         ",
         );
     }
