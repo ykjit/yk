@@ -452,7 +452,14 @@ impl Opt {
                     }
                     (Operand::Const(_), Operand::Var(_)) | (Operand::Var(_), Operand::Var(_)) => (),
                 },
-                _ => (),
+                _ => {
+                    if let (Operand::Const(_), Operand::Const(_)) = (
+                        self.an.op_map(&self.m, x.lhs(&self.m)),
+                        self.an.op_map(&self.m, x.rhs(&self.m)),
+                    ) {
+                        todo!("{:?}", x.binop());
+                    }
+                }
             },
             Inst::DynPtrAdd(x) => {
                 if let Operand::Const(cidx) = self.an.op_map(&self.m, x.num_elems(&self.m)) {
