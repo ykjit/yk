@@ -19,4 +19,4 @@ RUN useradd -m -u ${CI_UID} ci && chown ${CI_UID}:${CI_UID} .
 ARG CI_RUNNER
 ENV CI_RUNNER=${CI_RUNNER}
 COPY --chown=${CI_UID}:${CI_UID} . .
-CMD sh -x .buildbot.sh
+CMD ["sh", "-x", ".buildbot.sh"]
