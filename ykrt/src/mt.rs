@@ -367,7 +367,7 @@ impl MT {
                 trace_iter.2,
             ) {
                 Ok(ct) => {
-                    parent_ctr.guard(guardid).set_ctr(ct);
+                    parent_ctr.guard(guardid).set_ctr(ct, &parent_ctr, guardid);
                     mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {

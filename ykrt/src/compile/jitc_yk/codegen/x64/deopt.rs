@@ -21,32 +21,6 @@ const RECOVER_REG: [usize; 31] = [
 /// from zero). This is used to allocate arrays whose indices need to be the DWARF register number.
 const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 
-/// When a guard fails, checks if there exists a compiled side-trace for this guard and if so,
-/// returns it's address. Otherwise returns a null pointer, indicating that we need to deoptimise.
-///
-/// # Arguments
-///
-/// * gidx - The [GuardIdx] of the current failing guard.
-/// * gptr - Pointer to a list of previous [GuardIdx]'s leading up to the current guard failure.
-/// * glen - Length for list in `gptr`.
-#[no_mangle]
-pub(crate) extern "C" fn __yk_guardcheck(
-    gidx: usize,
-    gptr: *const usize,
-    glen: usize,
-) -> *const libc::c_void {
-    let v = unsafe { slice::from_raw_parts(gptr, glen) };
-    let ctr = running_trace(v);
-    let info = &ctr.deoptinfo[&gidx];
-    if let Some(st) = info.guard.ctr() {
-        let staddr = st.entry();
-        let mt = Arc::clone(&ctr.mt);
-        mt.log.log(Verbosity::JITEvent, "execute-side-trace");
-        return staddr;
-    }
-    std::ptr::null()
-}
-
 /// Get the actual running trace by walking down the guards from the root trace using the
 /// [GuardIdx]'s passed in via `gidxs`.
 ///

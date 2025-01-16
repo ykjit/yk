@@ -43,21 +43,16 @@
 //     --- End jit-pre-opt ---
 //     24
 //     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
 //     26
-//     yk-jit-event: execute-side-trace
 //     28
-//     yk-jit-event: execute-side-trace
 //     30
 //     ...
 //     36
 //     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
 //     yk-jit-event: deoptimise
 //     ...
 //     42
 //     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-side-tracing
 //     45
@@ -67,17 +62,9 @@
 //     --- End jit-pre-opt ---
 //     48
 //     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     51
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     54
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     57
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     60
 //     yk-jit-event: deoptimise
 //   stdout:
