@@ -89,18 +89,25 @@ pub struct PerfThreadTracer {
 impl ThreadTracer for PerfThreadTracer {
     #[cfg(pt)]
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError> {
-        let mut cerr = PerfPTCError::new();
-        let rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut cerr) };
-        if !rc {
-            return Err(cerr.into());
-        }
+        let mut stop_cerr = PerfPTCError::new();
+        let stop_rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut stop_cerr) };
 
-        let mut cerr = PerfPTCError::new();
-        if !unsafe { hwt_perf_free_collector(self.ctx, &mut cerr) } {
-            return Err(cerr.into());
-        }
+        // Even if stopping the collecor fails, we still have to free the collector to ensure that
+        // no resources leak. Critically, we must ensure that the perf fd is closed so that this
+        // thread is able to trace again!
+        let mut free_cerr = PerfPTCError::new();
+        let free_rc = unsafe { hwt_perf_free_collector(self.ctx, &mut free_cerr) };
 
-        Ok(self.trace)
+        // Now we decide how to deal with these two fallable operations.
+        //
+        // For now we a let the `hwt_perf_stop_collector()` error take precedence.
+        if !stop_rc {
+            Err(stop_cerr.into())
+        } else if !free_rc {
+            Err(free_cerr.into())
+        } else {
+            Ok(self.trace)
+        }
     }
 }
 
