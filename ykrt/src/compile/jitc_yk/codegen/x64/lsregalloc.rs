@@ -252,11 +252,6 @@ impl<'a> LSRegAlloc<'a> {
         self.stack.size()
     }
 
-    #[cfg(test)]
-    pub(crate) fn inst_vals_alive_until(&self) -> &Vec<InstIdx> {
-        &self.rev_an.inst_vals_alive_until
-    }
-
     /// Return the inline [PtrAddInst] for a load/store, if there is one.
     pub(crate) fn ptradd(&self, iidx: InstIdx) -> Option<PtrAddInst> {
         self.rev_an.ptradds[usize::from(iidx)]
@@ -283,26 +278,37 @@ impl LSRegAlloc<'_> {
     /// Note that if this register is already used, a spill will be generated instead.
     pub(crate) fn force_assign_inst_gp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
         if self.gp_regset.is_set(reg) {
-            debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
             // Input values alias to a single register. To avoid the rest of the register allocator
             // having to think about this, we "dealias" the values by spilling.
-            let inst = self.m.inst(iidx);
-            let size = inst.def_byte_size(self.m);
-            self.stack.align(size); // FIXME
-            let frame_off = self.stack.grow(size);
-            let off = i32::try_from(frame_off).unwrap();
-            match size {
-                1 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
-                2 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
-                4 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
-                8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
-                _ => unreachable!(),
-            }
-            self.spills[usize::from(iidx)] = SpillState::Stack(off);
+            self.force_assign_and_spill_inst_gp_reg(asm, iidx, reg);
         } else {
             self.gp_regset.set(reg);
             self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
         }
+    }
+
+    /// Forcibly spill the machine register `reg` and assign the spilled value as being produced by
+    /// instruction `iidx`.
+    pub(crate) fn force_assign_and_spill_inst_gp_reg(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        reg: Rq,
+    ) {
+        debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
+        let inst = self.m.inst(iidx);
+        let size = inst.def_byte_size(self.m);
+        self.stack.align(size); // FIXME
+        let frame_off = self.stack.grow(size);
+        let off = i32::try_from(frame_off).unwrap();
+        match size {
+            1 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
+            2 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
+            4 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
+            8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
+            _ => unreachable!(),
+        }
+        self.spills[usize::from(iidx)] = SpillState::Stack(off);
     }
 
     /// Forcibly assign the floating point register `reg`, which must be in the [RegState::Empty] state,
@@ -538,14 +544,16 @@ impl LSRegAlloc<'_> {
             let reg = match self.gp_regset.find_empty_avoiding(avoid) {
                 Some(reg) => reg,
                 None => {
-                    // We need to find a register to spill. Our heuristic is two-fold:
-                    //   1. Spill the register whose value is used furthest away in the trace. This
-                    //      is a proxy for "the value is less likely to be used soon".
-                    //   2. If (1) leads to a tie, spill the "highest" register (e.g. prefer to
-                    //      spill R15 over RAX) because "lower" registers are more likely to be
-                    //      clobbered by CALLS, and we assume that the more recently we've put a
-                    //      value into a register, the more likely it is to be used again soon.
-                    let mut furthest = None;
+                    // We need to find a register to spill. Our heuristic is (in order):
+                    //   1. If a register's value contains a constant, use that.
+                    //   2. If a register's value is already spilt use that.
+                    //   3. Spill the register whose value is used furthest away in the trace based
+                    //      on the reverse analyser's (def, use) analysis.
+                    //   4. If (1) or (2) leads to a tie, spill the register whose values is next
+                    //      used furthest away from the current instruction.
+                    let mut cnd_const = None;
+                    let mut cnd_spill = None;
+                    let mut cnd_furthest = None;
                     for reg in GP_REGS {
                         if avoid.is_set(reg) {
                             continue;
@@ -555,26 +563,54 @@ impl LSRegAlloc<'_> {
                             RegState::Empty => unreachable!(),
                             RegState::FromConst(_) => todo!(),
                             RegState::FromInst(from_iidx) => {
-                                debug_assert!(self
-                                    .rev_an
-                                    .is_inst_var_still_used_at(iidx, from_iidx));
-                                if furthest.is_none() {
-                                    furthest = Some((reg, from_iidx));
-                                } else if let Some((_, furthest_iidx)) = furthest {
-                                    if self.rev_an.inst_vals_alive_until[usize::from(from_iidx)]
-                                        >= self.rev_an.inst_vals_alive_until
-                                            [usize::from(furthest_iidx)]
+                                match self.spills[usize::from(from_iidx)] {
+                                    SpillState::Empty => match cnd_furthest {
+                                        None => cnd_furthest = Some((reg, from_iidx)),
+                                        Some((_, furthest_iidx)) => {
+                                            if let Some(next_iidx) =
+                                                self.rev_an.next_use(iidx, from_iidx)
+                                            {
+                                                if next_iidx > furthest_iidx {
+                                                    cnd_furthest = Some((reg, from_iidx))
+                                                }
+                                            }
+                                        }
+                                    },
+                                    SpillState::Stack(_) | SpillState::Direct(_) => match cnd_spill
                                     {
-                                        furthest = Some((reg, from_iidx))
+                                        None => cnd_spill = Some((reg, from_iidx)),
+                                        Some((_, spill_iidx)) => {
+                                            if let Some(next_iidx) =
+                                                self.rev_an.next_use(iidx, from_iidx)
+                                            {
+                                                if next_iidx > spill_iidx {
+                                                    cnd_spill = Some((reg, from_iidx))
+                                                }
+                                            }
+                                        }
+                                    },
+                                    SpillState::ConstInt { .. } => {
+                                        // Should we encounter multiple constants in registers
+                                        // (which isn't very likely...), we want to spill the one
+                                        // in the lowest register, since that's more likely to be
+                                        // clobbered by a CALL.
+                                        if cnd_const.is_none() {
+                                            cnd_const = Some(reg);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
-                    match furthest {
-                        Some((reg, _)) => reg,
-                        None => panic!("Cannot satisfy register constraints: no registers left"),
+                    if let Some(reg) = cnd_const {
+                        reg
+                    } else if let Some((reg, _)) = cnd_spill {
+                        reg
+                    } else if let Some((reg, _)) = cnd_furthest {
+                        reg
+                    } else {
+                        panic!("Cannot satisfy register constraints: no registers left");
                     }
                 }
             };
@@ -1103,8 +1139,8 @@ impl LSRegAlloc<'_> {
                 Some(reg) => reg,
                 None => {
                     // We need to find a register to spill. Our heuristic is two-fold:
-                    //   1. Spill the register whose value is used furthest away in the trace. This
-                    //      is a proxy for "the value is less likely to be used soon".
+                    //   1. Spill the register whose value is used furthest away in the trace based
+                    //      on the reverse analyser's (def, use) analysis.
                     //   2. If (1) leads to a tie, spill the "highest" register (e.g. prefer to
                     //      spill XMM15 over XMM0) because "lower" registers are more likely to be
                     //      clobbered by CALLS, and we assume that the more recently we've put a
@@ -1125,11 +1161,10 @@ impl LSRegAlloc<'_> {
                                 if furthest.is_none() {
                                     furthest = Some((reg, from_iidx));
                                 } else if let Some((_, furthest_iidx)) = furthest {
-                                    if self.rev_an.inst_vals_alive_until[usize::from(from_iidx)]
-                                        >= self.rev_an.inst_vals_alive_until
-                                            [usize::from(furthest_iidx)]
-                                    {
-                                        furthest = Some((reg, from_iidx))
+                                    if let Some(next_iidx) = self.rev_an.next_use(iidx, from_iidx) {
+                                        if next_iidx > furthest_iidx {
+                                            furthest = Some((reg, from_iidx))
+                                        }
                                     }
                                 }
                             }

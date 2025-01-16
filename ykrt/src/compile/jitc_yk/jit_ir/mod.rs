@@ -1525,6 +1525,7 @@ impl Inst {
                 | Inst::TraceBodyStart
                 | Inst::TraceBodyEnd
                 | Inst::SidetraceEnd
+                | Inst::Param(_)
         )
     }
 

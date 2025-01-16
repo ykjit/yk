@@ -42,25 +42,6 @@ mod test {
             "
           entry:
             %0: i8 = param 0
-            %1: i8 = param 1
-            black_box %1
-        ",
-            |mut m| {
-                m.dead_code_elimination();
-                m
-            },
-            "
-          ...
-          entry:
-            %1: i8 = param ...
-            black_box %1
-        ",
-        );
-
-        Module::assert_ir_transform_eq(
-            "
-          entry:
-            %0: i8 = param 0
             %1: i8 = add %0, %0
             %2: i8 = add %0, %0
             black_box %2
@@ -117,6 +98,7 @@ mod test {
             "
           ...
           entry:
+            %0: i8 = param ...
             %1: i8 = param ...
             %3: i1 = ult %1, %1
             black_box %3
@@ -161,6 +143,7 @@ mod test {
           ...
           entry:
             %0: i8 = param ...
+            %1: i8 = param ...
             call @f(%0)
         ",
         );
@@ -183,6 +166,7 @@ mod test {
           entry:
             %0: ptr = param ...
             %1: i8 = param ...
+            %2: i8 = param ...
             icall %0(%1)
         ",
         );
