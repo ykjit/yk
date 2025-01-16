@@ -45,12 +45,12 @@ impl Record {
 }
 
 /// Describes where live variables are stored at specific times during execution.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Location {
     /// The live variable is stored in a register. Note, that LLVM's stackmap only stores one
     /// location per live variable, which is enough for reading them out. For deoptimisation
     /// however, we need to restore live variables, and the compiler often puts them in multiple
-    /// places, e.g. during spilling. Thus the fields describe three different locations in total:
+    /// places, e.g. during spilling. Additional locations are recorded via a vector:
     /// * `u16`: Dwarf register number
     /// * `u16`: size of the value
     /// * `Vec<u16>`: additional locations. >=0  is a DWARF register number. < 0 is a stack offset
@@ -59,18 +59,43 @@ pub enum Location {
     /// FIXME: We may need more additional locations in the future, which however will require
     /// rewriting the stackmap format (until now we managed to get by with two extra locations).
     Register(u16, u16, Vec<i16>),
-    /// The live variable is a pointer into the stack. To avoid unnecessary spilling and
-    /// dereferencing LLVM just records the value as an (offset, register) pair where the register
-    /// is typically the base pointer:
-    /// * `u16`: Dwarf register number
+    /// The live variable lives on the stack, because it was either put there directly via an
+    /// `alloca` or it was spilled. The location is encoded as an offset relative to the base
+    /// pointer. To get the value, we first need to compute the pointer via `rbp - offset` and then
+    /// dereference it. For example, the following C-code is likely going to produce an indirect
+    /// variable:
+    /// ```ignore
+    /// int x = 0;
+    /// control_point()   // Live vars: [x]
+    /// printf("%p", &x); // Forces x to be stack allocated.
+    /// ```
+    ///
+    /// The fields of an `Indirect` are:
+    /// * `u16`: Dwarf register number. This appears to be always RBP.
     /// * `i32`: offset
     /// * `u16`: size of the value
-    Direct(u16, i32, u16),
-    /// The live variable lives on the stack. Similar to the `Direct` location, it's recorded as an
-    /// (offset, register) pair where the register is typically the base pointer. However, to read
-    /// out the value the address described by the (offset, register) pair needs to be dereferenced
-    /// first.
     Indirect(u16, i32, u16),
+    /// LLVM's stackmaps can use `Direct` locations to optimise an `Indirect` location, where the
+    /// value itself is a pointer to the stack. This avoids having to spill the variable to the
+    /// stack. For example, the following C-code is likely to produce a direct location if there
+    /// are no more free registers available:
+    /// ```ignore
+    /// ...
+    /// int x = 0;
+    /// int* y = &x;
+    /// control_point()   // Live vars: [x, y]
+    /// printf("%d %p", x, y);
+    /// ```
+    ///
+    /// Instead of spilling `y` to the stack and recording it as an `Indirect` it can instead be
+    /// recorded as a `Direct` without spilling. This would lead to one `Indirect` and one `Direct`
+    /// location, where the offsets are the same:
+    /// x: Indirect(.., -8, 4)
+    /// y: Direct(.., -8, 8)
+    ///
+    /// In order to get the value for `x` we compute the pointer and dereference it, whereas the
+    /// value for `y` is simply the computation of the pointer (`rbp - offset`).
+    Direct(u16, i32, u16),
     /// The live variable is a constant and has been directly inlined into the stackmap.
     Constant(u32),
     /// The live variable is a large constant and was stored in a vector as part of a record. This
