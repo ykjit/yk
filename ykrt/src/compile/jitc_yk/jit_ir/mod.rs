@@ -1008,7 +1008,7 @@ impl Ty {
     }
 
     /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
-    pub(crate) fn bit_size(&self) -> Option<usize> {
+    pub(crate) fn bitw(&self) -> Option<usize> {
         match self {
             Self::Void => Some(0),
             Self::Integer(bits) => Some(usize::try_from(*bits).unwrap()),
@@ -1165,6 +1165,18 @@ impl Operand {
         match self {
             Self::Var(l) => m.inst_raw(*l).def_byte_size(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).byte_size().unwrap(),
+        }
+    }
+
+    /// Returns the size of the operand in bits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if asking for the size make no sense for this operand.
+    pub(crate) fn bitw(&self, m: &Module) -> usize {
+        match self {
+            Self::Var(l) => m.inst_raw(*l).def_bitw(m),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).bitw().unwrap(),
         }
     }
 
@@ -1844,7 +1856,7 @@ impl Inst {
         Ok(inst)
     }
 
-    /// Returns the size of the local variable that this instruction defines (if any).
+    /// Returns the size in bytes of the local variable that this instruction defines (if any).
     ///
     /// # Panics
     ///
@@ -1854,6 +1866,25 @@ impl Inst {
     pub(crate) fn def_byte_size(&self, m: &Module) -> usize {
         if let Some(ty) = self.def_type(m) {
             if let Some(size) = ty.byte_size() {
+                size
+            } else {
+                panic!()
+            }
+        } else {
+            panic!()
+        }
+    }
+
+    /// Returns the bit width of the local variable that this instruction defines (if any).
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    ///  - The instruction defines no local variable.
+    ///  - The instruction defines an unsized local variable.
+    pub(crate) fn def_bitw(&self, m: &Module) -> usize {
+        if let Some(ty) = self.def_type(m) {
+            if let Some(size) = ty.bitw() {
                 size
             } else {
                 panic!()
