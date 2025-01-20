@@ -1002,6 +1002,8 @@ pub(crate) enum Inst {
     },
     #[deku(id = "20")]
     FNeg { val: Operand },
+    #[deku(id = "21")]
+    DebugStr { msg: Operand },
     #[deku(id = "255")]
     Unimplemented {
         tyidx: TyIdx,
@@ -1095,6 +1097,7 @@ impl Inst {
             Self::FCmp { tyidx, .. } => Some(m.type_(*tyidx)),
             Self::Promote { tyidx, .. } => Some(m.type_(*tyidx)),
             Self::FNeg { val } => Some(val.type_(m)),
+            Self::DebugStr { .. } => None,
         }
     }
 
@@ -1383,6 +1386,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::FNeg { val } => {
                 write!(f, "fneg {}", val.display(self.m),)
             }
+            Inst::DebugStr { msg } => write!(f, "debug_str {}", msg.display(self.m)),
         }
     }
 }
