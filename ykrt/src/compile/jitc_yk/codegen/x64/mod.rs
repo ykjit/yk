@@ -1803,7 +1803,7 @@ impl<'a> Assemble<'a> {
         match bit_size {
             0 => unreachable!(),
             32 => dynasm!(self.asm; cmp Rd(lhs_reg.code()), rhs),
-            1..=64 => {
+            8 | 16 | 64 => {
                 if pred.signed() {
                     self.sign_extend_to_reg64(lhs_reg, u8::try_from(bit_size).unwrap());
                 } else {
@@ -1819,7 +1819,7 @@ impl<'a> Assemble<'a> {
         match bit_size {
             0 => unreachable!(),
             32 => dynasm!(self.asm; cmp Rd(lhs_reg.code()), Rd(rhs_reg.code())),
-            1..=64 => {
+            8 | 16 | 64 => {
                 if pred.signed() {
                     self.sign_extend_to_reg64(lhs_reg, u8::try_from(bit_size).unwrap());
                     self.sign_extend_to_reg64(rhs_reg, u8::try_from(bit_size).unwrap());
@@ -1829,7 +1829,7 @@ impl<'a> Assemble<'a> {
                 }
                 dynasm!(self.asm; cmp Rq(lhs_reg.code()), Rq(rhs_reg.code()));
             }
-            _ => todo!(),
+            _ => todo!("{bit_size}"),
         }
     }
 
@@ -2580,15 +2580,15 @@ impl<'a> Assemble<'a> {
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
         let fail_label = self.guard_to_deopt(inst);
         let cond = inst.cond(self.m);
-        // ICmp instructions evaluate to a one-byte zero/one value.
-        debug_assert_eq!(cond.byte_size(self.m), 1);
         let [reg] = self
             .ra
             .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(cond)]);
-        dynasm!(self.asm
-            ; cmp Rb(reg.code()), inst.expect() as i8 // `as` intentional.
-            ; jne =>fail_label
-        );
+        dynasm!(self.asm ; bt Rq(reg.code()), 0);
+        if inst.expect() {
+            dynasm!(self.asm ; jnb =>fail_label);
+        } else {
+            dynasm!(self.asm ; jb =>fail_label);
+        }
     }
 }
 
@@ -4000,19 +4000,16 @@ mod tests {
               entry:
                 %0: i16 = param 0
                 %1: i32 = param 1
-                %2: i63 = param 2
-                header_start [%0, %1, %2]
-                %4: i1 = eq %0, %0
-                %5: i1 = eq %1, %1
-                %6: i1 = eq %2, %2
+                header_start [%0, %1]
+                %3: i1 = eq %0, %0
+                %4: i1 = eq %1, %1
+                black_box %3
                 black_box %4
-                black_box %5
-                black_box %6
-                header_end [%0, %1, %2]
+                header_end [%0, %1]
             ",
             "
                 ...
-                ; %4: i1 = eq %0, %0
+                ; %3: i1 = eq %0, %0
                 ......
                 ......
                 movzx r.64.a, r.16.a
@@ -4020,20 +4017,12 @@ mod tests {
                 cmp r.64.a, r.64.b
                 setz r.8._
                 ...
-                ; %5: i1 = eq %1, %1
+                ; %4: i1 = eq %1, %1
                 ......
                 ......
                 cmp r.32.c, r.32.d
                 setz r.8._
-                ; %6: i1 = eq %2, %2
-                ......
-                ......
-                shl r.64.e, 0x01
-                shr r.64.e, 0x01
-                shl r.64.f, 0x01
-                shr r.64.f, 0x01
-                cmp r.64.e, r.64.f
-                setz r.8._
+                ; black_box %3
                 ...
             ",
             false,
@@ -4136,8 +4125,8 @@ mod tests {
                 ...
                 ; guard true, %0, [] ; ...
                 movzx r.64._, byte ptr ...
-                cmp r.8.b, 0x01
-                jnz 0x...
+                bt r.64._, 0x00
+                jnb 0x...
                 ...
                 ; deopt id for guard 0
                 push rsi
@@ -4166,8 +4155,8 @@ mod tests {
                 ...
                 ; guard false, %0, [] ; ...
                 movzx r.64._, byte ptr ...
-                cmp r.8.b, 0x00
-                jnz 0x...
+                bt r.64._, 0x00
+                jb 0x...
                 ...
                 ; deopt id for guard 0
                 push rsi
@@ -4199,8 +4188,8 @@ mod tests {
                 ...
                 ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8] ; trace_gidx 0 safepoint_id 0
                 movzx r.64._, byte ptr ...
-                cmp r.8.b, 0x00
-                jnz 0x...
+                bt r.64._, 0x00
+                jb 0x...
                 ...
                 ; deopt id for guard 0
                 push rsi
@@ -4280,8 +4269,8 @@ mod tests {
                 cmp r.64.x, 0x03
                 setz bl
                 ; guard true, %1, [] ; ...
-                cmp bl, 0x01
-                jnz 0x...
+                bt r.64._, 0x00
+                jnb 0x...
                 ; %3: i8 = sext %1
                 shl rbx, 0x3f
                 sar rbx, 0x3f
