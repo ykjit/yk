@@ -834,21 +834,46 @@ impl<'a> Assemble<'a> {
         let rhs = inst.rhs(self.m);
 
         match inst.binop() {
-            BinOp::Add | BinOp::And | BinOp::Or | BinOp::Xor => {
+            BinOp::Add => {
                 let byte_size = lhs.byte_size(self.m);
                 // We only optimise the canonicalised case.
-                if let Some(v) = self.op_to_i32(&rhs) {
+                if let Some(v) = self.op_to_sign_ext_i32(&rhs) {
+                    let [lhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::InputOutput(lhs)],
+                    );
+                    match byte_size {
+                        8 => dynasm!(self.asm; add Rq(lhs_reg.code()), v),
+                        1..=4 => dynasm!(self.asm; add Rd(lhs_reg.code()), v),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
+                    );
+                    match byte_size {
+                        0 => unreachable!(),
+                        1..=8 => {
+                            // OK to ignore any undefined high-order bits here.
+                            dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code()));
+                        }
+                        _ => todo!(),
+                    }
+                }
+            }
+            BinOp::And | BinOp::Or | BinOp::Xor => {
+                let byte_size = lhs.byte_size(self.m);
+                // We only optimise the canonicalised case.
+                if let Some(v) = self.op_to_zero_ext_i32(&rhs) {
                     let [lhs_reg] = self.ra.assign_gp_regs(
                         &mut self.asm,
                         iidx,
                         [RegConstraint::InputOutput(lhs)],
                     );
                     match inst.binop() {
-                        BinOp::Add => match byte_size {
-                            8 => dynasm!(self.asm; add Rq(lhs_reg.code()), v),
-                            1..=4 => dynasm!(self.asm; add Rd(lhs_reg.code()), v),
-                            _ => unreachable!(),
-                        },
                         BinOp::And => match byte_size {
                             8 => dynasm!(self.asm; and Rq(lhs_reg.code()), v),
                             1..=4 => dynasm!(self.asm; and Rd(lhs_reg.code()), v),
@@ -873,16 +898,6 @@ impl<'a> Assemble<'a> {
                         [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
                     );
                     match inst.binop() {
-                        BinOp::Add => {
-                            match byte_size {
-                                0 => unreachable!(),
-                                1..=8 => {
-                                    // OK to ignore any undefined high-order bits here.
-                                    dynasm!(self.asm; add Rq(lhs_reg.code()), Rq(rhs_reg.code()));
-                                }
-                                _ => todo!(),
-                            }
-                        }
                         BinOp::And => {
                             match byte_size {
                                 0 => unreachable!(),
@@ -926,7 +941,7 @@ impl<'a> Assemble<'a> {
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
-                if let Some(v) = self.op_to_i8(&rhs) {
+                if let Some(v) = self.op_to_zero_ext_i8(&rhs) {
                     let [lhs_reg] = self.ra.assign_gp_regs(
                         &mut self.asm,
                         iidx,
@@ -1114,7 +1129,7 @@ impl<'a> Assemble<'a> {
                 let Ty::Integer(bit_size) = self.m.type_(lhs.tyidx(self.m)) else {
                     unreachable!()
                 };
-                if let Some(0) = self.op_to_i32(&lhs) {
+                if let Some(0) = self.op_to_sign_ext_i32(&lhs) {
                     let [rhs_reg] = self.ra.assign_gp_regs(
                         &mut self.asm,
                         iidx,
@@ -1405,7 +1420,7 @@ impl<'a> Assemble<'a> {
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
                 let byte_size = val.byte_size(self.m);
-                if let Some(imm) = self.op_to_immediate(&val) {
+                if let Some(imm) = self.op_to_zero_ext_immediate(&val) {
                     let [tgt_reg] =
                         self.ra
                             .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
@@ -1669,7 +1684,7 @@ impl<'a> Assemble<'a> {
 
     /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
     /// it, otherwise return `None`.
-    fn op_to_i8(&self, op: &Operand) -> Option<i8> {
+    fn op_to_sign_ext_i8(&self, op: &Operand) -> Option<i8> {
         if let Operand::Const(cidx) = op {
             if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
                 let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
@@ -1684,18 +1699,38 @@ impl<'a> Assemble<'a> {
         }
         None
     }
-    ///
+
+    /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
+    /// it zero-extended to 8 bits, otherwise return `None`.
+    fn op_to_zero_ext_i8(&self, op: &Operand) -> Option<i8> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
+                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                if *bit_size <= 8 {
+                    debug_assert_eq!(v.truncate(*bit_size), *v);
+                    return Some(*v as i8);
+                } else if v.truncate(8) == *v {
+                    return Some(v.truncate(8) as i8);
+                }
+            }
+        }
+        None
+    }
+
     /// If an `Operand` refers to a constant integer that can be represented as an `i16`, return
-    /// it, otherwise return `None`.
-    fn op_to_i16(&self, op: &Operand) -> Option<i16> {
+    /// it zero extended to 16 bits, otherwise return `None`.
+    fn op_to_zero_ext_i16(&self, op: &Operand) -> Option<i16> {
         if let Operand::Const(cidx) = op {
             if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
                 let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
                     panic!()
                 };
                 if *bit_size <= 16 {
-                    return Some(v.sign_extend(*bit_size, 16) as i16);
-                } else if v.truncate(16).sign_extend(16, 64) == *v {
+                    debug_assert_eq!(v.truncate(*bit_size), *v);
+                    return Some(*v as i16);
+                } else if v.truncate(16) == *v {
                     return Some(v.truncate(16) as i16);
                 }
             }
@@ -1703,9 +1738,9 @@ impl<'a> Assemble<'a> {
         None
     }
 
-    /// If an `Operand` refers to a constant integer that can be represented as an `i32`, return
-    /// it, otherwise return `None`.
-    fn op_to_i32(&self, op: &Operand) -> Option<i32> {
+    /// If an `Operand` refers to a constant integer that can be represented as an `i32`, return it
+    /// sign-extended to 32 bits, otherwise return `None`.
+    fn op_to_sign_ext_i32(&self, op: &Operand) -> Option<i32> {
         if let Operand::Const(cidx) = op {
             if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
                 let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
@@ -1721,25 +1756,44 @@ impl<'a> Assemble<'a> {
         None
     }
 
-    /// Return an [Immediate] if `op` is a constant and is representable as an x64 immediate. Note
-    /// this embeds the follow assumptions:
+    /// If an `Operand` refers to a constant integer that can be represented as an `i32`, return it
+    /// zero-extended to 32 bits, otherwise return `None`.
+    fn op_to_zero_ext_i32(&self, op: &Operand) -> Option<i32> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
+                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                if *bit_size <= 32 {
+                    debug_assert_eq!(v.truncate(*bit_size), *v);
+                    return Some(*v as i32);
+                } else if v.truncate(32) == *v {
+                    return Some(v.truncate(32) as i32);
+                }
+            }
+        }
+        None
+    }
+
+    /// Return a zero-extended [Immediate] if `op` is a constant and is representable as an x64
+    /// immediate. Note this embeds the follow assumptions:
     ///   1. 1 byte constants map to Immediate::I8.
     ///   2. 2 byte constants map to Immediate::I16.
     ///   3. 3 byte constants map to Immediate::I32.
     ///   4. 4 byte constants map to Immediate::I32.
     ///
     /// Note that number (4) breaks the pattern of the (1-3)!
-    fn op_to_immediate(&self, op: &Operand) -> Option<Immediate> {
+    fn op_to_zero_ext_immediate(&self, op: &Operand) -> Option<Immediate> {
         match op {
             Operand::Const(cidx) => match self.m.const_(*cidx) {
                 Const::Float(_, _) => todo!(),
                 Const::Int(_, _) => match op.byte_size(self.m) {
-                    1 => self.op_to_i8(op).map(Immediate::I8),
-                    2 => self.op_to_i16(op).map(Immediate::I16),
-                    4 | 8 => self.op_to_i32(op).map(Immediate::I32),
+                    1 => self.op_to_zero_ext_i8(op).map(Immediate::I8),
+                    2 => self.op_to_zero_ext_i16(op).map(Immediate::I16),
+                    4 | 8 => self.op_to_zero_ext_i32(op).map(Immediate::I32),
                     _ => todo!(),
                 },
-                Const::Ptr(_) => self.op_to_i32(op).map(Immediate::I32),
+                Const::Ptr(_) => self.op_to_zero_ext_i32(op).map(Immediate::I32),
             },
             Operand::Var(_) => None,
         }
@@ -1797,7 +1851,12 @@ impl<'a> Assemble<'a> {
             ic_inst.rhs(self.m),
         );
         let bit_size = self.m.type_(lhs.tyidx(self.m)).bit_size().unwrap();
-        if let Some(v) = self.op_to_i32(&rhs) {
+        let imm = if pred.signed() {
+            self.op_to_sign_ext_i32(&rhs)
+        } else {
+            self.op_to_zero_ext_i32(&rhs)
+        };
+        if let Some(v) = imm {
             let [lhs_reg] =
                 self.ra
                     .assign_gp_regs(&mut self.asm, ic_iidx, [RegConstraint::Input(lhs)]);
@@ -1851,7 +1910,12 @@ impl<'a> Assemble<'a> {
     fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
         let bit_size = self.m.type_(lhs.tyidx(self.m)).bit_size().unwrap();
-        let lhs_reg = if let Some(v) = self.op_to_i32(&rhs) {
+        let imm = if pred.signed() {
+            self.op_to_sign_ext_i32(&rhs)
+        } else {
+            self.op_to_zero_ext_i32(&rhs)
+        };
+        let lhs_reg = if let Some(v) = imm {
             let [lhs_reg] =
                 self.ra
                     .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::InputOutput(lhs)]);
@@ -2699,6 +2763,9 @@ impl<'a> AsmPrinter<'a> {
 }
 
 /// A representation of an x64 immediate, suitable for use in x64 instructions.
+///
+/// Note that the integer values inside may be zero or sign-extended depending on the construction
+/// of an instance of this enum.
 enum Immediate {
     I8(i8),
     I16(i16),
@@ -3397,21 +3464,26 @@ mod tests {
                 %3: i32 = param 3
                 %4: i63 = param 4
                 %5: i63 = param 5
-                %6: i16 = and %0, %1
-                %7: i32 = and %2, %3
-                %8: i63 = and %4, %5
-                black_box %6
+                %6: i1 = param 6
+                %7: i16 = and %0, %1
+                %8: i32 = and %2, %3
+                %9: i63 = and %4, %5
+                %10: i1 = and %6, 1i1
                 black_box %7
                 black_box %8
+                black_box %9
+                black_box %10
             ",
             "
                 ...
-                ; %6: i16 = and %0, %1
+                ; %7: i16 = and %0, %1
                 and r.64.a, r.64.b
-                ; %7: i32 = and %2, %3
+                ; %8: i32 = and %2, %3
                 and r.64.c, r.64.d
-                ; %8: i63 = and %4, %5
+                ; %9: i63 = and %4, %5
                 and r.64.e, r.64.f
+                ; %10: i1 = and %6, 1i1
+                and r.32._, 0x01
                 ...
                 ",
             false,
@@ -3569,21 +3641,26 @@ mod tests {
                 %3: i32 = param 3
                 %4: i63 = param 4
                 %5: i63 = param 5
-                %6: i16 = or %0, %1
-                %7: i32 = or %2, %3
-                %8: i63 = or %4, %5
-                black_box %6
+                %6: i1 = param 6
+                %7: i16 = or %0, %1
+                %8: i32 = or %2, %3
+                %9: i63 = or %4, %5
+                %10: i1 = or %6, 1i1
                 black_box %7
                 black_box %8
+                black_box %9
+                black_box %10
             ",
             "
                 ...
-                ; %6: i16 = or %0, %1
+                ; %7: i16 = or %0, %1
                 or r.64.a, r.64.b
-                ; %7: i32 = or %2, %3
+                ; %8: i32 = or %2, %3
                 or r.64.c, r.64.d
-                ; %8: i63 = or %4, %5
+                ; %9: i63 = or %4, %5
                 or r.64.e, r.64.f
+                ; %10: i1 = or %6, 1i1
+                or r.32._, 0x01
                 ...
                 ",
             false,
@@ -3732,21 +3809,26 @@ mod tests {
                 %3: i32 = param 3
                 %4: i63 = param 4
                 %5: i63 = param 5
-                %6: i16 = xor %0, %1
-                %7: i32 = xor %2, %3
-                %8: i63 = xor %4, %5
-                black_box %6
+                %6: i1 = param 6
+                %7: i16 = xor %0, %1
+                %8: i32 = xor %2, %3
+                %9: i63 = xor %4, %5
+                %10: i1 = xor %6, 1i1
                 black_box %7
                 black_box %8
+                black_box %9
+                black_box %10
             ",
             "
                 ...
-                ; %6: i16 = xor %0, %1
+                ; %7: i16 = xor %0, %1
                 xor r.64.a, r.64.b
-                ; %7: i32 = xor %2, %3
+                ; %8: i32 = xor %2, %3
                 xor r.64.c, r.64.d
-                ; %8: i63 = xor %4, %5
+                ; %9: i63 = xor %4, %5
                 xor r.64.e, r.64.f
+                ; %10: i1 = xor %6, 1i1
+                xor r.32._, 0x01
                 ...
                 ",
             false,
