@@ -154,6 +154,23 @@ impl Module {
                         );
                     }
                 }
+                Inst::Select(x) => {
+                    let Ty::Integer(bitsize) = self.type_(x.cond(self).tyidx(self)) else {
+                        panic!();
+                    };
+                    if *bitsize != 1 {
+                        panic!(
+                            "Instruction at position {iidx} trying to select on a non-i1\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
+                    }
+                    if x.trueval(self).tyidx(self) != x.falseval(self).tyidx(self) {
+                        panic!(
+                            "Instruction at position {iidx} has incompatible true/false types\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
+                    }
+                }
                 Inst::SExt(x) => {
                     let Ty::Integer(val_bitsize) = self.type_(x.val(self).tyidx(self)) else {
                         panic!();
@@ -391,6 +408,30 @@ mod tests {
                 %0: i8 = param 0
                 %1: i64 = param 1
                 %2: i1 = eq %0, %1
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 trying to select on a non-i1")]
+    fn select_bad_width() {
+        Module::from_str(
+            "
+              entry:
+                %0: i32 = param 0
+                %1: i32 = %0 ? 1i32 : 2i32
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 has incompatible true/false types")]
+    fn select_incompatible_types() {
+        Module::from_str(
+            "
+              entry:
+                %0: i1 = param 0
+                %1: i32 = %0 ? 1i16 : 2i32
             ",
         );
     }

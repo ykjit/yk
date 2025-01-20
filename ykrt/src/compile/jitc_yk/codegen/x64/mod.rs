@@ -2492,8 +2492,16 @@ impl<'a> Assemble<'a> {
                 RegConstraint::Input(inst.falseval(self.m)),
             ],
         );
-        dynasm!(self.asm ; cmp Rb(cond_reg.code()), 0);
-        dynasm!(self.asm ; cmove Rq(true_reg.code()), Rq(false_reg.code()));
+        debug_assert_eq!(
+            self.m
+                .type_(inst.cond(self.m).tyidx(self.m))
+                .bit_size()
+                .unwrap(),
+            1
+        );
+
+        dynasm!(self.asm ; bt Rq(cond_reg.code()), 0);
+        dynasm!(self.asm ; cmovnc Rq(true_reg.code()), Rq(false_reg.code()));
     }
 
     fn guard_to_deopt(&mut self, inst: &jit_ir::GuardInst) -> DynamicLabel {
@@ -4422,7 +4430,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = param 0
+                %0: i1 = param 0
                 %1: i32 = %0 ? 1i32 : 2i32
                 black_box %1
             ",
@@ -4431,8 +4439,8 @@ mod tests {
                 ; %1: i32 = %0 ? 1i32 : 2i32
                 mov r.64.x, 0x01
                 mov r.64.y, 0x02
-                cmp r.8.z, 0x00
-                cmovz r.64.x, r.64.y
+                bt r.64.z, 0x00
+                cmovnb r.64.x, r.64.y
                 ...
             ",
             false,
