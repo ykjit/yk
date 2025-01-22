@@ -1591,21 +1591,21 @@ pub(crate) fn const_int_bytes_to_string(num_bits: u32, bytes: &[u8]) -> String {
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct IntegerTy {
-    pub(crate) num_bits: u32,
+    bitw: u32,
 }
 
 impl IntegerTy {
     /// Create a new integer type with the specified number of bits.
     #[cfg(test)]
-    pub(crate) fn new(num_bits: u32) -> Self {
-        debug_assert!(num_bits > 0 && num_bits <= 0x800000);
-        Self { num_bits }
+    pub(crate) fn new(bitw: u32) -> Self {
+        debug_assert!(bitw > 0 && bitw <= 0x800000);
+        Self { bitw }
     }
 
     /// Return the number of bits (1..2^23 (inc.)) this integer spans.
-    pub(crate) fn num_bits(&self) -> u32 {
-        debug_assert!(self.num_bits > 0 && self.num_bits <= 0x800000);
-        self.num_bits
+    pub(crate) fn bitw(&self) -> u32 {
+        debug_assert!(self.bitw > 0 && self.bitw <= 0x800000);
+        self.bitw
     }
 
     /// Return the number of bytes required to store this integer type.
@@ -1613,7 +1613,7 @@ impl IntegerTy {
     /// Padding for alignment is not included.
     #[cfg(test)]
     pub(crate) fn byte_size(&self) -> usize {
-        let bits = self.num_bits();
+        let bits = self.bitw();
         let mut ret = bits / 8;
         // If it wasn't an exactly byte-sized thing, round up to the next byte.
         if bits % 8 != 0 {
@@ -1624,13 +1624,13 @@ impl IntegerTy {
 
     /// Format a constant integer value that is of the type described by `self`.
     fn const_to_string(&self, c: &ConstVal) -> String {
-        const_int_bytes_to_string(self.num_bits, c.bytes())
+        const_int_bytes_to_string(self.bitw, c.bytes())
     }
 }
 
 impl Display for IntegerTy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "i{}", self.num_bits)
+        write!(f, "i{}", self.bitw)
     }
 }
 
@@ -2022,7 +2022,7 @@ mod tests {
             let bytes = ToBytes::to_ne_bytes(&num).as_ref().to_vec();
 
             // Construct an IR constant and check it stringifies ok.
-            let it = IntegerTy { num_bits };
+            let it = IntegerTy { bitw: num_bits };
             let c = ConstVal {
                 tyidx: TyIdx::new(0),
                 bytes,
@@ -2125,7 +2125,7 @@ mod tests {
         let mut m = Module::default();
 
         let i8_tyidx = TyIdx::new(m.types.len());
-        m.types.push(Ty::Integer(IntegerTy { num_bits: 8 }));
+        m.types.push(Ty::Integer(IntegerTy { bitw: 8 }));
         let void_tyidx = TyIdx::new(m.types.len());
         m.types.push(Ty::Void);
 

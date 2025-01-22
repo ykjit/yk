@@ -152,7 +152,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             } = inst
             {
                 let width_bits = match self.aot_mod.type_(*tyidx) {
-                    aot_ir::Ty::Integer(it) => it.num_bits(),
+                    aot_ir::Ty::Integer(x) => x.bitw(),
                     _ => unreachable!(),
                 };
                 let width_bytes = usize::try_from(width_bits.div_ceil(8)).unwrap();
@@ -347,10 +347,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         let aot_const = aot_const.unwrap_val();
         let bytes = aot_const.bytes();
         match self.aot_mod.type_(aot_const.tyidx()) {
-            aot_ir::Ty::Integer(aot_ir::IntegerTy { num_bits }) => {
+            aot_ir::Ty::Integer(x) => {
                 // FIXME: It would be better if the AOT IR had converted these integers in advance
                 // rather than doing this dance here.
-                let x = match num_bits {
+                let v = match x.bitw() {
                     1 | 8 => {
                         debug_assert_eq!(bytes.len(), 1);
                         u64::from(bytes[0])
@@ -370,10 +370,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                             bytes[7],
                         ])
                     }
-                    _ => todo!("{}", num_bits),
+                    _ => todo!("{}", x.bitw()),
                 };
-                let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(*num_bits))?;
-                Ok(jit_ir::Const::Int(jit_tyidx, x))
+                let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(x.bitw()))?;
+                Ok(jit_ir::Const::Int(jit_tyidx, v))
             }
             aot_ir::Ty::Float(fty) => {
                 let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Float(fty.clone()))?;
@@ -422,7 +422,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
     fn handle_type(&mut self, aot_type: &aot_ir::Ty) -> Result<jit_ir::TyIdx, CompilationError> {
         let jit_ty = match aot_type {
             aot_ir::Ty::Void => jit_ir::Ty::Void,
-            aot_ir::Ty::Integer(it) => jit_ir::Ty::Integer(it.num_bits()),
+            aot_ir::Ty::Integer(x) => jit_ir::Ty::Integer(x.bitw()),
             aot_ir::Ty::Ptr => jit_ir::Ty::Ptr,
             aot_ir::Ty::Func(ft) => {
                 let mut jit_args = Vec::new();
