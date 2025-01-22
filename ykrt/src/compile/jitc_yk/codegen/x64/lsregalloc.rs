@@ -829,15 +829,21 @@ impl LSRegAlloc<'_> {
             RegState::FromInst(iidx) => {
                 if self.spills[usize::from(iidx)] == SpillState::Empty {
                     let inst = self.m.inst(iidx);
-                    let size = inst.def_byte_size(self.m);
-                    self.stack.align(size); // FIXME
-                    let frame_off = self.stack.grow(size);
+                    let bitw = inst.def_bitw(self.m);
+                    let bytew = inst.def_byte_size(self.m);
+                    debug_assert!(bitw >= bytew);
+                    self.stack.align(bytew);
+                    let frame_off = self.stack.grow(bytew);
                     let off = i32::try_from(frame_off).unwrap();
-                    match size {
-                        1 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
-                        2 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
-                        4 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
-                        8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
+                    match bitw {
+                        1 => dynasm!(asm
+                            ; and Rq(reg.code()), 1
+                            ; mov BYTE [rbp - off], Rb(reg.code())
+                        ),
+                        8 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
+                        16 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
+                        32 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
+                        64 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
                         _ => unreachable!(),
                     }
                     self.spills[usize::from(iidx)] = SpillState::Stack(off);
@@ -1380,13 +1386,15 @@ impl LSRegAlloc<'_> {
             RegState::FromInst(iidx) => {
                 if self.spills[usize::from(iidx)] == SpillState::Empty {
                     let inst = self.m.inst(iidx);
-                    let size = inst.def_byte_size(self.m);
-                    self.stack.align(size); // FIXME
-                    let frame_off = self.stack.grow(size);
+                    let bitw = inst.def_bitw(self.m);
+                    let bytew = inst.def_byte_size(self.m);
+                    debug_assert!(bitw >= bytew);
+                    self.stack.align(bytew);
+                    let frame_off = self.stack.grow(bytew);
                     let off = i32::try_from(frame_off).unwrap();
-                    match size {
-                        4 => dynasm!(asm ; movss [rbp - off], Rx(reg.code())),
-                        8 => dynasm!(asm ; movsd [rbp - off], Rx(reg.code())),
+                    match bitw {
+                        32 => dynasm!(asm ; movss [rbp - off], Rx(reg.code())),
+                        64 => dynasm!(asm ; movsd [rbp - off], Rx(reg.code())),
                         _ => unreachable!(),
                     }
                     self.spills[usize::from(iidx)] = SpillState::Stack(off);
