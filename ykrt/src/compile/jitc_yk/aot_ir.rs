@@ -1613,13 +1613,7 @@ impl IntegerTy {
     /// Padding for alignment is not included.
     #[cfg(test)]
     pub(crate) fn byte_size(&self) -> usize {
-        let bits = self.bitw();
-        let mut ret = bits / 8;
-        // If it wasn't an exactly byte-sized thing, round up to the next byte.
-        if bits % 8 != 0 {
-            ret += 1;
-        }
-        usize::try_from(ret).unwrap()
+        usize::try_from(self.bitw().div_ceil(8)).unwrap()
     }
 
     /// Format a constant integer value that is of the type described by `self`.
