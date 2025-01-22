@@ -1612,7 +1612,7 @@ impl IntegerTy {
     ///
     /// Padding for alignment is not included.
     #[cfg(test)]
-    pub(crate) fn byte_size(&self) -> usize {
+    pub(crate) fn bytew(&self) -> usize {
         usize::try_from(self.bitw().div_ceil(8)).unwrap()
     }
 
@@ -2104,14 +2104,14 @@ mod tests {
     #[test]
     fn integer_type_sizes() {
         for i in 1..8 {
-            assert_eq!(IntegerTy::new(i).byte_size(), 1);
+            assert_eq!(IntegerTy::new(i).bytew(), 1);
         }
         for i in 9..16 {
-            assert_eq!(IntegerTy::new(i).byte_size(), 2);
+            assert_eq!(IntegerTy::new(i).bytew(), 2);
         }
-        assert_eq!(IntegerTy::new(127).byte_size(), 16);
-        assert_eq!(IntegerTy::new(128).byte_size(), 16);
-        assert_eq!(IntegerTy::new(129).byte_size(), 17);
+        assert_eq!(IntegerTy::new(127).bytew(), 16);
+        assert_eq!(IntegerTy::new(128).bytew(), 16);
+        assert_eq!(IntegerTy::new(129).bytew(), 17);
     }
 
     #[test]
