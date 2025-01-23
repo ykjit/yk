@@ -8,6 +8,7 @@ use crate::compile::jitc_yk::aot_ir;
 
 use super::super::{
     aot_ir::{BinOp, FloatPredicate, InstID, Predicate},
+    arbbitint::ArbBitInt,
     jit_ir::{
         BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
         FNegInst, FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
@@ -569,34 +570,34 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
             ASTOperand::ConstInt(span) => {
                 let s = self.lexer.span_str(span);
                 let [val, width] = <[&str; 2]>::try_from(s.split('i').collect::<Vec<_>>()).unwrap();
-                let width = width
+                let bitw = width
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let val = if val.starts_with("-") {
                     let val = val
                         .parse::<i64>()
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                    if width < 64
-                        && (val < -((1 << width) - 1) / 2 - 1 || val >= ((1 << width) - 1) / 2)
+                    if bitw < 64
+                        && (val < -((1 << bitw) - 1) / 2 - 1 || val >= ((1 << bitw) - 1) / 2)
                     {
                         return Err(self.error_at_span(span,
-                          &format!("Signed constant {val} exceeds the bit width {width} of the integer type")));
+                          &format!("Signed constant {val} exceeds the bit width {bitw} of the integer type")));
                     }
                     val as u64
                 } else {
                     let val = val
                         .parse::<u64>()
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                    if width < 64 && val > (1 << width) - 1 {
+                    if bitw < 64 && val > (1 << bitw) - 1 {
                         return Err(self.error_at_span(span,
-                          &format!("Unsigned constant {val} exceeds the bit width {width} of the integer type")));
+                          &format!("Unsigned constant {val} exceeds the bit width {bitw} of the integer type")));
                     }
                     val
                 };
-                let tyidx = self.m.insert_ty(Ty::Integer(width)).unwrap();
+                let tyidx = self.m.insert_ty(Ty::Integer(bitw)).unwrap();
                 Ok(Operand::Const(
                     self.m
-                        .insert_const(Const::Int(tyidx, val))
+                        .insert_const(Const::Int(tyidx, ArbBitInt::from_u64(bitw, val)))
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?,
                 ))
             }

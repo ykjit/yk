@@ -5,6 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
+    arbbitint::ArbBitInt,
     jit_ir::{self, Const, Operand, PackedOperand, ParamIdx, TraceKind},
     AOT_MOD,
 };
@@ -396,7 +397,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                     _ => todo!("{}", x.bitw()),
                 };
                 let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(x.bitw()))?;
-                Ok(jit_ir::Const::Int(jit_tyidx, v))
+                Ok(jit_ir::Const::Int(
+                    jit_tyidx,
+                    ArbBitInt::from_u64(x.bitw(), v),
+                ))
             }
             aot_ir::Ty::Float(fty) => {
                 let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Float(fty.clone()))?;
@@ -917,6 +921,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         }
 
         let jit_tyidx = self.handle_type(test_val.type_(self.aot_mod))?;
+        let bitw = self.jit_mod.type_(jit_tyidx).bitw().unwrap();
 
         // Find out which case we traced.
         let guard = match case_dests.iter().position(|&cd| cd == next_bb.bbidx()) {
@@ -926,7 +931,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 let bb = case_dests[cidx];
 
                 // Build the constant value to guard.
-                let jit_const = jit_ir::Const::Int(jit_tyidx, val);
+                let jit_const = jit_ir::Const::Int(jit_tyidx, ArbBitInt::from_u64(bitw, val));
                 let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
                 // Perform the comparison.
@@ -957,7 +962,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 let mut cmps_opnds = Vec::new();
                 for cv in case_values {
                     // Build a constant of the case value.
-                    let jit_const = jit_ir::Const::Int(jit_tyidx, *cv);
+                    let jit_const = jit_ir::Const::Int(jit_tyidx, ArbBitInt::from_u64(bitw, *cv));
                     let jit_const_opnd =
                         jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
@@ -1083,27 +1088,28 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
 
                 // Insert a guard to ensure the trace only runs if the value we encounter is the
                 // same each time.
-                let ty = self.handle_type(self.aot_mod.type_(*tyidx))?;
+                let tyidx = self.handle_type(self.aot_mod.type_(*tyidx))?;
                 // Create the constant from the runtime value.
-                let c = match self.jit_mod.type_(ty) {
+                let ty = self.jit_mod.type_(tyidx);
+                let c = match ty {
                     jit_ir::Ty::Void => unreachable!(),
-                    jit_ir::Ty::Integer(width_bits) => {
-                        let width_bytes = usize::try_from(*width_bits).unwrap() / 8;
-                        let v = match width_bits {
+                    jit_ir::Ty::Integer(bitw) => {
+                        let bytew = ty.byte_size().unwrap();
+                        let v = match *bitw {
                             64 => u64::from_ne_bytes(
-                                self.promotions[self.promote_idx..self.promote_idx + width_bytes]
+                                self.promotions[self.promote_idx..self.promote_idx + bytew]
                                     .try_into()
                                     .unwrap(),
                             ),
                             32 => u64::from(u32::from_ne_bytes(
-                                self.promotions[self.promote_idx..self.promote_idx + width_bytes]
+                                self.promotions[self.promote_idx..self.promote_idx + bytew]
                                     .try_into()
                                     .unwrap(),
                             )),
                             x => todo!("{x}"),
                         };
-                        self.promote_idx += width_bytes;
-                        Const::Int(ty, v)
+                        self.promote_idx += bytew;
+                        Const::Int(tyidx, ArbBitInt::from_u64(*bitw, v))
                     }
                     jit_ir::Ty::Ptr => todo!(),
                     jit_ir::Ty::Func(_) => todo!(),

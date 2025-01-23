@@ -71,6 +71,7 @@ impl Stats {
     pub fn new() -> Self {
         Self {
             inner: Some(Mutex::new(StatsInner::new("-".to_string()))),
+            #[cfg(feature = "yk_testing")]
             wait_until_condvar: None,
         }
     }

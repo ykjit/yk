@@ -56,16 +56,12 @@ impl Analyse {
                     // that allows us to turn it into a constant.
                     if let Inst::ICmp(inst) = m.inst(iidx) {
                         let lhs = self.op_map(m, inst.lhs(m));
-                        let pred = inst.predicate();
                         let rhs = self.op_map(m, inst.rhs(m));
-                        if let (&Operand::Const(lhs_cidx), &Operand::Const(rhs_cidx)) = (&lhs, &rhs)
+                        if let (&Operand::Const(_lhs_cidx), &Operand::Const(_rhs_cidx)) =
+                            (&lhs, &rhs)
                         {
-                            if pred == Predicate::Equal && m.const_(lhs_cidx) == m.const_(rhs_cidx)
-                            {
-                                self.values.borrow_mut()[usize::from(iidx)] =
-                                    Value::Const(m.true_constidx());
-                                return Operand::Const(m.true_constidx());
-                            }
+                            // Can we still hit this case?
+                            todo!();
                         }
                     }
                     op

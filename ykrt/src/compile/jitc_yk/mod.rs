@@ -21,6 +21,7 @@ use ykaddr::addr::symbol_to_ptr;
 use yksmp::Location;
 
 pub mod aot_ir;
+mod arbbitint;
 mod codegen;
 #[cfg(any(debug_assertions, test))]
 mod gdb;

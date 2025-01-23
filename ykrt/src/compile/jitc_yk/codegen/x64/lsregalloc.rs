@@ -29,7 +29,7 @@
 
 use super::{rev_analyse::RevAnalyse, Register, VarLocation};
 use crate::compile::jitc_yk::{
-    codegen::{abs_stack::AbstractStack, x64::REG64_BYTESIZE},
+    codegen::abs_stack::AbstractStack,
     jit_ir::{Const, ConstIdx, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
 };
 use dynasmrt::{
@@ -831,7 +831,7 @@ impl LSRegAlloc<'_> {
                     let inst = self.m.inst(iidx);
                     let bitw = inst.def_bitw(self.m);
                     let bytew = inst.def_byte_size(self.m);
-                    debug_assert!(bitw >= bytew);
+                    debug_assert!(usize::try_from(bitw).unwrap() >= bytew);
                     self.stack.align(bytew);
                     let frame_off = self.stack.grow(bytew);
                     let off = i32::try_from(frame_off).unwrap();
@@ -921,13 +921,8 @@ impl LSRegAlloc<'_> {
     fn load_const_into_gp_reg(&mut self, asm: &mut Assembler, cidx: ConstIdx, reg: Rq) {
         match self.m.const_(cidx) {
             Const::Float(_tyidx, _x) => todo!(),
-            Const::Int(tyidx, x) => {
-                // `unwrap` cannot fail, integers are sized.
-                if self.m.type_(*tyidx).byte_size().unwrap() <= REG64_BYTESIZE {
-                    dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64);
-                } else {
-                    todo!();
-                }
+            Const::Int(_, x) => {
+                dynasm!(asm; mov Rq(reg.code()), QWORD x.to_zero_ext_u64().unwrap() as i64);
             }
             Const::Ptr(x) => {
                 dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64)
@@ -964,12 +959,10 @@ impl LSRegAlloc<'_> {
                 Inst::Copy(_) => panic!(),
                 Inst::Const(cidx) => match self.m.const_(cidx) {
                     Const::Float(_, v) => VarLocation::ConstFloat(*v),
-                    Const::Int(tyidx, v) => {
-                        let Ty::Integer(bits) = self.m.type_(*tyidx) else {
-                            panic!()
-                        };
-                        VarLocation::ConstInt { bits: *bits, v: *v }
-                    }
+                    Const::Int(_, x) => VarLocation::ConstInt {
+                        bits: x.bitw(),
+                        v: x.to_zero_ext_u64().unwrap(),
+                    },
                     Const::Ptr(p) => VarLocation::ConstInt {
                         bits: 64,
                         v: u64::try_from(*p).unwrap(),
@@ -1388,7 +1381,7 @@ impl LSRegAlloc<'_> {
                     let inst = self.m.inst(iidx);
                     let bitw = inst.def_bitw(self.m);
                     let bytew = inst.def_byte_size(self.m);
-                    debug_assert!(bitw >= bytew);
+                    debug_assert!(usize::try_from(bitw).unwrap() >= bytew);
                     self.stack.align(bytew);
                     let frame_off = self.stack.grow(bytew);
                     let off = i32::try_from(frame_off).unwrap();
