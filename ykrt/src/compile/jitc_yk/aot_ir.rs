@@ -2073,7 +2073,9 @@ mod tests {
             bytes,
         };
 
-        let expect_bytes = rng.rev().map(|i| format!("{:02x}", i)).collect::<String>();
+        let expect_bytes = rng
+            .rev()
+            .fold("".to_string(), |acc, i| format!("{acc}{i:02x}"));
         let expect_usize = usize::from_str_radix(&expect_bytes, 16).unwrap();
         assert_eq!(
             format!("{}", cp.display(&m)),

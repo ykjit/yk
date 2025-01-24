@@ -421,7 +421,7 @@ mod test {
     use std::assert_matches::assert_matches;
     use vob::vob;
 
-    fn rev_analyse_header<'a>(m: &'a Module) -> RevAnalyse<'a> {
+    fn rev_analyse_header(m: &Module) -> RevAnalyse<'_> {
         let mut rev_an = RevAnalyse::new(m);
         rev_an.analyse_header();
         rev_an
@@ -441,7 +441,7 @@ mod test {
         let rev_an = rev_analyse_header(&m);
         assert_eq!(
             rev_an.inst_vals_alive_until,
-            vec![3, 0, 0, 0]
+            [3, 0, 0, 0]
                 .iter()
                 .map(|x: &usize| InstIdx::try_from(*x).unwrap())
                 .collect::<Vec<_>>()
@@ -461,7 +461,7 @@ mod test {
         let rev_an = rev_analyse_header(&m);
         assert_eq!(
             rev_an.inst_vals_alive_until,
-            vec![2, 0, 5, 0, 0, 0]
+            [2, 0, 5, 0, 0, 0]
                 .iter()
                 .map(|x: &usize| InstIdx::try_from(*x).unwrap())
                 .collect::<Vec<_>>()

@@ -109,6 +109,9 @@ pub(crate) trait SideTraceInfo: fmt::Debug {
 }
 
 #[cfg(test)]
+pub(crate) use compiled_trace_testing::*;
+
+#[cfg(test)]
 mod compiled_trace_testing {
     use super::*;
 
@@ -201,6 +204,3 @@ mod compiled_trace_testing {
         }
     }
 }
-
-#[cfg(test)]
-pub(crate) use compiled_trace_testing::*;

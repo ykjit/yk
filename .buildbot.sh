@@ -137,7 +137,7 @@ for tracer in ${TRACERS}; do
     echo "$WARNING_DEFINES" | xargs cargo rustc -p xtask --profile check --bin xtask --
 
     # Error if Clippy detects any warnings introduced in lines changed in this PR.
-    cargo-clippy-diff origin/master -- --all-features -- -D warnings
+    cargo-clippy-diff origin/master -- --all-features --tests -- -D warnings
 done
 
 # Run the tests multiple times on hwt to try and catch non-deterministic

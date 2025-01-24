@@ -149,7 +149,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             Operand::Var(iidx) => Inst::Copy(iidx),
                             Operand::Const(cidx) => Inst::Const(cidx),
                         };
-                        self.push_assign(inst.into(), assign)?;
+                        self.push_assign(inst, assign)?;
                     }
                     ASTInst::BinOp {
                         assign,
@@ -317,7 +317,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             .span_str(tiidx)
                             .parse::<usize>()
                             .map_err(|e| self.error_at_span(tiidx, &e.to_string()))?;
-                        assert_eq!(self.m.params.len(), usize::try_from(off).unwrap());
+                        assert_eq!(self.m.params.len(), off);
                         let type_ = self.process_type(type_)?;
                         let size = self.m.type_(type_).byte_size().ok_or_else(|| {
                             self.error_at_span(
@@ -506,7 +506,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         } in func_types
         {
             let name = self.lexer.span_str(name_span).to_owned();
-            if self.func_types_map.get(&name).is_some() {
+            if self.func_types_map.contains_key(&name) {
                 return Err(format!("Duplicate function type '{name}'").into());
             }
             let arg_tys = {
@@ -535,7 +535,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         } in func_decls
         {
             let name = self.lexer.span_str(name_span).to_owned();
-            if self.func_types_map.get(&name).is_some() {
+            if self.func_types_map.contains_key(&name) {
                 todo!();
             }
             let arg_tys = {
@@ -694,7 +694,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         }
 
         self.m.push(inst).unwrap();
-        debug_assert!(self.inst_idx_map.get(&iidx).is_none());
+        debug_assert!(!self.inst_idx_map.contains_key(&iidx));
         self.inst_idx_map.insert(iidx, self.m.last_inst_idx());
         Ok(())
     }
