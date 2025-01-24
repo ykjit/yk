@@ -698,7 +698,7 @@ impl Opt {
 
     fn opt_load(&mut self, iidx: InstIdx, inst: LoadInst) -> Result<(), CompilationError> {
         if !inst.is_volatile() {
-            let tgt = self.an.op_map(&self.m, inst.operand(&self.m));
+            let tgt = self.an.op_map(&self.m, inst.ptr(&self.m));
             let bytesize = Inst::Load(inst).def_byte_size(&self.m);
             match self.an.heapvalue(
                 &self.m,
@@ -789,7 +789,7 @@ impl Opt {
 
     fn opt_store(&mut self, iidx: InstIdx, inst: StoreInst) -> Result<(), CompilationError> {
         if !inst.is_volatile() {
-            let tgt = self.an.op_map(&self.m, inst.tgt(&self.m));
+            let tgt = self.an.op_map(&self.m, inst.ptr(&self.m));
             let val = self.an.op_map(&self.m, inst.val(&self.m));
             let is_dead = match self.an.heapvalue(
                 &self.m,
