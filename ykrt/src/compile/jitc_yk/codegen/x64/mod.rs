@@ -2803,7 +2803,7 @@ mod tests {
             let mut map = HashMap::new();
             for (i, regs) in X64_RAW_REGS_MAP.iter().enumerate() {
                 for r in regs.iter() {
-                    if *r != "" {
+                    if !r.is_empty() {
                         map.insert(*r, i);
                     }
                 }
@@ -2833,7 +2833,7 @@ mod tests {
         };
     }
 
-    fn fmatcher<'a>(ptn: &'a str) -> FMatcher<'a> {
+    fn fmatcher(ptn: &str) -> FMatcher<'_> {
         let mut fmb = FMBuilder::new(ptn)
             .unwrap()
             .name_matching_validator(|names| {
@@ -4714,11 +4714,11 @@ mod tests {
         m.push_param(loc.clone());
         let pinst1: Inst =
             jit_ir::ParamInst::new(ParamIdx::try_from(0).unwrap(), m.int8_tyidx()).into();
-        m.push(pinst1.clone()).unwrap();
+        m.push(pinst1).unwrap();
         m.push_param(loc);
         let pinst2: Inst =
             jit_ir::ParamInst::new(ParamIdx::try_from(1).unwrap(), m.int8_tyidx()).into();
-        m.push(pinst2.clone()).unwrap();
+        m.push(pinst2).unwrap();
         let op1 = m.push_and_make_operand(pinst1).unwrap();
         let op2 = m.push_and_make_operand(pinst2).unwrap();
 

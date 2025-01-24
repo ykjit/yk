@@ -149,7 +149,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             Operand::Var(iidx) => Inst::Copy(iidx),
                             Operand::Const(cidx) => Inst::Const(cidx),
                         };
-                        self.push_assign(inst.into(), assign)?;
+                        self.push_assign(inst, assign)?;
                     }
                     ASTInst::BinOp {
                         assign,
