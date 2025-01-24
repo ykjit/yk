@@ -1603,7 +1603,7 @@ impl Inst {
                 let num_elems = x.num_elems;
                 num_elems.unpack(m).map_iidx(f);
             }
-            Inst::Store(StoreInst { tgt, val, .. }) => {
+            Inst::Store(StoreInst { ptr: tgt, val, .. }) => {
                 tgt.unpack(m).map_iidx(f);
                 val.unpack(m).map_iidx(f);
             }
@@ -1820,8 +1820,8 @@ impl Inst {
                 val: mapper(m, val),
                 dest_tyidx: *dest_tyidx,
             }),
-            Inst::Store(StoreInst { tgt, val, volatile }) => Inst::Store(StoreInst {
-                tgt: mapper(m, tgt),
+            Inst::Store(StoreInst { ptr, val, volatile }) => Inst::Store(StoreInst {
+                ptr: mapper(m, ptr),
                 val: mapper(m, val),
                 volatile: *volatile,
             }),
@@ -2019,7 +2019,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Store(x) => write!(
                 f,
                 "*{} = {}",
-                x.tgt.unpack(self.m).display(self.m),
+                x.ptr.unpack(self.m).display(self.m),
                 x.val.unpack(self.m).display(self.m)
             ),
             Inst::ICmp(x) => write!(
@@ -2531,7 +2531,7 @@ impl DirectCallInst {
 #[derive(Clone, Copy, Debug)]
 pub struct StoreInst {
     /// The target pointer that we will store `val` into.
-    tgt: PackedOperand,
+    ptr: PackedOperand,
     /// The value to store.
     val: PackedOperand,
     /// Is this store volatile?
@@ -2539,17 +2539,17 @@ pub struct StoreInst {
 }
 
 impl StoreInst {
-    pub(crate) fn new(tgt: Operand, val: Operand, volatile: bool) -> Self {
+    pub(crate) fn new(ptr: Operand, val: Operand, volatile: bool) -> Self {
         // FIXME: assert type of pointer
         Self {
-            tgt: PackedOperand::new(&tgt),
+            ptr: PackedOperand::new(&ptr),
             val: PackedOperand::new(&val),
             volatile,
         }
     }
 
     fn decopy_eq(&self, m: &Module, other: Self) -> bool {
-        self.tgt(m) == other.tgt(m)
+        self.ptr(m) == other.ptr(m)
             && self.val(m) == other.val(m)
             && self.volatile == other.volatile
     }
@@ -2559,9 +2559,9 @@ impl StoreInst {
         self.val.unpack(m)
     }
 
-    /// Returns the target operand: i.e. where to store [self.val()].
-    pub(crate) fn tgt(&self, m: &Module) -> Operand {
-        self.tgt.unpack(m)
+    /// Returns the target pointer: i.e. where to store [self.val()].
+    pub(crate) fn ptr(&self, m: &Module) -> Operand {
+        self.ptr.unpack(m)
     }
 
     pub(crate) fn is_volatile(&self) -> bool {

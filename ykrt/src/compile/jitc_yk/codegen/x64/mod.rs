@@ -1391,7 +1391,7 @@ impl<'a> Assemble<'a> {
     fn cg_store(&mut self, iidx: InstIdx, inst: &jit_ir::StoreInst) {
         let (tgt_op, off) = match self.ra.ptradd(iidx) {
             Some(x) => (x.ptr(self.m), x.off()),
-            None => (inst.tgt(self.m), 0),
+            None => (inst.ptr(self.m), 0),
         };
 
         let val = inst.val(self.m);

@@ -375,7 +375,7 @@ impl<'a> RevAnalyse<'a> {
     /// Analyse a [StoreInst]. Returns `true` if it has been inlined and should not go through the
     /// normal "calculate `inst_vals_alive_until`" phase.
     fn an_store(&mut self, iidx: InstIdx, inst: StoreInst) -> bool {
-        if let Operand::Var(op_iidx) = inst.tgt(self.m) {
+        if let Operand::Var(op_iidx) = inst.ptr(self.m) {
             if let Inst::PtrAdd(pa_inst) = self.m.inst(op_iidx) {
                 self.ptradds[usize::from(iidx)] = Some(pa_inst);
                 if let Operand::Var(y) = pa_inst.ptr(self.m) {

@@ -789,7 +789,7 @@ impl Opt {
 
     fn opt_store(&mut self, iidx: InstIdx, inst: StoreInst) -> Result<(), CompilationError> {
         if !inst.is_volatile() {
-            let tgt = self.an.op_map(&self.m, inst.tgt(&self.m));
+            let tgt = self.an.op_map(&self.m, inst.ptr(&self.m));
             let val = self.an.op_map(&self.m, inst.val(&self.m));
             let is_dead = match self.an.heapvalue(
                 &self.m,
