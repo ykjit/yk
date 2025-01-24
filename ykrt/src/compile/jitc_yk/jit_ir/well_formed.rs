@@ -156,6 +156,15 @@ impl Module {
                             self.inst(iidx).display(self, iidx)
                         );
                     }
+
+                    if let Ty::Ptr = self.type_(x.lhs(self).tyidx(self)) {
+                        if x.predicate().signed() {
+                            panic!(
+                                "Instruction at position {iidx} compares pointers using a signed predicate\n  {}",
+                                self.inst(iidx).display(self, iidx)
+                            );
+                        }
+                    }
                 }
                 Inst::Select(x) => {
                     let Ty::Integer(bitsize) = self.type_(x.cond(self).tyidx(self)) else {
@@ -418,6 +427,22 @@ mod tests {
                 %0: i8 = param 0
                 %1: i64 = param 1
                 %2: i1 = eq %0, %1
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 2 compares pointers using a signed predicate"
+    )]
+    fn cg_icmp_ptr_signed() {
+        Module::from_str(
+            "
+              entry:
+                %0: ptr = param 0
+                %1: ptr = param 1
+                %2: i1 = slt %0, %1
+                black_box %2
             ",
         );
     }

@@ -677,10 +677,10 @@ impl Opt {
                     Predicate::UnsignedGreaterEqual => x >= y,
                     Predicate::UnsignedLess => x < y,
                     Predicate::UnsignedLessEqual => x <= y,
-                    Predicate::SignedGreater => (x as i64) > (y as i64),
-                    Predicate::SignedGreaterEqual => (x as i64) >= (y as i64),
-                    Predicate::SignedLess => (x as i64) < (y as i64),
-                    Predicate::SignedLessEqual => (x as i64) <= (y as i64),
+                    Predicate::SignedGreater
+                    | Predicate::SignedGreaterEqual
+                    | Predicate::SignedLess
+                    | Predicate::SignedLessEqual => unreachable!(),
                 };
 
                 self.m.replace(
