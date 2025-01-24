@@ -76,7 +76,7 @@ impl Analyse {
     pub(super) fn set_value(&self, m: &Module, iidx: InstIdx, v: Value) {
         self.values.borrow_mut()[usize::from(iidx)] = v.clone();
         if let Some(Inst::Load(linst)) = m.inst_nocopy(iidx) {
-            let addr = Address::from_operand(m, linst.operand(m));
+            let addr = Address::from_operand(m, linst.ptr(m));
             self.heapvalues.borrow_mut().load(m, addr, v.to_operand());
         }
     }

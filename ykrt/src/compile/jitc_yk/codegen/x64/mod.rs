@@ -1280,7 +1280,7 @@ impl<'a> Assemble<'a> {
     fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         let (ptr_op, off) = match self.ra.ptradd(iidx) {
             Some(x) => (x.ptr(self.m), x.off()),
-            None => (inst.operand(self.m), 0),
+            None => (inst.ptr(self.m), 0),
         };
 
         match self.m.type_(inst.tyidx()) {

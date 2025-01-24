@@ -1577,7 +1577,7 @@ impl Inst {
                 lhs.unpack(m).map_iidx(f);
                 rhs.unpack(m).map_iidx(f);
             }
-            Inst::Load(LoadInst { op, .. }) => op.unpack(m).map_iidx(f),
+            Inst::Load(LoadInst { ptr: op, .. }) => op.unpack(m).map_iidx(f),
             Inst::LookupGlobal(_) => (),
             Inst::Param(_) => (),
             Inst::Call(x) => {
@@ -1786,11 +1786,11 @@ impl Inst {
                 rhs: mapper(m, rhs),
             }),
             Inst::Load(LoadInst {
-                op,
+                ptr,
                 tyidx,
                 volatile,
             }) => Inst::Load(LoadInst {
-                op: mapper(m, op),
+                ptr: mapper(m, ptr),
                 tyidx: *tyidx,
                 volatile: *volatile,
             }),
@@ -1971,7 +1971,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 lhs.unpack(self.m).display(self.m),
                 rhs.unpack(self.m).display(self.m)
             ),
-            Inst::Load(x) => write!(f, "load {}", x.operand(self.m).display(self.m)),
+            Inst::Load(x) => write!(f, "load {}", x.ptr(self.m).display(self.m)),
             Inst::LookupGlobal(x) => write!(
                 f,
                 "lookup_global @{}",
@@ -2263,7 +2263,7 @@ impl BlackBoxInst {
 #[derive(Clone, Copy, Debug)]
 pub struct LoadInst {
     /// The pointer to load from.
-    op: PackedOperand,
+    ptr: PackedOperand,
     /// The type of the pointee.
     tyidx: TyIdx,
     /// Is this load volatile?
@@ -2272,23 +2272,23 @@ pub struct LoadInst {
 
 impl LoadInst {
     // FIXME: why do we need to provide a type index? Can't we get that from the operand?
-    pub(crate) fn new(op: Operand, tyidx: TyIdx, volatile: bool) -> LoadInst {
+    pub(crate) fn new(ptr: Operand, tyidx: TyIdx, volatile: bool) -> LoadInst {
         LoadInst {
-            op: PackedOperand::new(&op),
+            ptr: PackedOperand::new(&ptr),
             tyidx,
             volatile,
         }
     }
 
     fn decopy_eq(&self, m: &Module, other: Self) -> bool {
-        self.op.unpack(m) == other.op.unpack(m)
+        self.ptr.unpack(m) == other.ptr.unpack(m)
             && self.tyidx == other.tyidx
             && self.volatile == other.volatile
     }
 
     /// Return the pointer operand.
-    pub(crate) fn operand(&self, m: &Module) -> Operand {
-        self.op.unpack(m)
+    pub(crate) fn ptr(&self, m: &Module) -> Operand {
+        self.ptr.unpack(m)
     }
 
     /// Returns the type index of the loaded value.

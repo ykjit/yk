@@ -355,7 +355,7 @@ impl<'a> RevAnalyse<'a> {
     /// Analyse a [LoadInst]. Returns `true` if it has been inlined and should not go through the
     /// normal "calculate `inst_vals_alive_until`" phase.
     fn an_load(&mut self, iidx: InstIdx, inst: LoadInst) -> bool {
-        if let Operand::Var(op_iidx) = inst.operand(self.m) {
+        if let Operand::Var(op_iidx) = inst.ptr(self.m) {
             if let Inst::PtrAdd(pa_inst) = self.m.inst(op_iidx) {
                 self.ptradds[usize::from(iidx)] = Some(pa_inst);
                 if let Operand::Var(y) = pa_inst.ptr(self.m) {
