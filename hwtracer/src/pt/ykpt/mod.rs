@@ -447,11 +447,16 @@ impl YkPTBlockIterator<'_> {
             // TNT buffer. The unwrap cannot fail because the above code ensures that `self.tnts`
             // is not empty.
             let taken = self.tnts.pop_front().unwrap();
-            // FIXME: If you re-enable compressed returns (in `collect.c`), once in a blue moon
-            // this assertion will fail.
+            // FIXME: Occasionally `taken` is `false` here, which indicates that something has gone
+            // wrong when decoding the PT trace (even with compressed returns disabled!).
             //
-            // More info: https://github.com/ykjit/yk/issues/874
-            debug_assert!(taken);
+            // For now we abort decoding the trace, since we know (and have seen in the wild) that
+            // if you carry on you get all manner of crashes.
+            if !taken {
+                return Err(IteratorError::HWTracerError(HWTracerError::Unrecoverable(
+                    "PT taken bug detected".to_string(),
+                )));
+            }
         }
 
         Ok(compressed)
