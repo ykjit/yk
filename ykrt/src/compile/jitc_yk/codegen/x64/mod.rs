@@ -16,7 +16,6 @@
 
 use super::{
     super::{
-        int_signs::{SignExtend, Truncate},
         jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, TraceKind, Ty},
         CompilationError,
     },
@@ -127,7 +126,7 @@ static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 
 /// The size of a 64-bit register in bytes.
 pub(crate) static REG64_BYTESIZE: usize = 8;
-static REG64_BITSIZE: usize = REG64_BYTESIZE * 8;
+static REG64_BITSIZE: u32 = 64;
 static RBP_DWARF_NUM: u16 = 6;
 
 /// The x64 SysV ABI requires a 16-byte aligned stack prior to any call.
@@ -1399,25 +1398,34 @@ impl<'a> Assemble<'a> {
         match self.m.type_(val.tyidx(self.m)) {
             Ty::Integer(_) | Ty::Ptr => {
                 let bitw = val.bitw(self.m);
-                if let Some(imm) = self.op_to_zero_ext_immediate(&val) {
+                if bitw == 8
+                    && let Some(v) = self.op_to_zero_ext_i8(&val)
+                {
                     let [tgt_reg] =
                         self.ra
                             .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
-                    match (imm, bitw) {
-                        (Immediate::I8(v), 8) => {
-                            dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code()) + off], v)
-                        }
-                        (Immediate::I16(v), 16) => {
-                            dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code()) + off], v)
-                        }
-                        (Immediate::I32(v), 32) => {
-                            dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code()) + off], v)
-                        }
-                        (Immediate::I32(v), 64) => {
-                            dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code()) + off], v)
-                        }
-                        _ => todo!(),
-                    }
+                    dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code()) + off], v);
+                } else if bitw == 16
+                    && let Some(v) = self.op_to_zero_ext_i16(&val)
+                {
+                    let [tgt_reg] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
+                    dynasm!(self.asm ; mov WORD [Rq(tgt_reg.code()) + off], v);
+                } else if bitw == 32
+                    && let Some(v) = self.op_to_zero_ext_i32(&val)
+                {
+                    let [tgt_reg] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
+                    dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code()) + off], v);
+                } else if bitw == 64
+                    && let Some(v) = self.op_to_zero_ext_i32(&val)
+                {
+                    let [tgt_reg] =
+                        self.ra
+                            .assign_gp_regs(&mut self.asm, iidx, [RegConstraint::Input(tgt_op)]);
+                    dynasm!(self.asm ; mov QWORD [Rq(tgt_reg.code()) + off], v);
                 } else {
                     let [tgt_reg, val_reg] = self.ra.assign_gp_regs(
                         &mut self.asm,
@@ -1679,15 +1687,10 @@ impl<'a> Assemble<'a> {
             Operand::Var(iidx) => self.ra.var_location(iidx),
             Operand::Const(cidx) => match self.m.const_(cidx) {
                 Const::Float(_, v) => VarLocation::ConstFloat(*v),
-                Const::Int(tyidx, v) => {
-                    let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
-                        panic!()
-                    };
-                    VarLocation::ConstInt {
-                        bits: *bit_size,
-                        v: *v,
-                    }
-                }
+                Const::Int(_, x) => VarLocation::ConstInt {
+                    bits: x.bitw(),
+                    v: x.to_zero_ext_u64().unwrap(),
+                },
                 Const::Ptr(v) => VarLocation::ConstPtr(*v),
             },
         }
@@ -1697,53 +1700,8 @@ impl<'a> Assemble<'a> {
     /// it, otherwise return `None`.
     fn op_to_sign_ext_i8(&self, op: &Operand) -> Option<i8> {
         if let Operand::Const(cidx) = op {
-            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
-                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
-                    panic!()
-                };
-                if *bit_size <= 8 {
-                    return Some(v.sign_extend(*bit_size, 8) as i8);
-                } else if v.truncate(8).sign_extend(8, 64) == *v {
-                    return Some(v.truncate(8) as i8);
-                }
-            }
-        }
-        None
-    }
-
-    /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
-    /// it zero-extended to 8 bits, otherwise return `None`.
-    fn op_to_zero_ext_i8(&self, op: &Operand) -> Option<i8> {
-        if let Operand::Const(cidx) = op {
-            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
-                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
-                    panic!()
-                };
-                if *bit_size <= 8 {
-                    debug_assert_eq!(v.truncate(*bit_size), *v);
-                    return Some(*v as i8);
-                } else if v.truncate(8) == *v {
-                    return Some(v.truncate(8) as i8);
-                }
-            }
-        }
-        None
-    }
-
-    /// If an `Operand` refers to a constant integer that can be represented as an `i16`, return
-    /// it zero extended to 16 bits, otherwise return `None`.
-    fn op_to_zero_ext_i16(&self, op: &Operand) -> Option<i16> {
-        if let Operand::Const(cidx) = op {
-            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
-                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
-                    panic!()
-                };
-                if *bit_size <= 16 {
-                    debug_assert_eq!(v.truncate(*bit_size), *v);
-                    return Some(*v as i16);
-                } else if v.truncate(16) == *v {
-                    return Some(v.truncate(16) as i16);
-                }
+            if let Const::Int(_, x) = self.m.const_(*cidx) {
+                return x.to_sign_ext_i8();
             }
         }
         None
@@ -1753,15 +1711,30 @@ impl<'a> Assemble<'a> {
     /// sign-extended to 32 bits, otherwise return `None`.
     fn op_to_sign_ext_i32(&self, op: &Operand) -> Option<i32> {
         if let Operand::Const(cidx) = op {
-            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
-                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
-                    panic!()
-                };
-                if *bit_size <= 32 {
-                    return Some(v.sign_extend(*bit_size, 32) as i32);
-                } else if v.truncate(32).sign_extend(32, 64) == *v {
-                    return Some(v.truncate(32) as i32);
-                }
+            if let Const::Int(_, x) = self.m.const_(*cidx) {
+                return x.to_sign_ext_i32();
+            }
+        }
+        None
+    }
+
+    /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
+    /// it zero-extended to 8 bits, otherwise return `None`.
+    fn op_to_zero_ext_i8(&self, op: &Operand) -> Option<i8> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(_, x) = self.m.const_(*cidx) {
+                return x.to_zero_ext_u8().map(|x| x as i8);
+            }
+        }
+        None
+    }
+
+    /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
+    /// it zero-extended to 8 bits, otherwise return `None`.
+    fn op_to_zero_ext_i16(&self, op: &Operand) -> Option<i16> {
+        if let Operand::Const(cidx) = op {
+            if let Const::Int(_, x) = self.m.const_(*cidx) {
+                return x.to_zero_ext_u16().map(|x| x as i16);
             }
         }
         None
@@ -1771,46 +1744,14 @@ impl<'a> Assemble<'a> {
     /// zero-extended to 32 bits, otherwise return `None`.
     fn op_to_zero_ext_i32(&self, op: &Operand) -> Option<i32> {
         if let Operand::Const(cidx) = op {
-            if let Const::Int(tyidx, v) = self.m.const_(*cidx) {
-                let Ty::Integer(bit_size) = self.m.type_(*tyidx) else {
-                    panic!()
-                };
-                if *bit_size <= 32 {
-                    debug_assert_eq!(v.truncate(*bit_size), *v);
-                    return Some(*v as i32);
-                } else if v.truncate(32) == *v {
-                    return Some(v.truncate(32) as i32);
-                }
+            if let Const::Int(_, x) = self.m.const_(*cidx) {
+                return x.to_zero_ext_u32().map(|x| x as i32);
             }
         }
         None
     }
 
-    /// Return a zero-extended [Immediate] if `op` is a constant and is representable as an x64
-    /// immediate. Note this embeds the follow assumptions:
-    ///   1. 1 byte constants map to Immediate::I8.
-    ///   2. 2 byte constants map to Immediate::I16.
-    ///   3. 3 byte constants map to Immediate::I32.
-    ///   4. 4 byte constants map to Immediate::I32.
-    ///
-    /// Note that number (4) breaks the pattern of the (1-3)!
-    fn op_to_zero_ext_immediate(&self, op: &Operand) -> Option<Immediate> {
-        match op {
-            Operand::Const(cidx) => match self.m.const_(*cidx) {
-                Const::Float(_, _) => todo!(),
-                Const::Int(_, _) => match op.byte_size(self.m) {
-                    1 => self.op_to_zero_ext_i8(op).map(Immediate::I8),
-                    2 => self.op_to_zero_ext_i16(op).map(Immediate::I16),
-                    4 | 8 => self.op_to_zero_ext_i32(op).map(Immediate::I32),
-                    _ => todo!(),
-                },
-                Const::Ptr(_) => self.op_to_zero_ext_i32(op).map(Immediate::I32),
-            },
-            Operand::Var(_) => None,
-        }
-    }
-
-    fn cg_cmp_const(&mut self, bit_size: usize, pred: jit_ir::Predicate, lhs_reg: Rq, rhs: i32) {
+    fn cg_cmp_const(&mut self, bit_size: u32, pred: jit_ir::Predicate, lhs_reg: Rq, rhs: i32) {
         match bit_size {
             0 => unreachable!(),
             32 => dynasm!(self.asm; cmp Rd(lhs_reg.code()), rhs),
@@ -1826,7 +1767,7 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_cmp_regs(&mut self, bit_size: usize, pred: jit_ir::Predicate, lhs_reg: Rq, rhs_reg: Rq) {
+    fn cg_cmp_regs(&mut self, bit_size: u32, pred: jit_ir::Predicate, lhs_reg: Rq, rhs_reg: Rq) {
         match bit_size {
             0 => unreachable!(),
             32 => dynasm!(self.asm; cmp Rd(lhs_reg.code()), Rd(rhs_reg.code())),
@@ -2110,6 +2051,13 @@ impl<'a> Assemble<'a> {
                                 mov BYTE [rbp - i32::try_from(off_dst).unwrap()], v as i8),
                             x => todo!("{x}"),
                         },
+                        VarLocation::ConstPtr(v) => {
+                            dynasm!(self.asm
+                                ; push rax
+                                ; mov rax, QWORD v as i64
+                                ; mov QWORD [rbp - i32::try_from(off_dst).unwrap()], rax
+                                ; pop rax);
+                        }
                         VarLocation::Stack {
                             frame_off: off_src,
                             size: size_src,
@@ -2326,7 +2274,7 @@ impl<'a> Assemble<'a> {
             unreachable!(); // must be an integer
         };
 
-        if *dest_bitsize <= u32::try_from(REG64_BITSIZE).unwrap() {
+        if *dest_bitsize <= REG64_BITSIZE {
             if *src_bitsize == 64 {
                 // The 64 bit registers are implicitly sign extended.
                 self.ra
@@ -2529,12 +2477,13 @@ impl<'a> Assemble<'a> {
                     // it doesn't have an allocation. We can just push the actual value instead
                     // which will be written as is during deoptimisation.
                     match self.m.const_(x) {
-                        Const::Int(tyidx, c) => {
-                            let Ty::Integer(bits) = self.m.type_(*tyidx) else {
-                                panic!()
-                            };
-                            lives.push((iid.clone(), VarLocation::ConstInt { bits: *bits, v: *c }))
-                        }
+                        Const::Int(_, y) => lives.push((
+                            iid.clone(),
+                            VarLocation::ConstInt {
+                                bits: y.bitw(),
+                                v: y.to_zero_ext_u64().unwrap(),
+                            },
+                        )),
                         Const::Ptr(p) => lives.push((
                             iid.clone(),
                             VarLocation::ConstInt {
@@ -2779,16 +2728,6 @@ impl<'a> AsmPrinter<'a> {
         }
         Ok(out.join("\n"))
     }
-}
-
-/// A representation of an x64 immediate, suitable for use in x64 instructions.
-///
-/// Note that the integer values inside may be zero or sign-extended depending on the construction
-/// of an instance of this enum.
-enum Immediate {
-    I8(i8),
-    I16(i16),
-    I32(i32),
 }
 
 /// x64 tests. These use an unusual form of pattern matching. Instead of using concrete register

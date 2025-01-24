@@ -117,7 +117,10 @@ impl HeapValues {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::jitc_yk::jit_ir::{Const, Ty};
+    use crate::compile::jitc_yk::{
+        arbbitint::ArbBitInt,
+        jit_ir::{Const, Ty},
+    };
 
     #[test]
     fn basic() {
@@ -137,14 +140,18 @@ mod test {
         // Add a single load
         let addr0 = Address::from_operand(&m, Operand::Var(InstIdx::unchecked_from(0)));
         assert!(hv.get(&m, addr0.clone(), 1).is_none());
-        let cidx0 = m.insert_const(Const::Int(m.int8_tyidx(), 0)).unwrap();
+        let cidx0 = m
+            .insert_const(Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 0)))
+            .unwrap();
         hv.load(&m, addr0.clone(), Operand::Const(cidx0));
         assert_eq!(hv.hv.len(), 1);
         assert_eq!(hv.get(&m, addr0.clone(), 1), Some(Operand::Const(cidx0)));
 
         // Add a non-overlapping load
         let addr1 = Address::from_operand(&m, Operand::Var(InstIdx::unchecked_from(1)));
-        let cidx1 = m.insert_const(Const::Int(m.int8_tyidx(), 1)).unwrap();
+        let cidx1 = m
+            .insert_const(Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 1)))
+            .unwrap();
         hv.load(&m, addr1.clone(), Operand::Const(cidx1));
         assert_eq!(hv.hv.len(), 2);
         assert_eq!(hv.get(&m, addr0.clone(), 1), Some(Operand::Const(cidx0)));
@@ -156,7 +163,9 @@ mod test {
         assert!(hv.get(&m, addr2.clone(), 2).is_none());
 
         // Add a store that replaces our knowledge of the second load but preserves the first.
-        let cidx2 = m.insert_const(Const::Int(m.int8_tyidx(), 2)).unwrap();
+        let cidx2 = m
+            .insert_const(Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 2)))
+            .unwrap();
         hv.store(&m, addr2.clone(), Operand::Const(cidx2));
         assert_eq!(hv.hv.len(), 2);
         assert_eq!(hv.get(&m, addr0.clone(), 1), Some(Operand::Const(cidx2)));
@@ -164,7 +173,9 @@ mod test {
 
         // Add an overlapping i64 store which should remove information about both preceding loads.
         let int64_tyidx = m.insert_ty(Ty::Integer(64)).unwrap();
-        let cidx3 = m.insert_const(Const::Int(int64_tyidx, 3)).unwrap();
+        let cidx3 = m
+            .insert_const(Const::Int(int64_tyidx, ArbBitInt::from_u64(64, 3)))
+            .unwrap();
         hv.store(&m, addr2.clone(), Operand::Const(cidx3));
         assert_eq!(hv.hv.len(), 1);
         assert_eq!(hv.get(&m, addr0.clone(), 8), Some(Operand::Const(cidx3)));
@@ -172,7 +183,9 @@ mod test {
         assert!(hv.get(&m, addr1.clone(), 1).is_none());
 
         // Add an overlapping i8 store which should remove information about the i64 load.
-        let cidx4 = m.insert_const(Const::Int(m.int8_tyidx(), 4)).unwrap();
+        let cidx4 = m
+            .insert_const(Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 4)))
+            .unwrap();
         hv.store(&m, addr1.clone(), Operand::Const(cidx4));
         assert_eq!(hv.hv.len(), 1);
         assert_eq!(hv.get(&m, addr1.clone(), 1), Some(Operand::Const(cidx4)));
@@ -181,7 +194,9 @@ mod test {
 
         // Add a store which we can't prove doesn't alias.
         let addr4 = Address::from_operand(&m, Operand::Var(InstIdx::unchecked_from(4)));
-        let cidx5 = m.insert_const(Const::Int(m.int8_tyidx(), 5)).unwrap();
+        let cidx5 = m
+            .insert_const(Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 5)))
+            .unwrap();
         hv.store(&m, addr4.clone(), Operand::Const(cidx5));
         assert_eq!(hv.hv.len(), 1);
         assert_eq!(hv.get(&m, addr4.clone(), 1), Some(Operand::Const(cidx5)));

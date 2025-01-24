@@ -97,9 +97,7 @@ mod parser;
 mod well_formed;
 
 use super::aot_ir;
-#[cfg(debug_assertions)]
-use super::int_signs::Truncate;
-use crate::compile::{CompilationError, SideTraceInfo};
+use crate::compile::{jitc_yk::arbbitint::ArbBitInt, CompilationError, SideTraceInfo};
 use indexmap::IndexSet;
 use std::{
     ffi::{c_void, CString},
@@ -266,13 +264,19 @@ impl Module {
         let mut consts = IndexSet::new();
         let true_constidx = ConstIdx::try_from(
             consts
-                .insert_full(ConstIndexSetWrapper(Const::Int(int1_tyidx, 1)))
+                .insert_full(ConstIndexSetWrapper(Const::Int(
+                    int1_tyidx,
+                    ArbBitInt::from_u64(1, 1),
+                )))
                 .0,
         )
         .unwrap();
         let false_constidx = ConstIdx::try_from(
             consts
-                .insert_full(ConstIndexSetWrapper(Const::Int(int1_tyidx, 0)))
+                .insert_full(ConstIndexSetWrapper(Const::Int(
+                    int1_tyidx,
+                    ArbBitInt::from_u64(1, 0),
+                )))
                 .0,
         )
         .unwrap();
@@ -523,23 +527,6 @@ impl Module {
     pub(crate) fn insert_const(&mut self, c: Const) -> Result<ConstIdx, CompilationError> {
         let (i, _) = self.consts.insert_full(ConstIndexSetWrapper(c));
         ConstIdx::try_from(i)
-    }
-
-    /// Convenience method for adding a `Const::Int` to the constant pool and, in debug mode,
-    /// checking that its bit size is not execeeded. See [Self::insert_const] for the return value.
-    pub(crate) fn insert_const_int(
-        &mut self,
-        tyidx: TyIdx,
-        v: u64,
-    ) -> Result<ConstIdx, CompilationError> {
-        #[cfg(debug_assertions)]
-        {
-            let Ty::Integer(bits) = self.type_(tyidx) else {
-                panic!()
-            };
-            assert_eq!(v.truncate(*bits), v);
-        }
-        self.insert_const(Const::Int(tyidx, v))
     }
 
     /// Return the const for the specified index.
@@ -1023,19 +1010,19 @@ impl Ty {
     }
 
     /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
-    pub(crate) fn bitw(&self) -> Option<usize> {
+    pub(crate) fn bitw(&self) -> Option<u32> {
         match self {
-            Self::Void => Some(0),
-            Self::Integer(bits) => Some(usize::try_from(*bits).unwrap()),
+            Self::Void => None,
+            Self::Integer(bitw) => Some(*bitw),
             Self::Ptr => {
                 // We make the same assumptions about pointer size as in Self::byte_size().
-                Some(mem::size_of::<*const c_void>() * 8)
+                u32::try_from(mem::size_of::<*const c_void>() * 8).ok()
             }
             Self::Func(_) => None,
-            Self::Float(ft) => Some(match ft {
-                FloatTy::Float => mem::size_of::<f32>() * 8,
-                FloatTy::Double => mem::size_of::<f64>() * 8,
-            }),
+            Self::Float(ft) => match ft {
+                FloatTy::Float => u32::try_from(mem::size_of::<f32>() * 8).ok(),
+                FloatTy::Double => u32::try_from(mem::size_of::<f64>() * 8).ok(),
+            },
             Self::Unimplemented(_) => None,
         }
     }
@@ -1188,7 +1175,7 @@ impl Operand {
     /// # Panics
     ///
     /// Panics if asking for the size make no sense for this operand.
-    pub(crate) fn bitw(&self, m: &Module) -> usize {
+    pub(crate) fn bitw(&self, m: &Module) -> u32 {
         match self {
             Self::Var(l) => m.inst_raw(*l).def_bitw(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).bitw().unwrap(),
@@ -1245,13 +1232,11 @@ impl fmt::Display for DisplayableOperand<'_> {
 /// Note that this struct deliberately does not implement `PartialEq` (or `Eq`): two instances of
 /// `Const` may represent the same underlying constant, but (because of floats), you as the user
 /// need to determine what notion of equality you wish to use on a given const.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) enum Const {
     Float(TyIdx, f64),
-    /// A constant integer at most 64 bits wide. This can be treated a signed or unsigned integer
-    /// depending on the operations that use this constant (the [Ty::Integer] type itself has no
-    /// concept of signedness).
-    Int(TyIdx, u64),
+    /// A constant integer. Note that, as in LLVM IR, this has no inherent signedness.
+    Int(TyIdx, ArbBitInt),
     Ptr(usize),
 }
 
@@ -1282,11 +1267,8 @@ impl fmt::Display for DisplayableConst<'_> {
                 Ty::Float(FloatTy::Double) => write!(f, "{}double", v),
                 _ => unreachable!(),
             },
-            Const::Int(tyidx, x) => {
-                let Ty::Integer(width) = self.m.type_(*tyidx) else {
-                    panic!()
-                };
-                write!(f, "{x}i{width}")
+            Const::Int(_, x) => {
+                write!(f, "{}i{}", x.to_zero_ext_u64().unwrap(), x.bitw())
             }
             Const::Ptr(x) => write!(f, "{:#x}", *x),
         }
@@ -1308,8 +1290,8 @@ impl PartialEq for ConstIndexSetWrapper {
                 // acceptable.
                 lhs_tyidx == rhs_tyidx && lhs_v.to_bits() == rhs_v.to_bits()
             }
-            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
-                lhs_tyidx == rhs_tyidx && lhs_v == rhs_v
+            (Const::Int(lhs_tyidx, lhs), Const::Int(rhs_tyidx, rhs)) => {
+                lhs_tyidx == rhs_tyidx && lhs == rhs
             }
             (Const::Ptr(lhs_v), Const::Ptr(rhs_v)) => lhs_v == rhs_v,
             (_, _) => false,
@@ -1321,16 +1303,16 @@ impl Eq for ConstIndexSetWrapper {}
 
 impl Hash for ConstIndexSetWrapper {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self.0 {
+        match &self.0 {
             Const::Float(tyidx, v) => {
                 tyidx.hash(state);
                 // We treat floats as bit patterns: because we can accept duplicates, this is
                 // acceptable.
                 v.to_bits().hash(state);
             }
-            Const::Int(tyidx, v) => {
+            Const::Int(tyidx, x) => {
                 tyidx.hash(state);
-                v.hash(state);
+                x.hash(state);
             }
             Const::Ptr(v) => v.hash(state),
         }
@@ -1902,7 +1884,7 @@ impl Inst {
     /// Panics if:
     ///  - The instruction defines no local variable.
     ///  - The instruction defines an unsized local variable.
-    pub(crate) fn def_bitw(&self, m: &Module) -> usize {
+    pub(crate) fn def_bitw(&self, m: &Module) -> u32 {
         if let Some(ty) = self.def_type(m) {
             if let Some(size) = ty.bitw() {
                 size
@@ -3294,13 +3276,27 @@ mod tests {
     #[test]
     fn stringify_int_consts() {
         let mut m = Module::new_testing();
-        let i8_tyidx = m.insert_ty(Ty::Integer(8)).unwrap();
-        assert_eq!(Const::Int(i8_tyidx, 0).display(&m).to_string(), "0i8");
-        assert_eq!(Const::Int(i8_tyidx, 255).display(&m).to_string(), "255i8");
         let i64_tyidx = m.insert_ty(Ty::Integer(64)).unwrap();
-        assert_eq!(Const::Int(i64_tyidx, 0).display(&m).to_string(), "0i64");
         assert_eq!(
-            Const::Int(i64_tyidx, 9223372036854775808)
+            Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 0))
+                .display(&m)
+                .to_string(),
+            "0i8"
+        );
+        assert_eq!(
+            Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 255))
+                .display(&m)
+                .to_string(),
+            "255i8"
+        );
+        assert_eq!(
+            Const::Int(i64_tyidx, ArbBitInt::from_u64(64, 0))
+                .display(&m)
+                .to_string(),
+            "0i64"
+        );
+        assert_eq!(
+            Const::Int(i64_tyidx, ArbBitInt::from_u64(64, 9223372036854775808))
                 .display(&m)
                 .to_string(),
             "9223372036854775808i64"

@@ -3,6 +3,7 @@
 #![cfg_attr(test, feature(test))]
 #![feature(assert_matches)]
 #![feature(int_roundings)]
+#![feature(let_chains)]
 #![feature(naked_functions)]
 #![feature(ptr_sub_ptr)]
 #![allow(clippy::type_complexity)]
