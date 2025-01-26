@@ -1503,6 +1503,11 @@ impl<'a> Assemble<'a> {
             "llvm.assume" => Ok(()),
             "llvm.lifetime.start.p0" => Ok(()),
             "llvm.lifetime.end.p0" => Ok(()),
+            x if x.starts_with("llvm.smax") => {
+                let [lhs_op, rhs_op] = args.try_into().unwrap();
+                self.cg_smax(iidx, lhs_op, rhs_op);
+                Ok(())
+            }
             x => {
                 let va = symbol_to_ptr(x).map_err(|e| CompilationError::General(e.to_string()))?;
                 self.emit_call(iidx, fty, Some(va), None, &args)
@@ -1684,6 +1689,25 @@ impl<'a> Assemble<'a> {
                 | RegConstraint::Temporary
                 | RegConstraint::None => (),
             }
+        }
+    }
+
+    fn cg_smax(&mut self, iidx: InstIdx, lhs: Operand, rhs: Operand) {
+        assert_eq!(lhs.bitw(self.m), rhs.bitw(self.m));
+        let bitw = lhs.bitw(self.m);
+        let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
+        );
+        match bitw {
+            64 => {
+                dynasm!(self.asm
+                    ; cmp Rq(lhs_reg.code()), Rq(rhs_reg.code())
+                    ; cmovl Rq(lhs_reg.code()), Rq(rhs_reg.code())
+                );
+            }
+            x => todo!("{x}"),
         }
     }
 
@@ -3894,6 +3918,27 @@ mod tests {
                ; call @llvm.lifetime.end.p0(16i64, %1)
                ; %5: ...
                ...
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_smax() {
+        codegen_and_test(
+            "
+             func_decl llvm.smax.i64 (i64, i64) -> i64
+             entry:
+               %0: i64 = param 0
+               %1: i64 = param 1
+               %2: i64 = call @llvm.smax.i64(%0, %1)
+               black_box %2
+            ",
+            "
+               ...
+               ; %2: i64 = call @llvm.smax.i64(%0, %1)
+               cmp r.64.a, r.64.b
+               cmovl r.64.a, r.64.b
             ",
             false,
         );
