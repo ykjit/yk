@@ -1503,6 +1503,11 @@ impl<'a> Assemble<'a> {
             "llvm.assume" => Ok(()),
             "llvm.lifetime.start.p0" => Ok(()),
             "llvm.lifetime.end.p0" => Ok(()),
+            x if x.starts_with("llvm.ctpop") => {
+                let [op] = args.try_into().unwrap();
+                self.cg_ctpop(iidx, op);
+                Ok(())
+            }
             x if x.starts_with("llvm.smax") => {
                 let [lhs_op, rhs_op] = args.try_into().unwrap();
                 self.cg_smax(iidx, lhs_op, rhs_op);
@@ -1689,6 +1694,22 @@ impl<'a> Assemble<'a> {
                 | RegConstraint::Temporary
                 | RegConstraint::None => (),
             }
+        }
+    }
+
+    fn cg_ctpop(&mut self, iidx: InstIdx, op: Operand) {
+        let bitw = op.bitw(self.m);
+        let [in_reg, out_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [
+                RegConstraint::Input(op.clone()),
+                RegConstraint::OutputCanBeSameAsInput(op),
+            ],
+        );
+        match bitw {
+            32 => dynasm!(self.asm; popcnt Rd(out_reg.code()), Rd(in_reg.code())),
+            x => todo!("{x}"),
         }
     }
 
@@ -3918,6 +3939,25 @@ mod tests {
                ; call @llvm.lifetime.end.p0(16i64, %1)
                ; %5: ...
                ...
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_ctpop() {
+        codegen_and_test(
+            "
+             func_decl llvm.ctpop.i32 (i32) -> i32
+             entry:
+               %0: i32 = param 0
+               %1: i32 = call @llvm.ctpop.i32(%0)
+               black_box %1
+            ",
+            "
+               ...
+               ; %1: i32 = call @llvm.ctpop.i32(%0)
+               popcnt r.32._, r.32._
             ",
             false,
         );
