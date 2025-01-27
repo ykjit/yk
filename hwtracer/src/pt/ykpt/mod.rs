@@ -436,27 +436,17 @@ impl YkPTBlockIterator<'_> {
             // *compressed* return.
             true
         } else {
-            // This *may* be a compressed return. If the next event packet carries a TIP update
-            // then this was an uncompressed return, otherwise it was compressed.
-            let pkt = self.seek_tnt_or_tip()?;
+            // This *may* be a compressed return. If the next (non-out-of-context) event packet
+            // carries a TIP update then this was an uncompressed return, otherwise it was
+            // compressed.
+            let pkt = self.seek_tnt_or_tip(true)?;
             pkt.tnts().is_some()
         };
 
         if compressed {
-            // If the return was compressed, we must we consume one "taken=true" decision from the
-            // TNT buffer. The unwrap cannot fail because the above code ensures that `self.tnts`
-            // is not empty.
-            let taken = self.tnts.pop_front().unwrap();
-            // FIXME: Occasionally `taken` is `false` here, which indicates that something has gone
-            // wrong when decoding the PT trace (even with compressed returns disabled!).
-            //
-            // For now we abort decoding the trace, since we know (and have seen in the wild) that
-            // if you carry on you get all manner of crashes.
-            if !taken {
-                return Err(IteratorError::HWTracerError(HWTracerError::Unrecoverable(
-                    "PT taken bug detected".to_string(),
-                )));
-            }
+            // NOTE: if/when re-enabling compressed returns, see the git history for the logic to
+            // insert here.
+            unreachable!("compressed returns are disabled in collect.c");
         }
 
         Ok(compressed)
@@ -676,6 +666,9 @@ impl YkPTBlockIterator<'_> {
     }
 
     /// Keep decoding packets until we encounter one with a TIP update.
+    ///
+    /// This function does not specially handle out of context TIP packets: it will happily return
+    /// out of context TIPs.
     fn seek_tip(&mut self) -> Result<(), IteratorError> {
         loop {
             if self.packet()?.kind().encodes_target_ip() {
@@ -689,10 +682,15 @@ impl YkPTBlockIterator<'_> {
     ///
     /// The packet is returned so that the consumer can determine which kind of packet was
     /// encountered.
-    fn seek_tnt_or_tip(&mut self) -> Result<Packet, IteratorError> {
+    ///
+    /// `skip_ooc` determines whether the caller wishes to skip over "Out Of Context" TIP packets
+    /// or not.
+    fn seek_tnt_or_tip(&mut self, skip_ooc: bool) -> Result<Packet, IteratorError> {
         loop {
             let pkt = self.packet()?;
-            if pkt.kind().encodes_target_ip() || pkt.tnts().is_some() {
+            if pkt.tnts().is_some()
+                || (pkt.kind().encodes_target_ip() && (pkt.target_ip().is_some() || !skip_ooc))
+            {
                 return Ok(pkt);
             }
         }
@@ -740,13 +738,13 @@ impl YkPTBlockIterator<'_> {
                 // TIP.PGD, TIP.PGE] sequence (with no intermediate TIP or TNT packets). In
                 // this case we can simply ignore the interruption. Later we need to support
                 // FUPs more generally.
-                pkt = self.seek_tnt_or_tip()?;
+                pkt = self.seek_tnt_or_tip(false)?;
                 if pkt.kind() != PacketKind::TIPPGD {
                     return Err(IteratorError::HWTracerError(HWTracerError::Temporary(
                         TemporaryErrorKind::TraceInterrupted,
                     )));
                 }
-                pkt = self.seek_tnt_or_tip()?;
+                pkt = self.seek_tnt_or_tip(true)?;
                 if pkt.kind() != PacketKind::TIPPGE {
                     return Err(IteratorError::HWTracerError(HWTracerError::Temporary(
                         TemporaryErrorKind::TraceInterrupted,
