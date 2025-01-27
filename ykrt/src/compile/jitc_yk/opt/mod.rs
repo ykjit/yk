@@ -582,9 +582,17 @@ impl Opt {
     }
 
     fn opt_guard(&mut self, iidx: InstIdx, inst: GuardInst) -> Result<(), CompilationError> {
-        if let Operand::Const(_) = self.an.op_map(&self.m, inst.cond(&self.m)) {
+        if let Operand::Const(cidx) = self.an.op_map(&self.m, inst.cond(&self.m)) {
             // A guard that references a constant is, by definition, not needed and
             // doesn't affect future analyses.
+            let Const::Int(_, v) = self.m.const_(cidx) else {
+                panic!()
+            };
+            assert_eq!(v.bitw(), 1);
+            assert!(
+                (inst.expect() && v.to_zero_ext_u8().unwrap() == 1)
+                    || (!inst.expect() && v.to_zero_ext_u8().unwrap() == 0)
+            );
             self.m.replace(iidx, Inst::Tombstone);
         } else {
             self.an.guard(&self.m, inst);
