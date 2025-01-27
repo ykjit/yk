@@ -295,6 +295,8 @@ impl MT {
                     debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
                     if let TraceFailed::DontTrace = hl.tracecompilation_error(&mt) {
                         hl.kind = HotLocationKind::DontTrace;
+                    } else {
+                        hl.kind = HotLocationKind::Counting(0);
                     }
                     match e {
                         CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
@@ -629,6 +631,19 @@ impl MT {
                             }
                         }
                         HotLocationKind::Compiling => TransitionControlPoint::NoAction,
+                        HotLocationKind::Counting(c) => {
+                            if is_tracing {
+                                // This thread is tracing something, so bail out as quickly as possible
+                                TransitionControlPoint::NoAction
+                            } else if c < self.hot_threshold() {
+                                lk.kind = HotLocationKind::Counting(c + 1);
+                                TransitionControlPoint::NoAction
+                            } else {
+                                let hl = loc.hot_location_arc_clone().unwrap();
+                                lk.kind = HotLocationKind::Tracing;
+                                TransitionControlPoint::StartTracing(hl)
+                            }
+                        }
                         HotLocationKind::Tracing => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             match &*mtt.tstate.borrow() {
@@ -668,9 +683,12 @@ impl MT {
                                                     // instead abort tracing, and hope we can start
                                                     // at a more propitious point in the future.
                                                     self.stats.trace_recorded_err();
-                                                    // FIXME: We will endless retry tracing this
-                                                    // [HotLocation]. There should be a `Counting`
-                                                    // state.
+                                                    match lk.tracecompilation_error(self) {
+                                                        TraceFailed::KeepTrying => {
+                                                            lk.kind = HotLocationKind::Counting(0)
+                                                        }
+                                                        TraceFailed::DontTrace => todo!(),
+                                                    }
                                                     TransitionControlPoint::AbortTracing
                                                 }
                                             }
@@ -1135,7 +1153,7 @@ mod tests {
         compile::{CompiledTraceTestingBasicTransitions, CompiledTraceTestingMinimal},
         trace::TraceRecorderError,
     };
-    use std::{hint::black_box, ptr};
+    use std::{assert_matches::assert_matches, hint::black_box, ptr};
     use test::bench::Bencher;
 
     // We only implement enough of the equality function for the tests we have.
@@ -1446,6 +1464,42 @@ mod tests {
             loc.hot_location().unwrap().lock().kind,
             HotLocationKind::Compiling
         ));
+    }
+
+    #[test]
+    fn locations_can_fail_multiple_times() {
+        // Test that a location can fail tracing/compiling multiple times before we give up.
+
+        let hot_thrsh = 5;
+        let mt = MT::new().unwrap();
+        mt.set_hot_threshold(hot_thrsh);
+        let loc = Location::new();
+        for i in 0..mt.hot_threshold() {
+            assert_eq!(
+                mt.transition_control_point(&loc, ptr::null_mut()),
+                TransitionControlPoint::NoAction
+            );
+            assert_eq!(loc.count(), Some(i + 1));
+        }
+        expect_start_tracing(&mt, &loc);
+        expect_stop_tracing(&mt, &loc);
+
+        for _ in 0..mt.trace_failure_threshold() {
+            assert_matches!(
+                loc.hot_location()
+                    .unwrap()
+                    .lock()
+                    .tracecompilation_error(&mt),
+                TraceFailed::KeepTrying
+            );
+        }
+        assert_matches!(
+            loc.hot_location()
+                .unwrap()
+                .lock()
+                .tracecompilation_error(&mt),
+            TraceFailed::DontTrace
+        );
     }
 
     #[test]

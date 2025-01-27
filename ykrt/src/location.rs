@@ -42,48 +42,71 @@ pub struct Location {
     /// A Location is a state machine which operates as follows (where Counting is the start state):
     ///
     /// ```text
-    ///              ┌──────────────┐
-    ///              │              │─────────────┐
-    ///   reprofile  │   Counting   │             │
-    ///  ┌──────────▶│              │◀────────────┘
-    ///  │           └──────────────┘    increment
-    ///  │             │                 count
-    ///  │             │ start tracing
-    ///  │             ▼
-    ///  │           ┌──────────────┐
-    ///  │           │              │ incomplete  ┌─────────────┐
-    ///  │           │   Tracing    │────────────▶│  DontTrace  │
-    ///  │           │              │             └─────────────┘
-    ///  │           └──────────────┘
-    ///  │             │ start compiling trace
-    ///  │             │ in thread
-    ///  │             ▼
-    ///  │           ┌──────────────┐             ┌───────────┐
-    ///  │           │  Compiling   │────────────▶│  Dropped  │
-    ///  │           └──────────────┘             └───────────┘
-    ///  │             │
-    ///  │             │ trace compiled
-    ///  │             ▼
-    ///  │           ┌──────────────┐
-    ///  └───────────│   Compiled   │◀────────────┐
-    ///              └──────────────┘             │
-    ///                │                          │
-    ///                │ guard failed             │
-    ///                ▼                          │
-    ///              ┌──────────────┐             │
-    ///              │  SideTracing │─────────────┘
-    ///              └──────────────┘
+    ///                                           │
+    ///                                           │
+    ///                                           ▼
+    ///                                         ┌─────────────────────────────────────────────────────────────────────────────────────┐   increment count
+    ///                                         │                                                                                     │ ──────────────────┐
+    ///                                         │                                      Counting                                       │                   │
+    ///                                         │                                                                                     │ ◀─────────────────┘
+    ///                                         └─────────────────────────────────────────────────────────────────────────────────────┘
+    ///                                           │                                ▲                          ▲
+    ///                                           │ start tracing                  │ failed below threshold   │ failed below threshold
+    ///                                           ▼                                │                          │
+    /// ┌───────────┐  failed above threshold   ┌───────────────────────────────┐  │                          │
+    /// │ DontTrace │ ◀──────────────────────── │            Tracing            │ ─┘                          │
+    /// └───────────┘                           └───────────────────────────────┘                             │
+    ///   ▲                                       │                                                           │
+    ///   │                                       │                                                           │
+    ///   │                                       ▼                                                           │
+    ///   │           failed above threshold    ┌───────────────────────────────┐                             │
+    ///   └──────────────────────────────────── │           Compiling           │ ────────────────────────────┘
+    ///                                         └───────────────────────────────┘
+    ///                                           │
+    ///                                           │
+    ///                                           ▼
+    ///                                         ┌───────────────────────────────┐
+    ///                                         │           Compiled            │ ◀┐
+    ///                                         └───────────────────────────────┘  │
+    ///                                           │                                │
+    ///                                           │ guard failed above threshold   │ sidetracing completed
+    ///                                           ▼                                │
+    ///                                         ┌───────────────────────────────┐  │
+    ///                                         │          SideTracing          │ ─┘
+    ///                                         └───────────────────────────────┘
+    /// ```
+    ///
+    /// This diagram was created with [this tool](https://dot-to-ascii.ggerganov.com/) using this
+    /// GraphViz input:
+    ///
+    /// ```text
+    /// digraph {
+    ///   init [label="", shape=point];
+    ///   init -> Counting;
+    ///   Counting -> Counting [label="increment count"];
+    ///   Counting -> Tracing [label="start tracing"];
+    ///   Tracing -> Compiling;
+    ///   Tracing -> Counting [label="failed below threshold"];
+    ///   Tracing -> DontTrace [label="failed above threshold"];
+    ///   Compiling -> Compiled;
+    ///   Compiling -> Counting [label="failed below threshold"];
+    ///   Compiling -> DontTrace [label="failed above threshold"];
+    ///   Compiled -> SideTracing [label="guard failed above threshold"];
+    ///   SideTracing -> Compiled [label="sidetracing completed"];
+    /// }
     /// ```
     ///
     /// We hope that a Location soon reaches the `Compiled` state (aka "the happy state") and stays
     /// there. However, many Locations will not be used frequently enough to reach such a state, so
     /// we don't want to waste resources on them.
     ///
-    /// We therefore encode a Location as a tagged integer: in the initial (Counting) state, no
-    /// memory is allocated; if the location is used frequently enough it becomes hot, memory
-    /// is allocated for it, and a pointer stored instead of an integer. Note that once memory for a
-    /// hot location is allocated, it can only be (scheduled for) deallocation when a Location
-    /// is dropped, as the Location may have handed out `&` references to that allocated memory.
+    /// We therefore encode a Location as a tagged integer: when initialised, no memory is
+    /// allocated; if the location is used frequently enough it becomes hot, memory is allocated
+    /// for it, and a pointer stored instead of an integer. Note that once memory for a hot
+    /// location is allocated, it can only be (scheduled for) deallocation when a Location is
+    /// dropped, as the Location may have handed out `&` references to that allocated memory. That
+    /// means that the `Counting` state is encoded in two separate ways: both with and without
+    /// allocated memory.
     ///
     /// The layout of a Location is as follows: bit 0 = <STATE_NOT_HOT|STATE_HOT>; bits 1..<machine
     /// width> = payload. In the `STATE_NOT_HOT` state, the payload is an integer; in a `STATE_HOT`
@@ -100,7 +123,11 @@ impl Location {
         }
     }
 
-    /// If `self` is in the `Counting` state, increment and return its count, or `None` otherwise.
+    /// If `self` is:
+    ///   1. in the `Counting` state and
+    ///   2. has not had a `HotLocation` allocated for it
+    ///
+    /// then increment and return its count, or `None` otherwise.
     pub(crate) fn inc_count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);
         if x & STATE_NOT_HOT != 0 {
@@ -243,6 +270,9 @@ pub(crate) enum HotLocationKind {
     /// A trace for this HotLocation is being compiled in another trace. When compilation is
     /// complete, the compiling thread will update the state of this HotLocation.
     Compiling,
+    /// Because of a failure in compiling / tracing, we have reentered the `Counting` state. This
+    /// can be seen as a way of implementing back-off in the face of errors.
+    Counting(HotThreshold),
     /// This HotLocation has encountered problems (e.g. traces which are too long) and shouldn't be
     /// traced again.
     DontTrace,
@@ -265,6 +295,7 @@ pub(crate) enum HotLocationKind {
 
 /// When a [HotLocation] has failed to compile a valid trace, should the [HotLocation] be tried
 /// again or not?
+#[derive(Debug)]
 pub(crate) enum TraceFailed {
     KeepTrying,
     DontTrace,
