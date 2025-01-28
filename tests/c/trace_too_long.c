@@ -24,14 +24,14 @@ int main(int argc, char **argv) {
   YkLocation loc1 = yk_location_new();
   YkLocation loc2 = yk_location_new();
 
-  int i = 2000;
+  int i = 10000;
   NOOPT_VAL(loc1);
   NOOPT_VAL(loc2);
   NOOPT_VAL(i);
   YkLocation *loc = &loc1;
   while (i > 0) {
     yk_mt_control_point(mt, loc);
-    if (i == 2000)
+    if (i == 10000)
       loc = &loc2;
     else if (i == 2)
       loc = &loc1;
