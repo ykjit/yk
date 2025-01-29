@@ -1853,6 +1853,13 @@ impl Inst {
                 dest_tyidx: *dest_tyidx,
             }),
             Inst::DebugStr(DebugStrInst { idx }) => Inst::DebugStr(DebugStrInst { idx: *idx }),
+            Inst::BitCast(BitCastInst { val, dest_tyidx }) => Inst::BitCast(BitCastInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
+            Inst::FNeg(FNegInst { val }) => Inst::FNeg(FNegInst {
+                val: mapper(m, val),
+            }),
             e => todo!("{:?}", e),
         };
         Ok(inst)
