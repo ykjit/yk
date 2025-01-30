@@ -23,9 +23,19 @@ test_yklua() {
     cd yklua
     make clean
     make -j $(nproc)
+    yklua=$(pwd)/src/lua
+    # Run the integrated test suite.
     cd tests
-    YKD_SERIALISE_COMPILATION=1 ../src/lua -e"_U=true" all.lua
-    ../src/lua -e"_U=true" all.lua
+    YKD_SERIALISE_COMPILATION=1 "${yklua}" -e"_U=true" all.lua
+    "${yklua}" -e"_U=true" all.lua
+    cd ..
+    # Run our own test suite.
+    if [ ! -e "yklua-tests" ]; then
+        git clone --recursive --depth=1 https://github.com/ykjit/yklua-tests
+    fi
+    cd yklua-tests
+    sh run.sh "${yklua}"
+    YKD_SERIALISE_COMPILATION=1 sh run.sh "${yklua}"
     cd ../..
 }
 
