@@ -29,6 +29,7 @@
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
 use std::{
+    borrow::Cow,
     collections::HashMap,
     error::Error,
     ffi::{CString, OsStr},
@@ -363,7 +364,7 @@ fn map_to_string(v: Vec<u8>) -> Result<String, DekuError> {
             return Ok(x);
         }
     }
-    Err(DekuError::Parse("Couldn't map string".to_owned()))
+    Err(DekuError::Parse(Cow::Borrowed("Couldn't map string")))
 }
 
 /// Convert the bytes of a null-terminated string into a PathBuf.
@@ -403,7 +404,7 @@ fn map_to_lineinfo(v: Vec<RawLineInfoRec>) -> Result<HashMap<InstID, LineInfoLoc
 /// A binary operator.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum BinOp {
     /// The canonicalised form of `Add` in JIT IR is (Var, Var) or (Var, Const).
     Add = 0,
@@ -515,7 +516,7 @@ impl BBlockId {
 /// from there.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum Predicate {
     /// "eq: yields true if the operands are equal, false otherwise. No sign
     /// interpretation is necessary or performed."
@@ -591,7 +592,7 @@ impl Display for Predicate {
 /// Predicates for use in numeric comparisons.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum FloatPredicate {
     // FIXME: eventually remove False/True (always false/always true) predicates. LLVM has them,
     // but we can lower these to constants in our IR.
@@ -671,7 +672,7 @@ impl Display for FloatPredicate {
 /// hierarchy here: https://llvm.org/doxygen/classllvm_1_1CastInst.html
 #[deku_derive(DekuRead)]
 #[derive(Debug, Clone, Copy)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum CastKind {
     SExt = 0,
     ZeroExtend = 1,
@@ -699,7 +700,7 @@ impl Display for CastKind {
 
 #[deku_derive(DekuRead)]
 #[derive(Debug, Clone, Hash)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum Operand {
     #[deku(id = "0")]
     Const(ConstIdx),
@@ -826,7 +827,7 @@ impl fmt::Display for DisplayableDeoptSafepoint<'_> {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[repr(u8)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum Inst {
     #[deku(id = "0")]
     Nop,
@@ -1702,7 +1703,7 @@ impl fmt::Display for DisplayableFuncTy<'_> {
 /// Floating point types.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum FloatTy {
     // 32-bit floating point.
     #[deku(id = "0")]
@@ -1781,7 +1782,7 @@ const TYKIND_UNIMPLEMENTED: u8 = 255;
 /// A type.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum Ty {
     #[deku(id = "TYKIND_VOID")]
     Void,
@@ -1859,7 +1860,7 @@ impl fmt::Display for DisplayableTy<'_> {
 /// Constants not handled by the ykllvm serialiser become `Const::Unimplemented`.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-#[deku(type = "u8")]
+#[deku(id_type = "u8")]
 pub(crate) enum Const {
     #[deku(id = "0")]
     Val(ConstVal),

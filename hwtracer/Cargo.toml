@@ -7,7 +7,7 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 byteorder = "1.4.3"
-deku = "0.16.0"
+deku = "0.18.1"
 intervaltree = "0.2.7"
 leb128 = "0.2.5"
 libc = "0.2.148"

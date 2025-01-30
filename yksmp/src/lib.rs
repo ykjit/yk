@@ -54,7 +54,7 @@ pub enum Location {
     /// * `u16`: Dwarf register number
     /// * `u16`: size of the value
     /// * `Vec<u16>`: additional locations. >=0  is a DWARF register number. < 0 is a stack offset
-    ///    relative to rbp (and [rbp-0] cannot be expressed, nor do we need to).
+    ///   relative to rbp (and [rbp-0] cannot be expressed, nor do we need to).
     ///
     /// FIXME: We may need more additional locations in the future, which however will require
     /// rewriting the stackmap format (until now we managed to get by with two extra locations).
