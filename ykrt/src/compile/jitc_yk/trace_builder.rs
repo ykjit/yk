@@ -95,7 +95,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 let func = self.aot_mod.funcidx(func_name);
                 Some(aot_ir::BBlockId::new(func, aot_ir::BBlockIdx::new(*bb)))
             }
-            TraceAction::UnmappableBBlock { .. } => None,
+            TraceAction::UnmappableBBlock => None,
             TraceAction::Promotion => todo!(),
         }
     }
