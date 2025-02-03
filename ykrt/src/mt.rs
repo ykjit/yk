@@ -434,7 +434,7 @@ impl MT {
                 }
                 let trace_addr = ctr.entry();
                 MTThread::with(|mtt| {
-                    mtt.set_running_trace(Some(ctr), None);
+                    mtt.set_running_trace(ctr);
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
 
@@ -980,8 +980,6 @@ enum MTThreadState {
     Executing {
         /// The currently executing compiled trace.
         ctr: Arc<dyn CompiledTrace>,
-        /// The root trace if the currently executing trace is a side-trace.
-        root: Option<Arc<dyn CompiledTrace>>,
     },
 }
 
@@ -1020,31 +1018,16 @@ impl MTThread {
     }
 
     /// If a trace is currently running, return a reference to its `CompiledTrace`.
-    pub(crate) fn running_trace(
-        &self,
-    ) -> (
-        Option<Arc<dyn CompiledTrace>>,
-        Option<Arc<dyn CompiledTrace>>,
-    ) {
+    pub(crate) fn running_trace(&self) -> Option<Arc<dyn CompiledTrace>> {
         match &*self.tstate.borrow() {
-            MTThreadState::Executing { ctr: ctr_arc, root } => {
-                let root_clone = root.as_ref().map(Arc::clone);
-                (Some(Arc::clone(ctr_arc)), root_clone)
-            }
-            _ => (None, None),
+            MTThreadState::Executing { ctr } => Some(Arc::clone(ctr)),
+            _ => None,
         }
     }
 
-    /// Update the currently running trace: `None` means that no trace is running.
-    pub(crate) fn set_running_trace(
-        &self,
-        ctr: Option<Arc<dyn CompiledTrace>>,
-        root: Option<Arc<dyn CompiledTrace>>,
-    ) {
-        *self.tstate.borrow_mut() = match ctr {
-            Some(ctr) => MTThreadState::Executing { ctr, root },
-            None => MTThreadState::Interpreting,
-        };
+    /// Update the currently running trace.
+    pub(crate) fn set_running_trace(&self, ctr: Arc<dyn CompiledTrace>) {
+        *self.tstate.borrow_mut() = MTThreadState::Executing { ctr };
     }
 
     /// Records `val` as a value to be promoted. Returns `true` if either: no trace is being

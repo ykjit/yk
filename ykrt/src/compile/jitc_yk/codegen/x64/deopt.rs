@@ -54,7 +54,7 @@ pub(crate) extern "C" fn __yk_guardcheck(
 ///
 /// * gidxs - List of [GuardIdx]'s for previous guard failures.
 fn running_trace(gidxs: &[usize]) -> Arc<X64CompiledTrace> {
-    let (ctr, _) = MTThread::with(|mtt| mtt.running_trace());
+    let ctr = MTThread::with(|mtt| mtt.running_trace());
     let mut ctr = ctr
         .clone()
         .unwrap()
