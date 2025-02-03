@@ -243,6 +243,14 @@ for b in collect_and_decode promote; do
     YKB_TRACER=hwt cargo bench --bench "${b}" -- --profile-time 1
 done
 
+# Test some BF programs.
+git clone https://github.com/ykjit/ykcbf.git
+cd ykcbf
+PATH=$(pwd)/../bin:${PATH} YK_BUILD_TYPE=debug make
+./bf_simple_yk lang_tests/bench.bf
+./bf_simple_yk lang_tests/hanoi-opt.bf
+cd ..
+
 # Check licenses.
 wait "${cargo_deny_mdbook_pid}" || ( cat "${cargo_deny_mdbook_tmp}" && exit 1 )
 cargo-deny check license
