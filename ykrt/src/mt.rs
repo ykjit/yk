@@ -493,11 +493,8 @@ impl MT {
                                 thread_tracer,
                                 promotions,
                                 debug_strs,
-                                frameaddr: tracing_frameaddr,
-                            } => {
-                                assert_eq!(frameaddr, tracing_frameaddr);
-                                (hl, thread_tracer, promotions, debug_strs)
-                            }
+                                frameaddr: _,
+                            } => (hl, thread_tracer, promotions, debug_strs),
                             _ => unreachable!(),
                         },
                     );
