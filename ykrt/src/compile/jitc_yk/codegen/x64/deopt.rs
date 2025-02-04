@@ -101,8 +101,8 @@ pub(crate) extern "C" fn __yk_deopt(
     let info = &ctr.deoptinfo[&usize::from(gidx)];
     let mt = Arc::clone(&ctr.mt);
 
-    ctr.mt
-        .stats
+    mt.deopt();
+    mt.stats
         .timing_state(crate::log::stats::TimingState::Deopting);
     mt.log.log(Verbosity::JITEvent, "deoptimise");
 
@@ -352,9 +352,8 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // The `clone` should really be `Arc::clone(&ctr)` but that doesn't play well with type
     // inference in this (unusual) case.
-    ctr.mt.guard_failure(ctr.clone(), gidx, frameaddr);
-    ctr.mt
-        .stats
+    mt.guard_failure(ctr.clone(), gidx, frameaddr);
+    mt.stats
         .timing_state(crate::log::stats::TimingState::OutsideYk);
 
     // Since we won't return from this function, drop `ctr` manually.
