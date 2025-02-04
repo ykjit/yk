@@ -6,38 +6,11 @@
 //     6
 //     yk-jit-event: start-tracing
 //     5
-//     yk-jit-event: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     yk-jit-event: tracing-aborted
 //     ...
-//     --- End jit-pre-opt ---
-//     4
-//     yk-jit-event: enter-jit-code
-//     3
-//     yk-jit-event: deoptimise
-//     yk-jit-event: enter-jit-code
-//     2
-//     yk-jit-event: deoptimise
-//     yk-jit-event: start-side-tracing
-//     yk-jit-event: stop-tracing
-//     --- Begin jit-pre-opt ---
-//     ...
-//     --- End jit-pre-opt ---
-//     1
-//     return
-//     yk-jit-event: enter-jit-code
-//     4
-//     yk-jit-event: execute-side-trace
-//     3
-//     yk-jit-event: execute-side-trace
-//     2
-//     yk-jit-event: execute-side-trace
-//     1
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: deoptimise
-//     return
-//     exit
 
-// Check that recursive tracing doesn't hit an error.
+// Check that traces that end in a different frame than they started in are
+// rejected.
 
 #include <assert.h>
 #include <stdio.h>
