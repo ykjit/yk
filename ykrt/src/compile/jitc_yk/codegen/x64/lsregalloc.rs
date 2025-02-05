@@ -641,9 +641,7 @@ impl LSRegAlloc<'_> {
                                             {
                                                 self.move_gp_reg(asm, reg, old_reg);
                                             } else {
-                                                // If we hit this case we probably need to swap
-                                                // registers. Can it happen?
-                                                todo!();
+                                                self.swap_gp_reg(asm, reg, old_reg);
                                             }
                                             changed = true;
                                         }
