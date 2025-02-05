@@ -489,8 +489,13 @@ impl MT {
                             thread_tracer,
                             promotions,
                             debug_strs,
-                            frameaddr: _,
-                        } => (hl, thread_tracer, promotions, debug_strs),
+                            frameaddr: tracing_frameaddr,
+                        } => {
+                            // If this assert fails then the code in `transition_control_point`,
+                            // which rejects traces that end in another frame, didn't work.
+                            assert_eq!(frameaddr, tracing_frameaddr);
+                            (hl, thread_tracer, promotions, debug_strs)
+                        }
                         _ => unreachable!(),
                     });
                 match thread_tracer.stop() {
@@ -651,7 +656,7 @@ impl MT {
                                         match STACK_DIRECTION {
                                             StackDirection::GrowsToHigherAddress => todo!(),
                                             StackDirection::GrowsToLowerAddress => {
-                                                if frameaddr <= *tracing_frameaddr {
+                                                if frameaddr == *tracing_frameaddr {
                                                     // We've completed a full iteration, either
                                                     // within the same frame, or in a recursive
                                                     // call. Either way, we do not want to unroll
@@ -661,7 +666,6 @@ impl MT {
                                                         TransitionControlPoint::StopTracing,
                                                     )
                                                 } else {
-                                                    debug_assert!(frameaddr > *tracing_frameaddr);
                                                     // We fell through to a caller frame. In other
                                                     // words, the frame that started tracing
                                                     // `return`ed before it stopped tracing. It's
@@ -743,7 +747,7 @@ impl MT {
                                         match STACK_DIRECTION {
                                             StackDirection::GrowsToHigherAddress => todo!(),
                                             StackDirection::GrowsToLowerAddress => {
-                                                if frameaddr <= *tracing_frameaddr {
+                                                if frameaddr == *tracing_frameaddr {
                                                     // ...and it's this location: we have therefore
                                                     // finished tracing back to the control point,
                                                     // either within the same frame, or in a
@@ -762,7 +766,6 @@ impl MT {
                                                         },
                                                     )
                                                 } else {
-                                                    debug_assert!(frameaddr > *tracing_frameaddr);
                                                     // We fell through to a caller frame. In other
                                                     // words, the frame that started tracing
                                                     // `return`ed before it stopped tracing. It's
