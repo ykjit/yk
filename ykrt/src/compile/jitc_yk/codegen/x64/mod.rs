@@ -1614,10 +1614,15 @@ impl<'a> Assemble<'a> {
             .map(|i| inst.operand(self.m, i))
             .collect::<Vec<_>>();
 
-        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
-            .map_err(|e| CompilationError::General(e.to_string()))?;
-        self.emit_call(iidx, fty, Some(va), None, &args)
+        match self.m.func_decl(func_decl_idx).name() {
+            "llvm.assume" => Ok(()),
+            "llvm.lifetime.start.p0" => Ok(()),
+            "llvm.lifetime.end.p0" => Ok(()),
+            x => {
+                let va = symbol_to_ptr(x).map_err(|e| CompilationError::General(e.to_string()))?;
+                self.emit_call(iidx, fty, Some(va), None, &args)
+            }
+        }
     }
 
     /// Codegen a indirect call.
@@ -4010,6 +4015,34 @@ mod tests {
                 mov r.64.x, ...
                 call r.64.x
                 ...
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_hints() {
+        codegen_and_test(
+            "
+             func_decl llvm.assume (i1)
+             func_decl llvm.lifetime.start.p0 (i64, ptr)
+             func_decl llvm.lifetime.end.p0 (i64, ptr)
+             entry:
+               %0: i1 = param 0
+               %1: ptr = param 1
+               call @llvm.assume(%0)
+               call @llvm.lifetime.start.p0(16i64, %1)
+               call @llvm.lifetime.end.p0(16i64, %1)
+               %5: ptr = ptr_add %1, 1
+               black_box %5
+            ",
+            "
+               ...
+               ; call @llvm.assume(%0)
+               ; call @llvm.lifetime.start.p0(16i64, %1)
+               ; call @llvm.lifetime.end.p0(16i64, %1)
+               ; %5: ...
+               ...
             ",
             false,
         );
