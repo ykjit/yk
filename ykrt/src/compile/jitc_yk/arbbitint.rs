@@ -89,6 +89,7 @@ impl ArbBitInt {
     }
 
     /// Sign extend the underlying value and, if it is representable as an `i8`, return it.
+    #[allow(unused)]
     pub(crate) fn to_sign_ext_i8(&self) -> Option<i8> {
         i8::try_from(self.val.sign_extend(self.bitw, 64) as i64).ok()
     }
