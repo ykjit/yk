@@ -1,7 +1,7 @@
 // ## Shadow stack isn't thread safe.
 // ignore-if: true
 // Run-time:
-//   env-var: YK_LOG=4
+//   env-var: YKD_LOG=4
 //   stderr:
 //     ...
 //     yk-jit-event: enter-jit-code
