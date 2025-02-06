@@ -34,6 +34,7 @@ int main(int argc, char **argv) {
     putchar(ch);
     ch++;
   }
+  fflush(stdout);
 
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
