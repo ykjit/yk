@@ -1614,10 +1614,25 @@ impl<'a> Assemble<'a> {
             .map(|i| inst.operand(self.m, i))
             .collect::<Vec<_>>();
 
-        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
-            .map_err(|e| CompilationError::General(e.to_string()))?;
-        self.emit_call(iidx, fty, Some(va), None, &args)
+        match self.m.func_decl(func_decl_idx).name() {
+            "llvm.assume" => Ok(()),
+            "llvm.lifetime.start.p0" => Ok(()),
+            "llvm.lifetime.end.p0" => Ok(()),
+            x if x.starts_with("llvm.ctpop") => {
+                let [op] = args.try_into().unwrap();
+                self.cg_ctpop(iidx, op);
+                Ok(())
+            }
+            x if x.starts_with("llvm.smax") => {
+                let [lhs_op, rhs_op] = args.try_into().unwrap();
+                self.cg_smax(iidx, lhs_op, rhs_op);
+                Ok(())
+            }
+            x => {
+                let va = symbol_to_ptr(x).map_err(|e| CompilationError::General(e.to_string()))?;
+                self.emit_call(iidx, fty, Some(va), None, &args)
+            }
+        }
     }
 
     /// Codegen a indirect call.
@@ -1783,6 +1798,61 @@ impl<'a> Assemble<'a> {
         }
 
         Ok(())
+    }
+
+    fn cg_ctpop(&mut self, iidx: InstIdx, op: Operand) {
+        let bitw = op.bitw(self.m);
+        let [in_reg, out_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [
+                GPConstraint::Input {
+                    op: op.clone(),
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: None,
+                    clobber_reg: false,
+                },
+                GPConstraint::Output {
+                    out_ext: RegExtension::ZeroExtended,
+                    force_reg: None,
+                    can_be_same_as_input: true,
+                },
+            ],
+        );
+        assert!(bitw > 1 && bitw <= 64);
+        dynasm!(self.asm; popcnt Rq(out_reg.code()), Rq(in_reg.code()));
+    }
+
+    fn cg_smax(&mut self, iidx: InstIdx, lhs: Operand, rhs: Operand) {
+        assert_eq!(lhs.bitw(self.m), rhs.bitw(self.m));
+        let bitw = lhs.bitw(self.m);
+        let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [
+                GPConstraint::InputOutput {
+                    op: lhs,
+                    in_ext: RegExtension::SignExtended,
+                    out_ext: RegExtension::SignExtended,
+                    force_reg: None,
+                },
+                GPConstraint::Input {
+                    op: rhs,
+                    in_ext: RegExtension::SignExtended,
+                    force_reg: None,
+                    clobber_reg: false,
+                },
+            ],
+        );
+        match bitw {
+            64 => {
+                dynasm!(self.asm
+                    ; cmp Rq(lhs_reg.code()), Rq(rhs_reg.code())
+                    ; cmovl Rq(lhs_reg.code()), Rq(rhs_reg.code())
+                );
+            }
+            x => todo!("{x}"),
+        }
     }
 
     /// Return the [VarLocation] an [Operand] relates to.
@@ -4010,6 +4080,75 @@ mod tests {
                 mov r.64.x, ...
                 call r.64.x
                 ...
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_hints() {
+        codegen_and_test(
+            "
+             func_decl llvm.assume (i1)
+             func_decl llvm.lifetime.start.p0 (i64, ptr)
+             func_decl llvm.lifetime.end.p0 (i64, ptr)
+             entry:
+               %0: i1 = param 0
+               %1: ptr = param 1
+               call @llvm.assume(%0)
+               call @llvm.lifetime.start.p0(16i64, %1)
+               call @llvm.lifetime.end.p0(16i64, %1)
+               %5: ptr = ptr_add %1, 1
+               black_box %5
+            ",
+            "
+               ...
+               ; call @llvm.assume(%0)
+               ; call @llvm.lifetime.start.p0(16i64, %1)
+               ; call @llvm.lifetime.end.p0(16i64, %1)
+               ; %5: ...
+               ...
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_ctpop() {
+        codegen_and_test(
+            "
+             func_decl llvm.ctpop.i32 (i32) -> i32
+             entry:
+               %0: i32 = param 0
+               %1: i32 = call @llvm.ctpop.i32(%0)
+               black_box %1
+            ",
+            "
+               ...
+               ; %1: i32 = call @llvm.ctpop.i32(%0)
+               mov r.32.a, r.32.a
+               popcnt r.64._, r.64.a
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_smax() {
+        codegen_and_test(
+            "
+             func_decl llvm.smax.i64 (i64, i64) -> i64
+             entry:
+               %0: i64 = param 0
+               %1: i64 = param 1
+               %2: i64 = call @llvm.smax.i64(%0, %1)
+               black_box %2
+            ",
+            "
+               ...
+               ; %2: i64 = call @llvm.smax.i64(%0, %1)
+               cmp r.64.a, r.64.b
+               cmovl r.64.a, r.64.b
             ",
             false,
         );
