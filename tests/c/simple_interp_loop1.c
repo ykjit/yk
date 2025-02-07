@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YK_LOG=4
+//   env-var: YKD_LOG=4
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     yk-jit-event: start-tracing

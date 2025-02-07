@@ -34,7 +34,7 @@ pub(crate) struct Log {
 
 impl Log {
     pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
-        match env::var("YK_LOG") {
+        match env::var("YKD_LOG") {
             Ok(s) => {
                 let (path, level) = match s.split(':').collect::<Vec<_>>()[..] {
                     [path, level] => {
@@ -49,16 +49,16 @@ impl Log {
                         }
                     }
                     [level] => (None, level),
-                    [..] => return Err("YK_LOG must be of the format `[<path|->:]<level>".into()),
+                    [..] => return Err("YKD_LOG must be of the format `[<path|->:]<level>".into()),
                 };
                 let level = level
                     .parse::<u8>()
-                    .map_err(|e| format!("Invalid YK_LOG level '{s}': {e}"))?;
+                    .map_err(|e| format!("Invalid YKD_LOG level '{s}': {e}"))?;
                 // This unwrap can only fail dynamically if we've got the types wrong statically
                 // (i.e. it'll fail as soon as this code is executed for the first time).
                 let max_level = u8::try_from(Verbosity::COUNT).unwrap() - 1;
                 let level = Verbosity::from_repr(level)
-                    .ok_or_else(|| format!("YK_LOG level {level} exceeds maximum {max_level}"))?;
+                    .ok_or_else(|| format!("YKD_LOG level {level} exceeds maximum {max_level}"))?;
                 Ok(Self { path, level })
             }
             Err(_) => Ok(Self {
