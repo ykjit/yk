@@ -28,7 +28,6 @@ use crate::{
         stats::{Stats, TimingState},
         Log, Verbosity,
     },
-    stack::{StackDirection, STACK_DIRECTION},
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
 };
 
@@ -573,6 +572,27 @@ impl MT {
             let is_tracing = mtt.is_tracing();
             match loc.hot_location() {
                 Some(hl) => {
+                    if is_tracing {
+                        if let MTThreadState::Tracing {
+                            frameaddr: tracing_frameaddr,
+                            hl: tracing_hl,
+                            ..
+                        } = mtt.peek_tstate()
+                        {
+                            if frameaddr != *tracing_frameaddr {
+                                // We're tracing but no longer in the frame we started in, so we
+                                // need to stop tracing and report the original [HotLocation] as
+                                // having failed to trace properly.
+                                self.stats.trace_recorded_err();
+                                let mut lk = tracing_hl.lock();
+                                lk.tracecompilation_error(self);
+                                lk.kind = HotLocationKind::Counting(0);
+
+                                return TransitionControlPoint::AbortTracing;
+                            }
+                        }
+                    }
+
                     // If this thread is tracing something, we *must* grab the [HotLocation] lock,
                     // because we need to know for sure if `loc` is the point at which we should
                     // stop tracing. In most compilation modes, we are willing to give up trying to
@@ -644,51 +664,15 @@ impl MT {
                         HotLocationKind::Tracing => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             match mtt.peek_tstate() {
-                                MTThreadState::Tracing {
-                                    hl: thread_hl,
-                                    frameaddr: tracing_frameaddr,
-                                    ..
-                                } => {
+                                MTThreadState::Tracing { hl: thread_hl, .. } => {
                                     // This thread is tracing something...
                                     if !Arc::ptr_eq(thread_hl, &hl) {
                                         // ...but not this Location.
                                         TransitionControlPoint::NoAction
                                     } else {
                                         // ...and it's this location...
-                                        match STACK_DIRECTION {
-                                            StackDirection::GrowsToHigherAddress => todo!(),
-                                            StackDirection::GrowsToLowerAddress => {
-                                                if frameaddr == *tracing_frameaddr {
-                                                    // We've completed a full iteration, either
-                                                    // within the same frame, or in a recursive
-                                                    // call. Either way, we do not want to unroll
-                                                    // the loop / recursion!
-                                                    lk.kind = HotLocationKind::Compiling;
-                                                    TransitionControlPoint::StopTracing
-                                                } else {
-                                                    // We fell through to a caller frame. In other
-                                                    // words, the frame that started tracing
-                                                    // `return`ed before it stopped tracing. It's
-                                                    // probably the case that we've unluckily
-                                                    // started tracing at the point in a recursive
-                                                    // algorithm where it's reached the culmination
-                                                    // point and is now returning many levels deep.
-                                                    // If we immediately restart tracing in such a
-                                                    // case, we'll just end up aborting again and
-                                                    // again. So we don't consider retrying and
-                                                    // instead abort tracing, and hope we can start
-                                                    // at a more propitious point in the future.
-                                                    self.stats.trace_recorded_err();
-                                                    match lk.tracecompilation_error(self) {
-                                                        TraceFailed::KeepTrying => {
-                                                            lk.kind = HotLocationKind::Counting(0);
-                                                            TransitionControlPoint::AbortTracing
-                                                        }
-                                                        TraceFailed::DontTrace => todo!(),
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        lk.kind = HotLocationKind::Compiling;
+                                        TransitionControlPoint::StopTracing
                                     }
                                 }
                                 _ => {
@@ -728,55 +712,20 @@ impl MT {
                         } => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             match mtt.peek_tstate() {
-                                MTThreadState::Tracing {
-                                    hl: thread_hl,
-                                    frameaddr: tracing_frameaddr,
-                                    ..
-                                } => {
+                                MTThreadState::Tracing { hl: thread_hl, .. } => {
                                     // This thread is tracing something...
                                     if !Arc::ptr_eq(thread_hl, &hl) {
                                         // ...but not this Location.
                                         TransitionControlPoint::NoAction
                                     } else {
-                                        match STACK_DIRECTION {
-                                            StackDirection::GrowsToHigherAddress => todo!(),
-                                            StackDirection::GrowsToLowerAddress => {
-                                                if frameaddr == *tracing_frameaddr {
-                                                    // ...and it's this location: we have therefore
-                                                    // finished tracing back to the control point,
-                                                    // either within the same frame, or in a
-                                                    // recursive call. Either way, we do not want
-                                                    // to unroll the loop / recursion!
-                                                    let parent_ctr = Arc::clone(parent_ctr);
-                                                    let root_ctr_cl = Arc::clone(root_ctr);
-                                                    lk.kind = HotLocationKind::Compiled(
-                                                        Arc::clone(root_ctr),
-                                                    );
-                                                    TransitionControlPoint::StopSideTracing {
-                                                        gidx,
-                                                        parent_ctr,
-                                                        root_ctr: root_ctr_cl,
-                                                    }
-                                                } else {
-                                                    // We fell through to a caller frame. In other
-                                                    // words, the frame that started tracing
-                                                    // `return`ed before it stopped tracing. It's
-                                                    // probably the case that we've unluckily
-                                                    // started tracing at the point in a recursive
-                                                    // algorithm where it's reached the culmination
-                                                    // point and is now returning many levels deep.
-                                                    // If we immediately restart tracing in such a
-                                                    // case, we'll just end up aborting again and
-                                                    // again. So we don't consider retrying and
-                                                    // instead abort tracing, and hope we can start
-                                                    // at a more propitious point in the future.
-                                                    self.stats.trace_recorded_err();
-                                                    lk.kind = HotLocationKind::Compiled(
-                                                        Arc::clone(root_ctr),
-                                                    );
-                                                    TransitionControlPoint::AbortTracing
-                                                }
-                                            }
+                                        // ...and it's this location.
+                                        let parent_ctr = Arc::clone(parent_ctr);
+                                        let root_ctr_cl = Arc::clone(root_ctr);
+                                        lk.kind = HotLocationKind::Compiled(Arc::clone(root_ctr));
+                                        TransitionControlPoint::StopSideTracing {
+                                            gidx,
+                                            parent_ctr,
+                                            root_ctr: root_ctr_cl,
                                         }
                                     }
                                 }
