@@ -643,7 +643,7 @@ impl MT {
                         }
                         HotLocationKind::Tracing => {
                             let hl = loc.hot_location_arc_clone().unwrap();
-                            let (lk_kind, rtn) = mtt.peek_tstate(|tstate| match tstate {
+                            let (lk_kind, rtn) = match mtt.peek_tstate() {
                                 MTThreadState::Tracing {
                                     hl: thread_hl,
                                     frameaddr: tracing_frameaddr,
@@ -723,7 +723,7 @@ impl MT {
                                         (None, TransitionControlPoint::NoAction)
                                     }
                                 }
-                            });
+                            };
                             if let Some(lk_kind) = lk_kind {
                                 lk.kind = lk_kind;
                             }
@@ -735,7 +735,7 @@ impl MT {
                             ref parent_ctr,
                         } => {
                             let hl = loc.hot_location_arc_clone().unwrap();
-                            let (lk_kind, rtn) = mtt.peek_tstate(move |tstate| match tstate {
+                            let (lk_kind, rtn) = match mtt.peek_tstate() {
                                 MTThreadState::Tracing {
                                     hl: thread_hl,
                                     frameaddr: tracing_frameaddr,
@@ -797,7 +797,7 @@ impl MT {
                                     assert!(!is_tracing);
                                     (None, TransitionControlPoint::Execute(Arc::clone(root_ctr)))
                                 }
-                            });
+                            };
                             if let Some(lk_kind) = lk_kind {
                                 lk.kind = lk_kind;
                             }
@@ -1057,13 +1057,10 @@ impl MTThread {
         }
     }
 
-    /// Run the closure `f` and pass it an immutable reference to the last element on the stack of
-    /// [MTThreadState]s.
-    fn peek_tstate<F, T>(&self, f: F) -> T
-    where
-        F: FnOnce(&MTThreadState) -> T,
-    {
-        f(self.tstate.last().unwrap())
+    /// Return a reference to the last element on the stack of [MTThreadState]s. There will always
+    /// be such an element: if this function panics, something has gone wrong elsewhere.
+    fn peek_tstate(&self) -> &MTThreadState {
+        self.tstate.last().unwrap()
     }
 
     /// Run the closure `f` and pass it a mutable reference to the last element on the
