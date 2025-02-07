@@ -1045,11 +1045,21 @@ impl MTThread {
     }
 
     /// Is this thread currently tracing something?
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     pub(crate) fn is_tracing(&self) -> bool {
         matches!(self.tstate.last().unwrap(), &MTThreadState::Tracing { .. })
     }
 
     /// If a trace is currently running, return a reference to its [CompiledTrace].
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     pub(crate) fn running_trace(&self) -> Option<Arc<dyn CompiledTrace>> {
         match self.tstate.last().unwrap() {
             MTThreadState::Executing { ref ctr } => Some(Arc::clone(ctr)),
@@ -1057,14 +1067,22 @@ impl MTThread {
         }
     }
 
-    /// Return a reference to the last element on the stack of [MTThreadState]s. There will always
-    /// be such an element: if this function panics, something has gone wrong elsewhere.
+    /// Return a reference to the last element on the stack of [MTThreadState]s.
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     fn peek_tstate(&self) -> &MTThreadState {
         self.tstate.last().unwrap()
     }
 
-    /// Return a mutable reference to the last element on the stack of [MTThreadState]s. There will
-    /// always be such an element: if this function panics, something has gone wrong elsewhere.
+    /// Return a mutable reference to the last element on the stack of [MTThreadState]s.
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     fn peek_mut_tstate(&mut self) -> &mut MTThreadState {
         self.tstate.last_mut().unwrap()
     }
@@ -1073,7 +1091,8 @@ impl MTThread {
     ///
     /// # Panics
     ///
-    /// If this would remove the last [MTThreadState] from the stack.
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     fn pop_tstate(&mut self) -> MTThreadState {
         debug_assert!(self.tstate.len() > 1);
         self.tstate.pop().unwrap()
@@ -1090,6 +1109,11 @@ impl MTThread {
     /// If `false` is returned, the current trace is unable to record the promotion successfully
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_i32(&mut self, val: i32) -> bool {
         if let MTThreadState::Tracing {
             ref mut promotions, ..
@@ -1106,6 +1130,11 @@ impl MTThread {
     /// If `false` is returned, the current trace is unable to record the promotion successfully
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_u32(&mut self, val: u32) -> bool {
         if let MTThreadState::Tracing {
             ref mut promotions, ..
@@ -1122,6 +1151,11 @@ impl MTThread {
     /// If `false` is returned, the current trace is unable to record the promotion successfully
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_i64(&mut self, val: i64) -> bool {
         if let MTThreadState::Tracing {
             ref mut promotions, ..
@@ -1138,6 +1172,11 @@ impl MTThread {
     /// If `false` is returned, the current trace is unable to record the promotion successfully
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_usize(&mut self, val: usize) -> bool {
         if let MTThreadState::Tracing {
             ref mut promotions, ..
@@ -1149,7 +1188,12 @@ impl MTThread {
     }
 
     /// Record a debug string.
-    pub fn insert_debug_str(&mut self, msg: String) -> bool {
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
+    pub(crate) fn insert_debug_str(&mut self, msg: String) -> bool {
         if let MTThreadState::Tracing {
             ref mut debug_strs, ..
         } = self.peek_mut_tstate()
