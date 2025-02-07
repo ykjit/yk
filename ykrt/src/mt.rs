@@ -1063,13 +1063,10 @@ impl MTThread {
         self.tstate.last().unwrap()
     }
 
-    /// Run the closure `f` and pass it a mutable reference to the last element on the
-    /// stack of [MTThreadState]s.
-    fn peek_mut_tstate<F, T>(&mut self, f: F) -> T
-    where
-        F: FnOnce(&mut MTThreadState) -> T,
-    {
-        f(self.tstate.last_mut().unwrap())
+    /// Return a mutable reference to the last element on the stack of [MTThreadState]s. There will
+    /// always be such an element: if this function panics, something has gone wrong elsewhere.
+    fn peek_mut_tstate(&mut self) -> &mut MTThreadState {
+        self.tstate.last_mut().unwrap()
     }
 
     /// Pop the last element from the stack of [MTThreadState]s and return it.
@@ -1094,14 +1091,12 @@ impl MTThread {
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
     pub(crate) fn promote_i32(&mut self, val: i32) -> bool {
-        self.peek_mut_tstate(|tstate| {
-            if let MTThreadState::Tracing {
-                ref mut promotions, ..
-            } = tstate
-            {
-                promotions.extend_from_slice(&val.to_ne_bytes());
-            }
-        });
+        if let MTThreadState::Tracing {
+            ref mut promotions, ..
+        } = self.peek_mut_tstate()
+        {
+            promotions.extend_from_slice(&val.to_ne_bytes());
+        }
         true
     }
 
@@ -1112,14 +1107,12 @@ impl MTThread {
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
     pub(crate) fn promote_u32(&mut self, val: u32) -> bool {
-        self.peek_mut_tstate(|tstate| {
-            if let MTThreadState::Tracing {
-                ref mut promotions, ..
-            } = tstate
-            {
-                promotions.extend_from_slice(&val.to_ne_bytes());
-            }
-        });
+        if let MTThreadState::Tracing {
+            ref mut promotions, ..
+        } = self.peek_mut_tstate()
+        {
+            promotions.extend_from_slice(&val.to_ne_bytes());
+        }
         true
     }
 
@@ -1130,14 +1123,12 @@ impl MTThread {
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
     pub(crate) fn promote_i64(&mut self, val: i64) -> bool {
-        self.peek_mut_tstate(|tstate| {
-            if let MTThreadState::Tracing {
-                ref mut promotions, ..
-            } = tstate
-            {
-                promotions.extend_from_slice(&val.to_ne_bytes());
-            }
-        });
+        if let MTThreadState::Tracing {
+            ref mut promotions, ..
+        } = self.peek_mut_tstate()
+        {
+            promotions.extend_from_slice(&val.to_ne_bytes());
+        }
         true
     }
 
@@ -1148,27 +1139,23 @@ impl MTThread {
     /// and further calls are probably pointless, though they will not cause the tracer to enter
     /// undefined behaviour territory.
     pub(crate) fn promote_usize(&mut self, val: usize) -> bool {
-        self.peek_mut_tstate(|tstate| {
-            if let MTThreadState::Tracing {
-                ref mut promotions, ..
-            } = tstate
-            {
-                promotions.extend_from_slice(&val.to_ne_bytes());
-            }
-        });
+        if let MTThreadState::Tracing {
+            ref mut promotions, ..
+        } = self.peek_mut_tstate()
+        {
+            promotions.extend_from_slice(&val.to_ne_bytes());
+        }
         true
     }
 
     /// Record a debug string.
     pub fn insert_debug_str(&mut self, msg: String) -> bool {
-        self.peek_mut_tstate(|tstate| {
-            if let MTThreadState::Tracing {
-                ref mut debug_strs, ..
-            } = tstate
-            {
-                debug_strs.push(msg);
-            }
-        });
+        if let MTThreadState::Tracing {
+            ref mut debug_strs, ..
+        } = self.peek_mut_tstate()
+        {
+            debug_strs.push(msg);
+        }
         true
     }
 }
