@@ -628,23 +628,26 @@ impl LSRegAlloc<'_> {
                                         &GPConstraint::Input { op: rhs_op, .. }
                                         | &GPConstraint::InputOutput { op: rhs_op, .. },
                                     ) => {
-                                        if lhs_op == rhs_op {
-                                            changed = true;
-                                            self.copy_gp_reg(asm, old_reg, reg);
-                                        } else {
-                                            if let RegState::Empty =
-                                                self.gp_reg_states[usize::from(reg.code())]
-                                            {
-                                                self.move_gp_reg(asm, old_reg, reg);
-                                            } else if let RegState::Empty =
-                                                self.gp_reg_states[usize::from(old_reg.code())]
-                                            {
-                                                self.move_gp_reg(asm, reg, old_reg);
+                                        if let RegState::Empty =
+                                            self.gp_reg_states[usize::from(reg.code())]
+                                        {
+                                            if lhs_op == rhs_op {
+                                                self.copy_gp_reg(asm, old_reg, reg);
                                             } else {
-                                                self.swap_gp_reg(asm, reg, old_reg);
+                                                self.move_gp_reg(asm, old_reg, reg);
                                             }
-                                            changed = true;
+                                        } else if let RegState::Empty =
+                                            self.gp_reg_states[usize::from(old_reg.code())]
+                                        {
+                                            if lhs_op == rhs_op {
+                                                self.copy_gp_reg(asm, reg, old_reg);
+                                            } else {
+                                                self.move_gp_reg(asm, reg, old_reg);
+                                            }
+                                        } else {
+                                            self.swap_gp_reg(asm, reg, old_reg);
                                         }
+                                        changed = true;
                                     }
                                     (
                                         &GPConstraint::Input { .. }
@@ -653,8 +656,18 @@ impl LSRegAlloc<'_> {
                                         | GPConstraint::Clobber { .. }
                                         | GPConstraint::Temporary,
                                     ) => {
+                                        if let RegState::Empty =
+                                            self.gp_reg_states[usize::from(reg.code())]
+                                        {
+                                            self.move_gp_reg(asm, old_reg, reg);
+                                        } else if let RegState::Empty =
+                                            self.gp_reg_states[usize::from(old_reg.code())]
+                                        {
+                                            self.move_gp_reg(asm, reg, old_reg);
+                                        } else {
+                                            self.swap_gp_reg(asm, reg, old_reg);
+                                        }
                                         changed = true;
-                                        self.move_gp_reg(asm, old_reg, reg);
                                     }
                                     _ => (),
                                 }
