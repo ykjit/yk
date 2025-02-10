@@ -228,6 +228,7 @@ for tracer in $TRACERS; do
         ln -s ../yklua .
         sed -e 's/executions: \[Lua, YkLua\]/executions: [YkLua]/' \
             -e 's/executable: yklua/executable: lua/' \
+            -e '/Havlak/{N; d;}' \
             rebench.conf > rebench2.conf
         ~/.local/bin/rebench --quick --no-denoise -c rebench2.conf
         cd ..
