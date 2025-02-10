@@ -1,4 +1,3 @@
-
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=jit-pre-opt
@@ -17,52 +16,46 @@
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-side-tracing
 //     b1
+//     ret1
 //     9
 //     yk-jit-event: tracing-aborted
 //     b3
 //     8
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
-//     yk-jit-event: start-side-tracing
 //     b3
 //     7
+//     yk-jit-event: start-tracing
+//     b3
+//     6
 //     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
-//     b3
-//     6
+//     b2
+//     5
 //     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-side-tracing
 //     b2
-//     5
+//     4
 //     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     b2
-//     4
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
-//     b2
 //     3
-//     yk-jit-event: execute-side-trace
+//     yk-jit-event: enter-jit-code
 //     yk-jit-event: execute-side-trace
 //     b2
 //     2
 //     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     b2
 //     1
-//     yk-jit-event: execute-side-trace
 //     yk-jit-event: execute-side-trace
 //     b2
 //     0
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-side-tracing
+//     ret2
 //     exit
 
 // Check that early return from a recursive interpreter loop aborts tracing,
@@ -96,10 +89,12 @@ void loop(YkMT *mt, YkLocation *loc, int i, bool inner) {
       i--;
     }
     if (inner && i == 6) {
+      fprintf(stderr, "ret1\n");
       return;
     }
     fprintf(stderr, "%d\n", i);
   }
+  fprintf(stderr, "ret2\n");
   return;
 }
 

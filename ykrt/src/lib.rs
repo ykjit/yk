@@ -27,7 +27,7 @@ use std::ffi::{c_char, CStr};
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "C" fn yk_debug_str(msg: *const c_char) {
-    MTThread::with(|mtt| {
+    MTThread::with_borrow_mut(|mtt| {
         mtt.insert_debug_str(unsafe { CStr::from_ptr(msg).to_str().unwrap().to_owned() });
     });
 }

@@ -10,7 +10,7 @@ use std::ffi::{c_int, c_longlong, c_uint};
 #[no_mangle]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
-    MTThread::with(|mtt| {
+    MTThread::with_borrow_mut(|mtt| {
         // We ignore the return value as we can't really cancel tracing from this function.
         mtt.promote_i32(val);
     });
@@ -21,7 +21,7 @@ pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
 #[no_mangle]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_unsigned_int(val: c_uint) -> c_uint {
-    MTThread::with(|mtt| {
+    MTThread::with_borrow_mut(|mtt| {
         // We ignore the return value as we can't really cancel tracing from this function.
         mtt.promote_u32(val);
     });
@@ -32,7 +32,7 @@ pub extern "C" fn __yk_promote_c_unsigned_int(val: c_uint) -> c_uint {
 #[no_mangle]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_long_long(val: c_longlong) -> c_longlong {
-    MTThread::with(|mtt| {
+    MTThread::with_borrow_mut(|mtt| {
         // We ignore the return value as we can't really cancel tracing from this function.
         mtt.promote_i64(val);
     });
@@ -42,7 +42,7 @@ pub extern "C" fn __yk_promote_c_long_long(val: c_longlong) -> c_longlong {
 /// Promote a `usize` during trace recording.
 #[no_mangle]
 pub extern "C" fn __yk_promote_usize(val: usize) -> usize {
-    MTThread::with(|mtt| {
+    MTThread::with_borrow_mut(|mtt| {
         // We ignore the return value as we can't really cancel tracing from this function.
         mtt.promote_usize(val);
     });
