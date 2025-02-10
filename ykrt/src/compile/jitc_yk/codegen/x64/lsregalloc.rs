@@ -30,7 +30,7 @@
 use super::{rev_analyse::RevAnalyse, Register, VarLocation};
 use crate::compile::jitc_yk::{
     codegen::abs_stack::AbstractStack,
-    jit_ir::{Const, ConstIdx, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
+    jit_ir::{Const, ConstIdx, FloatTy, GuardInst, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
 };
 use dynasmrt::{
     dynasm,
@@ -269,6 +269,38 @@ impl<'a> LSRegAlloc<'a> {
             self.assign_gp_regs(asm, iidx, gp_constraints),
             self.assign_fp_regs(asm, iidx, fp_constraints),
         )
+    }
+
+    /// Return a [GuardSnapshot] for the guard `ginst`. This should be called when generating code
+    /// for a guard: it returns the information the register allocator will later need to perform
+    /// its part in generating correct code for this guard's failure in
+    /// [Self::get_ready_for_deopt].
+    pub(super) fn guard_snapshot(&self, ginst: &GuardInst) -> GuardSnapshot {
+        let gi = ginst.guard_info(self.m);
+        let mut regs_to_zero_ext = Vec::new();
+        for op in gi.live_vars().iter().map(|(_, pop)| pop.unpack(self.m)) {
+            if let Operand::Var(op_iidx) = op {
+                if let Some(reg) = self.find_op_in_gp_reg(&op) {
+                    let RegState::FromInst(_, ext) = self.gp_reg_states[usize::from(reg.code())]
+                    else {
+                        panic!()
+                    };
+                    if ext != RegExtension::ZeroExtended {
+                        regs_to_zero_ext.push((reg, self.m.inst(op_iidx).def_bitw(self.m)));
+                    }
+                }
+            }
+        }
+        GuardSnapshot { regs_to_zero_ext }
+    }
+
+    /// When generating the code for a guard failure, do the necessary work from the register
+    /// allocator's perspective (e.g. ensuring registers have an appropriate [RegExtension]) for
+    /// deopt to occur.
+    pub(super) fn get_ready_for_deopt(&self, asm: &mut Assembler, gsnap: &GuardSnapshot) {
+        for (reg, bitw) in &gsnap.regs_to_zero_ext {
+            self.force_zero_extend_to_reg64(asm, *reg, *bitw);
+        }
     }
 }
 
@@ -813,19 +845,19 @@ impl LSRegAlloc<'_> {
         }
     }
 
-    /// Zero extend the `from_bits`-sized integer stored in `reg` up to the full size of the 64-bit
+    /// Zero extend the `from_bitw`-sized integer stored in `reg` up to the full size of the 64-bit
     /// register.
     ///
     /// `from_bits` must be between 1 and 64.
-    fn force_zero_extend_to_reg64(&self, asm: &mut Assembler, reg: Rq, from_bits: u32) {
-        debug_assert!(from_bits > 0 && from_bits <= 64);
-        match from_bits {
-            1..=31 => dynasm!(asm; and Rd(reg.code()), ((1u64 << from_bits) - 1) as i32),
+    fn force_zero_extend_to_reg64(&self, asm: &mut Assembler, reg: Rq, from_bitw: u32) {
+        debug_assert!(from_bitw > 0 && from_bitw <= 64);
+        match from_bitw {
+            1..=31 => dynasm!(asm; and Rd(reg.code()), ((1u64 << from_bitw) - 1) as i32),
             32 => {
                 // mov into a 32-bit register zero extends the upper 32 bits.
                 dynasm!(asm; mov Rd(reg.code()), Rd(reg.code()));
             }
-            64 => (), // nothing to do.
+            64 => (), // There are no additional bits to zero extend
             x => todo!("{x}"),
         }
     }
@@ -1698,6 +1730,14 @@ impl<R: dynasmrt::Register> RegConstraint<R> {
             | Self::None => None,
         }
     }
+}
+
+/// The information the register allocator records at the point of a guard's code generation that
+/// it later needs to get a failing guard ready for deopt.
+pub(super) struct GuardSnapshot {
+    /// The registers we need to zero extend: the `u32` is the `from_bitw` that is passed to
+    /// `force_zero_extend_to_reg64`.
+    regs_to_zero_ext: Vec<(Rq, u32)>,
 }
 
 #[derive(Clone, Debug)]

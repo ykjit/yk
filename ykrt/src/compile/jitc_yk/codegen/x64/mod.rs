@@ -60,7 +60,7 @@ pub(super) mod lsregalloc;
 mod rev_analyse;
 
 use deopt::{__yk_deopt, __yk_guardcheck};
-use lsregalloc::{GPConstraint, LSRegAlloc, RegConstraint, RegExtension};
+use lsregalloc::{GPConstraint, GuardSnapshot, LSRegAlloc, RegConstraint, RegExtension};
 
 /// General purpose argument registers as defined by the x64 SysV ABI.
 static ARG_GP_REGS: [Rq; 6] = [Rq::RDI, Rq::RSI, Rq::RDX, Rq::RCX, Rq::R8, Rq::R9];
@@ -301,7 +301,7 @@ struct Assemble<'a> {
     body_start_locs: Vec<VarLocation>,
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
-    deoptinfo: HashMap<usize, DeoptInfo>,
+    deoptinfo: HashMap<usize, (GuardSnapshot, DeoptInfo)>,
     ///
     /// Maps assembly offsets to comments.
     ///
@@ -419,7 +419,7 @@ impl<'a> Assemble<'a> {
             let mut infos = self
                 .deoptinfo
                 .iter()
-                .map(|(id, l)| (*id, l.fail_label))
+                .map(|(id, (_regset, di))| (*id, di.fail_label))
                 .collect::<Vec<_>>();
             // Debugging deopt asm is much easier if the stubs are in order.
             #[cfg(debug_assertions)]
@@ -431,6 +431,8 @@ impl<'a> Assemble<'a> {
                     self.asm.offset(),
                     format!("Deopt ID for guard {:?}", deoptid),
                 );
+                self.ra
+                    .get_ready_for_deopt(&mut self.asm, &self.deoptinfo[&deoptid].0);
                 // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
                 let deoptid = i32::try_from(deoptid).unwrap();
                 dynasm!(self.asm
@@ -560,7 +562,11 @@ impl<'a> Assemble<'a> {
         Ok(Arc::new(X64CompiledTrace {
             mt,
             buf,
-            deoptinfo: self.deoptinfo,
+            deoptinfo: self
+                .deoptinfo
+                .into_iter()
+                .map(|(id, (_gsnap, di))| (id, di))
+                .collect::<HashMap<_, _>>(),
             prevguards,
             sp_offset: self.ra.stack_size(),
             prologue_offset: self.prologue_offset.0,
@@ -2712,7 +2718,8 @@ impl<'a> Assemble<'a> {
             inlined_frames: gi.inlined_frames().to_vec(),
             guard: Guard::new(),
         };
-        self.deoptinfo.insert(inst.gidx.into(), deoptinfo);
+        self.deoptinfo
+            .insert(inst.gidx.into(), (self.ra.guard_snapshot(inst), deoptinfo));
         fail_label
     }
 
@@ -4345,6 +4352,30 @@ mod tests {
                 mov r9, 0x...
                 mov rax, 0x...
                 call rax
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_deopt_reg_exts() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = param 0
+                %1: i1 = param 1
+                %2: i8 = shl %0, 1i8
+                guard true, %1, [%2]
+            ",
+            "
+                ...
+                ; %2: i8 = shl %0, 1i8
+                shl r.64.x, 0x01
+                ; guard true, %1, ...
+                ...
+                ; deopt id for guard 0
+                and r.32.x, 0xff
+                ...
             ",
             false,
         );
