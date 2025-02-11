@@ -391,7 +391,7 @@ impl LSRegAlloc<'_> {
         //   2. Move values out of, and into, registers and update `self`.
 
         // No constraint operands should be float-typed.
-        debug_assert_eq!(
+        assert_eq!(
             constraints
                 .iter()
                 .filter(|x| match x {
@@ -407,7 +407,7 @@ impl LSRegAlloc<'_> {
         );
 
         // There must be at most 1 output register.
-        debug_assert!(
+        assert!(
             constraints
                 .iter()
                 .filter(|x| match x {

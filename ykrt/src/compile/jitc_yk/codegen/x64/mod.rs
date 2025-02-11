@@ -2639,6 +2639,16 @@ impl<'a> Assemble<'a> {
     fn cg_select(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
         // First load the true case. We then immediately follow this up with a conditional move,
         // overwriting the value with the false case, if the condition was false.
+        match self.m.type_(inst.trueval(self.m).tyidx(self.m)) {
+            Ty::Void => todo!(),
+            Ty::Integer(_) | Ty::Ptr => self.cg_select_int_ptr(iidx, inst),
+            Ty::Func(_) => todo!(),
+            Ty::Float(_) => self.cg_select_float(iidx, inst),
+            Ty::Unimplemented(_) => unreachable!(),
+        }
+    }
+
+    fn cg_select_int_ptr(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
         let [true_reg, cond_reg, false_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
@@ -2673,6 +2683,61 @@ impl<'a> Assemble<'a> {
 
         dynasm!(self.asm ; bt Rd(cond_reg.code()), 0);
         dynasm!(self.asm ; cmovnc Rq(true_reg.code()), Rq(false_reg.code()));
+    }
+
+    fn cg_select_float(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
+        let ([cond_reg], [true_reg, false_reg, out_reg]) = self.ra.assign_regs(
+            &mut self.asm,
+            iidx,
+            [GPConstraint::Input {
+                op: inst.cond(self.m),
+                in_ext: RegExtension::Undefined,
+                force_reg: None,
+                clobber_reg: false,
+            }],
+            [
+                RegConstraint::Input(inst.trueval(self.m)),
+                RegConstraint::Input(inst.falseval(self.m)),
+                RegConstraint::Output,
+            ],
+        );
+        debug_assert_eq!(
+            self.m
+                .type_(inst.cond(self.m).tyidx(self.m))
+                .bitw()
+                .unwrap(),
+            1
+        );
+
+        assert_eq!(
+            inst.trueval(self.m).bitw(self.m),
+            inst.falseval(self.m).bitw(self.m)
+        );
+        match inst.trueval(self.m).bitw(self.m) {
+            32 => {
+                dynasm!(self.asm
+                    ;   bt Rd(cond_reg.code()), 0
+                    ;   jc >equal
+                    ;   movss Rx(out_reg.code()), Rx(false_reg.code())
+                    ;   jmp >done
+                    ; equal:
+                    ;   movss Rx(out_reg.code()), Rx(true_reg.code())
+                    ; done:
+                );
+            }
+            64 => {
+                dynasm!(self.asm
+                    ;   bt Rd(cond_reg.code()), 0
+                    ;   jc >equal
+                    ;   movsd Rx(out_reg.code()), Rx(false_reg.code())
+                    ;   jmp >done
+                    ; equal:
+                    ;   movsd Rx(out_reg.code()), Rx(true_reg.code())
+                    ; done:
+                );
+            }
+            x => todo!("{x}"),
+        }
     }
 
     fn guard_to_deopt(&mut self, inst: &jit_ir::GuardInst) -> DynamicLabel {
@@ -4570,7 +4635,7 @@ mod tests {
     }
 
     #[test]
-    fn cg_select() {
+    fn cg_select_int() {
         codegen_and_test(
             "
               entry:
@@ -4587,6 +4652,59 @@ mod tests {
                 cmovnb r.64.x, r.64.y
             ",
             false,
+        );
+    }
+
+    #[test]
+    fn cg_select_float() {
+        codegen_and_test(
+            "
+              entry:
+                %0: float = param 0
+                %1: float = param 1
+                %2: i1 = param 2
+                %3: float = %2 ? %0 : %1
+                %4: float = fadd %0, %1
+                black_box %3
+                black_box %4
+            ",
+            "
+                ...
+                ; %3: float = %2 ? %0 : %1
+                {{_}} {{_}}: bt r.32._, 0x00
+                {{_}} {{_}}: jb 0x00000000{{true_label}}
+                {{_}} {{_}}: movss fp.128.x, fp.128.y
+                {{_}} {{_}}: jmp 0x00000000{{done_label}}
+                {{_}} {{true_label}}: movss fp.128.x, fp.128.z
+                ; %4: float = fadd %0, %1
+                {{_}} {{done_label}}: ...
+            ",
+            true,
+        );
+
+        codegen_and_test(
+            "
+              entry:
+                %0: double = param 0
+                %1: double = param 1
+                %2: i1 = param 2
+                %3: double = %2 ? %0 : %1
+                %4: double = fadd %0, %1
+                black_box %3
+                black_box %4
+            ",
+            "
+                ...
+                ; %3: double = %2 ? %0 : %1
+                {{_}} {{_}}: bt r.32._, 0x00
+                {{_}} {{_}}: jb 0x00000000{{true_label}}
+                {{_}} {{_}}: movsd fp.128.x, fp.128.y
+                {{_}} {{_}}: jmp 0x00000000{{done_label}}
+                {{_}} {{true_label}}: movsd fp.128.x, fp.128.z
+                ; %4: double = fadd %0, %1
+                {{_}} {{done_label}}: ...
+            ",
+            true,
         );
     }
 
