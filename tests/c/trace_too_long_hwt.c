@@ -18,27 +18,28 @@
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc1 = yk_location_new();
-  YkLocation loc2 = yk_location_new();
+  YkLocation loc = yk_location_new();
 
-  int i = 100000;
-  NOOPT_VAL(loc1);
-  NOOPT_VAL(loc2);
+  int i = 10;
+  int t = 0;
+  NOOPT_VAL(loc);
   NOOPT_VAL(i);
-  YkLocation *loc = &loc1;
+  NOOPT_VAL(t);
   while (i > 0) {
-    yk_mt_control_point(mt, loc);
-    if (i == 100000)
-      loc = &loc2;
-    else if (i == 2)
-      loc = &loc1;
+    yk_mt_control_point(mt, &loc);
+    if (i == 10) {
+      int j = 100000000;
+      while (j > 0) {
+        t++;
+        j--;
+      }
+    }
     NOOPT_VAL(i);
     i--;
   }
   printf("exit");
   NOOPT_VAL(i);
-  yk_location_drop(loc1);
-  yk_location_drop(loc2);
+  yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);
 }

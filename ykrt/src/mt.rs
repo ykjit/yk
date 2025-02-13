@@ -4,7 +4,7 @@ use std::{
     assert_matches::{assert_matches, debug_assert_matches},
     cell::RefCell,
     cmp,
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     env,
     error::Error,
     ffi::c_void,
@@ -454,6 +454,7 @@ impl MT {
                             promotions: Vec::new(),
                             debug_strs: Vec::new(),
                             frameaddr,
+                            seen_hls: HashSet::new(),
                         });
                     }),
                     Err(e) => {
@@ -491,6 +492,7 @@ impl MT {
                             promotions,
                             debug_strs,
                             frameaddr: tracing_frameaddr,
+                            seen_hls: _,
                         } => {
                             // If this assert fails then the code in `transition_control_point`,
                             // which rejects traces that end in another frame, didn't work.
@@ -531,6 +533,7 @@ impl MT {
                             promotions,
                             debug_strs,
                             frameaddr: tracing_frameaddr,
+                            seen_hls: _,
                         } => {
                             assert_eq!(frameaddr, tracing_frameaddr);
                             (hl, thread_tracer, promotions, debug_strs)
@@ -576,8 +579,9 @@ impl MT {
                         if let MTThreadState::Tracing {
                             frameaddr: tracing_frameaddr,
                             hl: tracing_hl,
+                            seen_hls,
                             ..
-                        } = mtt.peek_tstate()
+                        } = mtt.peek_mut_tstate()
                         {
                             if frameaddr != *tracing_frameaddr {
                                 // We're tracing but no longer in the frame we started in, so we
@@ -589,6 +593,14 @@ impl MT {
                                 lk.kind = HotLocationKind::Counting(0);
 
                                 return TransitionControlPoint::AbortTracing;
+                            }
+
+                            if let Some(x) =
+                                loc.hot_location().map(|x| x as *const Mutex<HotLocation>)
+                            {
+                                if !seen_hls.insert(x) {
+                                    return TransitionControlPoint::AbortTracing;
+                                }
                             }
                         }
                     }
@@ -642,7 +654,7 @@ impl MT {
                         HotLocationKind::Compiled(ref ctr) => {
                             if is_tracing {
                                 // This thread is tracing something, so bail out as quickly as possible
-                                TransitionControlPoint::NoAction
+                                TransitionControlPoint::AbortTracing
                             } else {
                                 TransitionControlPoint::Execute(Arc::clone(ctr))
                             }
@@ -741,7 +753,36 @@ impl MT {
                 }
                 None => {
                     if is_tracing {
-                        // This thread is tracing something, so bail out as quickly as possible
+                        let hl_ptr = match loc.inc_count() {
+                            Some(count) => {
+                                let hl = HotLocation {
+                                    kind: HotLocationKind::Counting(count),
+                                    tracecompilation_errors: 0,
+                                };
+                                loc.count_to_hot_location(count, hl)
+                                    .map(|x| Arc::as_ptr(&x))
+                            }
+                            None => loc.hot_location().map(|x| x as *const Mutex<HotLocation>),
+                        };
+                        if let Some(hl_ptr) = hl_ptr {
+                            let MTThreadState::Tracing {
+                                frameaddr: tracing_frameaddr,
+                                seen_hls,
+                                ..
+                            } = mtt.peek_mut_tstate()
+                            else {
+                                panic!()
+                            };
+                            if frameaddr != *tracing_frameaddr {
+                                // We're tracing but no longer in the frame we started in, so we
+                                // need to stop tracing and report the original [HotLocation] as
+                                // having failed to trace properly.
+                                return TransitionControlPoint::AbortTracing;
+                            }
+                            if !seen_hls.insert(hl_ptr) {
+                                return TransitionControlPoint::AbortTracing;
+                            }
+                        }
                         return TransitionControlPoint::NoAction;
                     }
                     match loc.inc_count() {
@@ -849,6 +890,7 @@ impl MT {
                             promotions: Vec::new(),
                             debug_strs: Vec::new(),
                             frameaddr,
+                            seen_hls: HashSet::new(),
                         })
                     }),
                     Err(e) => todo!("{e:?}"),
@@ -904,6 +946,15 @@ enum MTThreadState {
     Interpreting,
     /// This thread is recording a trace.
     Tracing {
+        /// Which [Location]s have we seen so far in this trace? If we see a [Location] twice
+        /// then we know we've got an undesirable trace (e.g. we started tracing an outer loop and
+        /// have started to unroll an inner loop).
+        ///
+        /// Tracking [Location]s directly is tricky as they have no inherent ID. To solve that, for
+        /// the time being we force every `Location` that we encounter in a trace to become a
+        /// [HotLocation] (with kind [HotLocationKind::Counting]) if it is not already. We can then
+        /// use the (unmoving) pointer to a [HotLocation]'s inner [Mutex] as an ID.
+        seen_hls: HashSet<*const Mutex<HotLocation>>,
         /// The [HotLocation] the trace will end at. For a top-level trace, this will be the same
         /// [HotLocation] the trace started at; for a side-trace, tracing started elsewhere.
         hl: Arc<Mutex<HotLocation>>,
@@ -1209,6 +1260,7 @@ mod tests {
                 promotions: Vec::new(),
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
+                seen_hls: HashSet::new(),
             });
         });
     }
@@ -1237,6 +1289,7 @@ mod tests {
                 promotions: Vec::new(),
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
+                seen_hls: HashSet::new(),
             });
         });
     }
@@ -1361,6 +1414,7 @@ mod tests {
                             promotions: Vec::new(),
                             debug_strs: Vec::new(),
                             frameaddr: ptr::null_mut(),
+                            seen_hls: HashSet::new(),
                         });
                     });
                     break;
@@ -1549,7 +1603,11 @@ mod tests {
             loc1.hot_location().unwrap().lock().kind,
             HotLocationKind::Tracing
         ));
-        assert_eq!(loc2.count(), Some(THRESHOLD));
+        assert_eq!(loc2.count(), None);
+        assert_matches!(
+            loc2.hot_location().unwrap().lock().kind,
+            HotLocationKind::Counting(6)
+        );
         expect_stop_tracing(&mt, &loc1);
         assert!(matches!(
             loc1.hot_location().unwrap().lock().kind,
@@ -1592,6 +1650,7 @@ mod tests {
                                     promotions: Vec::new(),
                                     debug_strs: Vec::new(),
                                     frameaddr: ptr::null_mut(),
+                                    seen_hls: HashSet::new(),
                                 });
                             });
                             assert!(matches!(
@@ -1768,7 +1827,7 @@ mod tests {
     }
 
     #[test]
-    fn dont_trace_execution_of_a_trace() {
+    fn traces_can_be_executed_during_tracing() {
         let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(0);
         let loc1 = Location::new();
@@ -1780,23 +1839,16 @@ mod tests {
         loc1.hot_location().unwrap().lock().kind =
             HotLocationKind::Compiled(Arc::new(CompiledTraceTestingMinimal::new()));
 
-        // If we transition `loc2` into `StartTracing`, then (for now) we should not execute the
-        // trace for `loc1`, as another location is being traced and we don't want to trace the
-        // execution of the trace!
-        //
-        // FIXME: this behaviour will need to change in the future:
-        // https://github.com/ykjit/yk/issues/519
         expect_start_tracing(&mt, &loc2);
-        assert!(matches!(
+        assert_matches!(
             mt.transition_control_point(&loc1, ptr::null_mut()),
-            TransitionControlPoint::NoAction
-        ));
+            TransitionControlPoint::AbortTracing
+        );
 
-        // But once we stop tracing for `loc2`, we should be able to execute the trace for `loc1`.
         expect_stop_tracing(&mt, &loc2);
-        assert!(matches!(
+        assert_matches!(
             mt.transition_control_point(&loc1, ptr::null_mut()),
             TransitionControlPoint::Execute(_)
-        ));
+        );
     }
 }
