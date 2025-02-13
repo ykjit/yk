@@ -267,9 +267,18 @@ pub(crate) extern "C" fn __yk_deopt(
                                 unsafe { rbp.offset(isize::from(*extra)) }
                             };
                             match size {
-                                8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
-                                4 => unsafe { ptr::write::<u32>(temp as *mut u32, jitval as u32) },
+                                1 => unsafe { ptr::write::<u16>(temp as *mut u16, jitval as u16) },
                                 2 => unsafe { ptr::write::<u16>(temp as *mut u16, jitval as u16) },
+                                4 => unsafe { ptr::write::<u32>(temp as *mut u32, jitval as u32) },
+                                8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
+                                16 => {
+                                    // FIXME: This case is clearly not safe in general: it just so
+                                    // happens to work because it the moment the biggest value we
+                                    // handle is 64 bits (be that a pointer, u64, or double). If
+                                    // and when we support values bigger than 64 bits, this line
+                                    // will lead to weird problems.
+                                    unsafe { ptr::write::<u64>(temp as *mut u64, jitval) };
+                                }
                                 _ => todo!("{}", size),
                             }
                         }
