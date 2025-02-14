@@ -186,11 +186,16 @@ impl VarLocation {
             },
             yksmp::Location::Constant(v) => {
                 let bitw = m.inst(iidx).def_bitw(m);
-                assert!(bitw <= 64);
+                assert!(bitw <= 32);
                 VarLocation::ConstInt {
                     bits: bitw,
                     v: u64::from(*v),
                 }
+            }
+            yksmp::Location::LargeConstant(v) => {
+                let bitw = m.inst(iidx).def_bitw(m);
+                assert!(bitw <= 64);
+                VarLocation::ConstInt { bits: bitw, v: *v }
             }
             e => {
                 todo!("{:?}", e);
@@ -259,6 +264,8 @@ impl From<&VarLocation> for yksmp::Location {
             VarLocation::ConstInt { bits, v } => {
                 if *bits <= 32 {
                     yksmp::Location::Constant(u32::try_from(*v).unwrap())
+                } else if *bits <= 64 {
+                    yksmp::Location::LargeConstant(*v)
                 } else {
                     todo!(">32 bit constant")
                 }
