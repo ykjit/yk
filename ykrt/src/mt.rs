@@ -50,7 +50,7 @@ pub type AtomicTraceCompilationErrorThreshold = AtomicU16;
 /// reasonable performance.
 /// FIXME: needs to be configurable.
 pub(crate) const DEFAULT_TRACE_TOO_LONG: usize = 20000;
-const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
+const DEFAULT_HOT_THRESHOLD: HotThreshold = 131;
 const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 /// How often can a [HotLocation] or [Guard] lead to an error in tracing or compilation before we
 /// give up trying to trace (or compile...) it?
