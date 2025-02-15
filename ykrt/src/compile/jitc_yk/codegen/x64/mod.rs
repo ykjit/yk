@@ -3105,6 +3105,10 @@ mod tests {
             Regex::new(r"\{\{_}\}").unwrap()
         };
 
+        static ref FP_REG_IGNORE_RE: Regex = {
+            Regex::new(r"fp\.128\._").unwrap()
+        };
+
         static ref FP_REG_NAME_RE: Regex = {
             Regex::new(r"fp\.128\.[0-9a-z]+").unwrap()
         };
@@ -3151,6 +3155,7 @@ mod tests {
             })
             .name_matcher_ignore(PTN_RE_IGNORE.clone(), TEXT_RE.clone())
             .name_matcher(PTN_RE.clone(), TEXT_RE.clone())
+            .name_matcher_ignore(FP_REG_IGNORE_RE.clone(), FP_REG_TEXT_RE.clone())
             .name_matcher(FP_REG_NAME_RE.clone(), FP_REG_TEXT_RE.clone());
 
         for (class_name, regs) in X64_REGS {
@@ -3189,6 +3194,12 @@ mod tests {
         let fmm = fmatcher("fp.128.x fp.128.y fp.128.x");
         assert!(fmm.matches("xmm0 xmm1 xmm0").is_ok());
         assert!(fmm.matches("xmm0 xmm0 xmm0").is_err());
+
+        let fmm = fmatcher("fp.128.x fp.128.y fp.128._");
+        assert!(fmm.matches("xmm0 xmm1 xmm0").is_ok());
+        assert!(fmm.matches("xmm0 xmm0 xmm0").is_err());
+        assert!(fmm.matches("xmm0 xmm1 xmm2").is_ok());
+        assert!(fmm.matches("xmm0 xmm1 xmm0").is_ok());
     }
 
     fn test_module() -> jit_ir::Module {
