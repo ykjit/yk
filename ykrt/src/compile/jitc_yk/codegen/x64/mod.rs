@@ -1634,6 +1634,11 @@ impl<'a> Assemble<'a> {
                 self.cg_floor(iidx, op);
                 Ok(())
             }
+            x if x.starts_with("llvm.memcpy") => {
+                let [dst, src, len, is_volatile] = args.try_into().unwrap();
+                self.cg_memcpy(iidx, dst, src, len, is_volatile);
+                Ok(())
+            }
             x if x.starts_with("llvm.smax") => {
                 let [lhs_op, rhs_op] = args.try_into().unwrap();
                 self.cg_smax(iidx, lhs_op, rhs_op);
@@ -1855,6 +1860,41 @@ impl<'a> Assemble<'a> {
             }
             Ty::Unimplemented(_) => todo!(),
         }
+    }
+
+    fn cg_memcpy(
+        &mut self,
+        iidx: InstIdx,
+        dst_op: Operand,
+        src_op: Operand,
+        len_op: Operand,
+        _is_volatile_op: Operand,
+    ) {
+        let [_, _, _] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [
+                GPConstraint::Input {
+                    op: dst_op.clone(),
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: Some(Rq::RDI),
+                    clobber_reg: true,
+                },
+                GPConstraint::Input {
+                    op: src_op.clone(),
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: Some(Rq::RSI),
+                    clobber_reg: true,
+                },
+                GPConstraint::Input {
+                    op: len_op.clone(),
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: Some(Rq::RCX),
+                    clobber_reg: true,
+                },
+            ],
+        );
+        dynasm!(self.asm; rep movsb);
     }
 
     fn cg_smax(&mut self, iidx: InstIdx, lhs: Operand, rhs: Operand) {
@@ -4259,6 +4299,28 @@ mod tests {
                ...
                ; %1: double = call @llvm.floor.f64(%0)
                roundsd fp.128._, fp.128._, 0x01
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_memcpy() {
+        codegen_and_test(
+            "
+             func_decl llvm.memcpy.p0.p0.i64 (ptr, ptr, i64, i1)
+             entry:
+               %0: ptr = param 0
+               %1: ptr = param 1
+               %2: i64 = param 2
+               call @llvm.memcpy.p0.p0.i64(%0, %1, %2, 0i1)
+            ",
+            "
+               ...
+               ; call @llvm.memcpy.p0.p0.i64(%0, %1, %2, 0i1)
+               mov rcx, r.64._
+               mov rdi, r.64._
+               rep movsb
             ",
             false,
         );
