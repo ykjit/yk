@@ -1629,6 +1629,11 @@ impl<'a> Assemble<'a> {
                 self.cg_ctpop(iidx, op);
                 Ok(())
             }
+            x if x.starts_with("llvm.floor") => {
+                let [op] = args.try_into().unwrap();
+                self.cg_floor(iidx, op);
+                Ok(())
+            }
             x if x.starts_with("llvm.smax") => {
                 let [lhs_op, rhs_op] = args.try_into().unwrap();
                 self.cg_smax(iidx, lhs_op, rhs_op);
@@ -1827,6 +1832,29 @@ impl<'a> Assemble<'a> {
         );
         assert!(bitw > 1 && bitw <= 64);
         dynasm!(self.asm; popcnt Rq(out_reg.code()), Rq(in_reg.code()));
+    }
+
+    fn cg_floor(&mut self, iidx: InstIdx, op: Operand) {
+        match self.m.type_(op.tyidx(self.m)) {
+            Ty::Void => todo!(),
+            Ty::Integer(_) => todo!(),
+            Ty::Ptr => todo!(),
+            Ty::Func(_) => todo!(),
+            Ty::Float(fty) => {
+                let [in_reg, out_reg] = self.ra.assign_fp_regs(
+                    &mut self.asm,
+                    iidx,
+                    [RegConstraint::Input(op.clone()), RegConstraint::Output],
+                );
+                match fty {
+                    FloatTy::Float => todo!(),
+                    FloatTy::Double => {
+                        dynasm!(self.asm; roundsd Rx(out_reg.code()), Rx(in_reg.code()), 1)
+                    }
+                }
+            }
+            Ty::Unimplemented(_) => todo!(),
+        }
     }
 
     fn cg_smax(&mut self, iidx: InstIdx, lhs: Operand, rhs: Operand) {
@@ -2163,17 +2191,18 @@ impl<'a> Assemble<'a> {
             jit_ir::FloatPredicate::OrderedGreater | jit_ir::FloatPredicate::UnorderedGreater => {
                 dynasm!(self.asm; seta Rb(tgt_reg.code()))
             }
-            jit_ir::FloatPredicate::OrderedGreaterEqual => {
+            jit_ir::FloatPredicate::OrderedGreaterEqual
+            | jit_ir::FloatPredicate::UnorderedGreaterEqual => {
                 dynasm!(self.asm; setae Rb(tgt_reg.code()))
             }
-            jit_ir::FloatPredicate::OrderedLess => dynasm!(self.asm; setb Rb(tgt_reg.code())),
+            jit_ir::FloatPredicate::OrderedLess | jit_ir::FloatPredicate::UnorderedLess => {
+                dynasm!(self.asm; setb Rb(tgt_reg.code()))
+            }
             jit_ir::FloatPredicate::OrderedLessEqual => dynasm!(self.asm; setbe Rb(tgt_reg.code())),
             jit_ir::FloatPredicate::False
             | jit_ir::FloatPredicate::OrderedNotEqual
             | jit_ir::FloatPredicate::Ordered
             | jit_ir::FloatPredicate::Unordered
-            | jit_ir::FloatPredicate::UnorderedGreaterEqual
-            | jit_ir::FloatPredicate::UnorderedLess
             | jit_ir::FloatPredicate::UnorderedLessEqual
             | jit_ir::FloatPredicate::True => todo!("{}", pred),
         }
@@ -4217,6 +4246,25 @@ mod tests {
     }
 
     #[test]
+    fn cg_call_floor() {
+        codegen_and_test(
+            "
+             func_decl llvm.floor.f64 (double) -> double
+             entry:
+               %0: double = param 0
+               %1: double = call @llvm.floor.f64(%0)
+               black_box %1
+            ",
+            "
+               ...
+               ; %1: double = call @llvm.floor.f64(%0)
+               roundsd fp.128._, fp.128._, 0x01
+            ",
+            false,
+        );
+    }
+
+    #[test]
     fn cg_call_smax() {
         codegen_and_test(
             "
@@ -5006,8 +5054,12 @@ mod tests {
                 %1: float = param 1
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
+                %4: i1 = f_uge %0, %1
+                %5: i1 = f_ult %0, %1
                 black_box %2
                 black_box %3
+                black_box %4
+                black_box %5
             ",
             "
                 ...
@@ -5021,7 +5073,16 @@ mod tests {
                 setnbe r.8._
                 setnp r.8._
                 and r.8._, r.8._
-                ...
+                ; %4: i1 = f_uge %0, %1
+                ucomiss fp.128.x, fp.128.y
+                setnb r.8._
+                setnp r.8._
+                and r.8._, r.8._
+                ; %5: i1 = f_ult %0, %1
+                ucomiss fp.128.x, fp.128.y
+                setb r.8._
+                setnp r.8._
+                and r.8._, r.8._
                 ",
             false,
         );
