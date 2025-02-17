@@ -27,6 +27,9 @@ pub(crate) struct TraceBuilder<Register: Send + Sync> {
     /// Index of the first [ParameterInst].
     first_paraminst_idx: usize,
     /// Inlined calls.
+    ///
+    /// For a valid trace, this always contains at least one element, otherwise the trace returned
+    /// out of the function that started tracing, which is problematic.
     frames: Vec<InlinedFrame>,
     /// The block at which to stop outlining.
     outline_target_blk: Option<BBlockId>,
@@ -69,8 +72,8 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             local_map: HashMap::new(),
             cp_block: None,
             first_paraminst_idx: 0,
-            // We have to set the funcidx to None here as we don't know what it is yet. We'll
-            // update it as soon as we do.
+            // We have to insert a placeholder frame to represent the place we started tracing, as
+            // we don't know where that is yet. We'll update it as soon as we do.
             frames: vec![InlinedFrame {
                 funcidx: None,
                 callinst: None,
@@ -189,6 +192,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         prevbb: &Option<aot_ir::BBlockId>,
         nextbb: Option<aot_ir::BBlockId>,
     ) -> Result<(), CompilationError> {
+        // We have already checked this (and aborted building the trace) at the time we encountered
+        // an `Inst::Ret` that would make the frame stack empty.
+        assert!(!self.frames.is_empty());
+
         // unwrap safe: can't trace a block not in the AOT module.
         let blk = self.aot_mod.bblock(bid);
 
@@ -621,12 +628,18 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         // If this `unwrap` fails, it means that early return detection in `mt.rs` is not working
         // as expected.
         let frame = self.frames.pop().unwrap();
-        // FIXME: Map return value to AOT call instruction.
-        if let Some(val) = val {
-            let op = self.handle_operand(val)?;
-            self.local_map.insert(frame.callinst.unwrap(), op);
+        if !self.frames.is_empty() {
+            if let Some(val) = val {
+                let op = self.handle_operand(val)?;
+                self.local_map.insert(frame.callinst.unwrap(), op);
+            }
+            Ok(())
+        } else {
+            // We've returned out of the function that started tracing, which isn't allowed.
+            Err(CompilationError::General(
+                "returned from function that started tracing".into(),
+            ))
         }
-        Ok(())
     }
 
     /// Translate a `ICmp` instruction.

@@ -1,5 +1,6 @@
 //! The Intermediate Representation (IR) of a trace.
 //!
+//!
 //! ## General SSA properties
 //!
 //! The most important part of the IR is the
@@ -730,10 +731,10 @@ impl GlobalDecl {
 ///  * `*_SHIFT`: the number of bits required to left shift a field's value into position (from the
 ///    LSB).
 ///
-const OPERAND_IDX_MASK: u16 = 0x7fff;
+const OPERAND_IDX_MASK: u32 = (1 << 23) - 1;
 
-/// The largest operand index we can express in 15 bits.
-const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
+/// The largest operand index we can express in 23 bits.
+const MAX_OPERAND_IDX: u32 = (1 << 23) - 1;
 
 /// The symbol name of the global variable pointers array.
 #[cfg(not(test))]
@@ -855,6 +856,63 @@ macro_rules! index_16bit {
     };
 }
 
+// Generate common methods for 32-bit index types.
+macro_rules! index_32bit {
+    ($struct:ident) => {
+        #[allow(dead_code)]
+        impl $struct {
+            /// What is the maximum value this index type can represent?
+            pub(crate) fn max() -> Self {
+                Self(u32::MAX)
+            }
+
+            /// Create an instance of `$struct` without checking whether `v` exceeds the underlying
+            /// type's bounds. If it does exceed those bounds, the result will be an instance of
+            /// this struct whose values is the `MAX` value the underlying type can represent.
+            pub(crate) fn unchecked_from(v: usize) -> Self {
+                debug_assert!(v <= usize::try_from(u32::MAX).unwrap());
+                Self(v as u32)
+            }
+
+            pub(crate) fn checked_add(&self, other: usize) -> Result<Self, CompilationError> {
+                Self::try_from(usize::try_from(self.0).unwrap() + other)
+            }
+
+            pub(crate) fn checked_sub(&self, other: usize) -> Result<Self, CompilationError> {
+                Self::try_from(usize::try_from(self.0).unwrap() - other)
+            }
+        }
+
+        impl From<$struct> for u32 {
+            fn from(s: $struct) -> u32 {
+                s.0
+            }
+        }
+
+        impl From<$struct> for usize {
+            fn from(s: $struct) -> usize {
+                s.0.try_into().unwrap()
+            }
+        }
+
+        impl TryFrom<usize> for $struct {
+            type Error = CompilationError;
+
+            fn try_from(v: usize) -> Result<Self, Self::Error> {
+                u32::try_from(v)
+                    .map_err(|_| index_overflow(stringify!($struct)))
+                    .map(|u| Self(u))
+            }
+        }
+
+        impl fmt::Display for $struct {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
 /// A function declaration index.
 ///
 /// One of these is an index into the [Module::func_decls].
@@ -881,8 +939,8 @@ index_16bit!(ArgsIdx);
 ///
 /// One of these is an index into the [Module::consts].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
-pub(crate) struct ConstIdx(u16);
-index_16bit!(ConstIdx);
+pub(crate) struct ConstIdx(u32);
+index_32bit!(ConstIdx);
 
 /// A guard info index.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -901,8 +959,8 @@ index_24bit!(IndirectCallIdx);
 
 /// An index into [Module::insts].
 #[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) struct InstIdx(u16);
-index_16bit!(InstIdx);
+pub(crate) struct InstIdx(u32);
+index_32bit!(InstIdx);
 
 /// An index into [Module::params].
 #[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -1108,19 +1166,19 @@ pub(crate) struct PackedOperand(
     ///  - `k=1`: `index` is a constant index
     ///
     ///  The IR can represent 2^{15} = 32768 locals, and as many constants.
-    u16,
+    u32,
 );
 
 impl PackedOperand {
     pub fn new(op: &Operand) -> Self {
         match op {
             Operand::Var(lidx) => {
-                debug_assert!(u16::from(*lidx) <= MAX_OPERAND_IDX);
-                PackedOperand(u16::from(*lidx))
+                debug_assert!(u32::from(*lidx) <= MAX_OPERAND_IDX);
+                PackedOperand(u32::from(*lidx))
             }
             Operand::Const(constidx) => {
-                debug_assert!(u16::from(*constidx) <= MAX_OPERAND_IDX);
-                PackedOperand(u16::from(*constidx) | !OPERAND_IDX_MASK)
+                debug_assert!(u32::from(*constidx) <= MAX_OPERAND_IDX);
+                PackedOperand(u32::from(*constidx) | !OPERAND_IDX_MASK)
             }
         }
     }
@@ -3147,10 +3205,10 @@ mod tests {
         .into();
     }
 
-    /// Ensure that any given instruction fits in 64-bits.
+    /// Ensure that any given instruction fits in 128-bits.
     #[test]
     fn inst_size() {
-        assert!(mem::size_of::<Inst>() <= mem::size_of::<u64>());
+        assert!(mem::size_of::<Inst>() <= 2 * mem::size_of::<u64>());
     }
 
     #[test]

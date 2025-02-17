@@ -30,7 +30,7 @@
 use super::{rev_analyse::RevAnalyse, Register, VarLocation};
 use crate::compile::jitc_yk::{
     codegen::abs_stack::AbstractStack,
-    jit_ir::{Const, ConstIdx, FloatTy, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
+    jit_ir::{Const, ConstIdx, FloatTy, GuardInst, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
 };
 use dynasmrt::{
     dynasm,
@@ -39,7 +39,7 @@ use dynasmrt::{
     },
     DynasmApi, Register as dynasmrtRegister,
 };
-use std::{marker::PhantomData, mem};
+use std::{assert_matches::assert_matches, marker::PhantomData, mem};
 
 /// The complete set of general purpose x64 registers, in the order that dynasmrt defines them.
 /// Note that large portions of the code rely on these registers mapping to the integers 0..15
@@ -197,14 +197,14 @@ impl<'a> LSRegAlloc<'a> {
                 RegState::Empty => {
                     debug_assert!(!self.gp_regset.is_set(reg));
                 }
-                RegState::FromConst(_) => {
+                RegState::FromConst(_, _) => {
                     debug_assert!(self.gp_regset.is_set(reg));
                     // FIXME: Don't immediately expire constants
                     self.gp_regset.unset(reg);
                     self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
                 }
-                RegState::FromInst(reg_iidx) => {
-                    debug_assert!(self.gp_regset.is_set(reg));
+                RegState::FromInst(reg_iidx, _) => {
+                    assert!(self.gp_regset.is_set(reg));
                     if !self.rev_an.is_inst_var_still_used_at(iidx, reg_iidx) {
                         self.gp_regset.unset(reg);
                         *self.gp_reg_states.get_mut(usize::from(reg.code())).unwrap() =
@@ -222,13 +222,13 @@ impl<'a> LSRegAlloc<'a> {
                 RegState::Empty => {
                     debug_assert!(!self.fp_regset.is_set(reg));
                 }
-                RegState::FromConst(_) => {
+                RegState::FromConst(_, _) => {
                     debug_assert!(self.fp_regset.is_set(reg));
                     // FIXME: Don't immediately expire constants
                     self.fp_regset.unset(reg);
                     self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
                 }
-                RegState::FromInst(reg_iidx) => {
+                RegState::FromInst(reg_iidx, _) => {
                     debug_assert!(self.fp_regset.is_set(reg));
                     if !self.rev_an.is_inst_var_still_used_at(iidx, reg_iidx) {
                         self.fp_regset.unset(reg);
@@ -262,13 +262,45 @@ impl<'a> LSRegAlloc<'a> {
         &mut self,
         asm: &mut Assembler,
         iidx: InstIdx,
-        gp_constraints: [RegConstraint<Rq>; NG],
+        gp_constraints: [GPConstraint; NG],
         fp_constraints: [RegConstraint<Rx>; NF],
     ) -> ([Rq; NG], [Rx; NF]) {
         (
             self.assign_gp_regs(asm, iidx, gp_constraints),
             self.assign_fp_regs(asm, iidx, fp_constraints),
         )
+    }
+
+    /// Return a [GuardSnapshot] for the guard `ginst`. This should be called when generating code
+    /// for a guard: it returns the information the register allocator will later need to perform
+    /// its part in generating correct code for this guard's failure in
+    /// [Self::get_ready_for_deopt].
+    pub(super) fn guard_snapshot(&self, ginst: &GuardInst) -> GuardSnapshot {
+        let gi = ginst.guard_info(self.m);
+        let mut regs_to_zero_ext = Vec::new();
+        for op in gi.live_vars().iter().map(|(_, pop)| pop.unpack(self.m)) {
+            if let Operand::Var(op_iidx) = op {
+                if let Some(reg) = self.find_op_in_gp_reg(&op) {
+                    let RegState::FromInst(_, ext) = self.gp_reg_states[usize::from(reg.code())]
+                    else {
+                        panic!()
+                    };
+                    if ext != RegExtension::ZeroExtended {
+                        regs_to_zero_ext.push((reg, self.m.inst(op_iidx).def_bitw(self.m)));
+                    }
+                }
+            }
+        }
+        GuardSnapshot { regs_to_zero_ext }
+    }
+
+    /// When generating the code for a guard failure, do the necessary work from the register
+    /// allocator's perspective (e.g. ensuring registers have an appropriate [RegExtension]) for
+    /// deopt to occur.
+    pub(super) fn get_ready_for_deopt(&self, asm: &mut Assembler, gsnap: &GuardSnapshot) {
+        for (reg, bitw) in &gsnap.regs_to_zero_ext {
+            self.force_zero_extend_to_reg64(asm, *reg, *bitw);
+        }
     }
 }
 
@@ -283,7 +315,8 @@ impl LSRegAlloc<'_> {
             self.force_assign_and_spill_inst_gp_reg(asm, iidx, reg);
         } else {
             self.gp_regset.set(reg);
-            self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+            self.gp_reg_states[usize::from(reg.code())] =
+                RegState::FromInst(iidx, RegExtension::Undefined);
         }
     }
 
@@ -297,16 +330,21 @@ impl LSRegAlloc<'_> {
     ) {
         debug_assert_eq!(self.spills[usize::from(iidx)], SpillState::Empty);
         let inst = self.m.inst(iidx);
-        let size = inst.def_byte_size(self.m);
-        self.stack.align(size); // FIXME
-        let frame_off = self.stack.grow(size);
+        let bytew = inst.def_byte_size(self.m);
+        self.stack.align(bytew); // FIXME
+        let frame_off = self.stack.grow(bytew);
         let off = i32::try_from(frame_off).unwrap();
-        match size {
-            1 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
-            2 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
-            4 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
-            8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
-            _ => unreachable!(),
+        match inst.def_bitw(self.m) {
+            1 => {
+                assert_matches!(self.gp_reg_states[usize::from(reg.code())], RegState::Empty);
+                self.force_zero_extend_to_reg64(asm, reg, 1);
+                dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code()));
+            }
+            8 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
+            16 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
+            32 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
+            64 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
+            x => todo!("{x}"),
         }
         self.spills[usize::from(iidx)] = SpillState::Stack(off);
     }
@@ -316,7 +354,8 @@ impl LSRegAlloc<'_> {
     pub(crate) fn force_assign_inst_fp_reg(&mut self, iidx: InstIdx, reg: Rx) {
         debug_assert!(!self.fp_regset.is_set(reg));
         self.fp_regset.set(reg);
-        self.fp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+        self.fp_reg_states[usize::from(reg.code())] =
+            RegState::FromInst(iidx, RegExtension::Undefined);
     }
 
     /// Forcibly assign the value produced by instruction `iidx` to `Direct` `frame_off`.
@@ -337,40 +376,6 @@ impl LSRegAlloc<'_> {
         self.spills[usize::from(iidx)] = SpillState::ConstInt { bits, v };
     }
 
-    /// Assign registers for the instruction `iidx`, which consumes the [Operand] `op` but does not
-    /// change its value. In many cases, the register allocator can avoid generating any code for
-    /// this case at all.
-    pub(crate) fn assign_gp_pass_through(
-        &mut self,
-        asm: &mut Assembler,
-        iidx: InstIdx,
-        op: Operand,
-    ) {
-        match op {
-            Operand::Var(op_iidx) => {
-                match self.gp_reg_states.iter().position(|x| {
-                    if let RegState::FromInst(y) = x {
-                        *y == op_iidx
-                    } else {
-                        false
-                    }
-                }) {
-                    Some(reg_i) => {
-                        if self.rev_an.is_inst_var_still_used_after(iidx, op_iidx) {
-                            let mut avoid = RegSet::with_gp_reserved();
-                            self.move_or_spill_gp(asm, iidx, &mut avoid, GP_REGS[reg_i]);
-                        }
-                        self.gp_reg_states[reg_i] = RegState::FromInst(iidx);
-                    }
-                    None => {
-                        self.spills[usize::from(iidx)] = self.spills[usize::from(op_iidx)];
-                    }
-                }
-            }
-            Operand::Const(_cidx) => todo!(),
-        }
-    }
-
     /// Assign general purpose registers for the instruction at position `iidx`.
     ///
     /// This is a convenience function for [Self::assign_regs] when there are no FP registers.
@@ -378,114 +383,90 @@ impl LSRegAlloc<'_> {
         &mut self,
         asm: &mut Assembler,
         iidx: InstIdx,
-        mut constraints: [RegConstraint<Rq>; N],
+        mut constraints: [GPConstraint; N],
     ) -> [Rq; N] {
-        // No constraint operands should be float-typed.
-        #[cfg(debug_assertions)]
-        for c in &constraints {
-            if let Some(o) = c.operand() {
-                debug_assert!(!matches!(self.m.type_(o.tyidx(self.m)), Ty::Float(_)));
-            }
-        }
+        // Register assignment is split into two stages:
+        //   1. Find a register for each `GPConstraint`. During this phase, no changes to state in
+        //      `self` must be made.
+        //   2. Move values out of, and into, registers and update `self`.
 
-        // There must be at most 1 output register.
-        debug_assert!(
+        // No constraint operands should be float-typed.
+        assert_eq!(
             constraints
                 .iter()
                 .filter(|x| match x {
-                    RegConstraint::Input(_)
-                    | RegConstraint::InputIntoReg(_, _)
-                    | RegConstraint::InputIntoRegAndClobber(_, _) => false,
-                    RegConstraint::InputOutputIntoReg(_, _)
-                    | RegConstraint::Output
-                    | RegConstraint::OutputCanBeSameAsInput(_)
-                    | RegConstraint::OutputFromReg(_)
-                    | RegConstraint::InputOutput(_) => true,
-                    RegConstraint::Clobber(_) | RegConstraint::Temporary | RegConstraint::None =>
-                        false,
+                    GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } =>
+                        matches!(self.m.type_(op.tyidx(self.m)), Ty::Float(_)),
+                    GPConstraint::Output { .. }
+                    | GPConstraint::Clobber { .. }
+                    | GPConstraint::Temporary
+                    | GPConstraint::None => false,
+                })
+                .count(),
+            0
+        );
+
+        // There must be at most 1 output register.
+        assert!(
+            constraints
+                .iter()
+                .filter(|x| match x {
+                    GPConstraint::InputOutput { .. } | GPConstraint::Output { .. } => true,
+                    GPConstraint::Input { .. }
+                    | GPConstraint::Clobber { .. }
+                    | GPConstraint::Temporary
+                    | GPConstraint::None => false,
                 })
                 .count()
                 <= 1
         );
 
-        let mut avoid = RegSet::with_gp_reserved();
+        // Stage 1: Find a register for each `GPConstraint`. During this phase, no changes to state
+        // in `self` must be made. This stage is split into sub-stages:
+        //   a. Use `force_reg`s, where specified.
+        //   b. Deal with register hints and `can_be_same_as_input`
 
-        // For each constraint, we will find a register to assign it to.
-        let mut asgn = [None; N];
+        // The register we are assigning to each constraint.
+        let mut cnstr_regs = [None; N];
+        // The registers we have assigned so far. This is a strict superset of the registers
+        // contained in `cnstr_regs` because there are some registers we cannot assign under any
+        // circumstances.
+        let mut asgn_regs = RegSet::with_gp_reserved();
 
         // Where the caller has told us they want to put things in specific registers, we need to
-        // make sure we avoid assigning those in all other circumstances.
+        // make sure we avoid assigning those in all other circumstances. Note: any given register
+        // can appear in at most one `force_reg`.
         for (i, cnstr) in constraints.iter().enumerate() {
             match cnstr {
-                RegConstraint::InputIntoReg(_, reg) => {
-                    asgn[i] = Some(*reg);
-                    avoid.set(*reg);
+                GPConstraint::Input { force_reg, .. }
+                | GPConstraint::InputOutput { force_reg, .. }
+                | GPConstraint::Output { force_reg, .. } => {
+                    if let Some(reg) = force_reg {
+                        assert!(!asgn_regs.is_set(*reg));
+                        cnstr_regs[i] = Some(*reg);
+                        asgn_regs.set(*reg);
+                    }
                 }
-                RegConstraint::InputIntoRegAndClobber(_, reg)
-                | RegConstraint::InputOutputIntoReg(_, reg)
-                | RegConstraint::OutputFromReg(reg)
-                | RegConstraint::Clobber(reg) => {
-                    asgn[i] = Some(*reg);
-                    avoid.set(*reg);
+                GPConstraint::Clobber { force_reg } => {
+                    assert!(!asgn_regs.is_set(*force_reg));
+                    cnstr_regs[i] = Some(*force_reg);
+                    asgn_regs.set(*force_reg);
                 }
-                RegConstraint::InputOutput(_)
-                | RegConstraint::Output
-                | RegConstraint::OutputCanBeSameAsInput(_)
-                | RegConstraint::Input(_)
-                | RegConstraint::Temporary
-                | RegConstraint::None => {}
+                GPConstraint::Temporary | GPConstraint::None => (),
             }
         }
 
-        // Deal with `OutputCanBeSameAsInput`.
-        for i in 0..constraints.len() {
-            if let RegConstraint::OutputCanBeSameAsInput(search_op) = constraints[i].clone() {
-                if let Some(Register::GP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
-                    if avoid.is_set(reg) {
-                        continue;
-                    }
-                    if let Operand::Var(search_op_iidx) = search_op {
-                        if !self
-                            .rev_an
-                            .is_inst_var_still_used_after(iidx, search_op_iidx)
-                        {
-                            for j in 0..constraints.len() {
-                                if let RegConstraint::Input(in_op) = constraints[j].clone() {
-                                    if search_op == in_op {
-                                        constraints[i] = RegConstraint::OutputFromReg(reg);
-                                        constraints[j] = RegConstraint::InputIntoReg(in_op, reg);
-                                        asgn[i] = Some(reg);
-                                        asgn[j] = Some(reg);
-                                        avoid.set(reg);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // If we have a hint for a constraint, use it.
+        // If we have a hint for an output constraint, use it.
         for (i, cnstr) in constraints.iter_mut().enumerate() {
+            if cnstr_regs[i].is_some() {
+                continue;
+            }
             match cnstr {
-                RegConstraint::Output
-                | RegConstraint::OutputCanBeSameAsInput(_)
-                | RegConstraint::InputOutput(_) => {
+                GPConstraint::Output { .. } | GPConstraint::InputOutput { .. } => {
                     if let Some(Register::GP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
-                        if !avoid.is_set(reg) {
-                            *cnstr = match cnstr {
-                                RegConstraint::Output => RegConstraint::OutputFromReg(reg),
-                                RegConstraint::OutputCanBeSameAsInput(_) => {
-                                    RegConstraint::OutputFromReg(reg)
-                                }
-                                RegConstraint::InputOutput(op) => {
-                                    RegConstraint::InputOutputIntoReg(op.clone(), reg)
-                                }
-                                _ => unreachable!(),
-                            };
-                            asgn[i] = Some(reg);
-                            avoid.set(reg);
+                        if !asgn_regs.is_set(reg) {
+                            cnstr_regs[i] = Some(reg);
+                            asgn_regs.set(reg);
                         }
                     }
                 }
@@ -493,55 +474,47 @@ impl LSRegAlloc<'_> {
             }
         }
 
-        // If we already have the value in a register, don't assign a new register.
+        // If we already have the input operand in a register, don't assign a new register. Note:
+        // multiple `Input` constraints might reference the same operand, so we may "reuse" the
+        // same register multiple times. Because of that we can't update `avoid` straight away: we
+        // do it in one go once we've processed all the input operands.
+        let mut input_regs = RegSet::blank();
         for (i, cnstr) in constraints.iter().enumerate() {
-            match cnstr {
-                RegConstraint::Input(op) | RegConstraint::InputOutput(op) => match op {
-                    Operand::Var(op_iidx) => {
-                        if let Some(reg_i) = self.gp_reg_states.iter().position(|x| {
-                            if let RegState::FromInst(y) = x {
-                                y == op_iidx
-                            } else {
-                                false
-                            }
-                        }) {
-                            let reg = GP_REGS[reg_i];
-                            if !avoid.is_set(reg) {
-                                debug_assert!(self.gp_regset.is_set(reg));
-                                match cnstr {
-                                    RegConstraint::Input(_) => asgn[i] = Some(reg),
-                                    RegConstraint::InputOutput(_) => asgn[i] = Some(reg),
-                                    _ => unreachable!(),
-                                }
-                                avoid.set(reg);
-                            }
-                        }
-                    }
-                    Operand::Const(_cidx) => (),
-                },
-                RegConstraint::InputIntoReg(_, _)
-                | RegConstraint::InputOutputIntoReg(_, _)
-                | RegConstraint::InputIntoRegAndClobber(_, _)
-                | RegConstraint::Clobber(_) => {
-                    // These were all handled in the first for loop.
-                }
-                RegConstraint::Output
-                | RegConstraint::OutputCanBeSameAsInput(_)
-                | RegConstraint::OutputFromReg(_)
-                | RegConstraint::Temporary => (),
-                RegConstraint::None => {
-                    asgn[i] = Some(GP_REGS[0]);
-                }
-            }
-        }
-
-        // Assign a register for all unassigned constraints.
-        for (i, _) in constraints.iter().enumerate() {
-            if asgn[i].is_some() {
+            if cnstr_regs[i].is_some() {
                 // We've already allocated this constraint.
                 continue;
             }
-            let reg = match self.gp_regset.find_empty_avoiding(avoid) {
+            match cnstr {
+                GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } => {
+                    if let Some(reg) = self.find_op_in_gp_reg(op) {
+                        if !asgn_regs.is_set(reg) {
+                            assert!(self.gp_regset.is_set(reg));
+                            input_regs.set(reg);
+                            cnstr_regs[i] = Some(reg);
+                        }
+                    }
+                }
+                GPConstraint::Output { .. }
+                | GPConstraint::Clobber { .. }
+                | GPConstraint::Temporary => (),
+                GPConstraint::None => {
+                    // By definition it doesn't matter what register we "assign" here: it's
+                    // ignored at any point of importance.
+                    cnstr_regs[i] = Some(GP_REGS[0]);
+                }
+            }
+        }
+        asgn_regs.union(input_regs);
+
+        // OPT: We don't yet do anything with can_be_same_as_input.
+
+        // Assign a register for all unassigned constraints.
+        for (i, _) in constraints.iter().enumerate() {
+            if cnstr_regs[i].is_some() {
+                // We've already allocated this constraint.
+                continue;
+            }
+            let reg = match self.gp_regset.find_empty_avoiding(asgn_regs) {
                 Some(reg) => reg,
                 None => {
                     // We need to find a register to spill. Our heuristic is (in order):
@@ -555,14 +528,14 @@ impl LSRegAlloc<'_> {
                     let mut cnd_spill = None;
                     let mut cnd_furthest = None;
                     for reg in GP_REGS {
-                        if avoid.is_set(reg) {
+                        if asgn_regs.is_set(reg) {
                             continue;
                         }
                         match self.gp_reg_states[usize::from(reg.code())] {
                             RegState::Reserved => (),
                             RegState::Empty => unreachable!(),
-                            RegState::FromConst(_) => todo!(),
-                            RegState::FromInst(from_iidx) => {
+                            RegState::FromConst(_, _) => todo!(),
+                            RegState::FromInst(from_iidx, _) => {
                                 match self.spills[usize::from(from_iidx)] {
                                     SpillState::Empty => match cnd_furthest {
                                         None => cnd_furthest = Some((reg, from_iidx)),
@@ -614,108 +587,322 @@ impl LSRegAlloc<'_> {
                     }
                 }
             };
-            asgn[i] = Some(reg);
-            avoid.set(reg);
+            cnstr_regs[i] = Some(reg);
+            asgn_regs.set(reg);
         }
 
-        // At this point, we've found a register for every constraint. We now need to decide if we
-        // need to move/spill any existing values in those registers.
+        // Stage 2: At this point, we've found a register for every constraint. We now go about
+        // updating the allocator's state to get from where we were to where we want to be.
 
-        // Try to move / swap existing registers, if possible.
-        debug_assert_eq!(constraints.len(), asgn.len());
-        for (cnstr, new_reg) in constraints.iter().zip(asgn.into_iter()) {
-            let new_reg = new_reg.unwrap();
-            match cnstr {
-                RegConstraint::Input(ref op)
-                | RegConstraint::InputIntoReg(ref op, _)
-                | RegConstraint::InputOutput(ref op)
-                | RegConstraint::InputOutputIntoReg(ref op, _)
-                | RegConstraint::InputIntoRegAndClobber(ref op, _) => {
-                    if let Some(old_reg) = self.find_op_in_gp_reg(op) {
-                        if old_reg != new_reg {
-                            match self.gp_reg_states[usize::from(new_reg.code())] {
-                                RegState::Reserved => unreachable!(),
-                                RegState::Empty => {
-                                    self.move_gp_reg(asm, old_reg, new_reg);
-                                }
-                                RegState::FromConst(_) => todo!(),
-                                RegState::FromInst(query_iidx) => {
-                                    if self.rev_an.is_inst_var_still_used_at(iidx, query_iidx) {
-                                        self.swap_gp_reg(asm, old_reg, new_reg);
-                                    } else {
-                                        self.move_gp_reg(asm, old_reg, new_reg);
+        let cnstr_regs = cnstr_regs.map(|x| x.unwrap());
+
+        // Spill currently assigned registers that don't contain values we want for the current
+        // instruction. OPT: by definition these values must be useful for later instructions, so
+        // in some cases we could move them rather than spill them.
+        for reg in cnstr_regs.iter() {
+            let st = &self.gp_reg_states[usize::from(reg.code())];
+            match st {
+                RegState::Reserved => (),
+                RegState::Empty => (),
+                RegState::FromConst(op_cidx, _) => {
+                    if !self.find_op_in_constraints(&constraints, Operand::Const(*op_cidx)) {
+                        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                        self.gp_regset.unset(*reg);
+                    }
+                }
+                RegState::FromInst(op_iidx, _) => {
+                    if !self.find_op_in_constraints(&constraints, Operand::Var(*op_iidx)) {
+                        self.spill_gp_if_not_already(asm, iidx, *reg);
+                        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                        self.gp_regset.unset(*reg);
+                    }
+                }
+            }
+        }
+
+        // Shuffle around constraint registers until everything is in place. This is a fixed point
+        // algorithm: if we copy / move / swap registers then we will do another round.
+        loop {
+            let mut changed = false;
+            // Move values that are already in non-constraint registers into place.
+            for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
+                let st = &self.gp_reg_states[usize::from(reg.code())];
+                if let RegState::Empty = st {
+                    if let GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } =
+                        cnstr
+                    {
+                        if !self.is_input_in_gp_reg(op, reg) {
+                            if let Some(old_reg) = self.find_op_in_gp_reg_avoiding(op, asgn_regs) {
+                                changed = true;
+                                self.copy_gp_reg(asm, old_reg, reg);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Move values that are already in constraint registers into place.
+            for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
+                if let GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } = cnstr
+                {
+                    if !self.is_input_in_gp_reg(op, reg) {
+                        if let Some(old_reg) = self.find_op_in_gp_reg(op) {
+                            if let Some(other_cnstr) = constraints
+                                .iter()
+                                .zip(cnstr_regs.into_iter())
+                                .find(|(_, y)| *y == old_reg)
+                                .map(|(x, _)| x)
+                            {
+                                match (&cnstr, &other_cnstr) {
+                                    (
+                                        &GPConstraint::Input { op: lhs_op, .. }
+                                        | &GPConstraint::InputOutput { op: lhs_op, .. },
+                                        &GPConstraint::Input { op: rhs_op, .. }
+                                        | &GPConstraint::InputOutput { op: rhs_op, .. },
+                                    ) => {
+                                        if let RegState::Empty =
+                                            self.gp_reg_states[usize::from(reg.code())]
+                                        {
+                                            if lhs_op == rhs_op {
+                                                self.copy_gp_reg(asm, old_reg, reg);
+                                            } else {
+                                                self.move_gp_reg(asm, old_reg, reg);
+                                            }
+                                        } else if let RegState::Empty =
+                                            self.gp_reg_states[usize::from(old_reg.code())]
+                                        {
+                                            if lhs_op == rhs_op {
+                                                self.copy_gp_reg(asm, reg, old_reg);
+                                            } else {
+                                                self.move_gp_reg(asm, reg, old_reg);
+                                            }
+                                        } else {
+                                            self.swap_gp_reg(asm, reg, old_reg);
+                                        }
+                                        changed = true;
                                     }
+                                    (
+                                        &GPConstraint::Input { .. }
+                                        | &GPConstraint::InputOutput { .. },
+                                        &GPConstraint::Output { .. }
+                                        | GPConstraint::Clobber { .. }
+                                        | GPConstraint::Temporary,
+                                    ) => {
+                                        if let RegState::Empty =
+                                            self.gp_reg_states[usize::from(reg.code())]
+                                        {
+                                            self.move_gp_reg(asm, old_reg, reg);
+                                        } else if let RegState::Empty =
+                                            self.gp_reg_states[usize::from(old_reg.code())]
+                                        {
+                                            self.move_gp_reg(asm, reg, old_reg);
+                                        } else {
+                                            self.swap_gp_reg(asm, reg, old_reg);
+                                        }
+                                        changed = true;
+                                    }
+                                    _ => (),
                                 }
                             }
                         }
                     }
                 }
-                RegConstraint::Output
-                | RegConstraint::OutputCanBeSameAsInput(_)
-                | RegConstraint::OutputFromReg(_)
-                | RegConstraint::Clobber(_)
-                | RegConstraint::Temporary
-                | RegConstraint::None => (),
+            }
+
+            if !changed {
+                break;
             }
         }
 
-        // Spill / unspill what we couldn't move.
-        for (cnstr, reg) in constraints.into_iter().zip(asgn.into_iter()) {
-            let reg = reg.unwrap();
+        // Put values that aren't in registers into them -- spilling values if we need them later.
+        for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
             match cnstr {
-                RegConstraint::Input(ref op) | RegConstraint::InputIntoReg(ref op, _) => {
-                    if !self.is_input_in_gp_reg(op, reg) {
-                        self.move_or_spill_gp(asm, iidx, &mut avoid, reg);
-                        self.put_input_in_gp_reg(asm, op, reg);
+                GPConstraint::Input {
+                    op,
+                    in_ext,
+                    force_reg: _,
+                    clobber_reg,
+                } => {
+                    self.put_input_in_gp_reg(asm, op, reg, *in_ext);
+                    if *clobber_reg {
+                        self.spill_gp_if_not_already(asm, iidx, reg);
                     }
                 }
-                RegConstraint::InputIntoRegAndClobber(ref op, _) => {
-                    if !self.is_input_in_gp_reg(op, reg) {
-                        self.move_or_spill_gp(asm, iidx, &mut avoid, reg);
-                        self.put_input_in_gp_reg(asm, op, reg);
-                    } else {
-                        self.move_or_spill_gp(asm, iidx, &mut avoid, reg);
-                    }
-                    self.gp_regset.unset(reg);
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                GPConstraint::InputOutput {
+                    op,
+                    in_ext,
+                    out_ext: _,
+                    force_reg: _,
+                } => {
+                    self.put_input_in_gp_reg(asm, op, reg, *in_ext);
+                    self.spill_gp_if_not_already(asm, iidx, reg);
                 }
-                RegConstraint::InputOutput(ref op)
-                | RegConstraint::InputOutputIntoReg(ref op, _) => {
-                    if !self.is_input_in_gp_reg(op, reg) {
-                        self.move_or_spill_gp(asm, iidx, &mut avoid, reg);
-                        self.put_input_in_gp_reg(asm, op, reg);
-                    } else {
-                        self.move_or_spill_gp(asm, iidx, &mut avoid, reg);
-                    }
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+                GPConstraint::Output {
+                    out_ext: _,
+                    force_reg: _,
+                    can_be_same_as_input: _,
                 }
-                RegConstraint::Output
-                | RegConstraint::OutputCanBeSameAsInput(_)
-                | RegConstraint::OutputFromReg(_) => {
-                    self.move_or_spill_gp(asm, iidx, &mut avoid, reg);
-                    self.gp_regset.set(reg);
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+                | GPConstraint::Clobber { force_reg: _ }
+                | GPConstraint::Temporary => {
+                    self.spill_gp_if_not_already(asm, iidx, reg);
                 }
-                RegConstraint::Clobber(_) | RegConstraint::Temporary => {
-                    self.move_or_spill_gp(asm, iidx, &mut avoid, reg);
-                    self.gp_regset.unset(reg);
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
-                }
-                RegConstraint::None => (),
+                GPConstraint::None => (),
             }
         }
-        asgn.map(|x| x.unwrap())
+
+        // Set the output state for constraints.
+        for (cnstr, reg) in constraints.into_iter().zip(cnstr_regs.into_iter()) {
+            match cnstr {
+                GPConstraint::Input { clobber_reg, .. } => {
+                    if clobber_reg {
+                        self.gp_regset.unset(reg);
+                        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                    }
+                }
+                GPConstraint::InputOutput { out_ext, .. } => {
+                    assert!(self.gp_regset.is_set(reg));
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx, out_ext);
+                }
+                GPConstraint::Output { out_ext, .. } => {
+                    self.gp_regset.set(reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx, out_ext);
+                }
+                GPConstraint::Clobber { .. } => {
+                    self.gp_regset.unset(reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+                GPConstraint::Temporary => {
+                    self.gp_regset.unset(reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+                GPConstraint::None => (),
+            }
+        }
+
+        cnstr_regs
     }
 
-    /// Return the GP register containing the value for `op` or `None` if that value is not in any
+    fn find_op_in_constraints(&self, constraints: &[GPConstraint], query_op: Operand) -> bool {
+        for cnstr in constraints {
+            match cnstr {
+                GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } => {
+                    if query_op == *op {
+                        return true;
+                    }
+                }
+                GPConstraint::Output { .. }
+                | GPConstraint::Clobber { .. }
+                | GPConstraint::Temporary
+                | GPConstraint::None => (),
+            }
+        }
+        false
+    }
+
+    /// Align `reg`'s sign/zero extension with `next_ext`. Returns the previous extension state of
+    /// the register.
+    fn align_extensions(
+        &mut self,
+        asm: &mut Assembler,
+        reg: Rq,
+        next_ext: RegExtension,
+    ) -> RegExtension {
+        let (bitw, mut cur_ext) = match &mut self.gp_reg_states[usize::from(reg.code())] {
+            RegState::Reserved | RegState::Empty => unreachable!(),
+            RegState::FromConst(cidx, ext) => (
+                self.m
+                    .type_(self.m.const_(*cidx).tyidx(self.m))
+                    .bitw()
+                    .unwrap(),
+                ext,
+            ),
+            RegState::FromInst(iidx, ext) => (self.m.inst(*iidx).def_bitw(self.m), ext),
+        };
+        let old_ext = *cur_ext;
+        match (&mut cur_ext, next_ext) {
+            (&mut RegExtension::Undefined, RegExtension::Undefined) => (),
+            (&mut RegExtension::Undefined, RegExtension::ZeroExtended)
+            | (&mut RegExtension::SignExtended, RegExtension::ZeroExtended) => {
+                *cur_ext = next_ext;
+                self.force_zero_extend_to_reg64(asm, reg, bitw);
+            }
+            (&mut RegExtension::ZeroExtended, RegExtension::Undefined) => (),
+            (&mut RegExtension::ZeroExtended, RegExtension::ZeroExtended) => (),
+            (&mut RegExtension::Undefined, RegExtension::SignExtended)
+            | (&mut RegExtension::ZeroExtended, RegExtension::SignExtended) => {
+                *cur_ext = next_ext;
+                self.force_sign_extend_to_reg64(asm, reg, bitw);
+            }
+            (&mut RegExtension::SignExtended, RegExtension::Undefined) => (),
+            (&mut RegExtension::SignExtended, RegExtension::SignExtended) => (),
+        }
+        old_ext
+    }
+
+    /// Sign extend the `from_bits`-sized integer stored in `reg` up to the full size of the 64-bit
+    /// register.
+    ///
+    /// `from_bits` must be between 1 and 64.
+    fn force_sign_extend_to_reg64(&self, asm: &mut Assembler, reg: Rq, from_bits: u32) {
+        debug_assert!(from_bits > 0 && from_bits <= 64);
+        match from_bits {
+            1 => dynasm!(asm
+                ; and Rq(reg.code()), 1
+                ; neg Rq(reg.code())
+            ),
+            8 => dynasm!(asm; movsx Rq(reg.code()), Rb(reg.code())),
+            16 => dynasm!(asm; movsx Rq(reg.code()), Rw(reg.code())),
+            32 => dynasm!(asm; movsx Rq(reg.code()), Rd(reg.code())),
+            64 => (), // nothing to do.
+            x => todo!("{x}"),
+        }
+    }
+
+    /// Zero extend the `from_bitw`-sized integer stored in `reg` up to the full size of the 64-bit
+    /// register.
+    ///
+    /// `from_bits` must be between 1 and 64.
+    fn force_zero_extend_to_reg64(&self, asm: &mut Assembler, reg: Rq, from_bitw: u32) {
+        debug_assert!(from_bitw > 0 && from_bitw <= 64);
+        match from_bitw {
+            1..=31 => dynasm!(asm; and Rd(reg.code()), ((1u64 << from_bitw) - 1) as i32),
+            32 => {
+                // mov into a 32-bit register zero extends the upper 32 bits.
+                dynasm!(asm; mov Rd(reg.code()), Rd(reg.code()));
+            }
+            64 => (), // There are no additional bits to zero extend
+            x => todo!("{x}"),
+        }
+    }
+
+    /// Return a  GP register containing the value for `op` or `None` if that value is not in any
     /// register.
     fn find_op_in_gp_reg(&self, op: &Operand) -> Option<Rq> {
         self.gp_reg_states
             .iter()
             .enumerate()
             .find(|(_, x)| match (op, x) {
-                (Operand::Const(op_cidx), RegState::FromConst(reg_cidx)) => *op_cidx == *reg_cidx,
-                (Operand::Var(op_iidx), RegState::FromInst(reg_iidx)) => *op_iidx == *reg_iidx,
+                (Operand::Const(op_cidx), RegState::FromConst(reg_cidx, _)) => {
+                    *op_cidx == *reg_cidx
+                }
+                (Operand::Var(op_iidx), RegState::FromInst(reg_iidx, _)) => *op_iidx == *reg_iidx,
+                _ => false,
+            })
+            .map(|(i, _)| GP_REGS[i])
+    }
+
+    /// Return a GP register that is (1) not in `avoid` (2) contains the value for `op`. Returns
+    /// `None` if no register meets these two rules.
+    fn find_op_in_gp_reg_avoiding(&self, op: &Operand, avoid: RegSet<Rq>) -> Option<Rq> {
+        self.gp_reg_states
+            .iter()
+            .enumerate()
+            .filter(|(reg_i, _)| !avoid.is_set(GP_REGS[*reg_i]))
+            .find(|(_, x)| match (op, x) {
+                (Operand::Const(op_cidx), RegState::FromConst(reg_cidx, _)) => {
+                    *op_cidx == *reg_cidx
+                }
+                (Operand::Var(op_iidx), RegState::FromInst(reg_iidx, _)) => *op_iidx == *reg_iidx,
                 _ => false,
             })
             .map(|(i, _)| GP_REGS[i])
@@ -725,11 +912,11 @@ impl LSRegAlloc<'_> {
     fn is_input_in_gp_reg(&self, op: &Operand, reg: Rq) -> bool {
         match self.gp_reg_states[usize::from(reg.code())] {
             RegState::Empty => false,
-            RegState::FromConst(reg_cidx) => match op {
+            RegState::FromConst(reg_cidx, _) => match op {
                 Operand::Const(op_cidx) => reg_cidx == *op_cidx,
                 Operand::Var(_) => false,
             },
-            RegState::FromInst(reg_iidx) => match op {
+            RegState::FromInst(reg_iidx, _) => match op {
                 Operand::Const(_) => false,
                 Operand::Var(op_iidx) => reg_iidx == *op_iidx,
             },
@@ -737,26 +924,47 @@ impl LSRegAlloc<'_> {
         }
     }
 
-    /// Put the value for `op` into `reg`. It is assumed that the caller has already checked that
-    /// the value for `op` is not already in `reg`.
-    fn put_input_in_gp_reg(&mut self, asm: &mut Assembler, op: &Operand, reg: Rq) {
-        debug_assert!(!self.is_input_in_gp_reg(op, reg));
+    /// Place the value for `op` into `reg` and force its extension appropriately. If necessary,
+    /// `op` will be loaded into `reg`.
+    fn put_input_in_gp_reg(
+        &mut self,
+        asm: &mut Assembler,
+        op: &Operand,
+        reg: Rq,
+        ext: RegExtension,
+    ) {
+        if self.is_input_in_gp_reg(op, reg) {
+            self.align_extensions(asm, reg, ext);
+            return;
+        }
         let st = match op {
             Operand::Const(cidx) => {
                 self.load_const_into_gp_reg(asm, *cidx, reg);
-                RegState::FromConst(*cidx)
+                self.align_extensions(asm, reg, ext);
+                RegState::FromConst(*cidx, ext)
             }
-            Operand::Var(iidx) => {
-                self.force_gp_unspill(asm, *iidx, reg);
-                RegState::FromInst(*iidx)
+            Operand::Var(op_iidx) => {
+                self.force_gp_unspill(asm, *op_iidx, reg);
+                self.align_extensions(asm, reg, ext);
+                RegState::FromInst(*op_iidx, ext)
             }
         };
         self.gp_regset.set(reg);
         self.gp_reg_states[usize::from(reg.code())] = st;
     }
 
+    /// Copy the value in `old_reg` to `new_reg` leaving `old_reg`'s [RegState] unchanged.
+    fn copy_gp_reg(&mut self, asm: &mut Assembler, old_reg: Rq, new_reg: Rq) {
+        assert_ne!(old_reg, new_reg);
+        dynasm!(asm; mov Rq(new_reg.code()), Rq(old_reg.code()));
+        self.gp_regset.set(new_reg);
+        self.gp_reg_states[usize::from(new_reg.code())] =
+            self.gp_reg_states[usize::from(old_reg.code())].clone();
+    }
+
     /// Move the value in `old_reg` to `new_reg`, setting `old_reg` to [RegState::Empty].
     fn move_gp_reg(&mut self, asm: &mut Assembler, old_reg: Rq, new_reg: Rq) {
+        assert_ne!(old_reg, new_reg);
         dynasm!(asm; mov Rq(new_reg.code()), Rq(old_reg.code()));
         self.gp_regset.set(new_reg);
         self.gp_reg_states[usize::from(new_reg.code())] = mem::replace(
@@ -768,67 +976,27 @@ impl LSRegAlloc<'_> {
 
     /// Swap the values, and register states, for `old_reg` and `new_reg`.
     fn swap_gp_reg(&mut self, asm: &mut Assembler, old_reg: Rq, new_reg: Rq) {
+        assert!(self.gp_regset.is_set(old_reg) && self.gp_regset.is_set(new_reg));
         dynasm!(asm; xchg Rq(new_reg.code()), Rq(old_reg.code()));
         self.gp_reg_states
             .swap(usize::from(old_reg.code()), usize::from(new_reg.code()));
     }
 
-    /// We are about to clobber `old_reg`, so if its value is needed later (1) move it to another
-    /// register if there's a spare available or (2) ensure it is already spilled or (2) spill it.
-    fn move_or_spill_gp(
-        &mut self,
-        asm: &mut Assembler,
-        cur_iidx: InstIdx,
-        avoid: &mut RegSet<Rq>,
-        old_reg: Rq,
-    ) {
-        match self.gp_reg_states[usize::from(old_reg.code())] {
+    /// Spill the value stored in `reg` if it is both (1) used in the future and (2) not already
+    /// spilled. This updates `self.spills` (if necessary) but not `self.gp_reg_state` or
+    /// `self.gp_regset`.
+    fn spill_gp_if_not_already(&mut self, asm: &mut Assembler, cur_iidx: InstIdx, reg: Rq) {
+        match self.gp_reg_states[usize::from(reg.code())] {
+            RegState::Reserved => unreachable!(),
             RegState::Empty => (),
-            RegState::FromConst(_) => (),
-            RegState::FromInst(query_iidx) => {
+            RegState::FromConst(_, _) => (),
+            RegState::FromInst(query_iidx, _) => {
                 if self
                     .rev_an
                     .is_inst_var_still_used_after(cur_iidx, query_iidx)
+                    && self.spills[usize::from(query_iidx)] == SpillState::Empty
                 {
-                    let mut new_reg = None;
-                    // Try to use `query_iidx`s hint, if there is one, and it's not in use...
-                    if let Some(Register::GP(reg)) = self.rev_an.reg_hints[usize::from(query_iidx)]
-                    {
-                        if !self.gp_regset.is_set(reg) && !avoid.is_set(reg) {
-                            new_reg = Some(reg);
-                        }
-                    }
-                    // ...otherwise try to find an arbitrary empty register.
-                    if new_reg.is_none() {
-                        if let Some(reg) = self.gp_regset.find_empty_avoiding(*avoid) {
-                            new_reg = Some(reg);
-                        }
-                    }
-                    if let Some(new_reg) = new_reg {
-                        // We found a register to move to.
-                        dynasm!(asm; mov Rq(new_reg.code()), Rq(old_reg.code()));
-                        avoid.set(new_reg);
-                        self.gp_regset.set(new_reg);
-                        self.gp_reg_states[usize::from(new_reg.code())] =
-                            self.gp_reg_states[usize::from(old_reg.code())].clone();
-                    } else {
-                        // We have no choice but to spill.
-                        self.spill_gp_if_not_already(asm, old_reg);
-                    }
-                }
-            }
-            RegState::Reserved => unreachable!(),
-        }
-    }
-
-    /// If the value stored in `reg` is not already spilled to the heap, then spill it. Note that
-    /// this function neither writes to the register or changes the register's [RegState].
-    fn spill_gp_if_not_already(&mut self, asm: &mut Assembler, reg: Rq) {
-        match self.gp_reg_states[usize::from(reg.code())] {
-            RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
-            RegState::FromInst(iidx) => {
-                if self.spills[usize::from(iidx)] == SpillState::Empty {
-                    let inst = self.m.inst(iidx);
+                    let inst = self.m.inst(query_iidx);
                     let bitw = inst.def_bitw(self.m);
                     let bytew = inst.def_byte_size(self.m);
                     debug_assert!(usize::try_from(bitw).unwrap() >= bytew);
@@ -836,17 +1004,19 @@ impl LSRegAlloc<'_> {
                     let frame_off = self.stack.grow(bytew);
                     let off = i32::try_from(frame_off).unwrap();
                     match bitw {
-                        1 => dynasm!(asm
-                            ; and Rq(reg.code()), 1
-                            ; mov BYTE [rbp - off], Rb(reg.code())
-                        ),
+                        1 => {
+                            let old_ext =
+                                self.align_extensions(asm, reg, RegExtension::ZeroExtended);
+                            dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code()));
+                            self.align_extensions(asm, reg, old_ext);
+                        }
                         8 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
                         16 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
                         32 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
                         64 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
                         _ => unreachable!(),
                     }
-                    self.spills[usize::from(iidx)] = SpillState::Stack(off);
+                    self.spills[usize::from(query_iidx)] = SpillState::Stack(off);
                 }
             }
         }
@@ -875,7 +1045,7 @@ impl LSRegAlloc<'_> {
                     .gp_reg_states
                     .iter()
                     .position(|x| {
-                        if let RegState::FromInst(y) = x {
+                        if let RegState::FromInst(y, _) = x {
                             *y == iidx
                         } else {
                             false
@@ -887,16 +1057,13 @@ impl LSRegAlloc<'_> {
                     dynasm!(asm; mov Rq(reg.code()), Rq(cur_reg.code()));
                 }
             }
-            SpillState::Stack(off) => {
-                match size {
-                    1 => dynasm!(asm ; movzx Rq(reg.code()), BYTE [rbp - off]),
-                    2 => dynasm!(asm ; movzx Rq(reg.code()), WORD [rbp - off]),
-                    4 => dynasm!(asm ; mov Rd(reg.code()), [rbp - off]),
-                    8 => dynasm!(asm ; mov Rq(reg.code()), [rbp - off]),
-                    _ => todo!("{}", size),
-                }
-                self.gp_regset.set(reg);
-            }
+            SpillState::Stack(off) => match size {
+                1 => dynasm!(asm ; movzx Rq(reg.code()), BYTE [rbp - off]),
+                2 => dynasm!(asm ; movzx Rq(reg.code()), WORD [rbp - off]),
+                4 => dynasm!(asm ; mov Rd(reg.code()), [rbp - off]),
+                8 => dynasm!(asm ; mov Rq(reg.code()), [rbp - off]),
+                _ => todo!("{}", size),
+            },
             SpillState::Direct(off) => match size {
                 8 => dynasm!(asm
                     ; lea Rq(reg.code()), [rbp + off]
@@ -913,6 +1080,9 @@ impl LSRegAlloc<'_> {
                 _ => todo!("{bits}"),
             },
         }
+        self.gp_regset.set(reg);
+        self.gp_reg_states[usize::from(reg.code())] =
+            RegState::FromInst(iidx, RegExtension::ZeroExtended);
     }
 
     /// Load the constant from `cidx` into `reg`.
@@ -921,13 +1091,20 @@ impl LSRegAlloc<'_> {
     fn load_const_into_gp_reg(&mut self, asm: &mut Assembler, cidx: ConstIdx, reg: Rq) {
         match self.m.const_(cidx) {
             Const::Float(_tyidx, _x) => todo!(),
-            Const::Int(_, x) => {
-                dynasm!(asm; mov Rq(reg.code()), QWORD x.to_zero_ext_u64().unwrap() as i64);
-            }
+            Const::Int(_, x) => match x.bitw() {
+                1..=32 => {
+                    dynasm!(asm; mov Rd(reg.code()), x.to_zero_ext_u32().unwrap() as i32);
+                }
+                64 => dynasm!(asm; mov Rq(reg.code()), QWORD x.to_zero_ext_u64().unwrap() as i64),
+                x => todo!("{x}"),
+            },
             Const::Ptr(x) => {
                 dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64)
             }
         }
+        self.gp_regset.set(reg);
+        self.gp_reg_states[usize::from(reg.code())] =
+            RegState::FromConst(cidx, RegExtension::ZeroExtended);
     }
 
     /// Return the location of the value at `iidx`. If that instruction's value is available in a
@@ -937,7 +1114,7 @@ impl LSRegAlloc<'_> {
     /// yet produced a value.
     pub(crate) fn var_location(&self, iidx: InstIdx) -> VarLocation {
         if let Some(reg_i) = self.gp_reg_states.iter().position(|x| {
-            if let RegState::FromInst(y) = x {
+            if let RegState::FromInst(y, _) = x {
                 *y == iidx
             } else {
                 false
@@ -945,7 +1122,7 @@ impl LSRegAlloc<'_> {
         }) {
             VarLocation::Register(Register::GP(GP_REGS[reg_i]))
         } else if let Some(reg_i) = self.fp_reg_states.iter().position(|x| {
-            if let RegState::FromInst(y) = x {
+            if let RegState::FromInst(y, _) = x {
                 *y == iidx
             } else {
                 false
@@ -1094,7 +1271,7 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Input(op) | RegConstraint::InputOutput(op) => match op {
                     Operand::Var(op_iidx) => {
                         if let Some(reg_i) = self.fp_reg_states.iter().position(|x| {
-                            if let RegState::FromInst(y) = x {
+                            if let RegState::FromInst(y, _) = x {
                                 y == op_iidx
                             } else {
                                 false
@@ -1137,43 +1314,8 @@ impl LSRegAlloc<'_> {
             let reg = match self.fp_regset.find_empty_avoiding(avoid) {
                 Some(reg) => reg,
                 None => {
-                    // We need to find a register to spill. Our heuristic is two-fold:
-                    //   1. Spill the register whose value is used furthest away in the trace based
-                    //      on the reverse analyser's (def, use) analysis.
-                    //   2. If (1) leads to a tie, spill the "highest" register (e.g. prefer to
-                    //      spill XMM15 over XMM0) because "lower" registers are more likely to be
-                    //      clobbered by CALLS, and we assume that the more recently we've put a
-                    //      value into a register, the more likely it is to be used again soon.
-                    let mut furthest = None;
-                    for reg in FP_REGS {
-                        if avoid.is_set(reg) {
-                            continue;
-                        }
-                        match self.fp_reg_states[usize::from(reg.code())] {
-                            RegState::Reserved => (),
-                            RegState::Empty => unreachable!(),
-                            RegState::FromConst(_) => todo!(),
-                            RegState::FromInst(from_iidx) => {
-                                debug_assert!(self
-                                    .rev_an
-                                    .is_inst_var_still_used_at(iidx, from_iidx));
-                                if furthest.is_none() {
-                                    furthest = Some((reg, from_iidx));
-                                } else if let Some((_, furthest_iidx)) = furthest {
-                                    if let Some(next_iidx) = self.rev_an.next_use(iidx, from_iidx) {
-                                        if next_iidx > furthest_iidx {
-                                            furthest = Some((reg, from_iidx))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    match furthest {
-                        Some((reg, _)) => reg,
-                        None => panic!("Cannot satisfy register constraints: no registers left"),
-                    }
+                    // We need to find a register to spill.
+                    todo!();
                 }
             };
             asgn[i] = Some(reg);
@@ -1200,14 +1342,8 @@ impl LSRegAlloc<'_> {
                                 RegState::Empty => {
                                     self.move_fp_reg(asm, old_reg, new_reg);
                                 }
-                                RegState::FromConst(_) => todo!(),
-                                RegState::FromInst(query_iidx) => {
-                                    if self.rev_an.is_inst_var_still_used_at(iidx, query_iidx) {
-                                        self.swap_fp_reg(asm, old_reg, new_reg);
-                                    } else {
-                                        self.move_fp_reg(asm, old_reg, new_reg);
-                                    }
-                                }
+                                RegState::FromConst(_, _) => todo!(),
+                                RegState::FromInst(_, _) => todo!(),
                             }
                         }
                     }
@@ -1249,12 +1385,14 @@ impl LSRegAlloc<'_> {
                     } else {
                         self.move_or_spill_fp(asm, iidx, &mut avoid, reg);
                     }
-                    self.fp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+                    self.fp_reg_states[usize::from(reg.code())] =
+                        RegState::FromInst(iidx, RegExtension::Undefined);
                 }
                 RegConstraint::Output | RegConstraint::OutputFromReg(_) => {
                     self.move_or_spill_fp(asm, iidx, &mut avoid, reg);
                     self.fp_regset.set(reg);
-                    self.fp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+                    self.fp_reg_states[usize::from(reg.code())] =
+                        RegState::FromInst(iidx, RegExtension::Undefined);
                 }
                 RegConstraint::Clobber(_) | RegConstraint::Temporary => {
                     self.move_or_spill_fp(asm, iidx, &mut avoid, reg);
@@ -1275,8 +1413,10 @@ impl LSRegAlloc<'_> {
             .iter()
             .enumerate()
             .find(|(_, x)| match (op, x) {
-                (Operand::Const(op_cidx), RegState::FromConst(reg_cidx)) => *op_cidx == *reg_cidx,
-                (Operand::Var(op_iidx), RegState::FromInst(reg_iidx)) => *op_iidx == *reg_iidx,
+                (Operand::Const(op_cidx), RegState::FromConst(reg_cidx, _)) => {
+                    *op_cidx == *reg_cidx
+                }
+                (Operand::Var(op_iidx), RegState::FromInst(reg_iidx, _)) => *op_iidx == *reg_iidx,
                 _ => false,
             })
             .map(|(i, _)| FP_REGS[i])
@@ -1286,11 +1426,11 @@ impl LSRegAlloc<'_> {
     fn is_input_in_fp_reg(&self, op: &Operand, reg: Rx) -> bool {
         match self.fp_reg_states[usize::from(reg.code())] {
             RegState::Empty => false,
-            RegState::FromConst(reg_cidx) => match op {
+            RegState::FromConst(reg_cidx, _) => match op {
                 Operand::Const(op_cidx) => reg_cidx == *op_cidx,
                 Operand::Var(_) => false,
             },
-            RegState::FromInst(reg_iidx) => match op {
+            RegState::FromInst(reg_iidx, _) => match op {
                 Operand::Const(_) => false,
                 Operand::Var(op_iidx) => reg_iidx == *op_iidx,
             },
@@ -1305,11 +1445,11 @@ impl LSRegAlloc<'_> {
         let st = match op {
             Operand::Const(cidx) => {
                 self.load_const_into_fp_reg(asm, *cidx, reg);
-                RegState::FromConst(*cidx)
+                RegState::FromConst(*cidx, RegExtension::Undefined)
             }
             Operand::Var(iidx) => {
                 self.force_fp_unspill(asm, *iidx, reg);
-                RegState::FromInst(*iidx)
+                RegState::FromInst(*iidx, RegExtension::Undefined)
             }
         };
         self.fp_regset.set(reg);
@@ -1349,8 +1489,8 @@ impl LSRegAlloc<'_> {
     ) {
         match self.fp_reg_states[usize::from(old_reg.code())] {
             RegState::Empty => (),
-            RegState::FromConst(_) => (),
-            RegState::FromInst(query_iidx) => {
+            RegState::FromConst(_, _) => (),
+            RegState::FromInst(query_iidx, _) => {
                 if self
                     .rev_an
                     .is_inst_var_still_used_after(cur_iidx, query_iidx)
@@ -1375,8 +1515,8 @@ impl LSRegAlloc<'_> {
     /// this function neither writes to the register or changes the register's [RegState].
     fn spill_fp_if_not_already(&mut self, asm: &mut Assembler, reg: Rx) {
         match self.fp_reg_states[usize::from(reg.code())] {
-            RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
-            RegState::FromInst(iidx) => {
+            RegState::Reserved | RegState::Empty | RegState::FromConst(_, _) => (),
+            RegState::FromInst(iidx, _) => {
                 if self.spills[usize::from(iidx)] == SpillState::Empty {
                     let inst = self.m.inst(iidx);
                     let bitw = inst.def_bitw(self.m);
@@ -1411,7 +1551,7 @@ impl LSRegAlloc<'_> {
                     .fp_reg_states
                     .iter()
                     .position(|x| {
-                        if let RegState::FromInst(y) = x {
+                        if let RegState::FromInst(y, _) = x {
                             *y == iidx
                         } else {
                             false
@@ -1516,6 +1656,75 @@ pub(crate) enum RegConstraint<R: dynasmrt::Register> {
     None,
 }
 
+/// A GP register constraint. Each constraint leads to a single register being returned. Note: in
+/// some situations (see the individual constraints), multiple constraints might return the same
+/// register.
+#[derive(Clone, Debug)]
+pub(crate) enum GPConstraint {
+    /// Make sure that `op` is loaded into a register with its upper bits matching extension
+    /// `in_ext`. If `force_reg` is `Some`, that register is guaranteed to be used. If `clobber` is
+    /// true, then the value in the register will be treated as clobbered on exit.
+    Input {
+        op: Operand,
+        in_ext: RegExtension,
+        force_reg: Option<Rq>,
+        clobber_reg: bool,
+    },
+    /// Make sure that `op` is loaded into a register with its upper bits matching extension
+    /// `in_ext`; the result of the instruction will be in the same register with its upper bits
+    /// matching extension `out_ext`. If `force_reg` is `Some`, that register is guaranteed to be
+    /// used.
+    InputOutput {
+        op: Operand,
+        in_ext: RegExtension,
+        out_ext: RegExtension,
+        force_reg: Option<Rq>,
+    },
+    /// The result of the instruction will be in a register with its upper bits matching extension
+    /// `out_ext`. If `force_reg` is `Some`, that register is guaranteed to be used. If
+    /// `can_be_same_as_input` is true, then the allocator may optionally return a register that is
+    /// also used for an input (in such a case, the input will implicitly be considered clobbered).
+    Output {
+        out_ext: RegExtension,
+        force_reg: Option<Rq>,
+        can_be_same_as_input: bool,
+    },
+    /// This instruction clobbers `force_reg`.
+    Clobber { force_reg: Rq },
+    /// A temporary register that the instruction will clobber.
+    Temporary,
+    /// A no-op register constraint. A random register will be assigned to this: using this
+    /// register for any purposes leads to undefined behaviour.
+    None,
+}
+
+/// This `enum` serves two related purposes: it tells us what we know about the unused upper bits
+/// of a value *and* it serves as a specification of what we want those values to be (in a
+/// [GPConstraint]). What counts as "upper bits"?
+///
+///   * For normal values, we assume they may end up in a 64-bit register: any bits between the
+///     `bitw` of the type and 64 bits are "upper bits". For 64 bit values, the extension is
+///     ignored, and can be set to any value.
+///
+///   * For floating point values, we assume that 32 bit floats and 64 bit doubles are not
+///     intermixed. The extension is thus ignored.
+///
+///   * We do not currently support "non-normal / non-float" values (e.g. vector values) and will
+///     have to think about those at a later point.
+///
+/// For example, if a 16 bit value is stored in a 64 bit value, we may know for sure that the upper
+/// 48 bits are set to zero, or they sign extend the 16 bit value --- or we may have no idea!
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) enum RegExtension {
+    /// We do not know what the upper bits are set to / we do not care what the upper bits are set
+    /// to.
+    Undefined,
+    /// The upper bits zero extend the value / we want the upper bits to zero extend the value.
+    ZeroExtended,
+    /// The upper bits sign extend the value / we want the upper bits to sign extend the value.
+    SignExtended,
+}
+
 #[cfg(debug_assertions)]
 impl<R: dynasmrt::Register> RegConstraint<R> {
     /// Return a reference to the inner [Operand], if there is one.
@@ -1536,12 +1745,20 @@ impl<R: dynasmrt::Register> RegConstraint<R> {
     }
 }
 
+/// The information the register allocator records at the point of a guard's code generation that
+/// it later needs to get a failing guard ready for deopt.
+pub(super) struct GuardSnapshot {
+    /// The registers we need to zero extend: the `u32` is the `from_bitw` that is passed to
+    /// `force_zero_extend_to_reg64`.
+    regs_to_zero_ext: Vec<(Rq, u32)>,
+}
+
 #[derive(Clone, Debug)]
 enum RegState {
     Reserved,
     Empty,
-    FromConst(ConstIdx),
-    FromInst(InstIdx),
+    FromConst(ConstIdx, RegExtension),
+    FromInst(InstIdx, RegExtension),
 }
 
 /// Which registers in a set of 16 registers are currently used? Happily 16 bits is the right size
@@ -1553,6 +1770,10 @@ impl<R: dynasmrt::Register> RegSet<R> {
     /// Create a [RegSet] with all registers unused.
     fn blank() -> Self {
         Self(0, PhantomData)
+    }
+
+    fn union(&mut self, other: Self) {
+        self.0 |= other.0;
     }
 
     fn is_set(&self, reg: R) -> bool {
@@ -1605,6 +1826,12 @@ impl RegSet<Rq> {
             s.set(*reg);
         }
         s
+    }
+
+    fn iter_set_bits(&self) -> impl Iterator<Item = Rq> + '_ {
+        (0usize..16)
+            .filter(|x| self.is_set(GP_REGS[*x]))
+            .map(|x| GP_REGS[x])
     }
 }
 
@@ -1674,25 +1901,35 @@ mod test {
     #[test]
     fn regset() {
         let mut x = RegSet::blank();
-        debug_assert!(!x.is_set(Rq::R15));
-        debug_assert_eq!(x.find_empty(), Some(Rq::R15));
+        assert!(!x.is_set(Rq::R15));
+        assert_eq!(x.find_empty(), Some(Rq::R15));
         x.set(Rq::R15);
-        debug_assert!(x.is_set(Rq::R15));
-        debug_assert_eq!(x.find_empty(), Some(Rq::R14));
+        assert!(x.is_set(Rq::R15));
+        assert_eq!(x.find_empty(), Some(Rq::R14));
         x.set(Rq::R14);
-        debug_assert_eq!(x.find_empty(), Some(Rq::R13));
+        assert_eq!(x.find_empty(), Some(Rq::R13));
         x.unset(Rq::R14);
-        debug_assert_eq!(x.find_empty(), Some(Rq::R14));
+        assert_eq!(x.find_empty(), Some(Rq::R14));
         for reg in GP_REGS {
             x.set(reg);
-            debug_assert!(x.is_set(reg));
+            assert!(x.is_set(reg));
         }
-        debug_assert_eq!(x.find_empty(), None);
+        assert_eq!(x.find_empty(), None);
         x.unset(Rq::RAX);
-        debug_assert!(!x.is_set(Rq::RAX));
-        debug_assert_eq!(x.find_empty(), Some(Rq::RAX));
+        assert!(!x.is_set(Rq::RAX));
+        assert_eq!(x.find_empty(), Some(Rq::RAX));
+
+        let mut x = RegSet::blank();
+        x.set(Rq::R15);
+        let mut y = RegSet::blank();
+        y.set(Rq::R14);
+        x.union(y);
+        assert_eq!(
+            x.iter_set_bits().collect::<Vec<_>>(),
+            vec![Rq::R14, Rq::R15]
+        );
 
         let x = RegSet::<Rq>::blank();
-        debug_assert_eq!(x.find_empty_avoiding(RegSet::from(Rq::R15)), Some(Rq::R14));
+        assert_eq!(x.find_empty_avoiding(RegSet::from(Rq::R15)), Some(Rq::R14));
     }
 }

@@ -2,7 +2,7 @@
 // ignore-if: true
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
-//   env-var: YK_LOG=4
+//   env-var: YKD_LOG=4
 //   stderr:
 //     FIXME: match some IR/output
 //     ...

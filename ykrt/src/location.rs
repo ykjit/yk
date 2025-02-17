@@ -156,7 +156,11 @@ impl Location {
         }
     }
 
-    /// If `self` is in the `Counting` state, return its count, or `None` otherwise.
+    /// If `self` is:
+    ///   1. in the `Counting` state and
+    ///   2. has not had a `HotLocation` allocated for it
+    ///
+    /// return its count, or `None` otherwise
     #[cfg(test)]
     pub(crate) fn count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);

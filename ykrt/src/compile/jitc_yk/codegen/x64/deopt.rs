@@ -54,7 +54,7 @@ pub(crate) extern "C" fn __yk_guardcheck(
 ///
 /// * gidxs - List of [GuardIdx]'s for previous guard failures.
 fn running_trace(gidxs: &[usize]) -> Arc<X64CompiledTrace> {
-    let (ctr, _) = MTThread::with(|mtt| mtt.running_trace());
+    let ctr = MTThread::with_borrow(|mtt| mtt.running_trace());
     let mut ctr = ctr
         .clone()
         .unwrap()
@@ -101,8 +101,8 @@ pub(crate) extern "C" fn __yk_deopt(
     let info = &ctr.deoptinfo[&usize::from(gidx)];
     let mt = Arc::clone(&ctr.mt);
 
-    ctr.mt
-        .stats
+    mt.deopt();
+    mt.stats
         .timing_state(crate::log::stats::TimingState::Deopting);
     mt.log.log(Verbosity::JITEvent, "deoptimise");
 
@@ -267,9 +267,18 @@ pub(crate) extern "C" fn __yk_deopt(
                                 unsafe { rbp.offset(isize::from(*extra)) }
                             };
                             match size {
-                                8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
-                                4 => unsafe { ptr::write::<u32>(temp as *mut u32, jitval as u32) },
+                                1 => unsafe { ptr::write::<u16>(temp as *mut u16, jitval as u16) },
                                 2 => unsafe { ptr::write::<u16>(temp as *mut u16, jitval as u16) },
+                                4 => unsafe { ptr::write::<u32>(temp as *mut u32, jitval as u32) },
+                                8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
+                                16 => {
+                                    // FIXME: This case is clearly not safe in general: it just so
+                                    // happens to work because it the moment the biggest value we
+                                    // handle is 64 bits (be that a pointer, u64, or double). If
+                                    // and when we support values bigger than 64 bits, this line
+                                    // will lead to weird problems.
+                                    unsafe { ptr::write::<u64>(temp as *mut u64, jitval) };
+                                }
                                 _ => todo!("{}", size),
                             }
                         }
@@ -352,9 +361,8 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // The `clone` should really be `Arc::clone(&ctr)` but that doesn't play well with type
     // inference in this (unusual) case.
-    ctr.mt.guard_failure(ctr.clone(), gidx, frameaddr);
-    ctr.mt
-        .stats
+    mt.guard_failure(ctr.clone(), gidx, frameaddr);
+    mt.stats
         .timing_state(crate::log::stats::TimingState::OutsideYk);
 
     // Since we won't return from this function, drop `ctr` manually.

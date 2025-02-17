@@ -52,7 +52,7 @@ thread_local! {
 #[cfg(tracer_swt)]
 #[no_mangle]
 pub extern "C" fn __yk_trace_basicblock(function_index: usize, block_index: usize) {
-    MTThread::with(|mtt| {
+    MTThread::with_borrow(|mtt| {
         if mtt.is_tracing() {
             BASIC_BLOCKS.with(|v| {
                 v.borrow_mut().push(TracingBBlock {
