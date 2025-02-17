@@ -13,13 +13,7 @@
 //     4
 //     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
-//       ...
-//       guard false, ...
-//       ...
-//       guard false, ...
-//       ...
-//       guard true, ...
-//       ...
+//     ...
 //     --- End jit-pre-opt ---
 //     3
 //     yk-jit-event: enter-jit-code
@@ -42,14 +36,9 @@
 //     yk-jit-event: tracing-aborted
 //     4
 //     enter
-//     yk-jit-event: start-tracing
-//     3
-//     yk-jit-event: stop-tracing
-//     --- Begin jit-pre-opt ---
-//     ...
-//     --- End jit-pre-opt ---
-//     2
 //     yk-jit-event: enter-jit-code
+//     3
+//     2
 //     1
 //     yk-jit-event: deoptimise
 //     return
@@ -62,16 +51,15 @@
 //     yk-jit-event: enter-jit-code
 //     1
 //     yk-jit-event: deoptimise
-//     yk-jit-event: start-side-tracing
 //     return
-//     yk-jit-event: tracing-aborted
+//     yk-jit-event: start-tracing
 //     b
 //     2
 //     enter
-//     yk-jit-event: start-tracing
+//     yk-jit-event: tracing-aborted
 //     1
 //     return
-//     yk-jit-event: tracing-aborted
+//     yk-jit-event: start-tracing
 //     a
 //     1
 //     enter
