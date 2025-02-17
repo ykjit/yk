@@ -29,14 +29,17 @@ test_yklua() {
     YKD_SERIALISE_COMPILATION=1 "${yklua}" -e"_U=true" all.lua
     "${yklua}" -e"_U=true" all.lua
     cd ..
-    # Run our own test suite.
-    if [ ! -e "yklua-tests" ]; then
-        git clone --recursive --depth=1 https://github.com/ykjit/yklua-tests
+    # Run third-party tests, but only in release mode to save time.
+    if [ "${YK_BUILD_TYPE}" = "release" ]; then
+        if [ ! -e "yklua-tests" ]; then
+            git clone --recursive --depth=1 https://github.com/ykjit/yklua-tests
+        fi
+        cd yklua-tests
+        sh run.sh "${yklua}"
+        YKD_SERIALISE_COMPILATION=1 sh run.sh "${yklua}"
+        cd ..
     fi
-    cd yklua-tests
-    sh run.sh "${yklua}"
-    YKD_SERIALISE_COMPILATION=1 sh run.sh "${yklua}"
-    cd ../..
+    cd ..
 }
 
 # Check that the ykllvm commit in the submodule is from the main branch.
