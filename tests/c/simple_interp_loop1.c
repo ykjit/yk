@@ -55,13 +55,12 @@ int main(int argc, char **argv) {
   size_t prog_len = sizeof(prog) / sizeof(prog[0]);
 
   // Create one location for each potential PC value.
-  YkLocation loop_loc = yk_location_new();
-  YkLocation **locs = calloc(prog_len, sizeof(&prog[0]));
+  YkLocation *locs = calloc(prog_len, sizeof(&prog[0]));
   for (int i = 0; i < prog_len; i++)
     if (i == 0)
-      locs[i] = &loop_loc;
+      locs[i] = yk_location_new();
     else
-      locs[i] = NULL;
+      locs[i] = yk_location_null();
 
   // The program counter.
   int pc = 0;
@@ -77,7 +76,7 @@ int main(int argc, char **argv) {
     if (pc >= prog_len) {
       exit(0);
     }
-    yk_mt_control_point(mt, locs[pc]);
+    yk_mt_control_point(mt, &locs[pc]);
     if ((pc == 0) && (mem == 9)) {
       __ykstats_wait_until(mt, test_compiled_event);
     }
@@ -102,7 +101,6 @@ int main(int argc, char **argv) {
   NOOPT_VAL(pc);
 
   free(locs);
-  yk_location_drop(loop_loc);
   yk_mt_shutdown(mt);
 
   return (EXIT_SUCCESS);

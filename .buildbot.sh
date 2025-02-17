@@ -2,8 +2,11 @@
 
 set -eu
 
-# What git commit hash of yklua will we test in buildbot?
-YKLUA_COMMIT="7ced271cf4f36a78127d0cc745906cc21409ae0d"
+# What git commit hash of yklua & ykcbf will we test in buildbot?
+YKLUA_REPO="https://github.com/ltratt/yklua.git"
+YKLUA_COMMIT="305bef80816b84e0848a6694c87e715c4cd263f5"
+YKCBF_REPO="https://github.com/ltratt/ykcbf.git"
+YKCBF_COMMIT="a7eb0e0dbeef38191c4fe823c5aed50e5768df5c"
 
 TRACERS="hwt swt"
 
@@ -14,7 +17,7 @@ TRACERS="hwt swt"
 #  - YK_BUILD_TYPE must be set.
 test_yklua() {
     if [ ! -e "yklua" ]; then
-        git clone --depth=1 https://github.com/ykjit/yklua
+        git clone --depth=1 "$YKLUA_REPO"
         cd yklua
         git fetch --depth=1 origin "$YKLUA_COMMIT"
         git checkout "$YKLUA_COMMIT"
@@ -244,8 +247,10 @@ for b in collect_and_decode promote; do
 done
 
 # Test some BF programs.
-git clone https://github.com/ykjit/ykcbf.git
+git clone --depth=1 "$YKCBF_REPO"
 cd ykcbf
+git fetch --depth=1 origin "$YKCBF_COMMIT"
+git checkout "$YKCBF_COMMIT"
 PATH=$(pwd)/../bin:${PATH} YK_BUILD_TYPE=debug make
 ./bf_simple_yk lang_tests/bench.bf
 ./bf_simple_yk lang_tests/hanoi-opt.bf

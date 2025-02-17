@@ -15,15 +15,18 @@ use crate::{
 use parking_lot::Mutex;
 
 #[cfg(target_pointer_width = "64")]
-const STATE_TAG: usize = 0b1; // All of the tag data must fit in this.
+const STATE_TAG_MASK: usize = 0b11; // All of the tag data must fit in this.
 #[cfg(target_pointer_width = "64")]
-const STATE_NUM_BITS: usize = 1;
+const STATE_NUM_BITS: usize = 2;
 
-/// Because hot locations will be most common, we save ourselves the effort of ANDing bits away by
-/// having `STATE_HOT` be 0, expecting that `ptr & !0` will be optimised to just `ptr`.
-const STATE_HOT: usize = 0b0;
-/// In the not hot state, we have to do `(inner & !1) >> STATE_NUM_BITS` to derive the count.
-const STATE_NOT_HOT: usize = 0b1;
+const STATE_NULL: usize = 0b00;
+/// The tag value for a not-yet-hot [Location]. Because null [Location]s have an inner value of 0,
+/// this value *must* be non-zero. To derive the count of a not-yet-hot [Location], we have to do
+/// `(inner & !1) >> STATE_NUM_BITS` to derive the count.
+const STATE_NOT_HOT: usize = 0b01;
+/// The tag value for a hot [Location]; its [HotLocation] address will be contained in the non-tag
+/// bits.
+const STATE_HOT: usize = 0b10;
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
@@ -39,7 +42,8 @@ const STATE_NOT_HOT: usize = 0b1;
 #[repr(C)]
 #[derive(Debug)]
 pub struct Location {
-    /// A Location is a state machine which operates as follows (where Counting is the start state):
+    /// A Location is a state machine. "Null" locations are always "null". Non-"null" locations
+    /// operate operate as follows (where Counting is the start state):
     ///
     /// ```text
     ///                                           │
@@ -118,9 +122,23 @@ impl Location {
     /// Create a new location.
     pub fn new() -> Self {
         // Locations start in the counting state with a count of 0.
+        debug_assert_ne!(STATE_NOT_HOT, 0);
         Self {
             inner: AtomicUsize::new(STATE_NOT_HOT),
         }
+    }
+
+    /// Create a new "null" location, denoting a point in a program which can never contribute to a
+    /// trace.
+    pub fn null() -> Self {
+        Self {
+            inner: AtomicUsize::new(STATE_NULL),
+        }
+    }
+
+    /// Returns true if this is a "null" location.
+    pub fn is_null(&self) -> bool {
+        self.inner.load(Ordering::Relaxed) == STATE_NULL
     }
 
     /// If `self` is:
@@ -130,7 +148,7 @@ impl Location {
     /// then increment and return its count, or `None` otherwise.
     pub(crate) fn inc_count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);
-        if x & STATE_NOT_HOT != 0 {
+        if x & STATE_TAG_MASK == STATE_NOT_HOT {
             // `HotThreshold` must be unsigned
             debug_assert_eq!(HotThreshold::MIN, 0);
             // For the `as` to be safe, `HotThreshold` can't be bigger than `usize`
@@ -164,7 +182,7 @@ impl Location {
     #[cfg(test)]
     pub(crate) fn count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);
-        if x & STATE_NOT_HOT != 0 {
+        if x & STATE_TAG_MASK == STATE_NOT_HOT {
             // `HotThreshold` must be unsigned
             debug_assert_eq!(HotThreshold::MIN, 0);
             Some((x >> STATE_NUM_BITS) as HotThreshold)
@@ -183,7 +201,7 @@ impl Location {
     ) -> Option<Arc<Mutex<HotLocation>>> {
         let hl = Arc::new(Mutex::new(hl));
         let cl: *const Mutex<HotLocation> = Arc::into_raw(Arc::clone(&hl));
-        debug_assert_eq!((cl as usize) & !STATE_TAG, cl as usize);
+        debug_assert_eq!((cl as usize) & !STATE_TAG_MASK, cl as usize);
         match self.inner.compare_exchange(
             ((old as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
             (cl as usize) | STATE_HOT,
@@ -204,11 +222,11 @@ impl Location {
     /// `None` otherwise.
     pub(crate) fn hot_location(&self) -> Option<&Mutex<HotLocation>> {
         let x = self.inner.load(Ordering::Relaxed);
-        if x & STATE_NOT_HOT == 0 {
+        if x & STATE_TAG_MASK == STATE_HOT {
             // `Arc::into_raw::<Mutex<T>>` returns `*mut Mutex<T>` so the address we're wrapping is
             // a pointer to the `Mutex` itself. By returning a `&` reference we ensure that the
             // reference to the `Mutex` can't outlive this `Location`.
-            Some(unsafe { &*(x as *const _) })
+            Some(unsafe { &*((x & !STATE_TAG_MASK) as *const _) })
         } else {
             None
         }
@@ -218,8 +236,8 @@ impl Location {
     /// otherwise.
     pub(crate) fn hot_location_arc_clone(&self) -> Option<Arc<Mutex<HotLocation>>> {
         let x = self.inner.load(Ordering::Relaxed);
-        if x & STATE_NOT_HOT == 0 {
-            let raw = unsafe { Arc::from_raw(x as *mut _) };
+        if x & STATE_TAG_MASK == STATE_HOT {
+            let raw = unsafe { Arc::from_raw((x & !STATE_TAG_MASK) as *mut _) };
             let cl = Arc::clone(&raw);
             mem::forget(raw);
             Some(cl)
@@ -238,8 +256,8 @@ impl Default for Location {
 impl Drop for Location {
     fn drop(&mut self) {
         let x = self.inner.load(Ordering::Relaxed);
-        if x & STATE_NOT_HOT == 0 {
-            drop(unsafe { Arc::from_raw(x as *mut Mutex<HotLocation>) });
+        if x & STATE_TAG_MASK == STATE_HOT {
+            drop(unsafe { Arc::from_raw((x & !STATE_TAG_MASK) as *mut Mutex<HotLocation>) });
         }
     }
 }

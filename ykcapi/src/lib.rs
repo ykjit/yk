@@ -128,9 +128,9 @@ pub extern "C" fn __ykrt_control_point_real(
     // Frame address of caller.
     frameaddr: *mut c_void,
 ) {
+    let mt = unsafe { &*mt };
+    let loc = unsafe { &*loc };
     if !loc.is_null() {
-        let mt = unsafe { &*mt };
-        let loc = unsafe { &*loc };
         let arc = unsafe { Arc::from_raw(mt) };
         arc.control_point(loc, frameaddr, smid);
         forget(arc);
@@ -154,6 +154,11 @@ pub unsafe extern "C" fn yk_mt_sidetrace_threshold_set(mt: *const MT, hot_thresh
 #[no_mangle]
 pub extern "C" fn yk_location_new() -> Location {
     Location::new()
+}
+
+#[no_mangle]
+pub extern "C" fn yk_location_null() -> Location {
+    Location::null()
 }
 
 #[no_mangle]

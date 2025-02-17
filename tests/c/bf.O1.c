@@ -36,10 +36,7 @@ int interp(char *prog, char *prog_end, char *cells, char *cells_end, YkMT *mt,
   char *inst = prog;
   char *cell = cells;
   while (inst < prog_end) {
-    YkLocation *loc = NULL;
-    if (*inst == ']')
-      loc = &yklocs[inst - prog];
-    yk_mt_control_point(mt, loc);
+    yk_mt_control_point(mt, &yklocs[inst - prog]);
     switch (*inst) {
     case '>': {
       if (cell++ == cells_end)
@@ -120,8 +117,12 @@ int main(void) {
   YkLocation *yklocs = calloc(prog_len, sizeof(YkLocation));
   if (yklocs == NULL)
     err(1, "out of memory");
-  for (YkLocation *ykloc = yklocs; ykloc < yklocs + prog_len; ykloc++)
-    *ykloc = yk_location_new();
+  for (size_t i = 0; i < prog_len; i++) {
+    if (INPUT_PROG[i] == ']')
+      yklocs[i] = yk_location_new();
+    else
+      yklocs[i] = yk_location_null();
+  }
 
   interp(INPUT_PROG, &INPUT_PROG[prog_len], cells, cells_end, mt, yklocs);
 

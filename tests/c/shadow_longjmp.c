@@ -53,10 +53,11 @@ int main(int argc, char **argv) {
   jmp_buf env;
 
   int i = 11;
+  YkLocation loc = yk_location_null();
   NOOPT_VAL(i);
   while (i > 0) {
     // Passing a NULL location. We never JIT. Just checking AOT behaviour.
-    yk_mt_control_point(mt, NULL);
+    yk_mt_control_point(mt, &loc);
     if (setjmp(env) != 0) {
       i -= 3;
     }

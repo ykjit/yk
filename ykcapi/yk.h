@@ -21,6 +21,8 @@ typedef struct {
   uintptr_t state;
 } YkLocation;
 
+#define YKLOCATION_NULL ((YkLocation) 0 )
+
 #if defined(__x86_64)
 typedef uint32_t YkHotThreshold;
 #else
@@ -43,10 +45,11 @@ YkMT *yk_mt_new(char **err_msg);
 // have observable behaviour.
 void yk_mt_shutdown(YkMT *);
 
-// Notify yk that an iteration of an interpreter loop is about to start. The
-// argument passed uniquely identifies the current location in the user's
-// program. A call to this function may cause yk to start/stop tracing, or to
-// execute JITted code.
+// Notify yk that a given `YkLocation` is about to be executed, allowing yk to
+// determine if a trace for this location exists, or one started or stopped, as
+// appropriate. The `YkLocation *` be a non-NULL pointer, though a
+// `yk_location_null` value causes this function call to be, in essence, a
+// no-op: see the documentation for that function for more details.
 void yk_mt_control_point(YkMT *, YkLocation *);
 
 // Set the threshold at which `YkLocation`'s are considered hot.
@@ -55,12 +58,23 @@ void yk_mt_hot_threshold_set(YkMT *, YkHotThreshold);
 // Set the threshold at which guard failures are considered hot.
 void yk_mt_sidetrace_threshold_set(YkMT *, YkHotThreshold);
 
+// Create a new `YkLocation`.
+//
+// Note that a `YkLocation` created by this call must not simply be discarded:
+// if no longer wanted, it must be passed to `yk_location_drop` to allow
+// appropriate clean-up.
+YkLocation yk_location_new(void);
+
+// Create a new NULL-equivalent `Location`. Such a `YkLocation` denotes a point
+// in a program which can never contribute to a trace.
+YkLocation yk_location_null(void);
+
 // Create a new `Location`.
 //
 // Note that a `Location` created by this call must not simply be discarded:
 // if no longer wanted, it must be passed to `yk_location_drop` to allow
 // appropriate clean-up.
-YkLocation yk_location_new(void);
+YkLocation yk_location_empty(void);
 
 // Clean-up a `Location` previously created by `yk_new_location`. The
 // `Location` must not be further used after this call or undefined behaviour
