@@ -583,24 +583,46 @@ impl MT {
                             ..
                         } = mtt.peek_mut_tstate()
                         {
+                            let mut abort = false;
                             if frameaddr != *tracing_frameaddr {
                                 // We're tracing but no longer in the frame we started in, so we
                                 // need to stop tracing and report the original [HotLocation] as
                                 // having failed to trace properly.
-                                self.stats.trace_recorded_err();
-                                let mut lk = tracing_hl.lock();
-                                lk.tracecompilation_error(self);
-                                lk.kind = HotLocationKind::Counting(0);
-
-                                return TransitionControlPoint::AbortTracing;
+                                abort = true;
                             }
 
                             if let Some(x) =
                                 loc.hot_location().map(|x| x as *const Mutex<HotLocation>)
                             {
                                 if !seen_hls.insert(x) {
-                                    return TransitionControlPoint::AbortTracing;
+                                    abort = true;
                                 }
+                            }
+
+                            if abort {
+                                self.stats.trace_recorded_err();
+                                let mut lk = tracing_hl.lock();
+                                match &lk.kind {
+                                    HotLocationKind::Compiled(_) => todo!(),
+                                    HotLocationKind::Compiling => todo!(),
+                                    HotLocationKind::Counting(_) => todo!(),
+                                    HotLocationKind::DontTrace => todo!(),
+                                    HotLocationKind::Tracing => {
+                                        match lk.tracecompilation_error(self) {
+                                            TraceFailed::KeepTrying => {
+                                                lk.kind = HotLocationKind::Counting(0);
+                                            }
+                                            TraceFailed::DontTrace => {
+                                                lk.kind = HotLocationKind::DontTrace;
+                                            }
+                                        }
+                                    }
+                                    HotLocationKind::SideTracing { root_ctr, .. } => {
+                                        lk.kind = HotLocationKind::Compiled(Arc::clone(root_ctr));
+                                    }
+                                }
+
+                                return TransitionControlPoint::AbortTracing;
                             }
                         }
                     }

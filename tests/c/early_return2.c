@@ -21,35 +21,43 @@
 //     yk-jit-event: tracing-aborted
 //     b3
 //     8
-//     b3
-//     7
-//     yk-jit-event: start-tracing
-//     b3
-//     6
-//     yk-jit-event: stop-tracing
-//     --- Begin jit-pre-opt ---
-//     ...
-//     --- End jit-pre-opt ---
-//     b2
-//     5
 //     yk-jit-event: enter-jit-code
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-side-tracing
+//     b3
+//     7
+//     yk-jit-event: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ...
+//     --- End jit-pre-opt ---
+//     b3
+//     6
+//     yk-jit-event: enter-jit-code
+//     yk-jit-event: execute-side-trace
+//     yk-jit-event: deoptimise
+//     yk-jit-event: start-side-tracing
 //     b2
-//     4
+//     5
 //     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     b2
-//     3
+//     4
 //     yk-jit-event: enter-jit-code
+//     yk-jit-event: execute-side-trace
+//     yk-jit-event: execute-side-trace
+//     b2
+//     3
+//     yk-jit-event: execute-side-trace
 //     yk-jit-event: execute-side-trace
 //     b2
 //     2
 //     yk-jit-event: execute-side-trace
+//     yk-jit-event: execute-side-trace
 //     b2
 //     1
+//     yk-jit-event: execute-side-trace
 //     yk-jit-event: execute-side-trace
 //     b2
 //     0

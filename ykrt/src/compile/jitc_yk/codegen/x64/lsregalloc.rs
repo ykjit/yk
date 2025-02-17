@@ -1071,10 +1071,10 @@ impl LSRegAlloc<'_> {
                 x => todo!("{x}"),
             },
             SpillState::ConstInt { bits, v } => match bits {
-                32 => {
-                    dynasm!(asm; mov Rd(reg.code()), v as i32)
+                64 => {
+                    dynasm!(asm; mov Rq(reg.code()), QWORD v as i64)
                 }
-                8 => {
+                32 | 16 | 8 => {
                     dynasm!(asm; mov Rd(reg.code()), v as i32)
                 }
                 _ => todo!("{bits}"),
