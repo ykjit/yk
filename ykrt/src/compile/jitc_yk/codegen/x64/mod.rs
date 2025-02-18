@@ -2700,15 +2700,20 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_trunc(&mut self, iidx: InstIdx, i: &jit_ir::TruncInst) {
-        let [_reg] = self.ra.assign_gp_regs(
+        let [reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
             [GPConstraint::InputOutput {
                 op: i.val(self.m),
-                in_ext: RegExtension::ZeroExtended,
+                in_ext: RegExtension::Undefined,
                 out_ext: RegExtension::ZeroExtended,
                 force_reg: None,
             }],
+        );
+        self.ra.force_zero_extend_to_reg64(
+            &mut self.asm,
+            reg,
+            self.m.type_(i.dest_tyidx()).bitw().unwrap(),
         );
     }
 
@@ -4751,10 +4756,11 @@ mod tests {
                 ; %0: i32 = param ...
                 ...
                 ; %1: i8 = trunc %0
-                mov r.32.x, r.32.x
-                ......
+                ...
+                and r.32._, 0xFF
                 ; %2: i8 = trunc %0
-                ......
+                ...
+                and r.32._, 0xFF
                 ; %3: i8 = add %2, %1
                 add r.32._, r.32._
             ",
