@@ -862,7 +862,7 @@ impl LSRegAlloc<'_> {
     /// register.
     ///
     /// `from_bits` must be between 1 and 64.
-    fn force_zero_extend_to_reg64(&self, asm: &mut Assembler, reg: Rq, from_bitw: u32) {
+    pub(super) fn force_zero_extend_to_reg64(&self, asm: &mut Assembler, reg: Rq, from_bitw: u32) {
         debug_assert!(from_bitw > 0 && from_bitw <= 64);
         match from_bitw {
             1..=31 => dynasm!(asm; and Rd(reg.code()), ((1u64 << from_bitw) - 1) as i32),

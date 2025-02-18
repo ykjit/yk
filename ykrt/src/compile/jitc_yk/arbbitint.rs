@@ -88,6 +88,19 @@ impl ArbBitInt {
         }
     }
 
+    /// Truncate this `ArbBitInt` to `to_bitw` bits.
+    ///
+    /// # Panics
+    ///
+    /// If `to_bitw` is larger than `self.bitw()`.
+    pub(crate) fn truncate(&self, to_bitw: u32) -> Self {
+        debug_assert!(to_bitw <= self.bitw && to_bitw <= 64);
+        Self {
+            bitw: to_bitw,
+            val: self.val,
+        }
+    }
+
     /// Sign extend the underlying value and, if it is representable as an `i8`, return it.
     #[allow(unused)]
     pub(crate) fn to_sign_ext_i8(&self) -> Option<i8> {
