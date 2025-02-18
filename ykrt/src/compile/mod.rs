@@ -88,6 +88,8 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// Return a reference to the guard `id`.
     fn guard(&self, gidx: GuardIdx) -> &Guard;
 
+    fn patch_guard(&self, gidx: GuardIdx, target: *const std::ffi::c_void);
+
     /// The pointer to this trace's executable code.
     fn entry(&self) -> *const c_void;
 
@@ -143,6 +145,10 @@ mod compiled_trace_testing {
             panic!();
         }
 
+        fn patch_guard(&self, _gidx: GuardIdx, _target: *const std::ffi::c_void) {
+            panic!();
+        }
+
         fn entry(&self) -> *const c_void {
             panic!();
         }
@@ -189,6 +195,10 @@ mod compiled_trace_testing {
         fn guard(&self, gidx: GuardIdx) -> &Guard {
             assert_eq!(usize::from(gidx), 0);
             &self.guard
+        }
+
+        fn patch_guard(&self, _gidx: GuardIdx, _target: *const std::ffi::c_void) {
+            panic!();
         }
 
         fn entry(&self) -> *const c_void {

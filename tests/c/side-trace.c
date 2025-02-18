@@ -41,13 +41,9 @@
 //     --- End jit-pre-opt ---
 //     22
 //     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
 //     24
-//     yk-jit-event: execute-side-trace
 //     26
-//     yk-jit-event: execute-side-trace
 //     28
-//     yk-jit-event: execute-side-trace
 //     30
 //     yk-jit-event: deoptimise
 //     {

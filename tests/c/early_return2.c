@@ -33,7 +33,6 @@
 //     b3
 //     6
 //     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-side-tracing
 //     b2
@@ -45,20 +44,12 @@
 //     b2
 //     4
 //     yk-jit-event: enter-jit-code
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     b2
 //     3
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     b2
 //     2
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     b2
 //     1
-//     yk-jit-event: execute-side-trace
-//     yk-jit-event: execute-side-trace
 //     b2
 //     0
 //     yk-jit-event: deoptimise
