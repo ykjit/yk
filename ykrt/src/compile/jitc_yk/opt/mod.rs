@@ -11,7 +11,7 @@ use super::{
     jit_ir::{
         BinOp, BinOpInst, Const, ConstIdx, DynPtrAddInst, GuardInst, ICmpInst, Inst, InstIdx,
         LoadInst, Module, Operand, Predicate, PtrAddInst, SExtInst, SelectInst, StoreInst,
-        TraceKind, Ty, ZExtInst,
+        TraceKind, TruncInst, Ty, ZExtInst,
     },
 };
 use crate::compile::CompilationError;
@@ -196,6 +196,7 @@ impl Opt {
             Inst::Select(x) => self.opt_select(iidx, x)?,
             Inst::SExt(x) => self.opt_sext(iidx, x)?,
             Inst::Store(x) => self.opt_store(iidx, x)?,
+            Inst::Trunc(x) => self.opt_trunc(iidx, x)?,
             Inst::ZExt(x) => self.opt_zext(iidx, x)?,
             _ => (),
         };
@@ -824,6 +825,25 @@ impl Opt {
                 self.an
                     .push_heap_store(&self.m, Address::from_operand(&self.m, tgt), val);
             }
+        }
+
+        Ok(())
+    }
+
+    fn opt_trunc(&mut self, iidx: InstIdx, inst: TruncInst) -> Result<(), CompilationError> {
+        if let Operand::Const(cidx) = self.an.op_map(&self.m, inst.val(&self.m)) {
+            let Const::Int(_src_ty, src_val) = self.m.const_(cidx) else {
+                unreachable!()
+            };
+            let dst_ty = self.m.type_(inst.dest_tyidx());
+            let Ty::Integer(dst_bits) = dst_ty else {
+                unreachable!()
+            };
+            debug_assert!(*dst_bits <= 64);
+            let dst_cidx = self
+                .m
+                .insert_const(Const::Int(inst.dest_tyidx(), src_val.truncate(*dst_bits)))?;
+            self.m.replace(iidx, Inst::Const(dst_cidx));
         }
 
         Ok(())
@@ -1574,6 +1594,29 @@ mod test {
             black_box 0i8
             black_box %1
             black_box %5
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_trunc() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i16 = trunc 1i32
+            %1: i16 = trunc 4294967295i32
+            %2: i32 = trunc 18446744073709551615i64
+            black_box %0
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 1i16
+            black_box 65535i16
+            black_box 4294967295i32
         ",
         );
     }
