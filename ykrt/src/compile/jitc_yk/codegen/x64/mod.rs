@@ -2036,10 +2036,9 @@ impl<'a> Assemble<'a> {
                     op: lhs,
                     in_ext,
                     force_reg: None,
-                    clobber_reg: true,
+                    clobber_reg: false,
                 }],
             );
-            self.patch_reg.insert(g_inst.gidx.into(), lhs_reg);
             self.cg_cmp_const(bitw, lhs_reg, v);
         } else {
             let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
@@ -2050,7 +2049,7 @@ impl<'a> Assemble<'a> {
                         op: lhs,
                         in_ext,
                         force_reg: None,
-                        clobber_reg: true,
+                        clobber_reg: false,
                     },
                     GPConstraint::Input {
                         op: rhs,
@@ -2060,17 +2059,20 @@ impl<'a> Assemble<'a> {
                     },
                 ],
             );
-            self.patch_reg.insert(g_inst.gidx.into(), lhs_reg);
             self.cg_cmp_regs(bitw, lhs_reg, rhs_reg);
         }
 
         // Codegen guard
         self.ra.expire_regs(g_iidx);
+        let [patch_reg] = self
+            .ra
+            .assign_gp_regs(&mut self.asm, ic_iidx, [GPConstraint::Temporary]);
+        self.patch_reg.insert(g_inst.gidx.into(), patch_reg);
+        let fail_label = self.guard_to_deopt(&g_inst);
         self.comment(
             self.asm.offset(),
             Inst::Guard(g_inst).display(self.m, g_iidx).to_string(),
         );
-        let fail_label = self.guard_to_deopt(&g_inst);
 
         if g_inst.expect() {
             match pred {
@@ -2989,19 +2991,22 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
-        let fail_label = self.guard_to_deopt(inst);
         let cond = inst.cond(self.m);
-        let [reg] = self.ra.assign_gp_regs(
+        let [reg, patch_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
-            [GPConstraint::Input {
-                op: cond,
-                in_ext: RegExtension::Undefined,
-                force_reg: None,
-                clobber_reg: true,
-            }],
+            [
+                GPConstraint::Input {
+                    op: cond,
+                    in_ext: RegExtension::Undefined,
+                    force_reg: None,
+                    clobber_reg: false,
+                },
+                GPConstraint::Temporary,
+            ],
         );
-        self.patch_reg.insert(inst.gidx.into(), reg);
+        self.patch_reg.insert(inst.gidx.into(), patch_reg);
+        let fail_label = self.guard_to_deopt(inst);
         dynasm!(self.asm ; bt Rd(reg.code()), 0);
         if inst.expect() {
             dynasm!(self.asm ; jnb =>fail_label);
@@ -4710,6 +4715,7 @@ mod tests {
                 jb 0x...
                 ...
                 ; deopt id and patch point for guard 0
+                and r.32._, 0x01
                 nop
                 ...
                 push rsi
@@ -4812,12 +4818,9 @@ mod tests {
                 cmp r.32.x, 0x03
                 setz r.8._
                 ; guard true, %1, [] ; ...
-                and r.32.x, 0x01
-                mov ...
                 bt r.32.x, 0x00
                 jnb 0x...
                 ; %3: i8 = sext %1
-                movzx ...
                 and r.64.x, 0x01
                 neg r.64.x
                 ; black_box %3
