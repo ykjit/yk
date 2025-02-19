@@ -3194,12 +3194,14 @@ impl<'a> AsmPrinter<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Assemble, X64CompiledTrace};
-    use crate::compile::{
-        jitc_yk::jit_ir::{self, Inst, Module, ParamIdx, TraceKind},
-        CompiledTrace,
+    use crate::{
+        compile::{
+            jitc_yk::jit_ir::{self, Inst, Module, ParamIdx, TraceKind},
+            CompiledTrace,
+        },
+        location::{HotLocation, HotLocationKind},
+        mt::{CompiledTraceId, MT},
     };
-    use crate::location::{HotLocation, HotLocationKind};
-    use crate::mt::MT;
     use fm::{FMBuilder, FMatcher};
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
@@ -5386,7 +5388,8 @@ mod tests {
 
     #[test]
     fn cg_aliasing_params() {
-        let mut m = jit_ir::Module::new(TraceKind::HeaderOnly, 0, 0).unwrap();
+        let mut m =
+            jit_ir::Module::new(TraceKind::HeaderOnly, CompiledTraceId::testing(), 0).unwrap();
 
         // Create two trace paramaters whose locations alias.
         let loc = yksmp::Location::Register(13, 1, [].into());

@@ -9,9 +9,12 @@ use super::{
     jit_ir::{self, Const, Operand, PackedOperand, ParamIdx, TraceKind},
     AOT_MOD,
 };
-use crate::aotsmp::AOT_STACKMAPS;
-use crate::compile::CompilationError;
-use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
+use crate::{
+    aotsmp::AOT_STACKMAPS,
+    compile::CompilationError,
+    mt::CompiledTraceId,
+    trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction},
+};
 use std::{collections::HashMap, ffi::CString, marker::PhantomData, sync::Arc};
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
@@ -61,7 +64,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
     ///  - `debug_archors`: Debug strs recorded during runtime.
     fn new(
         tracekind: TraceKind,
-        ctr_id: u64,
+        ctr_id: CompiledTraceId,
         aot_mod: &'static Module,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
@@ -1465,7 +1468,7 @@ struct InlinedFrame {
 
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.
 pub(super) fn build<Register: Send + Sync + 'static>(
-    ctr_id: u64,
+    ctr_id: CompiledTraceId,
     aot_mod: &'static Module,
     ta_iter: Box<dyn AOTTraceIterator>,
     sti: Option<Arc<YkSideTraceInfo<Register>>>,

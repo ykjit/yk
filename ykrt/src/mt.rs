@@ -93,9 +93,8 @@ pub struct MT {
     /// The [Compiler] that will be used for compiling future `IRTrace`s. Note that this might not
     /// be the same as the compiler(s) used to compile past `IRTrace`s.
     compiler: Mutex<Arc<dyn Compiler>>,
-    /// A monotonically increasing integer that semi-uniquely identifies each compiled trace. This
-    /// is only useful for general debugging purposes, and must not be relied upon for semantic
-    /// correctness, because the IDs can repeat when the underlying `u64` overflows/wraps.
+    /// A monotonically increasing integer that uniquely identifies each compiled trace. Used to
+    /// create new [CompiledTrace]s.
     compiled_trace_id: AtomicU64,
     pub(crate) log: Log,
     pub(crate) stats: Stats,
@@ -211,12 +210,16 @@ impl MT {
         self.max_worker_threads.load(Ordering::Relaxed)
     }
 
-    /// Return the semi-unique ID for the next compiled trace. Note: this is only useful for
-    /// general debugging purposes, and must not be relied upon for semantic correctness, because
-    /// the IDs will wrap when the underlying `u64` overflows.
-    pub(crate) fn next_compiled_trace_id(self: &Arc<Self>) -> u64 {
+    /// Return the unique ID for the next compiled trace.
+    pub(crate) fn next_compiled_trace_id(self: &Arc<Self>) -> CompiledTraceId {
         // Note: fetch_add is documented to wrap on overflow.
-        self.compiled_trace_id.fetch_add(1, Ordering::Relaxed)
+        let ctr_id = self.compiled_trace_id.fetch_add(1, Ordering::Relaxed);
+        if ctr_id == u64::MAX {
+            // OK, OK, technically we have 1 ID left that we could use, but if we've actually
+            // managed to compile u64::MAX traces, it's probable that something's gone wrong.
+            panic!("Ran out of trace IDs");
+        }
+        CompiledTraceId(ctr_id)
     }
 
     /// Queue `job` to be run on a worker thread.
@@ -1230,6 +1233,23 @@ enum TransitionControlPoint {
 pub(crate) enum TransitionGuardFailure {
     NoAction,
     StartSideTracing(Arc<Mutex<HotLocation>>),
+}
+
+/// The unique identifier of a compiled trace.
+#[derive(Clone, Debug)]
+pub(crate) struct CompiledTraceId(u64);
+
+impl CompiledTraceId {
+    #[cfg(test)]
+    pub(crate) fn testing() -> Self {
+        Self(0)
+    }
+}
+
+impl std::fmt::Display for CompiledTraceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 #[cfg(test)]

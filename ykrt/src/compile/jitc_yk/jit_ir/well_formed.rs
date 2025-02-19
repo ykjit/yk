@@ -332,6 +332,7 @@ mod tests {
         super::{ArbBitInt, TraceKind},
         BinOp, BinOpInst, Const, Inst, Module, Operand,
     };
+    use crate::mt::CompiledTraceId;
 
     #[should_panic(expected = "Instruction at position 0 passing too few arguments")]
     #[test]
@@ -402,7 +403,7 @@ mod tests {
     fn cg_add_wrong_types() {
         // The parser will reject a binop with a result type different from either operand, so to
         // get the test we want, we can't use the parser.
-        let mut m = Module::new(TraceKind::HeaderOnly, 0, 0).unwrap();
+        let mut m = Module::new(TraceKind::HeaderOnly, CompiledTraceId::testing(), 0).unwrap();
         let c1 = m
             .insert_const(Const::Int(m.int1_tyidx(), ArbBitInt::from_u64(1, 0)))
             .unwrap();
