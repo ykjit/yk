@@ -333,14 +333,9 @@ pub(crate) extern "C" fn __yk_deopt(
         newframedst = unsafe { newframedst.byte_add(REG64_BYTESIZE) };
     }
 
-    // The `clone` should really be `Arc::clone(&ctr)` but that doesn't play well with type
-    // inference in this (unusual) case.
-    mt.guard_failure(ctr.clone(), gidx, frameaddr);
+    mt.guard_failure(ctr, gidx, frameaddr);
     mt.stats
         .timing_state(crate::log::stats::TimingState::OutsideYk);
-
-    // Since we won't return from this function, drop `ctr` manually.
-    drop(ctr);
 
     // Now overwrite the existing stack with our newly recreated one.
     unsafe { replace_stack(newframedst, newstack, memsize) };
