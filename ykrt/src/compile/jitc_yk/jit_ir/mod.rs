@@ -235,13 +235,8 @@ impl Module {
         self.tracekind = tracekind;
     }
 
-    /// Returns the ID of the module.
-    ///
-    /// In `cfg(test)` the ID is meaningless: in `cfg(not(test))` the ID is obtained from
-    /// [crate::mt::MT::next_compiled_trace_id] and can be used to semi-uniquely distinguish traces
-    /// (see [crate::mt::MT::compiled_trace_id] for more details).
-    #[cfg(any(debug_assertions, test))]
-    pub(crate) fn ctr_id(&self) -> CompiledTraceId {
+    /// Returns the ID the module will have when it is compiled into a trace.
+    pub(crate) fn ctrid(&self) -> CompiledTraceId {
         self.ctr_id.clone()
     }
 

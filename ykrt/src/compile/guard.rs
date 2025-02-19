@@ -17,7 +17,7 @@ pub(crate) struct Guard(Mutex<GuardState>);
 enum GuardState {
     Counting(HotThreshold),
     SideTracing,
-    Compiled(Arc<dyn CompiledTrace>),
+    Compiled,
 }
 
 impl Guard {
@@ -40,7 +40,7 @@ impl Guard {
                 }
             }
             GuardState::SideTracing => false,
-            GuardState::Compiled(_) => false,
+            GuardState::Compiled => false,
         }
     }
 
@@ -58,7 +58,7 @@ impl Guard {
         let mut lk = self.0.lock();
         let addr = ctr.entry();
         match &*lk {
-            GuardState::SideTracing => *lk = GuardState::Compiled(ctr),
+            GuardState::SideTracing => *lk = GuardState::Compiled,
             _ => panic!(),
         }
         // It's important to patch the parent only after we've updated the `GuardState` to avoid a
@@ -66,15 +66,6 @@ impl Guard {
         // where another thread takes the patched jump and deopts before we had a chance to call
         // `set_ctr` which sets information required by deopt.
         parent.patch_guard(gidx, addr);
-    }
-
-    /// Return the compiled side-trace or None if no side-trace has been compiled.
-    pub fn ctr(&self) -> Option<Arc<dyn CompiledTrace>> {
-        let lk = self.0.lock();
-        match &*lk {
-            GuardState::Compiled(ctr) => Some(Arc::clone(ctr)),
-            _ => None,
-        }
     }
 }
 
