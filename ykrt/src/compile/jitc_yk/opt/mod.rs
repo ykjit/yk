@@ -286,7 +286,7 @@ impl Opt {
                 }
                 (Operand::Var(_), Operand::Var(_)) => (),
             },
-            BinOp::LShr => match (
+            BinOp::AShr | BinOp::LShr => match (
                 self.an.op_map(&self.m, inst.lhs(&self.m)),
                 self.an.op_map(&self.m, inst.rhs(&self.m)),
             ) {
@@ -317,9 +317,15 @@ impl Opt {
                             debug_assert_eq!(lhs_tyidx, _rhs_tyidx);
                             // If checked_shr fails, we've encountered LLVM poison and can
                             // choose any value.
-                            let shr = lhs
-                                .checked_shr(rhs.to_zero_ext_u32().unwrap())
-                                .unwrap_or_else(|| ArbBitInt::all_bits_set(lhs.bitw()));
+                            let shr = match inst.binop() {
+                                BinOp::AShr => lhs
+                                    .checked_ashr(rhs.to_zero_ext_u32().unwrap())
+                                    .unwrap_or_else(|| ArbBitInt::all_bits_set(lhs.bitw())),
+                                BinOp::LShr => lhs
+                                    .checked_lshr(rhs.to_zero_ext_u32().unwrap())
+                                    .unwrap_or_else(|| ArbBitInt::all_bits_set(lhs.bitw())),
+                                _ => unreachable!(),
+                            };
                             let cidx = self.m.insert_const(Const::Int(*lhs_tyidx, shr))?;
                             self.m.replace(iidx, Inst::Const(cidx));
                         }
@@ -1141,6 +1147,76 @@ mod test {
             %0: ptr = param ...
             %1: ptr = ptr_add %0, 6
             black_box %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ashr_zero() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param 0
+            %1: i8 = ashr %0, 0i8
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box %0
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param 0
+            %1: i8 = ashr 0i8, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 0i8
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ashr_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = 255i8
+            %1: i8 = 3i8
+            %2: i8 = ashr %0, %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 255i8
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = 240i8
+            %1: i8 = 3i8
+            %2: i8 = ashr %0, %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 254i8
         ",
         );
     }

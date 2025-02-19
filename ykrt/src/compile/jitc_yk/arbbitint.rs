@@ -198,9 +198,26 @@ impl ArbBitInt {
         }
     }
 
-    /// Return a new [ArbBitInt] that right shifts `self` by `bits` or `None` if `bits >=
+    /// Return a new [ArbBitInt] that arithmetic-right shifts `self` by `bits` or `None` if `bits
+    /// >= self.bitw()`.
+    pub(crate) fn checked_ashr(&self, bits: u32) -> Option<Self> {
+        if bits < self.bitw {
+            Some(Self {
+                bitw: self.bitw,
+                val: self
+                    .val
+                    .checked_shr(bits)
+                    .unwrap()
+                    .sign_extend(self.bitw - bits, self.bitw), // unwrap cannot fail
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Return a new [ArbBitInt] that logic-right shifts `self` by `bits` or `None` if `bits >=
     /// self.bitw()`.
-    pub(crate) fn checked_shr(&self, bits: u32) -> Option<Self> {
+    pub(crate) fn checked_lshr(&self, bits: u32) -> Option<Self> {
         if bits < self.bitw {
             Some(Self {
                 bitw: self.bitw,
@@ -808,45 +825,89 @@ mod tests {
         }
 
         #[test]
-        fn arbbitint_8bit_shr(x in any::<u8>(), y in 0u32..=8) {
+        fn arbbitint_8bit_ashr(x in any::<i8>(), y in 0u32..=8) {
             // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
             // sure that we test the "failure" case, while not biasing our testing too-far to
             // "failure cases only".
             assert_eq!(
-                ArbBitInt::from_u64(8, x as u64).checked_shr(y).map(|x| x.to_zero_ext_u8()),
+                ArbBitInt::from_i64(8, x as i64).checked_ashr(y).map(|x| x.to_sign_ext_i8()),
                 x.checked_shr(y).map(Some)
             );
         }
 
         #[test]
-        fn arbbitint_16bit_shr(x in any::<u16>(), y in 0u32..=16) {
+        fn arbbitint_16bit_ashr(x in any::<i16>(), y in 0u32..=16) {
             // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
             // sure that we test the "failure" case, while not biasing our testing too-far to
             // "failure cases only".
             assert_eq!(
-                ArbBitInt::from_u64(16, x as u64).checked_shr(y).map(|x| x.to_zero_ext_u16()),
+                ArbBitInt::from_i64(16, x as i64).checked_ashr(y).map(|x| x.to_sign_ext_i16()),
                 x.checked_shr(y).map(Some)
             );
         }
 
         #[test]
-        fn arbbitint_32bit_shr(x in any::<u32>(), y in 0u32..=32) {
+        fn arbbitint_32bit_ashr(x in any::<i32>(), y in 0u32..=32) {
             // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
             // sure that we test the "failure" case, while not biasing our testing too-far to
             // "failure cases only".
             assert_eq!(
-                ArbBitInt::from_u64(32, x as u64).checked_shr(y).map(|x| x.to_zero_ext_u32()),
+                ArbBitInt::from_i64(32, x as i64).checked_ashr(y).map(|x| x.to_sign_ext_i32()),
                 x.checked_shr(y).map(Some)
             );
         }
 
         #[test]
-        fn arbbitint_64bit_shr(x in any::<u64>(), y in 0u32..=63) {
+        fn arbbitint_64bit_ashr(x in any::<i64>(), y in 0u32..=63) {
             // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
             // sure that we test the "failure" case, while not biasing our testing too-far to
             // "failure cases only".
             assert_eq!(
-                ArbBitInt::from_u64(64, x).checked_shr(y).map(|x| x.to_zero_ext_u64()),
+                ArbBitInt::from_i64(64, x).checked_ashr(y).map(|x| x.to_sign_ext_i64()),
+                x.checked_shr(y).map(Some)
+            );
+        }
+
+        #[test]
+        fn arbbitint_8bit_lshr(x in any::<u8>(), y in 0u32..=8) {
+            // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
+            // sure that we test the "failure" case, while not biasing our testing too-far to
+            // "failure cases only".
+            assert_eq!(
+                ArbBitInt::from_u64(8, x as u64).checked_lshr(y).map(|x| x.to_zero_ext_u8()),
+                x.checked_shr(y).map(Some)
+            );
+        }
+
+        #[test]
+        fn arbbitint_16bit_lshr(x in any::<u16>(), y in 0u32..=16) {
+            // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
+            // sure that we test the "failure" case, while not biasing our testing too-far to
+            // "failure cases only".
+            assert_eq!(
+                ArbBitInt::from_u64(16, x as u64).checked_lshr(y).map(|x| x.to_zero_ext_u16()),
+                x.checked_shr(y).map(Some)
+            );
+        }
+
+        #[test]
+        fn arbbitint_32bit_lshr(x in any::<u32>(), y in 0u32..=32) {
+            // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
+            // sure that we test the "failure" case, while not biasing our testing too-far to
+            // "failure cases only".
+            assert_eq!(
+                ArbBitInt::from_u64(32, x as u64).checked_lshr(y).map(|x| x.to_zero_ext_u32()),
+                x.checked_shr(y).map(Some)
+            );
+        }
+
+        #[test]
+        fn arbbitint_64bit_lshr(x in any::<u64>(), y in 0u32..=63) {
+            // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
+            // sure that we test the "failure" case, while not biasing our testing too-far to
+            // "failure cases only".
+            assert_eq!(
+                ArbBitInt::from_u64(64, x).checked_lshr(y).map(|x| x.to_zero_ext_u64()),
                 x.checked_shr(y).map(Some)
             );
         }
