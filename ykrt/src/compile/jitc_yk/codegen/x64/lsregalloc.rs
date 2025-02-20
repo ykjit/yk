@@ -645,8 +645,7 @@ impl LSRegAlloc<'_> {
         let cnstr_regs = cnstr_regs.map(|x| x.unwrap());
 
         // Spill currently assigned registers that don't contain values we want for the current
-        // instruction. OPT: by definition these values must be useful for later instructions, so
-        // in some cases we could move them rather than spill them.
+        // instruction.
         for reg in cnstr_regs.iter() {
             let st = &self.gp_reg_states[usize::from(reg.code())];
             match st {
@@ -660,9 +659,28 @@ impl LSRegAlloc<'_> {
                 }
                 RegState::FromInst(op_iidx, _) => {
                     if !self.find_op_in_constraints(&constraints, Operand::Var(*op_iidx)) {
-                        self.spill_gp_if_not_already(asm, iidx, *reg);
-                        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
-                        self.gp_regset.unset(*reg);
+                        if let Some(Register::GP(new_reg)) =
+                            self.rev_an.reg_hints[usize::from(*op_iidx)]
+                        {
+                            // If this operand has a hint and the relevant register is unused, move it
+                            // there.
+                            if !asgn_regs.is_set(new_reg) && !self.gp_regset.is_set(new_reg) {
+                                self.move_gp_reg(asm, *reg, new_reg);
+                                asgn_regs.set(new_reg);
+                                continue;
+                            }
+                        }
+
+                        if let Some(new_reg) = self.gp_regset.find_empty_avoiding(asgn_regs) {
+                            // There's a completely free register we can move things to.
+                            self.move_gp_reg(asm, *reg, new_reg);
+                            asgn_regs.set(new_reg);
+                        } else {
+                            // Nothing free: we have to spill.
+                            self.spill_gp_if_not_already(asm, iidx, *reg);
+                            self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                            self.gp_regset.unset(*reg);
+                        }
                     }
                 }
             }
