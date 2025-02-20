@@ -736,17 +736,7 @@ impl LSRegAlloc<'_> {
                                         | GPConstraint::Clobber { .. }
                                         | GPConstraint::Temporary,
                                     ) => {
-                                        if let RegState::Empty =
-                                            self.gp_reg_states[usize::from(reg.code())]
-                                        {
-                                            self.move_gp_reg(asm, old_reg, reg);
-                                        } else if let RegState::Empty =
-                                            self.gp_reg_states[usize::from(old_reg.code())]
-                                        {
-                                            self.move_gp_reg(asm, reg, old_reg);
-                                        } else {
-                                            self.swap_gp_reg(asm, reg, old_reg);
-                                        }
+                                        self.move_gp_reg(asm, old_reg, reg);
                                         changed = true;
                                     }
                                     _ => (),
