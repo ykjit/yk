@@ -121,6 +121,16 @@ if [ "$CI_RUNNER" = buildbot ] ; then
     # cargo-clippy-def to work later.
     git fetch --no-recurse-submodules origin master:refs/remotes/origin/master
 fi
+
+# debug mode is very slow to run yk programs, but we don't really care about
+# the buildtime, so we force `debug` builds to be built with optimisations.
+# Note, this still keeps `debug_assert`s, overflow checks and the like!
+cat << EOF >> Cargo.toml
+[profile.dev.build-override]
+opt-level = 3
+codegen-units = 16
+EOF
+
 for tracer in ${TRACERS}; do
     export YKB_TRACER="${tracer}"
     # Check for annoying compiler warnings in each package.
