@@ -126,7 +126,7 @@ fi
 # the buildtime, so we force `debug` builds to be built with optimisations.
 # Note, this still keeps `debug_assert`s, overflow checks and the like!
 cat << EOF >> Cargo.toml
-[profile.dev.build-override]
+[profile.dev]
 opt-level = 3
 codegen-units = 16
 EOF
