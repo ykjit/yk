@@ -3,10 +3,10 @@
 set -eu
 
 # What git commit hash of yklua & ykcbf will we test in buildbot?
-YKLUA_REPO="https://github.com/ltratt/yklua.git"
-YKLUA_COMMIT="305bef80816b84e0848a6694c87e715c4cd263f5"
-YKCBF_REPO="https://github.com/ltratt/ykcbf.git"
-YKCBF_COMMIT="a7eb0e0dbeef38191c4fe823c5aed50e5768df5c"
+YKLUA_REPO="https://github.com/ykjit/yklua.git"
+YKLUA_COMMIT="8a7a2082d941291de90c8314b52fc2bc91353e0c"
+YKCBF_REPO="https://github.com/ykjit/ykcbf.git"
+YKCBF_COMMIT="431b92593180e1e376d08ecf383c4a1ab8473b3d"
 
 TRACERS="hwt swt"
 
@@ -121,6 +121,16 @@ if [ "$CI_RUNNER" = buildbot ] ; then
     # cargo-clippy-def to work later.
     git fetch --no-recurse-submodules origin master:refs/remotes/origin/master
 fi
+
+# debug mode is very slow to run yk programs, but we don't really care about
+# the buildtime, so we force `debug` builds to be built with optimisations.
+# Note, this still keeps `debug_assert`s, overflow checks and the like!
+cat << EOF >> Cargo.toml
+[profile.dev.build-override]
+opt-level = 3
+codegen-units = 16
+EOF
+
 for tracer in ${TRACERS}; do
     export YKB_TRACER="${tracer}"
     # Check for annoying compiler warnings in each package.
