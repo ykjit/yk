@@ -614,29 +614,6 @@ pub(crate) enum FloatPredicate {
     True,
 }
 
-impl FloatPredicate {
-    /// Returns whether the operation is ordered (where possible).
-    pub(crate) fn is_ordered(&self) -> Option<bool> {
-        match self {
-            Self::False => None,
-            Self::OrderedEqual => Some(true),
-            Self::OrderedGreater => Some(true),
-            Self::OrderedGreaterEqual => Some(true),
-            Self::OrderedLess => Some(true),
-            Self::OrderedLessEqual => Some(true),
-            Self::OrderedNotEqual => Some(true),
-            Self::Ordered => Some(true),
-            Self::Unordered => Some(false),
-            Self::UnorderedEqual => Some(false),
-            Self::UnorderedGreater => Some(false),
-            Self::UnorderedGreaterEqual => Some(false),
-            Self::UnorderedLess => Some(false),
-            Self::UnorderedLessEqual => Some(false),
-            Self::UnorderedNotEqual => Some(false),
-            Self::True => None,
-        }
-    }
-}
 impl Display for FloatPredicate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // The `f_` prefix ensures there is no ambiguity with integer predicates.

@@ -2184,7 +2184,65 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_fcmp(&mut self, iidx: InstIdx, inst: &jit_ir::FCmpInst) {
-        let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
+        // For some predicates we do as LLVM does and rewrite the operation into an equivalent one
+        // that can be codegenned more efficiently.
+        //
+        // For example, suppose we want to codegen this 32-bit float comparison:
+        //
+        //   %3: i1 = f_ugt %1, %2
+        //
+        // This means "set %3 to 1 if %1 > %2 or if the comparison's result unordered (i.e. one or
+        // both of %1 and %2 were NaN), otherwise set %3 to 0".
+        //
+        // Assume that %1 is in xmm1 and %2 is in xmm2. We'd use `ucomis{s,d}` (depending on if we
+        // are operating on floats or doubles) to set the flags register and then interpret the
+        // flags to know which relation(s) held.
+        //
+        // Here's the truth table:
+        //
+        //               | ZF | PF | CF
+        //     ----------+----+----+---
+        //     UNORDERED | 1  | 1  | 1
+        //         >     | 0  | 0  | 0
+        //         <     | 0  | 0  | 1
+        //         =     | 1  | 0  | 0
+        //
+        // A naiave code-gen for this does `ucomiss xmm1, xmm2` to set the flags register, then
+        // checks for the unordered result (PF=1) and if xmm1 > xmm2 (CF=0 and ZF=0), i.e.:
+        //
+        //     ucomiss xmm1, xmm2
+        //     setp al                  ; unordered result?
+        //     seta bl                  ; xmm1 > xmm2?
+        //     or al, bl                ; either of the above true? result in al
+        //
+        // That's a lot of work for one comparison and what's more it requires a temporary
+        // register.
+        //
+        // A more clever codegen converts `%3: i1 = f_ugt %1, %2` into the equivalent
+        // `%3: i1 = f_ult $2, %1` by inverting the predicate and swapping the operands. By doing
+        // this we can capture the correct outcome in one flag check: CF=1. This allows much more
+        // efficient codegen:
+        //
+        //     ucomiss xmm2, xmm1       ; operands swapped!
+        //     setb al                  ; predicate inverted, result in al
+        //
+        // For evience of this optimisation in LLVM, see:
+        // https://github.com/llvm/llvm-project/blob/2b340c10a611d929fee25e6222909c8915e3d6b6/llvm/lib/Target/X86/X86InstrInfo.cpp#L3388
+        let (lhs, pred, rhs) = match (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m)) {
+            (lhs, jit_ir::FloatPredicate::UnorderedGreater, rhs) => {
+                (rhs, jit_ir::FloatPredicate::UnorderedLess, lhs)
+            }
+            (lhs, jit_ir::FloatPredicate::UnorderedGreaterEqual, rhs) => {
+                (rhs, jit_ir::FloatPredicate::UnorderedLessEqual, lhs)
+            }
+            (lhs, jit_ir::FloatPredicate::OrderedLess, rhs) => {
+                (rhs, jit_ir::FloatPredicate::OrderedGreater, lhs)
+            }
+            (lhs, jit_ir::FloatPredicate::OrderedLessEqual, rhs) => {
+                (rhs, jit_ir::FloatPredicate::OrderedGreaterEqual, lhs)
+            }
+            (lhs, pred, rhs) => (lhs, pred, rhs),
+        };
         let bitw = lhs.bitw(self.m);
         let ([tgt_reg, tmp_reg], [lhs_reg, rhs_reg]) = self.ra.assign_regs(
             &mut self.asm,
@@ -2195,77 +2253,71 @@ impl<'a> Assemble<'a> {
                     force_reg: None,
                     can_be_same_as_input: false,
                 },
+                // OPT: not all comparisons need a temporary register, but we always take one.
                 GPConstraint::Temporary,
             ],
             [RegConstraint::Input(lhs), RegConstraint::Input(rhs)],
         );
 
-        match pred.is_ordered() {
-            Some(true) => match bitw {
-                32 => dynasm!(self.asm; comiss Rx(lhs_reg.code()), Rx(rhs_reg.code())),
-                64 => dynasm!(self.asm; comisd Rx(lhs_reg.code()), Rx(rhs_reg.code())),
-                _ => panic!(),
-            },
-            Some(false) => match bitw {
-                32 => dynasm!(self.asm; ucomiss Rx(lhs_reg.code()), Rx(rhs_reg.code())),
-                64 => dynasm!(self.asm; ucomisd Rx(lhs_reg.code()), Rx(rhs_reg.code())),
-                _ => panic!(),
-            },
-            None => todo!(),
+        // We use ucomis{s,d} instead of comis{s,d} because our IR semantics are such that a float
+        // comparison involving a qNaN operand shouldn't cause a floating point exception.
+        match bitw {
+            32 => dynasm!(self.asm; ucomiss Rx(lhs_reg.code()), Rx(rhs_reg.code())),
+            64 => dynasm!(self.asm; ucomisd Rx(lhs_reg.code()), Rx(rhs_reg.code())),
+            _ => panic!(),
         }
 
         // Interpret the flags assignment WRT the predicate.
         //
-        // Note that although floats are signed values, `{u,}comis{s,d}` sets CF (not SF and OF, as
+        // Note that although floats are signed values, `ucomis{s,d}` sets CF (not SF and OF, as
         // you might expect). So when checking the outcome you have to use the "above" and "below"
         // variants of `setcc`, as if you were comparing unsigned integers.
         match pred {
-            jit_ir::FloatPredicate::OrderedEqual | jit_ir::FloatPredicate::UnorderedEqual => {
-                dynasm!(self.asm; sete Rb(tgt_reg.code()))
+            jit_ir::FloatPredicate::OrderedLess
+            | jit_ir::FloatPredicate::OrderedLessEqual
+            | jit_ir::FloatPredicate::UnorderedGreater
+            | jit_ir::FloatPredicate::UnorderedGreaterEqual => {
+                // All of these cases were re-written to their inverse above.
+                unreachable!();
             }
-            jit_ir::FloatPredicate::UnorderedNotEqual => {
+            jit_ir::FloatPredicate::OrderedNotEqual => {
                 dynasm!(self.asm; setne Rb(tgt_reg.code()))
             }
-            jit_ir::FloatPredicate::OrderedGreater | jit_ir::FloatPredicate::UnorderedGreater => {
-                dynasm!(self.asm; seta Rb(tgt_reg.code()))
-            }
-            jit_ir::FloatPredicate::OrderedGreaterEqual
-            | jit_ir::FloatPredicate::UnorderedGreaterEqual => {
-                dynasm!(self.asm; setae Rb(tgt_reg.code()))
-            }
-            jit_ir::FloatPredicate::OrderedLess | jit_ir::FloatPredicate::UnorderedLess => {
-                dynasm!(self.asm; setb Rb(tgt_reg.code()))
-            }
-            jit_ir::FloatPredicate::OrderedLessEqual => dynasm!(self.asm; setbe Rb(tgt_reg.code())),
-            jit_ir::FloatPredicate::False
-            | jit_ir::FloatPredicate::OrderedNotEqual
-            | jit_ir::FloatPredicate::Ordered
-            | jit_ir::FloatPredicate::Unordered
-            | jit_ir::FloatPredicate::UnorderedLessEqual
-            | jit_ir::FloatPredicate::True => todo!("{}", pred),
-        }
-
-        // But we have to be careful to check that the computation didn't produce "unordered". This
-        // happens when at least one of the value compared was NaN. The unordered result is flagged
-        // by PF (parity flag) being set.
-        //
-        // We follow the precedent set by clang and follow the IEE-754 spec with regards to
-        // comparisons with NaN:
-        //  - Any "not equal" comparison involving NaN is true.
-        //  - All other comparisons are false.
-        match pred {
-            jit_ir::FloatPredicate::OrderedNotEqual | jit_ir::FloatPredicate::UnorderedNotEqual => {
+            jit_ir::FloatPredicate::OrderedEqual => {
+                // This case requires two flag checks (and thus a temp reg).
                 dynasm!(self.asm
-                    ; setp Rb(tmp_reg.code())
-                    ; or Rb(tgt_reg.code()), Rb(tmp_reg.code())
-                );
-            }
-            _ => {
-                dynasm!(self.asm
-                    ; setnp Rb(tmp_reg.code())
+                    ; sete Rb(tmp_reg.code())
+                    ; setnp Rb(tgt_reg.code())
                     ; and Rb(tgt_reg.code()), Rb(tmp_reg.code())
                 );
             }
+            jit_ir::FloatPredicate::OrderedGreaterEqual => {
+                dynasm!(self.asm; setae Rb(tgt_reg.code()))
+            }
+            jit_ir::FloatPredicate::OrderedGreater => {
+                dynasm!(self.asm; seta Rb(tgt_reg.code()))
+            }
+            jit_ir::FloatPredicate::UnorderedEqual => {
+                dynasm!(self.asm; sete Rb(tgt_reg.code()))
+            }
+            jit_ir::FloatPredicate::UnorderedNotEqual => {
+                // This case requires two flag checks (and thus a temp reg).
+                dynasm!(self.asm
+                    ; setne Rb(tmp_reg.code())
+                    ; setp Rb(tgt_reg.code())
+                    ; or Rb(tgt_reg.code()), Rb(tmp_reg.code())
+                )
+            }
+            jit_ir::FloatPredicate::UnorderedLess => {
+                dynasm!(self.asm; setb Rb(tgt_reg.code()))
+            }
+            jit_ir::FloatPredicate::UnorderedLessEqual => {
+                dynasm!(self.asm; setbe Rb(tgt_reg.code()))
+            }
+            jit_ir::FloatPredicate::False
+            | jit_ir::FloatPredicate::Ordered
+            | jit_ir::FloatPredicate::Unordered
+            | jit_ir::FloatPredicate::True => todo!("{}", pred),
         }
     }
 
@@ -5215,7 +5267,54 @@ mod tests {
     }
 
     #[test]
-    fn cg_fcmp_float() {
+    fn cg_fcmp_float_ordered() {
+        codegen_and_test(
+            "
+              entry:
+                %0: float = param 0
+                %1: float = param 1
+                %2: i1 = f_oeq %0, %1
+                %3: i1 = f_ogt %0, %1
+                %4: i1 = f_oge %0, %1
+                %5: i1 = f_olt %0, %1
+                %6: i1 = f_ole %0, %1
+                %7: i1 = f_one %0, %1
+                black_box %2
+                black_box %3
+                black_box %4
+                black_box %5
+                black_box %6
+                black_box %7
+            ",
+            "
+            ...
+            ; %2: i1 = f_oeq %0, %1
+            ucomiss fp.128.x, fp.128.y
+            setz r.8.i
+            setnp r.8.j
+            and r.8.j, r.8.i
+            ; %3: i1 = f_ogt %0, %1
+            ucomiss fp.128.x, fp.128.y
+            setnbe r.8._
+            ; %4: i1 = f_oge %0, %1
+            ucomiss fp.128.x, fp.128.y
+            setnb r.8._
+            ; %5: i1 = f_olt %0, %1
+            ucomiss fp.128.y, fp.128.x
+            setnbe r.8._
+            ; %6: i1 = f_ole %0, %1
+            ucomiss fp.128.y, fp.128.x
+            setnb r.8._
+            ; %7: i1 = f_one %0, %1
+            ucomiss fp.128.x, fp.128.y
+            setnz r.8._
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_fcmp_float_unordered() {
         codegen_and_test(
             "
               entry:
@@ -5225,40 +5324,91 @@ mod tests {
                 %3: i1 = f_ugt %0, %1
                 %4: i1 = f_uge %0, %1
                 %5: i1 = f_ult %0, %1
+                %6: i1 = f_ule %0, %1
+                %7: i1 = f_une %0, %1
                 black_box %2
                 black_box %3
                 black_box %4
                 black_box %5
+                black_box %6
+                black_box %7
             ",
             "
                 ...
                 ; %2: i1 = f_ueq %0, %1
                 ucomiss fp.128.x, fp.128.y
-                setz r.8.x
-                setnp r.8.y
-                and r.8.x, r.8.y
+                setz r.8._
                 ; %3: i1 = f_ugt %0, %1
-                ucomiss fp.128.x, fp.128.y
-                setnbe r.8._
-                setnp r.8._
-                and r.8._, r.8._
+                ucomiss fp.128.y, fp.128.x
+                setb r.8._
                 ; %4: i1 = f_uge %0, %1
-                ucomiss fp.128.x, fp.128.y
-                setnb r.8._
-                setnp r.8._
-                and r.8._, r.8._
+                ucomiss fp.128.y, fp.128.x
+                setbe r.8._
                 ; %5: i1 = f_ult %0, %1
                 ucomiss fp.128.x, fp.128.y
                 setb r.8._
-                setnp r.8._
-                and r.8._, r.8._
+                ; %6: i1 = f_ule %0, %1
+                ucomiss fp.128.x, fp.128.y
+                setbe r.8._
+                ; %7: i1 = f_une %0, %1
+                ucomiss fp.128.x, fp.128.y
+                setnz r.8.i
+                setp r.8.j
+                or r.8.j, r.8.i
                 ",
             false,
         );
     }
 
     #[test]
-    fn cg_fcmp_double() {
+    fn cg_fcmp_double_ordered() {
+        codegen_and_test(
+            "
+              entry:
+                %0: double = param 0
+                %1: double = param 1
+                %2: i1 = f_oeq %0, %1
+                %3: i1 = f_ogt %0, %1
+                %4: i1 = f_oge %0, %1
+                %5: i1 = f_olt %0, %1
+                %6: i1 = f_ole %0, %1
+                %7: i1 = f_one %0, %1
+                black_box %2
+                black_box %3
+                black_box %4
+                black_box %5
+                black_box %6
+                black_box %7
+            ",
+            "
+                ...
+                ; %2: i1 = f_oeq %0, %1
+                ucomisd fp.128.x, fp.128.y
+                setz r.8.i
+                setnp r.8.j
+                and r.8.j, r.8.i
+                ; %3: i1 = f_ogt %0, %1
+                ucomisd fp.128.x, fp.128.y
+                setnbe r.8._
+                ; %4: i1 = f_oge %0, %1
+                ucomisd fp.128.x, fp.128.y
+                setnb r.8._
+                ; %5: i1 = f_olt %0, %1
+                ucomisd fp.128.y, fp.128.x
+                setnbe r.8._
+                ; %6: i1 = f_ole %0, %1
+                ucomisd fp.128.y, fp.128.x
+                setnb r.8._
+                ; %7: i1 = f_one %0, %1
+                ucomisd fp.128.x, fp.128.y
+                setnz r.8._
+                ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_fcmp_double_unordered() {
         codegen_and_test(
             "
               entry:
@@ -5266,22 +5416,39 @@ mod tests {
                 %1: double = param 1
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
+                %4: i1 = f_uge %0, %1
+                %5: i1 = f_ult %0, %1
+                %6: i1 = f_ule %0, %1
+                %7: i1 = f_une %0, %1
                 black_box %2
                 black_box %3
+                black_box %4
+                black_box %5
+                black_box %6
+                black_box %7
             ",
             "
                 ...
                 ; %2: i1 = f_ueq %0, %1
                 ucomisd fp.128.x, fp.128.y
                 setz r.8.x
-                setnp r.8.y
-                and r.8.x, r.8.y
                 ; %3: i1 = f_ugt %0, %1
+                ucomisd fp.128.y, fp.128.x
+                setb r.8._
+                ; %4: i1 = f_uge %0, %1
+                ucomisd fp.128.y, fp.128.x
+                setbe r.8._
+                ; %5: i1 = f_ult %0, %1
                 ucomisd fp.128.x, fp.128.y
-                setnbe r.8._
-                setnp r.8._
-                and r.8._, r.8._
-                ...
+                setb r.8._
+                ; %6: i1 = f_ule %0, %1
+                ucomisd fp.128.x, fp.128.y
+                setbe r.8._
+                ; %7: i1 = f_une %0, %1
+                ucomisd fp.128.x, fp.128.y
+                setnz r.8.i
+                setp r.8.j
+                or r.8.j, r.8.i
                 ",
             false,
         );
