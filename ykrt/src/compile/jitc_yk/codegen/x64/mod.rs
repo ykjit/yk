@@ -2294,10 +2294,6 @@ impl<'a> Assemble<'a> {
     /// Move live values from their source location into the target location when doing a jump back
     /// to the beginning of a trace (or a jump from a side-trace to the beginning of its root
     /// trace).
-    ///
-    /// # Arguments
-    ///
-    /// * `tgt_vars` - The target locations. If `None` use `self.loop_start_locs` instead.
     fn write_jump_vars(&mut self, iidx: InstIdx) {
         let (tgt_vars, src_ops) = match self.m.tracekind() {
             TraceKind::HeaderOnly => (self.header_start_locs.clone(), self.m.trace_header_end()),
@@ -2312,8 +2308,6 @@ impl<'a> Assemble<'a> {
                 self.m.trace_header_end(),
             ),
         };
-        // If we pass in `None` use `self.loop_start_locs` instead. We need to do this since we
-        // can't pass in `&self.loop_start_locs` directly due to borrowing restrictions.
         let mut gp_regs = lsregalloc::GP_REGS
             .iter()
             .map(|_| GPConstraint::None)
