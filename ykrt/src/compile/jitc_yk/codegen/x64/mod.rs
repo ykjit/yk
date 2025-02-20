@@ -34,7 +34,7 @@ use crate::{
         CompiledTrace, Guard, GuardIdx, SideTraceInfo,
     },
     location::HotLocation,
-    mt::MT,
+    mt::{CompiledTraceId, MT},
 };
 use dynasmrt::{
     components::StaticLabel,
@@ -479,7 +479,8 @@ impl<'a> Assemble<'a> {
                 patch_deopts.push((mov_off, deopt_off));
                 dynasm!(self.asm
                     ; push rsi // FIXME: We push RSI now so we can fish it back out in
-                               // `deopt_label`.
+                               // `deopt_label`. This misaligns the stack which we align
+                               // below.
                     ; mov rsi, deoptid
                     ; jmp => guardcheck_label
                 );
@@ -511,39 +512,15 @@ impl<'a> Assemble<'a> {
                     );
                 }
                 dynasm!(self.asm; mov rcx, rsp);
-
-                // Push [GuardIdx]'s of previous guard failures.
-                if let Some(ref guards) = prevguards {
-                    for gidx in guards.iter().rev() {
-                        let g = i64::try_from(usize::from(*gidx)).unwrap();
-                        dynasm!(self.asm
-                            ; mov r9, QWORD g
-                            ; push r9
-                        );
-                    }
-                }
-                // Save the pointer to this list.
-                dynasm!(self.asm
-                    ; mov r8, rsp
-                );
-
-                let len = i64::try_from(prevguards.as_ref().map_or(0, |v| v.len())).unwrap();
-                // Total alignment caused by pushing the parent guards.
-
-                // Pushing RSI above mis-aligned the stack to 8 bytes, but the calling convetion
-                // requires us to be 16 bytes aligned. Unless we accidentally re-aligned it by
-                // pushing an uneven amount of previous [GuardIdx]'s, we need to re-align it here.
-                if len % 2 == 0 {
-                    dynasm!(self.asm
-                        ; sub rsp, 8
-                    );
-                }
+                // Correct the alignment for the `push rsi` above so the stack is on a 16 byte
+                // boundary.
+                dynasm!(self.asm; sub rsp, 8);
 
                 // Deoptimise.
                 dynasm!(self.asm; => deopt_label);
                 dynasm!(self.asm
                     ; mov rdi, rbp
-                    ; mov r9, QWORD len
+                    ; mov r8, QWORD self.m.ctrid().as_u64().cast_signed()
                     ; mov rax, QWORD __yk_deopt as i64
                     ; call rax
                 );
@@ -571,13 +548,14 @@ impl<'a> Assemble<'a> {
 
         #[cfg(any(debug_assertions, test))]
         let gdb_ctx = gdb::register_jitted_code(
-            self.m.ctr_id(),
+            self.m.ctrid(),
             buf.ptr(AssemblyOffset(0)),
             buf.size(),
             self.comments.get_mut(),
         )?;
 
         Ok(Arc::new(X64CompiledTrace {
+            ctrid: self.m.ctrid(),
             mt,
             buf,
             deoptinfo: self
@@ -3020,6 +2998,7 @@ fn patch_address(target: *const u8, val: u64) {
 
 #[derive(Debug)]
 pub(super) struct X64CompiledTrace {
+    ctrid: CompiledTraceId,
     // Reference to the meta-tracer required for side tracing.
     mt: Arc<MT>,
     /// The executable code itself.
@@ -3058,6 +3037,14 @@ impl X64CompiledTrace {
 }
 
 impl CompiledTrace for X64CompiledTrace {
+    fn ctrid(&self) -> CompiledTraceId {
+        self.ctrid.clone()
+    }
+
+    fn mt(&self) -> &Arc<MT> {
+        &self.mt
+    }
+
     fn entry(&self) -> *const libc::c_void {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
@@ -3205,12 +3192,14 @@ impl<'a> AsmPrinter<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Assemble, X64CompiledTrace};
-    use crate::compile::{
-        jitc_yk::jit_ir::{self, Inst, Module, ParamIdx, TraceKind},
-        CompiledTrace,
+    use crate::{
+        compile::{
+            jitc_yk::jit_ir::{self, Inst, Module, ParamIdx, TraceKind},
+            CompiledTrace,
+        },
+        location::{HotLocation, HotLocationKind},
+        mt::{CompiledTraceId, MT},
     };
-    use crate::location::{HotLocation, HotLocationKind};
-    use crate::mt::MT;
     use fm::{FMBuilder, FMatcher};
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
@@ -4582,7 +4571,7 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 mov rdi, rbp
-                mov r9, 0x...
+                mov r8, 0x...
                 mov rax, 0x...
                 call rax
             ",
@@ -4614,7 +4603,7 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 mov rdi, rbp
-                mov r9, 0x...
+                mov r8, 0x...
                 mov rax, 0x...
                 call rax
             ",
@@ -4649,7 +4638,7 @@ mod tests {
                 ; call __yk_deopt
                 ...
                 mov rdi, rbp
-                mov r9, 0x...
+                mov r8, 0x...
                 mov rax, 0x...
                 call rax
             ",
@@ -5397,7 +5386,8 @@ mod tests {
 
     #[test]
     fn cg_aliasing_params() {
-        let mut m = jit_ir::Module::new(TraceKind::HeaderOnly, 0, 0).unwrap();
+        let mut m =
+            jit_ir::Module::new(TraceKind::HeaderOnly, CompiledTraceId::testing(), 0).unwrap();
 
         // Create two trace paramaters whose locations alias.
         let loc = yksmp::Location::Register(13, 1, [].into());

@@ -5,6 +5,7 @@
 //! (than just raw asm) displayed when debugging traces.
 
 use super::CompilationError;
+use crate::mt::CompiledTraceId;
 use deku::prelude::*;
 use indexmap::IndexMap;
 use std::{
@@ -174,7 +175,7 @@ impl Drop for GdbCtx {
 
 /// Inform gdb of newly-compiled JITted code.
 pub(crate) fn register_jitted_code(
-    id: u64,
+    ctr_id: CompiledTraceId,
     jitted_code: *const u8,
     jitted_code_size: usize,
     comments: &IndexMap<usize, Vec<String>>,
@@ -206,7 +207,7 @@ pub(crate) fn register_jitted_code(
     // Build the symbol file we are going to give to gdb.
     //
     // unwrap safe: string cannot contain internal zero bytes.
-    let sym_name = CString::new(format!("{}{}", TRACE_SYM_PREFIX, id)).unwrap();
+    let sym_name = CString::new(format!("{}{}", TRACE_SYM_PREFIX, ctr_id)).unwrap();
     // unwrap safe: path is valid UTF-8 and  cannot contain internal zero bytes.
     let src_path = CString::new(src_file.path().to_str().unwrap()).unwrap();
     // Support for more lineinfos could be added if required.

@@ -98,7 +98,10 @@ mod parser;
 mod well_formed;
 
 use super::aot_ir;
-use crate::compile::{jitc_yk::arbbitint::ArbBitInt, CompilationError, SideTraceInfo};
+use crate::{
+    compile::{jitc_yk::arbbitint::ArbBitInt, CompilationError, SideTraceInfo},
+    mt::CompiledTraceId,
+};
 use indexmap::IndexSet;
 use std::{
     ffi::{c_void, CString},
@@ -139,10 +142,10 @@ pub(crate) enum TraceKind {
 pub(crate) struct Module {
     /// What kind of trace does this module represent?
     tracekind: TraceKind,
-    /// The ID of the compiled trace.
+    /// The ID of the compiled trace this module will lead to.
     ///
     /// See the [Self::ctr_id] method for details.
-    ctr_id: u64,
+    ctr_id: CompiledTraceId,
     /// The IR trace as a linear sequence of instructions.
     insts: Vec<Inst>,
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
@@ -210,7 +213,7 @@ impl Module {
     /// Create a new [Module].
     pub(crate) fn new(
         tracekind: TraceKind,
-        ctr_id: u64,
+        ctr_id: CompiledTraceId,
         global_decls_len: usize,
     ) -> Result<Self, CompilationError> {
         Self::new_internal(tracekind, ctr_id, global_decls_len)
@@ -232,24 +235,19 @@ impl Module {
         self.tracekind = tracekind;
     }
 
-    /// Returns the ID of the module.
-    ///
-    /// In `cfg(test)` the ID is meaningless: in `cfg(not(test))` the ID is obtained from
-    /// [crate::mt::MT::next_compiled_trace_id] and can be used to semi-uniquely distinguish traces
-    /// (see [crate::mt::MT::compiled_trace_id] for more details).
-    #[cfg(any(debug_assertions, test))]
-    pub(crate) fn ctr_id(&self) -> u64 {
-        self.ctr_id
+    /// Returns the ID the module will have when it is compiled into a trace.
+    pub(crate) fn ctrid(&self) -> CompiledTraceId {
+        self.ctr_id.clone()
     }
 
     #[cfg(test)]
     pub(crate) fn new_testing() -> Self {
-        Self::new_internal(TraceKind::HeaderOnly, 0, 0).unwrap()
+        Self::new_internal(TraceKind::HeaderOnly, CompiledTraceId::testing(), 0).unwrap()
     }
 
     pub(crate) fn new_internal(
         tracekind: TraceKind,
-        ctr_id: u64,
+        ctr_id: CompiledTraceId,
         global_decls_len: usize,
     ) -> Result<Self, CompilationError> {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows

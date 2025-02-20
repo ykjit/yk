@@ -4,7 +4,7 @@ use std::{
     assert_matches::{assert_matches, debug_assert_matches},
     cell::RefCell,
     cmp,
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     env,
     error::Error,
     ffi::c_void,
@@ -93,10 +93,12 @@ pub struct MT {
     /// The [Compiler] that will be used for compiling future `IRTrace`s. Note that this might not
     /// be the same as the compiler(s) used to compile past `IRTrace`s.
     compiler: Mutex<Arc<dyn Compiler>>,
-    /// A monotonically increasing integer that semi-uniquely identifies each compiled trace. This
-    /// is only useful for general debugging purposes, and must not be relied upon for semantic
-    /// correctness, because the IDs can repeat when the underlying `u64` overflows/wraps.
+    /// A monotonically increasing integer that uniquely identifies each compiled trace.
     compiled_trace_id: AtomicU64,
+    /// The currently available compiled traces. This is a [HashMap] because it is potentially a
+    /// sparse mapping due to (1) (one day!) we might garbage collect traces (2) some
+    /// [CompiledTraceId]s that we hand out are "lost" because a trace failed to compile.
+    compiled_traces: Mutex<HashMap<CompiledTraceId, Arc<dyn CompiledTrace>>>,
     pub(crate) log: Log,
     pub(crate) stats: Stats,
 }
@@ -131,6 +133,7 @@ impl MT {
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             compiled_trace_id: AtomicU64::new(0),
+            compiled_traces: Mutex::new(HashMap::new()),
             log: Log::new()?,
             stats: Stats::new(),
         }))
@@ -211,12 +214,16 @@ impl MT {
         self.max_worker_threads.load(Ordering::Relaxed)
     }
 
-    /// Return the semi-unique ID for the next compiled trace. Note: this is only useful for
-    /// general debugging purposes, and must not be relied upon for semantic correctness, because
-    /// the IDs will wrap when the underlying `u64` overflows.
-    pub(crate) fn next_compiled_trace_id(self: &Arc<Self>) -> u64 {
+    /// Return the unique ID for the next compiled trace.
+    pub(crate) fn next_compiled_trace_id(self: &Arc<Self>) -> CompiledTraceId {
         // Note: fetch_add is documented to wrap on overflow.
-        self.compiled_trace_id.fetch_add(1, Ordering::Relaxed)
+        let ctr_id = self.compiled_trace_id.fetch_add(1, Ordering::Relaxed);
+        if ctr_id == u64::MAX {
+            // OK, OK, technically we have 1 ID left that we could use, but if we've actually
+            // managed to compile u64::MAX traces, it's probable that something's gone wrong.
+            panic!("Ran out of trace IDs");
+        }
+        CompiledTraceId(ctr_id)
     }
 
     /// Queue `job` to be run on a worker thread.
@@ -284,10 +291,13 @@ impl MT {
                 trace_iter.1,
                 trace_iter.2,
             ) {
-                Ok(ct) => {
+                Ok(ctr) => {
+                    mt.compiled_traces
+                        .lock()
+                        .insert(ctr.ctrid(), Arc::clone(&ctr));
                     let mut hl = hl_arc.lock();
                     debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
-                    hl.kind = HotLocationKind::Compiled(ct);
+                    hl.kind = HotLocationKind::Compiled(ctr);
                     mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {
@@ -366,8 +376,11 @@ impl MT {
                 trace_iter.1,
                 trace_iter.2,
             ) {
-                Ok(ct) => {
-                    parent_ctr.guard(guardid).set_ctr(ct, &parent_ctr, guardid);
+                Ok(ctr) => {
+                    mt.compiled_traces
+                        .lock()
+                        .insert(ctr.ctrid(), Arc::clone(&ctr));
+                    parent_ctr.guard(guardid).set_ctr(ctr, &parent_ctr, guardid);
                     mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {
@@ -990,20 +1003,20 @@ enum MTThreadState {
         /// at the same point that we started.
         frameaddr: *mut c_void,
     },
-    /// This thread is executing a trace. Note that the `dyn CompiledTrace` serves two different purposes:
-    ///
-    /// 1. It is needed for side traces and the like.
-    /// 2. It allows another thread to tell whether the thread that started tracing a [Location] is
-    ///    still alive or not by inspecting its strong count (if the strong count is equal to 1
-    ///    then the thread died while tracing). Note that this relies on thread local storage
-    ///    dropping the [MTThread] instance and (by implication) dropping the [Arc] and
-    ///    decrementing its strong count. Unfortunately, there is no guarantee that thread local
-    ///    storage will be dropped when a thread dies (and there is also significant platform
-    ///    variation in regard to dropping thread locals), so this mechanism can't be fully relied
-    ///    upon: however, we can't monitor thread death in any other reasonable way, so this will
-    ///    have to do.
+    /// This thread is executing a trace. The `dyn CompiledTrace` allows another thread to tell
+    /// whether the thread that started tracing a [Location] is still alive or not by inspecting
+    /// its strong count (if the strong count is equal to 1 then the thread died while tracing).
+    /// Note that this relies on thread local storage dropping the [MTThread] instance and (by
+    /// implication) dropping the [Arc] and decrementing its strong count. Unfortunately, there is
+    /// no guarantee that thread local storage will be dropped when a thread dies (and there is
+    /// also significant platform variation in regard to dropping thread locals), so this mechanism
+    /// can't be fully relied upon: however, we can't monitor thread death in any other reasonable
+    /// way, so this will have to do.
     Executing {
-        /// The currently executing compiled trace.
+        /// The root trace which started execution off. Note: the *actual* [CompiledTrace]
+        /// currently executing might not be *this* [CompiledTrace] (e.g. it could be a sidetrace).
+        /// However, whatever trace is executing will guarantee to have originated from the same
+        /// [MT] instance.
         ctr: Arc<dyn CompiledTrace>,
     },
 }
@@ -1060,17 +1073,17 @@ impl MTThread {
         matches!(self.tstate.last().unwrap(), &MTThreadState::Tracing { .. })
     }
 
-    /// If a trace is currently running, return a reference to its [CompiledTrace].
+    /// Return a reference to the [CompiledTrace] with ID `ctrid`.
     ///
     /// # Panics
     ///
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
-    pub(crate) fn running_trace(&self) -> Option<Arc<dyn CompiledTrace>> {
-        match self.tstate.last().unwrap() {
-            MTThreadState::Executing { ref ctr } => Some(Arc::clone(ctr)),
-            _ => None,
-        }
+    pub(crate) fn running_trace(&self, ctrid: CompiledTraceId) -> Arc<dyn CompiledTrace> {
+        let MTThreadState::Executing { ctr } = self.peek_tstate() else {
+            panic!()
+        };
+        Arc::clone(&ctr.mt().as_ref().compiled_traces.lock()[&ctrid])
     }
 
     /// Return a reference to the last element on the stack of [MTThreadState]s.
@@ -1230,6 +1243,37 @@ enum TransitionControlPoint {
 pub(crate) enum TransitionGuardFailure {
     NoAction,
     StartSideTracing(Arc<Mutex<HotLocation>>),
+}
+
+/// The unique identifier of a compiled trace.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct CompiledTraceId(u64);
+
+impl CompiledTraceId {
+    /// Create a [CompiledTraceId] from a `u64`. This function should only be used by deopt
+    /// modules, which have to take a value from a register.
+    pub(crate) fn from_u64(ctrid: u64) -> Self {
+        Self(ctrid)
+    }
+
+    /// Create a dummy [CompiledTraceId] for testing purposes. Note: duplicate IDs can, and
+    /// probably will, be returned!
+    #[cfg(test)]
+    pub(crate) fn testing() -> Self {
+        Self(0)
+    }
+
+    /// Return a `u64` which can later be turned back into a `CompiledTraceId`. This should only be
+    /// used by code gen when creating guard/deopt code.
+    pub(crate) fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for CompiledTraceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 #[cfg(test)]
