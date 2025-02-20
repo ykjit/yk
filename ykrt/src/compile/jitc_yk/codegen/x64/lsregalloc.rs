@@ -506,14 +506,45 @@ impl LSRegAlloc<'_> {
         }
         asgn_regs.union(input_regs);
 
-        // OPT: We don't yet do anything with can_be_same_as_input.
+        // If we have an `Output { can_be_same_as_input: true }` constraint, we have the option to
+        // take advantage of an input constraint whose value we don't need later. Try and find such
+        // a constraint.
+        let mut reusable_input_cnstr = None;
+        for (i, cnstr) in constraints.iter().enumerate() {
+            if let GPConstraint::Input { op, .. } = cnstr {
+                match op {
+                    Operand::Var(query_iidx) => {
+                        if !self.rev_an.is_inst_var_still_used_after(iidx, *query_iidx) {
+                            reusable_input_cnstr = Some(i);
+                        }
+                    }
+                    Operand::Const(_) => {
+                        reusable_input_cnstr = Some(i);
+                    }
+                }
+            }
+        }
 
-        // Assign a register for all unassigned constraints.
-        for (i, _) in constraints.iter().enumerate() {
+        // Assign a register for all unassigned constraints (except `Output { can_be_same_as_input:
+        // true }`).
+        for (i, cnstr) in constraints.iter().enumerate() {
             if cnstr_regs[i].is_some() {
                 // We've already allocated this constraint.
                 continue;
             }
+            // If we have an `Output { can_be_same_as_input: true }` constraint *and* we have an
+            // input constraint we can reuse, we don't need to allocate a register for the `Output`
+            // constraint.
+            if let GPConstraint::Output {
+                can_be_same_as_input: true,
+                ..
+            } = cnstr
+            {
+                if reusable_input_cnstr.is_some() {
+                    continue;
+                }
+            }
+
             let reg = match self.gp_regset.find_empty_avoiding(asgn_regs) {
                 Some(reg) => reg,
                 None => {
@@ -589,6 +620,23 @@ impl LSRegAlloc<'_> {
             };
             cnstr_regs[i] = Some(reg);
             asgn_regs.set(reg);
+        }
+
+        // If there is an `Output { can_be_same_as_input: true }` register and a reusable input
+        // constraint register, we can now match the two up.
+        for (i, cnstr) in constraints.iter().enumerate() {
+            if cnstr_regs[i].is_some() {
+                // We've already allocated this constraint.
+                continue;
+            }
+            if let GPConstraint::Output {
+                can_be_same_as_input: true,
+                ..
+            } = cnstr
+            {
+                cnstr_regs[i] = cnstr_regs[reusable_input_cnstr.unwrap()];
+                break;
+            }
         }
 
         // Stage 2: At this point, we've found a register for every constraint. We now go about
