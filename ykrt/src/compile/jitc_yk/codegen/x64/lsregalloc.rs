@@ -95,7 +95,7 @@ const FP_REGS_LEN: usize = 16;
 
 /// The set of general registers which we will never assign value to. RSP & RBP are reserved by
 /// SysV.
-static RESERVED_GP_REGS: [Rq; 2] = [Rq::RSP, Rq::RBP];
+pub(super) static RESERVED_GP_REGS: [Rq; 2] = [Rq::RSP, Rq::RBP];
 
 /// The set of floating point registers which we will never assign value to.
 static RESERVED_FP_REGS: [Rx; 0] = [];

@@ -2308,6 +2308,8 @@ impl<'a> Assemble<'a> {
                 self.m.trace_header_end(),
             ),
         };
+
+        // First of all we work out what to do with registers
         let mut gp_regs = lsregalloc::GP_REGS
             .iter()
             .map(|_| GPConstraint::None)
@@ -2317,75 +2319,15 @@ impl<'a> Assemble<'a> {
             .map(|_| RegConstraint::None)
             .collect::<Vec<_>>();
         for (i, op) in src_ops.iter().enumerate() {
-            // FIXME: This is completely broken: see the FIXME later.
             let op = op.unpack(self.m);
             let src = self.op_to_var_location(op.clone());
             let dst = tgt_vars[i];
             if dst == src {
-                // The value is already in the correct place, so there's nothing we need to
-                // do.
+                // The value is already in the correct place.
                 continue;
             }
-            match dst {
-                VarLocation::Stack {
-                    frame_off: off_dst,
-                    size: size_dst,
-                } => {
-                    match src {
-                        VarLocation::Register(Register::GP(reg)) => match size_dst {
-                            8 => dynasm!(self.asm;
-                                mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
-                            ),
-                            4 => dynasm!(self.asm;
-                                mov DWORD [rbp - i32::try_from(off_dst).unwrap()], Rd(reg.code())
-                            ),
-                            _ => todo!(),
-                        },
-                        VarLocation::ConstInt { bits, v } => match bits {
-                            32 => dynasm!(self.asm;
-                                mov DWORD [rbp - i32::try_from(off_dst).unwrap()], v as i32
-                            ),
-                            8 => dynasm!(self.asm;
-                                mov BYTE [rbp - i32::try_from(off_dst).unwrap()], v as i8),
-                            x => todo!("{x}"),
-                        },
-                        VarLocation::ConstPtr(v) => {
-                            dynasm!(self.asm
-                                ; push rax
-                                ; mov rax, QWORD v as i64
-                                ; mov QWORD [rbp - i32::try_from(off_dst).unwrap()], rax
-                                ; pop rax);
-                        }
-                        VarLocation::Stack {
-                            frame_off: off_src,
-                            size: size_src,
-                        } => match size_src {
-                            // FIXME: Better to ask register allocator for a free register
-                            // rather than pushing/popping RAX here?
-                            8 => dynasm!(self.asm;
-                                push rax;
-                                mov rax, QWORD [rbp - i32::try_from(off_src).unwrap()];
-                                mov QWORD [rbp - i32::try_from(off_dst).unwrap()], rax;
-                                pop rax
-                            ),
-                            4 => dynasm!(self.asm;
-                                push rax;
-                                mov eax, DWORD [rbp - i32::try_from(off_src).unwrap()];
-                                mov DWORD [rbp - i32::try_from(off_dst).unwrap()], eax;
-                                pop rax
-                            ),
-                            e => todo!("{:?}", e),
-                        },
-                        e => todo!("{:?}", e),
-                    }
-                }
-                VarLocation::Direct { .. } => {
-                    // Direct locations are read-only, so it doesn't make sense to write to
-                    // them. This is likely a case where the direct value has been moved
-                    // somewhere else (register/normal stack) so dst and src no longer
-                    // match. But since the value can't change we can safely ignore this.
-                }
-                VarLocation::Register(reg) => match reg {
+            if let VarLocation::Register(reg) = dst {
+                match reg {
                     Register::GP(r) => {
                         gp_regs[usize::from(r.code())] = GPConstraint::Input {
                             op: op.clone(),
@@ -2397,7 +2339,82 @@ impl<'a> Assemble<'a> {
                     Register::FP(r) => {
                         fp_regs[usize::from(r.code())] = RegConstraint::InputIntoReg(op.clone(), r);
                     }
+                }
+            }
+        }
+
+        // If we're lucky -- and we normally are! -- there will be a register which we don't need
+        // for the jump that we can use as the scratch register for moving spills around.
+        let scratch_reg = gp_regs
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !lsregalloc::RESERVED_GP_REGS.contains(&lsregalloc::GP_REGS[*i]))
+            .find(|(_, cnstr)| matches!(cnstr, GPConstraint::None));
+        let spare_reg = match scratch_reg {
+            Some((i, _)) => lsregalloc::GP_REGS[i],
+            None => todo!(),
+        };
+
+        // Second we handle moving spill locations around
+        for (i, op) in src_ops.iter().enumerate() {
+            let op = op.unpack(self.m);
+            let src = self.op_to_var_location(op.clone());
+            let dst = tgt_vars[i];
+            if dst == src {
+                // The value is already in the correct place.
+                continue;
+            }
+            match dst {
+                VarLocation::Stack {
+                    frame_off: off_dst,
+                    size: size_dst,
+                } => match src {
+                    VarLocation::Register(Register::GP(reg)) => match size_dst {
+                        8 => dynasm!(self.asm;
+                            mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
+                        ),
+                        4 => dynasm!(self.asm;
+                            mov DWORD [rbp - i32::try_from(off_dst).unwrap()], Rd(reg.code())
+                        ),
+                        _ => todo!(),
+                    },
+                    VarLocation::ConstInt { bits, v } => match bits {
+                        32 => dynasm!(self.asm;
+                            mov DWORD [rbp - i32::try_from(off_dst).unwrap()], v as i32
+                        ),
+                        8 => dynasm!(self.asm;
+                                mov BYTE [rbp - i32::try_from(off_dst).unwrap()], v as i8),
+                        x => todo!("{x}"),
+                    },
+                    VarLocation::ConstPtr(v) => {
+                        dynasm!(self.asm
+                            ; mov Rq(spare_reg.code()), QWORD v as i64
+                            ; mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(spare_reg.code())
+                        );
+                    }
+                    VarLocation::Stack {
+                        frame_off: off_src,
+                        size: size_src,
+                    } => match size_src {
+                        8 => dynasm!(self.asm
+                            ; mov Rq(spare_reg.code()), QWORD [rbp - i32::try_from(off_src).unwrap()]
+                            ; mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(spare_reg.code())
+                        ),
+                        4 => dynasm!(self.asm
+                            ; mov Rd(spare_reg.code()), DWORD [rbp - i32::try_from(off_src).unwrap()]
+                            ; mov DWORD [rbp - i32::try_from(off_dst).unwrap()], Rd(spare_reg.code())
+                        ),
+                        e => todo!("{:?}", e),
+                    },
+                    e => todo!("{:?}", e),
                 },
+                VarLocation::Direct { .. } => {
+                    // Direct locations are read-only, so it doesn't make sense to write to
+                    // them. This is likely a case where the direct value has been moved
+                    // somewhere else (register/normal stack) so dst and src no longer
+                    // match. But since the value can't change we can safely ignore this.
+                }
+                VarLocation::Register(_reg) => (), // Handled in the earlier loop
                 _ => todo!(),
             }
         }
