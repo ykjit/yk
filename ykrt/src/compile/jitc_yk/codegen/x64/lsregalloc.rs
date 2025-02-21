@@ -499,8 +499,10 @@ impl LSRegAlloc<'_> {
                 | GPConstraint::Temporary => (),
                 GPConstraint::None => {
                     // By definition it doesn't matter what register we "assign" here: it's
-                    // ignored at any point of importance.
-                    cnstr_regs[i] = Some(GP_REGS[0]);
+                    // ignored at any point of importance. To make it less likely that someone uses
+                    // the value and doesn't notice, we "assign" a register that's likely to cause
+                    // the program to explode if it's used.
+                    cnstr_regs[i] = Some(RESERVED_GP_REGS[0]);
                 }
             }
         }
@@ -646,7 +648,12 @@ impl LSRegAlloc<'_> {
 
         // Spill currently assigned registers that don't contain values we want for the current
         // instruction.
-        for reg in cnstr_regs.iter() {
+        assert_eq!(constraints.len(), cnstr_regs.len());
+        for (cnstr, reg) in constraints.iter().zip(cnstr_regs.iter()) {
+            if let GPConstraint::None = cnstr {
+                // We don't want to mess with the dummy "assigned" register.
+                continue;
+            }
             let st = &self.gp_reg_states[usize::from(reg.code())];
             match st {
                 RegState::Reserved => (),
@@ -708,6 +715,7 @@ impl LSRegAlloc<'_> {
             }
 
             // Move values that are already in constraint registers into place.
+            assert_eq!(constraints.len(), cnstr_regs.len());
             for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
                 if let GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } = cnstr
                 {
@@ -1749,8 +1757,9 @@ pub(crate) enum GPConstraint {
     Clobber { force_reg: Rq },
     /// A temporary register that the instruction will clobber.
     Temporary,
-    /// A no-op register constraint. A random register will be assigned to this: using this
-    /// register for any purposes leads to undefined behaviour.
+    /// A no-op register constraint. No registers will be assigned for this, but we have to put a
+    /// value in here for normal Rust reasons. A random register will thus end up being returned
+    /// from this, but using that register for any purposes leads to undefined behaviour.
     None,
 }
 
