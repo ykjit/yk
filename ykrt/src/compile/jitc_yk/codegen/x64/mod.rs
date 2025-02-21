@@ -3018,7 +3018,7 @@ fn patch_address(target: *const u8, val: u64) {
             // Since we are only patching 8-bytes which are aligned, we know we can't span two
             // pages. Passing a size of 1 still marks the entire page which is what we need.
             1,
-            libc::PROT_WRITE | libc::PROT_EXEC,
+            libc::PROT_EXEC | libc::PROT_READ | libc::PROT_WRITE,
         )
     };
     // Check that the target address is 8-byte aligned. This is required so we can patch
