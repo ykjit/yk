@@ -2244,28 +2244,46 @@ impl<'a> Assemble<'a> {
             (lhs, pred, rhs) => (lhs, pred, rhs),
         };
         let bitw = lhs.bitw(self.m);
-        let ([tgt_reg, tmp_reg], [lhs_reg, rhs_reg]) = self.ra.assign_regs(
-            &mut self.asm,
-            iidx,
-            [
-                GPConstraint::Output {
-                    out_ext: RegExtension::Undefined,
-                    force_reg: None,
-                    can_be_same_as_input: false,
-                },
-                // OPT: not all comparisons need a temporary register, but we always take one.
-                GPConstraint::Temporary,
-            ],
-            [RegConstraint::Input(lhs), RegConstraint::Input(rhs)],
-        );
 
-        // We use ucomis{s,d} instead of comis{s,d} because our IR semantics are such that a float
-        // comparison involving a qNaN operand shouldn't cause a floating point exception.
-        match bitw {
-            32 => dynasm!(self.asm; ucomiss Rx(lhs_reg.code()), Rx(rhs_reg.code())),
-            64 => dynasm!(self.asm; ucomisd Rx(lhs_reg.code()), Rx(rhs_reg.code())),
-            _ => panic!(),
-        }
+        // Set the EFLAGS register with the result of a FP comparison with `ucomis{s,d}`.
+        //
+        // Doing so requires us to assign registers, so if interpreting the flags afterwards will
+        // require a temporary register, pass `needs_tmp=true`.
+        //
+        // Returns a tuple containing the register assignment for the registers you'd need to
+        // interpret the flags later: `(target_reg, tmp_reg)` where `tmp_reg` is `Option`.
+        let set_eflags = |bitw, needs_tmp| {
+            let fp_cstrs = [RegConstraint::Input(lhs), RegConstraint::Input(rhs)];
+            let target_reg_cstr = GPConstraint::Output {
+                out_ext: RegExtension::Undefined,
+                force_reg: None,
+                can_be_same_as_input: false,
+            };
+            let (tgt_reg, lhs_reg, rhs_reg, tmp_reg) = if needs_tmp {
+                let ([tgt_reg, tmp_reg], [lhs_reg, rhs_reg]) = self.ra.assign_regs(
+                    &mut self.asm,
+                    iidx,
+                    [target_reg_cstr, GPConstraint::Temporary], // request additional temp reg.
+                    fp_cstrs,
+                );
+                (tgt_reg, lhs_reg, rhs_reg, Some(tmp_reg))
+            } else {
+                let ([tgt_reg], [lhs_reg, rhs_reg]) =
+                    self.ra
+                        .assign_regs(&mut self.asm, iidx, [target_reg_cstr], fp_cstrs);
+                (tgt_reg, lhs_reg, rhs_reg, None)
+            };
+
+            // We use `ucomis{s,d}` instead of `comis{s,d}` because our IR semantics are such that
+            // a float comparison involving a qNaN operand shouldn't cause a floating point
+            // exception.
+            match bitw {
+                32 => dynasm!(self.asm; ucomiss Rx(lhs_reg.code()), Rx(rhs_reg.code())),
+                64 => dynasm!(self.asm; ucomisd Rx(lhs_reg.code()), Rx(rhs_reg.code())),
+                _ => panic!(),
+            }
+            (tgt_reg, tmp_reg)
+        };
 
         // Interpret the flags assignment WRT the predicate.
         //
@@ -2281,10 +2299,13 @@ impl<'a> Assemble<'a> {
                 unreachable!();
             }
             jit_ir::FloatPredicate::OrderedNotEqual => {
+                let (tgt_reg, _) = set_eflags(bitw, false);
                 dynasm!(self.asm; setne Rb(tgt_reg.code()))
             }
             jit_ir::FloatPredicate::OrderedEqual => {
                 // This case requires two flag checks (and thus a temp reg).
+                let (tgt_reg, tmp_reg) = set_eflags(bitw, true);
+                let tmp_reg = tmp_reg.unwrap(); // cannot fail. we passed true to set_eflags().
                 dynasm!(self.asm
                     ; sete Rb(tmp_reg.code())
                     ; setnp Rb(tgt_reg.code())
@@ -2292,16 +2313,21 @@ impl<'a> Assemble<'a> {
                 );
             }
             jit_ir::FloatPredicate::OrderedGreaterEqual => {
+                let (tgt_reg, _) = set_eflags(bitw, false);
                 dynasm!(self.asm; setae Rb(tgt_reg.code()))
             }
             jit_ir::FloatPredicate::OrderedGreater => {
+                let (tgt_reg, _) = set_eflags(bitw, false);
                 dynasm!(self.asm; seta Rb(tgt_reg.code()))
             }
             jit_ir::FloatPredicate::UnorderedEqual => {
+                let (tgt_reg, _) = set_eflags(bitw, false);
                 dynasm!(self.asm; sete Rb(tgt_reg.code()))
             }
             jit_ir::FloatPredicate::UnorderedNotEqual => {
                 // This case requires two flag checks (and thus a temp reg).
+                let (tgt_reg, tmp_reg) = set_eflags(bitw, true);
+                let tmp_reg = tmp_reg.unwrap(); // cannot fail. we passed true to set_eflags().
                 dynasm!(self.asm
                     ; setne Rb(tmp_reg.code())
                     ; setp Rb(tgt_reg.code())
@@ -2309,9 +2335,11 @@ impl<'a> Assemble<'a> {
                 )
             }
             jit_ir::FloatPredicate::UnorderedLess => {
+                let (tgt_reg, _) = set_eflags(bitw, false);
                 dynasm!(self.asm; setb Rb(tgt_reg.code()))
             }
             jit_ir::FloatPredicate::UnorderedLessEqual => {
+                let (tgt_reg, _) = set_eflags(bitw, false);
                 dynasm!(self.asm; setbe Rb(tgt_reg.code()))
             }
             jit_ir::FloatPredicate::False
