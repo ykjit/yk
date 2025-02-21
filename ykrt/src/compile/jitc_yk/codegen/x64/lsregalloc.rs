@@ -499,21 +499,54 @@ impl LSRegAlloc<'_> {
                 | GPConstraint::Temporary => (),
                 GPConstraint::None => {
                     // By definition it doesn't matter what register we "assign" here: it's
-                    // ignored at any point of importance.
-                    cnstr_regs[i] = Some(GP_REGS[0]);
+                    // ignored at any point of importance. To make it less likely that someone uses
+                    // the value and doesn't notice, we "assign" a register that's likely to cause
+                    // the program to explode if it's used.
+                    cnstr_regs[i] = Some(RESERVED_GP_REGS[0]);
                 }
             }
         }
         asgn_regs.union(input_regs);
 
-        // OPT: We don't yet do anything with can_be_same_as_input.
+        // If we have an `Output { can_be_same_as_input: true }` constraint, we have the option to
+        // take advantage of an input constraint whose value we don't need later. Try and find such
+        // a constraint.
+        let mut reusable_input_cnstr = None;
+        for (i, cnstr) in constraints.iter().enumerate() {
+            if let GPConstraint::Input { op, .. } = cnstr {
+                match op {
+                    Operand::Var(query_iidx) => {
+                        if !self.rev_an.is_inst_var_still_used_after(iidx, *query_iidx) {
+                            reusable_input_cnstr = Some(i);
+                        }
+                    }
+                    Operand::Const(_) => {
+                        reusable_input_cnstr = Some(i);
+                    }
+                }
+            }
+        }
 
-        // Assign a register for all unassigned constraints.
-        for (i, _) in constraints.iter().enumerate() {
+        // Assign a register for all unassigned constraints (except `Output { can_be_same_as_input:
+        // true }`).
+        for (i, cnstr) in constraints.iter().enumerate() {
             if cnstr_regs[i].is_some() {
                 // We've already allocated this constraint.
                 continue;
             }
+            // If we have an `Output { can_be_same_as_input: true }` constraint *and* we have an
+            // input constraint we can reuse, we don't need to allocate a register for the `Output`
+            // constraint.
+            if let GPConstraint::Output {
+                can_be_same_as_input: true,
+                ..
+            } = cnstr
+            {
+                if reusable_input_cnstr.is_some() {
+                    continue;
+                }
+            }
+
             let reg = match self.gp_regset.find_empty_avoiding(asgn_regs) {
                 Some(reg) => reg,
                 None => {
@@ -591,15 +624,36 @@ impl LSRegAlloc<'_> {
             asgn_regs.set(reg);
         }
 
+        // If there is an `Output { can_be_same_as_input: true }` register and a reusable input
+        // constraint register, we can now match the two up.
+        for (i, cnstr) in constraints.iter().enumerate() {
+            if cnstr_regs[i].is_some() {
+                // We've already allocated this constraint.
+                continue;
+            }
+            if let GPConstraint::Output {
+                can_be_same_as_input: true,
+                ..
+            } = cnstr
+            {
+                cnstr_regs[i] = cnstr_regs[reusable_input_cnstr.unwrap()];
+                break;
+            }
+        }
+
         // Stage 2: At this point, we've found a register for every constraint. We now go about
         // updating the allocator's state to get from where we were to where we want to be.
 
         let cnstr_regs = cnstr_regs.map(|x| x.unwrap());
 
         // Spill currently assigned registers that don't contain values we want for the current
-        // instruction. OPT: by definition these values must be useful for later instructions, so
-        // in some cases we could move them rather than spill them.
-        for reg in cnstr_regs.iter() {
+        // instruction.
+        assert_eq!(constraints.len(), cnstr_regs.len());
+        for (cnstr, reg) in constraints.iter().zip(cnstr_regs.iter()) {
+            if let GPConstraint::None = cnstr {
+                // We don't want to mess with the dummy "assigned" register.
+                continue;
+            }
             let st = &self.gp_reg_states[usize::from(reg.code())];
             match st {
                 RegState::Reserved => (),
@@ -612,9 +666,28 @@ impl LSRegAlloc<'_> {
                 }
                 RegState::FromInst(op_iidx, _) => {
                     if !self.find_op_in_constraints(&constraints, Operand::Var(*op_iidx)) {
-                        self.spill_gp_if_not_already(asm, iidx, *reg);
-                        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
-                        self.gp_regset.unset(*reg);
+                        if let Some(Register::GP(new_reg)) =
+                            self.rev_an.reg_hints[usize::from(*op_iidx)]
+                        {
+                            // If this operand has a hint and the relevant register is unused, move it
+                            // there.
+                            if !asgn_regs.is_set(new_reg) && !self.gp_regset.is_set(new_reg) {
+                                self.move_gp_reg(asm, *reg, new_reg);
+                                asgn_regs.set(new_reg);
+                                continue;
+                            }
+                        }
+
+                        if let Some(new_reg) = self.gp_regset.find_empty_avoiding(asgn_regs) {
+                            // There's a completely free register we can move things to.
+                            self.move_gp_reg(asm, *reg, new_reg);
+                            asgn_regs.set(new_reg);
+                        } else {
+                            // Nothing free: we have to spill.
+                            self.spill_gp_if_not_already(asm, iidx, *reg);
+                            self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                            self.gp_regset.unset(*reg);
+                        }
                     }
                 }
             }
@@ -642,6 +715,7 @@ impl LSRegAlloc<'_> {
             }
 
             // Move values that are already in constraint registers into place.
+            assert_eq!(constraints.len(), cnstr_regs.len());
             for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
                 if let GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } = cnstr
                 {
@@ -688,17 +762,7 @@ impl LSRegAlloc<'_> {
                                         | GPConstraint::Clobber { .. }
                                         | GPConstraint::Temporary,
                                     ) => {
-                                        if let RegState::Empty =
-                                            self.gp_reg_states[usize::from(reg.code())]
-                                        {
-                                            self.move_gp_reg(asm, old_reg, reg);
-                                        } else if let RegState::Empty =
-                                            self.gp_reg_states[usize::from(old_reg.code())]
-                                        {
-                                            self.move_gp_reg(asm, reg, old_reg);
-                                        } else {
-                                            self.swap_gp_reg(asm, reg, old_reg);
-                                        }
+                                        self.move_gp_reg(asm, old_reg, reg);
                                         changed = true;
                                     }
                                     _ => (),
@@ -1693,8 +1757,9 @@ pub(crate) enum GPConstraint {
     Clobber { force_reg: Rq },
     /// A temporary register that the instruction will clobber.
     Temporary,
-    /// A no-op register constraint. A random register will be assigned to this: using this
-    /// register for any purposes leads to undefined behaviour.
+    /// A no-op register constraint. No registers will be assigned for this, but we have to put a
+    /// value in here for normal Rust reasons. A random register will thus end up being returned
+    /// from this, but using that register for any purposes leads to undefined behaviour.
     None,
 }
 

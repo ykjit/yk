@@ -4812,14 +4812,14 @@ mod tests {
                 cmp r.32.x, 0x03
                 setz r.8._
                 ; guard true, %1, [] ; ...
-                and r.32.y, 0x01
-                mov [rbp-0x01], r.8.y
-                bt r.32.y, 0x00
+                and r.32.x, 0x01
+                mov ...
+                bt r.32.x, 0x00
                 jnb 0x...
                 ; %3: i8 = sext %1
-                movzx r.64.y, byte ptr [rbp-0x01]
-                and r.64.y, 0x01
-                neg r.64.y
+                movzx ...
+                and r.64.x, 0x01
+                neg r.64.x
                 ; black_box %3
                 ...
             ",
