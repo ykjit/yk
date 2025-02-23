@@ -3500,8 +3500,7 @@ mod tests {
             "
                 ...
                 ; %1: ptr = load %0
-                mov r.64.x, [rbx]
-                ...
+                mov r.64.x, [rax]
                 ",
             false,
         );
@@ -3519,8 +3518,7 @@ mod tests {
             "
                 ...
                 ; %1: i8 = load %0
-                movzx r.32.x, byte ptr [rbx]
-                ...
+                movzx r.32.x, byte ptr [rax]
                 ",
             false,
         );
@@ -3603,12 +3601,13 @@ mod tests {
                 ...
                 ; %1: ...
                 ; %3: i64 = load %0 + 64
-                mov r.64.x, [rbx+{{_}}]
+                mov r.64.x, [r.64._+{{_}}]
                 ; %4: ptr = ptr_add %1, 32
                 lea r.64.y, [r.64.z+0x20]
                 ; %5: i64 = load %1 + 32
                 mov r.64._, [r.64.z+0x20]
-                ...
+                ; %6: ptr = ptr_add %4, 1
+                lea r.64._, [r.64.y+0x01]
                 ",
             false,
         );
@@ -3631,7 +3630,7 @@ mod tests {
             "
                 ...
                 ; *(%0 + 64) = 1i8
-                mov byte ptr [rbx+{{_}}], 0x01
+                mov byte ptr [rax+{{_}}], 0x01
                 ; %5: i64 = load %1 + 32
                 mov r.64.y, [r.64.x+0x20]
                 ; *(%1 + 32) = 2i8
@@ -4093,7 +4092,7 @@ mod tests {
             "
                 ...
                 ; %4: i16 = mul %0, %1
-                mov rax, ...
+                mov r.64.a, rdx
                 and eax, 0xffff
                 and r.32.a, 0xffff
                 mul r.64.a
@@ -4135,7 +4134,7 @@ mod tests {
                 ; %9: i1 = or %4, 1i1
                 or r.32.e, 0x01
                 ; %10: i64 = or %5, %6
-                or r10, r11
+                or r.64.f, r.64.g
                 ",
             false,
         );
@@ -4287,11 +4286,11 @@ mod tests {
             "
                 ...
                 ; %4: i16 = udiv %0, %1
-                mov rax, r.64.a
+                mov r.64.a, r.64._
                 and eax, 0xffff
-                movsx r.64.b, si
+                movsx r.64.a, r.16.a
                 xor rdx, rdx
-                div r.64.b
+                div r.64.a
                 ; %5: i32 = udiv %2, %3
                 ...
                 xor rdx, rdx
@@ -4341,8 +4340,9 @@ mod tests {
                 "
                 ...
                 ; call @puts(%0, %1, %2)
-                mov rdx, rdi
-                mov rdi, rbx
+                xchg rdx, rcx
+                mov rsi, rcx
+                mov rdi, rax
                 mov r.64.tgt, 0x{sym_addr:X}
                 call r.64.tgt
             "
@@ -4369,9 +4369,10 @@ mod tests {
                 "
                 ...
                 ; call @puts(%0, %1, %2, %3)
-                mov rcx, r8
-                mov rdx, rdi
-                mov rdi, rbx
+                xchg rdx, rcx
+                mov rsi, rcx
+                mov rdi, rax
+                mov rcx, rbx
                 and ecx, 0x01
                 and esi, 0xffff
                 and edi, 0xff
@@ -4497,8 +4498,8 @@ mod tests {
             "
                ...
                ; call @llvm.memcpy.p0.p0.i64(%0, %1, %2, 0i1)
-               mov rcx, r.64._
-               mov rdi, r.64._
+               mov rdi, rax
+               mov rsi, rdx
                rep movsb
             ",
             false,
@@ -4905,12 +4906,11 @@ mod tests {
             "
                 ...
                 ; %2: i8 = srem %0, %1
-                mov rax, r.64.y
+                mov r.64.a, rdx
                 movsx rax, al
-                movsx rsi, sil
+                movsx r.64.a, r.8.a
                 cqo
-                idiv r.64.x
-                ...
+                idiv r.64.a
             ",
             false,
         );

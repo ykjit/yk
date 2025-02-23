@@ -135,7 +135,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         // as yksmp currently doesn't seem able to differentiate general purpose from floating
         // point.
         #[cfg(target_arch = "x86_64")]
-        let mut gp_reg_off: u16 = 3; // FIXME: Why do need to start from register 3? I have no idea.
+        let mut gp_reg_off: u16 = 0;
         #[cfg(target_arch = "x86_64")]
         let mut fp_reg_off: u16 = 17; // In DWARF, xmm registers are 17..32.
         let mut inst_off = 0;
