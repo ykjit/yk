@@ -4062,13 +4062,12 @@ mod tests {
             "
                 ...
                 ; %2: i16 = shl %0, 1i16
-                ...
-                shl r.64.a, 0x01
+                shl rax, 0x01
                 ; %3: i32 = shl %1, 2i32
-                ...
-                shl r.64._, 0x02
-                ; %4: i32 = shl %1, %3
                 ......
+                shl rcx, 0x02
+                ; %4: i32 = shl %1, %3
+                ...
                 shl r.64._, cl
                 ",
             false,
@@ -4094,8 +4093,8 @@ mod tests {
                 ; %4: i16 = mul %0, %1
                 mov r.64.a, rdx
                 and eax, 0xffff
-                and r.32.a, 0xffff
-                mul r.64.a
+                and ecx, 0xffff
+                mul rcx
                 ; %5: i32 = mul %2, %3
                 ...
                 mul r.64.b
@@ -4288,9 +4287,9 @@ mod tests {
                 ; %4: i16 = udiv %0, %1
                 mov r.64.a, r.64._
                 and eax, 0xffff
-                movsx r.64.a, r.16.a
+                movsx r.64.b, r.16.b
                 xor rdx, rdx
-                div r.64.a
+                div r.64.b
                 ; %5: i32 = udiv %2, %3
                 ...
                 xor rdx, rdx
@@ -4340,7 +4339,6 @@ mod tests {
                 "
                 ...
                 ; call @puts(%0, %1, %2)
-                xchg rdx, rcx
                 mov rsi, rcx
                 mov rdi, rax
                 mov r.64.tgt, 0x{sym_addr:X}
@@ -4369,7 +4367,6 @@ mod tests {
                 "
                 ...
                 ; call @puts(%0, %1, %2, %3)
-                xchg rdx, rcx
                 mov rsi, rcx
                 mov rdi, rax
                 mov rcx, rbx
@@ -4499,7 +4496,8 @@ mod tests {
                ...
                ; call @llvm.memcpy.p0.p0.i64(%0, %1, %2, 0i1)
                mov rdi, rax
-               mov rsi, rdx
+               mov rsi, rcx
+               mov rcx, rdx
                rep movsb
             ",
             false,
@@ -4906,11 +4904,10 @@ mod tests {
             "
                 ...
                 ; %2: i8 = srem %0, %1
-                mov r.64.a, rdx
                 movsx rax, al
-                movsx r.64.a, r.8.a
+                movsx rcx, cl
                 cqo
-                idiv r.64.a
+                idiv rcx
             ",
             false,
         );

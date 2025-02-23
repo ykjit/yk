@@ -134,10 +134,8 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         // We try and put trace inputs into registers, but place floating point values on the stack
         // as yksmp currently doesn't seem able to differentiate general purpose from floating
         // point.
-        #[cfg(target_arch = "x86_64")]
-        let mut gp_reg_off: u16 = 0;
-        #[cfg(target_arch = "x86_64")]
-        let mut fp_reg_off: u16 = 17; // In DWARF, xmm registers are 17..32.
+        let mut gp_reg_iter = gp_reg_iter();
+        let mut fp_reg_iter = fp_reg_iter();
         let mut inst_off = 0;
 
         for bblock in bblocks.into_iter() {
@@ -328,30 +326,19 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         match self.m.type_(type_) {
                             Ty::Void => unreachable!(),
                             Ty::Integer(_) | Ty::Ptr | Ty::Func(_) => {
-                                if gp_reg_off == 15 {
-                                    panic!("out of gp registers");
-                                }
+                                let dwarf_reg = gp_reg_iter.next().expect("out of gp registers");
                                 self.m.push_param(yksmp::Location::Register(
-                                    gp_reg_off,
+                                    dwarf_reg,
                                     u16::try_from(size).unwrap(),
                                     vec![],
                                 ));
-                                gp_reg_off += 1;
-                                // FIXME: gross hack to avoid allocating RBP/RSP.
-                                while gp_reg_off == 6 || gp_reg_off == 7 {
-                                    gp_reg_off += 1;
-                                }
                             }
                             Ty::Float(_) => {
-                                if fp_reg_off == 32 {
-                                    panic!("out of fp regisers");
-                                }
                                 self.m.push_param(yksmp::Location::Register(
-                                    fp_reg_off,
+                                    fp_reg_iter.next().expect("Out of FP registers"),
                                     u16::try_from(size).unwrap(),
                                     vec![],
                                 ));
-                                fp_reg_off += 1;
                             }
                             Ty::Unimplemented(_) => todo!(),
                         }
@@ -888,6 +875,27 @@ enum ASTType {
     Ptr,
     Void,
 }
+
+/// Hand out X86 registers to JIT tests that want them, mapping them to the DWARF registers that
+/// yksmp uses.
+#[cfg(target_arch = "x86_64")]
+mod x64_regs {
+    pub(super) fn fp_reg_iter() -> impl Iterator<Item = u16> {
+        // FP registers on x64 DWARF are 17 to 32 inclusive
+        17..=32
+    }
+
+    pub(super) fn gp_reg_iter() -> impl Iterator<Item = u16> {
+        // For reasons that are above my pay grade, DWARF uses a different ordering of registers to
+        // everyone else. To lessen the confusion we hand out registers in "Intel order" i.e. the order
+        // that everyone who doesn't read the DWARF spec expects. This array encodes that mapping.
+        let intel_dwarf_mapping: [u16; 14] = [0, 2, 1, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15];
+        intel_dwarf_mapping.into_iter()
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+use x64_regs::{fp_reg_iter, gp_reg_iter};
 
 #[cfg(test)]
 mod tests {
