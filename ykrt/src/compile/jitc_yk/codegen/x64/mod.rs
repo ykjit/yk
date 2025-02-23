@@ -1068,6 +1068,7 @@ impl<'a> Assemble<'a> {
                         GPConstraint::Clobber { force_reg: Rq::RDX },
                     ],
                 );
+                assert!(rhs_reg != Rq::RAX && rhs_reg != Rq::RDX);
                 dynasm!(self.asm
                     ; cqo // Sign extend RAX up to RDX:RAX.
                     ; idiv Rq(rhs_reg.code())
@@ -1103,6 +1104,7 @@ impl<'a> Assemble<'a> {
                 );
                 assert_eq!(lhs_reg, Rq::RAX);
                 assert_eq!(_rem_reg, Rq::RDX);
+                assert!(rhs_reg != Rq::RAX && rhs_reg != Rq::RDX);
                 assert!(bitw > 0 && bitw <= 64);
                 dynasm!(self.asm
                     ; cqo // Sign extend RAX up to RDX:RAX.
