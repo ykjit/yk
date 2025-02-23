@@ -1828,7 +1828,7 @@ pub(super) struct GuardSnapshot {
     regs_to_zero_ext: Vec<(Rq, u32)>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum RegState {
     Reserved,
     Empty,
@@ -1972,6 +1972,8 @@ enum SpillState {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::compile::jitc_yk::jit_ir::BinOp;
+    use std::collections::HashMap;
 
     #[test]
     fn regset() {
@@ -2006,5 +2008,124 @@ mod test {
 
         let x = RegSet::<Rq>::blank();
         assert_eq!(x.find_empty_avoiding(RegSet::from(Rq::R15)), Some(Rq::R14));
+    }
+
+    fn check_reg_states(
+        reg_states: &[[RegState; 16]],
+        iidx: InstIdx,
+        check: HashMap<&str, RegState>,
+    ) {
+        for (reg_name, expected) in check.iter() {
+            // Note: Intel (not DWARF!) ordering of registers
+            let reg_i = [
+                "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11",
+                "r12", "r13", "r14", "r15", "rip",
+            ]
+            .iter()
+            .position(|x| x == reg_name)
+            .unwrap();
+            let actual = &reg_states[usize::from(iidx)][reg_i];
+            assert_eq!(actual, expected, "at InstIdx({iidx}), {reg_name} (reg offset {reg_i}) is {actual:?}, not {expected:?}, in {:?}", reg_states[usize::from(iidx)]);
+        }
+    }
+
+    #[test]
+    fn can_be_same_as_input() {
+        let m = Module::from_str(
+            "
+          entry:
+            %0: i64 = param 0
+            %1: i64 = param 1
+            %2: i64 = param 2
+            %3: i64 = param 3
+            %4: i64 = param 4
+            %5: i64 = param 5
+            %6: i64 = param 6
+            %7: i64 = param 7
+            %8: i64 = param 8
+            %9: i64 = param 9
+            %10: i64 = param 10
+            %11: i64 = add %6, %7
+            black_box %11
+        ",
+        );
+
+        let mut ra = LSRegAlloc::new(&m, 0);
+        let mut asm = dynasmrt::x64::Assembler::new().unwrap();
+        let mut gp_regsets = Vec::with_capacity(m.insts_len());
+        let mut reg_states = Vec::with_capacity(m.insts_len());
+        for (iidx, inst) in m.iter_skipping_insts() {
+            match inst {
+                Inst::BlackBox(_) => (),
+                Inst::Param(pinst) => {
+                    match VarLocation::from_yksmp_location(&m, iidx, m.param(pinst.paramidx())) {
+                        VarLocation::Register(Register::GP(reg)) => {
+                            ra.force_assign_inst_gp_reg(&mut asm, iidx, reg);
+                        }
+                        _ => todo!(),
+                    }
+                }
+                Inst::BinOp(binst) => match binst.binop() {
+                    BinOp::Add => {
+                        let [_, _, _] = ra.assign_gp_regs(
+                            &mut asm,
+                            iidx,
+                            [
+                                GPConstraint::Input {
+                                    op: binst.lhs(&m),
+                                    in_ext: RegExtension::Undefined,
+                                    force_reg: None,
+                                    clobber_reg: false,
+                                },
+                                GPConstraint::Input {
+                                    op: binst.lhs(&m),
+                                    in_ext: RegExtension::Undefined,
+                                    force_reg: None,
+                                    clobber_reg: false,
+                                },
+                                GPConstraint::Output {
+                                    out_ext: RegExtension::Undefined,
+                                    force_reg: None,
+                                    can_be_same_as_input: true,
+                                },
+                            ],
+                        );
+                    }
+                    _ => panic!(),
+                },
+                _ => panic!(),
+            }
+            gp_regsets.push(ra.gp_regset);
+            reg_states.push(ra.gp_reg_states.clone());
+        }
+
+        check_reg_states(
+            &reg_states,
+            InstIdx::unchecked_from(10),
+            HashMap::from([
+                (
+                    "r8",
+                    RegState::FromInst(InstIdx::unchecked_from(6), RegExtension::Undefined),
+                ),
+                (
+                    "r9",
+                    RegState::FromInst(InstIdx::unchecked_from(7), RegExtension::Undefined),
+                ),
+            ]),
+        );
+        check_reg_states(
+            &reg_states,
+            InstIdx::unchecked_from(11),
+            HashMap::from([
+                (
+                    "r8",
+                    RegState::FromInst(InstIdx::unchecked_from(11), RegExtension::Undefined),
+                ),
+                (
+                    "r9",
+                    RegState::FromInst(InstIdx::unchecked_from(7), RegExtension::Undefined),
+                ),
+            ]),
+        );
     }
 }
