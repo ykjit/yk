@@ -421,8 +421,98 @@ impl LSRegAlloc<'_> {
                 <= 1
         );
 
-        // Stage 1: Find a register for each `GPConstraint`. During this phase, no changes to state
-        // in `self` must be made. This stage is split into sub-stages:
+        // Stage 1: Find a register for each `GPConstraint`. This stage is split into sub-stages:
+        //   a. Use `force_reg`s, where specified.
+        //   b. Deal with register hints and `can_be_same_as_input`
+        // Note: during this stage no changes are made to the allocator's state in `self`.
+
+        let (mut asgn_regs, cnstr_regs) = self.find_regs_for_constraints(iidx, &mut constraints);
+
+        // Stage 2: At this point, we've found a register for every constraint. We now go about
+        // updating the allocator's state to get from where we were to where we want to be.
+
+        // Spill currently assigned registers that don't contain values we want for the current
+        // instruction.
+        self.spill_or_move_constraints(asm, iidx, &constraints, &mut asgn_regs, &cnstr_regs);
+
+        // Put values that aren't in registers into them -- spilling values if we need them later.
+        for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
+            match cnstr {
+                GPConstraint::Input {
+                    op,
+                    in_ext,
+                    force_reg: _,
+                    clobber_reg,
+                } => {
+                    self.put_input_in_gp_reg(asm, op, reg, *in_ext);
+                    if *clobber_reg {
+                        self.spill_gp_if_not_already(asm, iidx, reg);
+                    }
+                }
+                GPConstraint::InputOutput {
+                    op,
+                    in_ext,
+                    out_ext: _,
+                    force_reg: _,
+                } => {
+                    self.put_input_in_gp_reg(asm, op, reg, *in_ext);
+                    self.spill_gp_if_not_already(asm, iidx, reg);
+                }
+                GPConstraint::Output {
+                    out_ext: _,
+                    force_reg: _,
+                    can_be_same_as_input: _,
+                }
+                | GPConstraint::Clobber { force_reg: _ }
+                | GPConstraint::Temporary => {
+                    self.spill_gp_if_not_already(asm, iidx, reg);
+                }
+                GPConstraint::None => (),
+            }
+        }
+
+        // Set the output state for constraints.
+        for (cnstr, reg) in constraints.into_iter().zip(cnstr_regs.into_iter()) {
+            match cnstr {
+                GPConstraint::Input { clobber_reg, .. } => {
+                    if clobber_reg {
+                        self.gp_regset.unset(reg);
+                        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                    }
+                }
+                GPConstraint::InputOutput { out_ext, .. } => {
+                    assert!(self.gp_regset.is_set(reg));
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx, out_ext);
+                }
+                GPConstraint::Output { out_ext, .. } => {
+                    self.gp_regset.set(reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx, out_ext);
+                }
+                GPConstraint::Clobber { .. } => {
+                    self.gp_regset.unset(reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+                GPConstraint::Temporary => {
+                    self.gp_regset.unset(reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+                GPConstraint::None => (),
+            }
+        }
+
+        cnstr_regs
+    }
+
+    /// Stage 1 in register allocation: find a register for each `GPConstraint`. Return the
+    /// `RegSet` of assigned registers and the `Rq` registers: note these two sets are in a sense
+    /// equivalent (the former can be derived from the latter), but having both makes other things
+    /// more convenient.
+    fn find_regs_for_constraints<const N: usize>(
+        &self,
+        iidx: InstIdx,
+        constraints: &mut [GPConstraint; N],
+    ) -> (RegSet<Rq>, [Rq; N]) {
+        // This stage is split into sub-stages:
         //   a. Use `force_reg`s, where specified.
         //   b. Deal with register hints and `can_be_same_as_input`
 
@@ -641,13 +731,17 @@ impl LSRegAlloc<'_> {
             }
         }
 
-        // Stage 2: At this point, we've found a register for every constraint. We now go about
-        // updating the allocator's state to get from where we were to where we want to be.
+        (asgn_regs, cnstr_regs.map(|x| x.unwrap()))
+    }
 
-        let cnstr_regs = cnstr_regs.map(|x| x.unwrap());
-
-        // Spill currently assigned registers that don't contain values we want for the current
-        // instruction.
+    fn spill_or_move_constraints<const N: usize>(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        constraints: &[GPConstraint; N],
+        asgn_regs: &mut RegSet<Rq>,
+        cnstr_regs: &[Rq; N],
+    ) {
         assert_eq!(constraints.len(), cnstr_regs.len());
         for (cnstr, reg) in constraints.iter().zip(cnstr_regs.iter()) {
             if let GPConstraint::None = cnstr {
@@ -659,13 +753,13 @@ impl LSRegAlloc<'_> {
                 RegState::Reserved => (),
                 RegState::Empty => (),
                 RegState::FromConst(op_cidx, _) => {
-                    if !self.find_op_in_constraints(&constraints, Operand::Const(*op_cidx)) {
+                    if !self.find_op_in_constraints(constraints, Operand::Const(*op_cidx)) {
                         self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
                         self.gp_regset.unset(*reg);
                     }
                 }
                 RegState::FromInst(op_iidx, _) => {
-                    if !self.find_op_in_constraints(&constraints, Operand::Var(*op_iidx)) {
+                    if !self.find_op_in_constraints(constraints, Operand::Var(*op_iidx)) {
                         if let Some(Register::GP(new_reg)) =
                             self.rev_an.reg_hints[usize::from(*op_iidx)]
                         {
@@ -678,7 +772,7 @@ impl LSRegAlloc<'_> {
                             }
                         }
 
-                        if let Some(new_reg) = self.gp_regset.find_empty_avoiding(asgn_regs) {
+                        if let Some(new_reg) = self.gp_regset.find_empty_avoiding(*asgn_regs) {
                             // There's a completely free register we can move things to.
                             self.move_gp_reg(asm, *reg, new_reg);
                             asgn_regs.set(new_reg);
@@ -698,16 +792,16 @@ impl LSRegAlloc<'_> {
         loop {
             let mut changed = false;
             // Move values that are already in non-constraint registers into place.
-            for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
+            for (cnstr, reg) in constraints.iter().zip(cnstr_regs.iter()) {
                 let st = &self.gp_reg_states[usize::from(reg.code())];
                 if let RegState::Empty = st {
                     if let GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } =
                         cnstr
                     {
-                        if !self.is_input_in_gp_reg(op, reg) {
-                            if let Some(old_reg) = self.find_op_in_gp_reg_avoiding(op, asgn_regs) {
+                        if !self.is_input_in_gp_reg(op, *reg) {
+                            if let Some(old_reg) = self.find_op_in_gp_reg_avoiding(op, *asgn_regs) {
                                 changed = true;
-                                self.copy_gp_reg(asm, old_reg, reg);
+                                self.copy_gp_reg(asm, old_reg, *reg);
                             }
                         }
                     }
@@ -716,15 +810,15 @@ impl LSRegAlloc<'_> {
 
             // Move values that are already in constraint registers into place.
             assert_eq!(constraints.len(), cnstr_regs.len());
-            for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
+            for (cnstr, reg) in constraints.iter().zip(cnstr_regs.iter()) {
                 if let GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } = cnstr
                 {
-                    if !self.is_input_in_gp_reg(op, reg) {
+                    if !self.is_input_in_gp_reg(op, *reg) {
                         if let Some(old_reg) = self.find_op_in_gp_reg(op) {
                             if let Some(other_cnstr) = constraints
                                 .iter()
-                                .zip(cnstr_regs.into_iter())
-                                .find(|(_, y)| *y == old_reg)
+                                .zip(cnstr_regs.iter())
+                                .find(|(_, y)| **y == old_reg)
                                 .map(|(x, _)| x)
                             {
                                 match (&cnstr, &other_cnstr) {
@@ -738,20 +832,20 @@ impl LSRegAlloc<'_> {
                                             self.gp_reg_states[usize::from(reg.code())]
                                         {
                                             if lhs_op == rhs_op {
-                                                self.copy_gp_reg(asm, old_reg, reg);
+                                                self.copy_gp_reg(asm, old_reg, *reg);
                                             } else {
-                                                self.move_gp_reg(asm, old_reg, reg);
+                                                self.move_gp_reg(asm, old_reg, *reg);
                                             }
                                         } else if let RegState::Empty =
                                             self.gp_reg_states[usize::from(old_reg.code())]
                                         {
                                             if lhs_op == rhs_op {
-                                                self.copy_gp_reg(asm, reg, old_reg);
+                                                self.copy_gp_reg(asm, *reg, old_reg);
                                             } else {
-                                                self.move_gp_reg(asm, reg, old_reg);
+                                                self.move_gp_reg(asm, *reg, old_reg);
                                             }
                                         } else {
-                                            self.swap_gp_reg(asm, reg, old_reg);
+                                            self.swap_gp_reg(asm, *reg, old_reg);
                                         }
                                         changed = true;
                                     }
@@ -765,13 +859,13 @@ impl LSRegAlloc<'_> {
                                         if let RegState::Empty =
                                             self.gp_reg_states[usize::from(reg.code())]
                                         {
-                                            self.move_gp_reg(asm, old_reg, reg);
+                                            self.move_gp_reg(asm, old_reg, *reg);
                                         } else if let RegState::Empty =
                                             self.gp_reg_states[usize::from(old_reg.code())]
                                         {
-                                            self.move_gp_reg(asm, reg, old_reg);
+                                            self.move_gp_reg(asm, *reg, old_reg);
                                         } else {
-                                            self.swap_gp_reg(asm, reg, old_reg);
+                                            self.swap_gp_reg(asm, *reg, old_reg);
                                         }
                                         changed = true;
                                     }
@@ -787,73 +881,6 @@ impl LSRegAlloc<'_> {
                 break;
             }
         }
-
-        // Put values that aren't in registers into them -- spilling values if we need them later.
-        for (cnstr, reg) in constraints.iter().zip(cnstr_regs.into_iter()) {
-            match cnstr {
-                GPConstraint::Input {
-                    op,
-                    in_ext,
-                    force_reg: _,
-                    clobber_reg,
-                } => {
-                    self.put_input_in_gp_reg(asm, op, reg, *in_ext);
-                    if *clobber_reg {
-                        self.spill_gp_if_not_already(asm, iidx, reg);
-                    }
-                }
-                GPConstraint::InputOutput {
-                    op,
-                    in_ext,
-                    out_ext: _,
-                    force_reg: _,
-                } => {
-                    self.put_input_in_gp_reg(asm, op, reg, *in_ext);
-                    self.spill_gp_if_not_already(asm, iidx, reg);
-                }
-                GPConstraint::Output {
-                    out_ext: _,
-                    force_reg: _,
-                    can_be_same_as_input: _,
-                }
-                | GPConstraint::Clobber { force_reg: _ }
-                | GPConstraint::Temporary => {
-                    self.spill_gp_if_not_already(asm, iidx, reg);
-                }
-                GPConstraint::None => (),
-            }
-        }
-
-        // Set the output state for constraints.
-        for (cnstr, reg) in constraints.into_iter().zip(cnstr_regs.into_iter()) {
-            match cnstr {
-                GPConstraint::Input { clobber_reg, .. } => {
-                    if clobber_reg {
-                        self.gp_regset.unset(reg);
-                        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
-                    }
-                }
-                GPConstraint::InputOutput { out_ext, .. } => {
-                    assert!(self.gp_regset.is_set(reg));
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx, out_ext);
-                }
-                GPConstraint::Output { out_ext, .. } => {
-                    self.gp_regset.set(reg);
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx, out_ext);
-                }
-                GPConstraint::Clobber { .. } => {
-                    self.gp_regset.unset(reg);
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
-                }
-                GPConstraint::Temporary => {
-                    self.gp_regset.unset(reg);
-                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
-                }
-                GPConstraint::None => (),
-            }
-        }
-
-        cnstr_regs
     }
 
     fn find_op_in_constraints(&self, constraints: &[GPConstraint], query_op: Operand) -> bool {
