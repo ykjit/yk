@@ -489,9 +489,11 @@ impl Module {
         self.args[usize::from(idx)].unpack(self)
     }
 
-    /// Push the location of a trace parameter.
-    pub(crate) fn push_param(&mut self, loc: yksmp::Location) {
+    /// Push the location of a trace parameter and return its `ParamIdx`.
+    pub(crate) fn push_param(&mut self, loc: yksmp::Location) -> ParamIdx {
+        let off = self.params.len();
         self.params.push(loc);
+        ParamIdx::try_from(off).unwrap()
     }
 
     /// Return the parameter at a given [InstIdx].
@@ -3426,12 +3428,12 @@ mod tests {
         let m = Module::from_str(
             "
         entry:
-          %0: i8 = param 0
-          %1: i8 = param 1
-          %2: i8 = param 2
-          %3: i8 = param 3
-          %4: i8 = param 4
-          %5: i8 = param 5
+          %0: i8 = param reg
+          %1: i8 = param reg
+          %2: i8 = param reg
+          %3: i8 = param reg
+          %4: i8 = param reg
+          %5: i8 = param reg
         ",
         );
         let mut iter = m.iter_skipping_insts();

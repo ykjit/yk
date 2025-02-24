@@ -3493,7 +3493,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
+                %0: ptr = param reg
                 %1: ptr = load %0
                 black_box %1
             ",
@@ -3511,7 +3511,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 %1: i8 = load %0
                 black_box %1
             ",
@@ -3529,7 +3529,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i32 = load %0
                 black_box %1
             ",
@@ -3548,7 +3548,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
+                %0: ptr = param reg
                 *%0 = 0x0
             ",
             "
@@ -3567,7 +3567,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
+                %0: ptr = param reg
                 %1: i32 = ptr_add %0, 64
                 black_box %1
             ",
@@ -3586,8 +3586,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: ptr = param 1
+                %0: ptr = param reg
+                %1: ptr = param reg
                 %2: ptr = ptr_add %0, 64
                 %3: i64 = load %2
                 %4: ptr = ptr_add %1, 32
@@ -3618,8 +3618,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: ptr = param 1
+                %0: ptr = param reg
+                %1: ptr = param reg
                 %2: ptr = ptr_add %0, 64
                 *%2 = 1i8
                 %4: ptr = ptr_add %1, 32
@@ -3646,8 +3646,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: i32 = param 1
+                %0: ptr = param reg
+                %1: i32 = param reg
                 %2: ptr = dyn_ptr_add %0, %1, 1
                 black_box %2
             ",
@@ -3663,8 +3663,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: i32 = param 1
+                %0: ptr = param reg
+                %1: i32 = param reg
                 %2: ptr = dyn_ptr_add %0, %1, 2
                 black_box %2
             ",
@@ -3680,8 +3680,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: i32 = param 1
+                %0: ptr = param reg
+                %1: i32 = param reg
                 %2: ptr = dyn_ptr_add %0, %1, 4
                 black_box %2
             ",
@@ -3698,8 +3698,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: i32 = param 1
+                %0: ptr = param reg
+                %1: i32 = param reg
                 %2: ptr = dyn_ptr_add %0, %1, 5
                 black_box %2
             ",
@@ -3716,8 +3716,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: i32 = param 1
+                %0: ptr = param reg
+                %1: i32 = param reg
                 %2: ptr = dyn_ptr_add %0, %1, 16
                 black_box %2
             ",
@@ -3735,8 +3735,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: i32 = param 1
+                %0: ptr = param reg
+                %1: i32 = param reg
                 %2: ptr = dyn_ptr_add %0, %1, 77
                 black_box %2
             ",
@@ -3756,8 +3756,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
-                %1: ptr = param 1
+                %0: ptr = param reg
+                %1: ptr = param reg
                 *%1 = %0
             ",
             "
@@ -3777,7 +3777,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: ptr = param 0
+                %0: ptr = param reg
                 *%0 = 1i8
                 *%0 = 2i16
                 *%0 = 3i32
@@ -3805,8 +3805,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
+                %0: i16 = param reg
+                %1: i16 = param reg
                 %2: i16 = add %0, %1
                 %3: i16 = add %2, 1i16
                 black_box %2
@@ -3829,8 +3829,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = param 0
-                %1: i64 = param 1
+                %0: i64 = param reg
+                %1: i64 = param reg
                 %2: i64 = add %0, %1
                 %3: i64 = add %2, 1i64
                 black_box %2
@@ -3853,7 +3853,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = param 0
+                %0: i64 = param reg
                 %1: i64 = add %0, 1i64
                 black_box %1
             ",
@@ -3872,7 +3872,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = param 0
+                %0: i64 = param reg
                 %1: i64 = add %0, 18446744073709551615i64
                 black_box %1
             ",
@@ -3892,7 +3892,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = param 0
+                %0: i64 = param reg
                 %1: i64 = add %0, 2147483647i64
                 black_box %1
             ",
@@ -3911,7 +3911,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = param 0
+                %0: i64 = param reg
                 %1: i64 = add %0, 2147483648i64
                 black_box %1
             ",
@@ -3931,7 +3931,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i32 = add %0, 1i32
                 black_box %1
             ",
@@ -3950,7 +3950,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i32 = add %0, 4294967295i32
                 black_box %1
             ",
@@ -3969,11 +3969,11 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
-                %2: i32 = param 2
-                %3: i32 = param 3
-                %4: i1 = param 4
+                %0: i16 = param reg
+                %1: i16 = param reg
+                %2: i32 = param reg
+                %3: i32 = param reg
+                %4: i1 = param reg
                 %5: i16 = and %0, %1
                 %6: i32 = and %2, %3
                 %7: i1 = and %4, 1i1
@@ -4000,8 +4000,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i32 = param 1
+                %0: i16 = param reg
+                %1: i32 = param reg
                 %2: i16 = ashr %0, 1i16
                 %3: i32 = ashr %1, 2i32
                 black_box %2
@@ -4025,8 +4025,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i32 = param 1
+                %0: i16 = param reg
+                %1: i32 = param reg
                 %2: i16 = lshr %0, 1i16
                 %3: i32 = lshr %1, 2i32
                 black_box %2
@@ -4050,8 +4050,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i32 = param 1
+                %0: i16 = param reg
+                %1: i32 = param reg
                 %2: i16 = shl %0, 1i16
                 %3: i32 = shl %1, 2i32
                 %4: i32 = shl %1, %3
@@ -4079,10 +4079,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
-                %2: i32 = param 2
-                %3: i32 = param 3
+                %0: i16 = param reg
+                %1: i16 = param reg
+                %2: i32 = param reg
+                %3: i32 = param reg
                 %4: i16 = mul %0, %1
                 %5: i32 = mul %2, %3
                 black_box %4
@@ -4108,13 +4108,13 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
-                %2: i32 = param 2
-                %3: i32 = param 3
-                %4: i1 = param 4
-                %5: i64 = param 5
-                %6: i64 = param 6
+                %0: i16 = param reg
+                %1: i16 = param reg
+                %2: i32 = param reg
+                %3: i32 = param reg
+                %4: i1 = param reg
+                %5: i64 = param reg
+                %6: i64 = param reg
                 %7: i16 = or %0, %1
                 %8: i32 = or %2, %3
                 %9: i1 = or %4, 1i1
@@ -4144,10 +4144,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
-                %2: i32 = param 2
-                %3: i32 = param 3
+                %0: i16 = param reg
+                %1: i16 = param reg
+                %2: i32 = param reg
+                %3: i32 = param reg
                 %4: i16 = sdiv %0, %1
                 %5: i32 = sdiv %2, %3
                 black_box %4
@@ -4175,10 +4175,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
-                %2: i32 = param 2
-                %3: i32 = param 3
+                %0: i16 = param reg
+                %1: i16 = param reg
+                %2: i32 = param reg
+                %3: i32 = param reg
                 %4: i16 = srem %0, %1
                 %5: i32 = srem %2, %3
                 black_box %4
@@ -4208,10 +4208,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
-                %2: i32 = param 2
-                %3: i32 = param 3
+                %0: i16 = param reg
+                %1: i16 = param reg
+                %2: i32 = param reg
+                %3: i32 = param reg
                 %4: i16 = sub %0, %1
                 %5: i32 = sub %2, %3
                 %6: i32 = sub 0i32, %5
@@ -4243,11 +4243,11 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
-                %2: i32 = param 2
-                %3: i32 = param 3
-                %4: i1 = param 4
+                %0: i16 = param reg
+                %1: i16 = param reg
+                %2: i32 = param reg
+                %3: i32 = param reg
+                %4: i1 = param reg
                 %5: i16 = xor %0, %1
                 %6: i32 = xor %2, %3
                 %7: i1 = xor %4, 1i1
@@ -4273,10 +4273,10 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i16 = param 1
-                %2: i32 = param 2
-                %3: i32 = param 3
+                %0: i16 = param reg
+                %1: i16 = param reg
+                %2: i32 = param reg
+                %3: i32 = param reg
                 %4: i16 = udiv %0, %1
                 %5: i32 = udiv %2, %3
                 black_box %4
@@ -4330,9 +4330,9 @@ mod tests {
               func_decl puts (i64, i64, i64)
 
               entry:
-                %0: i64 = param 0
-                %1: i64 = param 1
-                %2: i64 = param 2
+                %0: i64 = param reg
+                %1: i64 = param reg
+                %2: i64 = param reg
                 call @puts(%0, %1, %2)
             ",
             &format!(
@@ -4357,10 +4357,10 @@ mod tests {
               func_decl puts(i8, i16, ptr, i1)
 
               entry:
-                %0: i8 = param 0
-                %1: i16 = param 1
-                %2: ptr = param 2
-                %3: i1 = param 3
+                %0: i8 = param reg
+                %1: i16 = param reg
+                %2: ptr = param reg
+                %3: i1 = param reg
                 call @puts(%0, %1, %2, %3)
             ",
             &format!(
@@ -4422,8 +4422,8 @@ mod tests {
              func_decl llvm.lifetime.start.p0 (i64, ptr)
              func_decl llvm.lifetime.end.p0 (i64, ptr)
              entry:
-               %0: i1 = param 0
-               %1: ptr = param 1
+               %0: i1 = param reg
+               %1: ptr = param reg
                call @llvm.assume(%0)
                call @llvm.lifetime.start.p0(16i64, %1)
                call @llvm.lifetime.end.p0(16i64, %1)
@@ -4448,7 +4448,7 @@ mod tests {
             "
              func_decl llvm.ctpop.i32 (i32) -> i32
              entry:
-               %0: i32 = param 0
+               %0: i32 = param reg
                %1: i32 = call @llvm.ctpop.i32(%0)
                black_box %1
             ",
@@ -4468,7 +4468,7 @@ mod tests {
             "
              func_decl llvm.floor.f64 (double) -> double
              entry:
-               %0: double = param 0
+               %0: double = param reg
                %1: double = call @llvm.floor.f64(%0)
                black_box %1
             ",
@@ -4487,9 +4487,9 @@ mod tests {
             "
              func_decl llvm.memcpy.p0.p0.i64 (ptr, ptr, i64, i1)
              entry:
-               %0: ptr = param 0
-               %1: ptr = param 1
-               %2: i64 = param 2
+               %0: ptr = param reg
+               %1: ptr = param reg
+               %2: i64 = param reg
                call @llvm.memcpy.p0.p0.i64(%0, %1, %2, 0i1)
             ",
             "
@@ -4510,8 +4510,8 @@ mod tests {
             "
              func_decl llvm.smax.i64 (i64, i64) -> i64
              entry:
-               %0: i64 = param 0
-               %1: i64 = param 1
+               %0: i64 = param reg
+               %1: i64 = param reg
                %2: i64 = call @llvm.smax.i64(%0, %1)
                black_box %2
             ",
@@ -4530,9 +4530,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i32 = param 1
-                %2: i32 = param 2
+                %0: i16 = param reg
+                %1: i32 = param reg
+                %2: i32 = param reg
                 %3: i1 = eq %0, %0
                 %4: i1 = eq %1, %1
                 %5: i1 = eq %2, %1
@@ -4562,8 +4562,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i32 = param 1
+                %0: i16 = param reg
+                %1: i32 = param reg
                 %2: i32 = sext %0
                 %3: i64 = sext %1
                 black_box %2
@@ -4586,8 +4586,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = param 0
-                %1: i32 = param 1
+                %0: i16 = param reg
+                %1: i32 = param reg
                 %2: i32 = zext %0
                 %3: i64 = zext %1
                 black_box %2
@@ -4609,8 +4609,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i64 = param 0
-                %1: i32 = param 1
+                %0: i64 = param reg
+                %1: i32 = param reg
                 %2: double = bitcast %0
                 %3: float = bitcast %1
                 black_box %2
@@ -4633,7 +4633,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = param 0
+                %0: i1 = param reg
                 guard true, %0, []
             ",
             "
@@ -4665,7 +4665,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = param 0
+                %0: i1 = param reg
                 guard false, %0, []
             ",
             "
@@ -4697,7 +4697,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = param 0
+                %0: i1 = param reg
                 %1: i8 = 10i8
                 %2: i8 = 32i8
                 %3: i8 = add %1, %2
@@ -4732,8 +4732,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
-                %1: i1 = param 1
+                %0: i8 = param reg
+                %1: i1 = param reg
                 %2: i8 = shl %0, 1i8
                 guard true, %1, [%2]
             ",
@@ -4756,7 +4756,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 %1: i1 = eq %0, 3i8
                 black_box %1
             ",
@@ -4777,7 +4777,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 %1: i1 = eq %0, 3i8
                 guard true, %1, []
             ",
@@ -4800,7 +4800,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 %1: i1 = eq %0, 3i8
                 guard true, %1, []
                 %3: i8 = sext %1
@@ -4869,7 +4869,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 header_start [%0]
                 %2: i8 = add %0, %0
                 black_box %2
@@ -4896,8 +4896,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
-                %1: i8 = param 1
+                %0: i8 = param reg
+                %1: i8 = param reg
                 %2: i8 = srem %0, %1
                 black_box %2
             ",
@@ -4918,7 +4918,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i8 = trunc %0
                 %2: i8 = trunc %0
                 %3: i8 = add %2, %1
@@ -4946,7 +4946,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i1 = param 0
+                %0: i1 = param reg
                 %1: i32 = %0 ? 1i32 : 2i32
                 black_box %1
             ",
@@ -4967,9 +4967,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
-                %1: float = param 1
-                %2: i1 = param 2
+                %0: float = param reg
+                %1: float = param reg
+                %2: i1 = param reg
                 %3: float = %2 ? %0 : %1
                 %4: float = fadd %0, %1
                 black_box %3
@@ -4992,9 +4992,9 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = param 0
-                %1: double = param 1
-                %2: i1 = param 2
+                %0: double = param reg
+                %1: double = param reg
+                %2: i1 = param reg
                 %3: double = %2 ? %0 : %1
                 %4: double = fadd %0, %1
                 black_box %3
@@ -5020,7 +5020,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 %1: i8 = 1i8
                 %2: i8 = add %0, %1
                 black_box %2
@@ -5040,7 +5040,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: float = si_to_fp %0
                 black_box %1
             ",
@@ -5059,7 +5059,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: double = si_to_fp %0
                 black_box %1
             ",
@@ -5078,7 +5078,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
+                %0: float = param reg
                 %1: double = fp_ext %0
                 black_box %1
             ",
@@ -5098,7 +5098,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
+                %0: float = param reg
                 %1: i32 = fp_to_si %0
                 black_box %1
             ",
@@ -5117,7 +5117,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = param 0
+                %0: double = param reg
                 %1: i32 = fp_to_si %0
                 black_box %1
             ",
@@ -5136,8 +5136,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
-                %1: float = param 1
+                %0: float = param reg
+                %1: float = param reg
                 %2: float = fdiv %0, %1
                 black_box %2
             ",
@@ -5156,8 +5156,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = param 0
-                %1: double = param 1
+                %0: double = param reg
+                %1: double = param reg
                 %2: double = fdiv %0, %1
                 black_box %2
             ",
@@ -5176,8 +5176,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
-                %1: float = param 1
+                %0: float = param reg
+                %1: float = param reg
                 %2: float = fadd %0, %1
                 black_box %2
             ",
@@ -5196,8 +5196,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = param 0
-                %1: double = param 1
+                %0: double = param reg
+                %1: double = param reg
                 %2: double = fadd %0, %1
                 black_box %2
             ",
@@ -5216,8 +5216,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
-                %1: float = param 1
+                %0: float = param reg
+                %1: float = param reg
                 %2: float = fsub %0, %1
                 black_box %2
             ",
@@ -5236,8 +5236,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = param 0
-                %1: double = param 1
+                %0: double = param reg
+                %1: double = param reg
                 %2: double = fsub %0, %1
                 black_box %2
             ",
@@ -5256,8 +5256,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
-                %1: float = param 1
+                %0: float = param reg
+                %1: float = param reg
                 %2: float = fmul %0, %1
                 %3: float = fmul %1, %1
                 black_box %2
@@ -5278,8 +5278,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = param 0
-                %1: double = param 1
+                %0: double = param reg
+                %1: double = param reg
                 %2: double = fmul %0, %1
                 black_box %2
             ",
@@ -5298,8 +5298,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
-                %1: float = param 1
+                %0: float = param reg
+                %1: float = param reg
                 %2: i1 = f_oeq %0, %1
                 %3: i1 = f_ogt %0, %1
                 %4: i1 = f_oge %0, %1
@@ -5345,8 +5345,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
-                %1: float = param 1
+                %0: float = param reg
+                %1: float = param reg
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
                 %4: i1 = f_uge %0, %1
@@ -5392,8 +5392,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = param 0
-                %1: double = param 1
+                %0: double = param reg
+                %1: double = param reg
                 %2: i1 = f_oeq %0, %1
                 %3: i1 = f_ogt %0, %1
                 %4: i1 = f_oge %0, %1
@@ -5439,8 +5439,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: double = param 0
-                %1: double = param 1
+                %0: double = param reg
+                %1: double = param reg
                 %2: i1 = f_ueq %0, %1
                 %3: i1 = f_ugt %0, %1
                 %4: i1 = f_uge %0, %1
@@ -5532,7 +5532,7 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 header_start [%0]
                 %2: i8 = 42i8
                 header_end [%2]
@@ -5555,8 +5555,8 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: float = param 0
-                %1: double = param 1
+                %0: float = param reg
+                %1: double = param reg
                 %2: float = fneg %0
                 %3: double = fneg %1
                 black_box %2

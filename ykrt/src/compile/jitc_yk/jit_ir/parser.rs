@@ -3,6 +3,13 @@
 //! This module -- which is only intended to be compiled-in in `cfg(test)` -- adds a `from_str`
 //! method to [Module] which takes in JIT IR as a string, parses it, and produces a [Module]. This
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
+//!
+//! Broadly speaking, the input it parses is the same as JIT IR output. There are some differences:
+//!
+//!   * The `param` command can automatically create correct parameters. `param reg`, for example,
+//!     will automatically assign an unused-by-other-parameters register.
+//!   * The `guard` command takes a list of operands, but does not accept AOT mappings (it
+//!     generates dummy mappings).
 
 use crate::compile::jitc_yk::aot_ir;
 
@@ -305,25 +312,15 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         );
                         self.push_assign(inst.into(), assign)?;
                     }
-                    ASTInst::Param {
-                        assign,
-                        type_,
-                        tiidx,
-                    } => {
-                        let off = self
-                            .lexer
-                            .span_str(tiidx)
-                            .parse::<usize>()
-                            .map_err(|e| self.error_at_span(tiidx, &e.to_string()))?;
-                        assert_eq!(self.m.params.len(), off);
+                    ASTInst::Param { assign, type_ } => {
                         let type_ = self.process_type(type_)?;
                         let size = self.m.type_(type_).byte_size().ok_or_else(|| {
                             self.error_at_span(
-                                tiidx,
+                                assign,
                                 "Assigning a trace input to a zero-sized type is nonsensical",
                             )
                         })?;
-                        match self.m.type_(type_) {
+                        let pidx = match self.m.type_(type_) {
                             Ty::Void => unreachable!(),
                             Ty::Integer(_) | Ty::Ptr | Ty::Func(_) => {
                                 let dwarf_reg = gp_reg_iter.next().expect("out of gp registers");
@@ -331,18 +328,16 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                     dwarf_reg,
                                     u16::try_from(size).unwrap(),
                                     vec![],
-                                ));
+                                ))
                             }
-                            Ty::Float(_) => {
-                                self.m.push_param(yksmp::Location::Register(
-                                    fp_reg_iter.next().expect("Out of FP registers"),
-                                    u16::try_from(size).unwrap(),
-                                    vec![],
-                                ));
-                            }
+                            Ty::Float(_) => self.m.push_param(yksmp::Location::Register(
+                                fp_reg_iter.next().expect("Out of FP registers"),
+                                u16::try_from(size).unwrap(),
+                                vec![],
+                            )),
                             Ty::Unimplemented(_) => todo!(),
-                        }
-                        let inst = ParamInst::new(ParamIdx::try_from(off).unwrap(), type_);
+                        };
+                        let inst = ParamInst::new(pidx, type_);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::PtrAdd {
@@ -777,7 +772,6 @@ enum ASTInst {
     Param {
         assign: Span,
         type_: ASTType,
-        tiidx: Span,
     },
     PtrAdd {
         assign: Span,
@@ -934,8 +928,8 @@ mod tests {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i16 = param 0
-            %1: i16 = param 1
+            %0: i16 = param reg
+            %1: i16 = param reg
             %2: i16 = add %0, %1
         ",
             |m| m,
@@ -959,16 +953,16 @@ mod tests {
             func_decl f3(i8, i32, ...) -> i64
             func_decl f4(...)
             entry:
-              %0: i32 = param 0
-              %1: i8 = param 1
-              %2: i32 = param 2
-              %3: ptr = param 3
-              %4: float = param 4
-              %5: i8 = param 5
-              %6: i16 = param 6
-              %7: i32 = param 7
-              %8: i64 = param 8
-              %9: i32 = param 9
+              %0: i32 = param reg
+              %1: i8 = param reg
+              %2: i32 = param reg
+              %3: ptr = param reg
+              %4: float = param reg
+              %5: i8 = param reg
+              %6: i16 = param reg
+              %7: i32 = param reg
+              %8: i64 = param reg
+              %9: i32 = param reg
               %10: i32 = trunc %8
               %11: i32 = add %7, %9
               %12: i1 = eq %0, %2
@@ -1131,8 +1125,8 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i16 = param 0
-            %3: i16 = param 1
+            %0: i16 = param reg
+            %3: i16 = param reg
             %19: i16 = add %7, %3
         ",
         );
@@ -1157,7 +1151,7 @@ mod tests {
           func_type t1()
           func_type t1()
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
         ",
         );
     }
@@ -1169,7 +1163,7 @@ mod tests {
             "
           func_type t1()
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             icall<t2> %0()
         ",
         );
@@ -1192,7 +1186,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = add %0, -128i8
             %2: i8 = add %0, -129i8
             ",
@@ -1205,7 +1199,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = add %0, 255i8
             %2: i8 = add %0, 256i8
             ",
@@ -1229,7 +1223,7 @@ mod tests {
         Module::from_str(
             "
           entry:
-            %0: i1 = param 0
+            %0: i1 = param reg
             guard true, %0, [%1]
             ",
         );

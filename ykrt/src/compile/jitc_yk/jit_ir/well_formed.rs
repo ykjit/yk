@@ -365,7 +365,7 @@ mod tests {
             "
               func_decl f()
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 call @f(%0)
             ",
         );
@@ -377,7 +377,7 @@ mod tests {
             "
               func_decl f(...)
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 call @f(%0)
             ",
         );
@@ -392,7 +392,7 @@ mod tests {
             "
               func_decl f(i32) -> i32
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 %1: i32 = call @f(%0)
             ",
         );
@@ -425,8 +425,8 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i8 = param 0
-                %1: i64 = param 1
+                %0: i8 = param reg
+                %1: i64 = param reg
                 %2: i1 = eq %0, %1
             ",
         );
@@ -440,8 +440,8 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: ptr = param 0
-                %1: ptr = param 1
+                %0: ptr = param reg
+                %1: ptr = param reg
                 %2: i1 = slt %0, %1
                 black_box %2
             ",
@@ -454,7 +454,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i32 = %0 ? 1i32 : 2i32
             ",
         );
@@ -466,7 +466,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i1 = param 0
+                %0: i1 = param reg
                 %1: i32 = %0 ? 1i16 : 2i32
             ",
         );
@@ -480,7 +480,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 %1: i8 = sext %0
             ",
         );
@@ -494,7 +494,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i16 = param 0
+                %0: i16 = param reg
                 %1: i8 = zext %0
             ",
         );
@@ -508,7 +508,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i16 = param 0
+                %0: i16 = param reg
                 %1: float = zext %0
             ",
         );
@@ -522,7 +522,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = param 0
+                %0: float = param reg
                 %1: i64 = zext %0
             ",
         );
@@ -536,7 +536,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = param 0
+                %0: float = param reg
                 %1: i8 = trunc %0
             ",
         );
@@ -548,7 +548,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i64 = param 0
+                %0: i64 = param reg
                 %1: float = trunc %0
             ",
         );
@@ -562,7 +562,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 %1: i16 = trunc %0
             ",
         );
@@ -574,7 +574,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i8 = param 0
+                %0: i8 = param reg
                 guard true, %0, []
             ",
         );
@@ -611,7 +611,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = param 0
+                %0: float = param reg
                 %1: float = si_to_fp %0
             ",
         );
@@ -623,7 +623,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i64 = si_to_fp %0
             ",
         );
@@ -637,7 +637,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i64 = param 0
+                %0: i64 = param reg
                 %1: float = si_to_fp %0
             ",
         );
@@ -651,7 +651,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: double = param 0
+                %0: double = param reg
                 %1: float = fp_ext %0
             ",
         );
@@ -663,7 +663,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: double = fp_ext %0
             ",
         );
@@ -675,7 +675,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = param 0
+                %0: float = param reg
                 %1: i64 = fp_ext %0
             ",
         );
@@ -687,7 +687,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = param 0
+                %0: float = param reg
                 %1: float = fp_to_si %0
             ",
         );
@@ -699,7 +699,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i32 = fp_to_si %0
             ",
         );
@@ -711,7 +711,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: float = param 0
+                %0: float = param reg
                 %1: float = add %0, %0
             ",
         );
@@ -723,7 +723,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i32 = fadd %0, %0
             ",
         );
@@ -737,9 +737,9 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i32 = add %0, %0
-                %2: i32 = param 1
+                %2: i32 = param reg
             ",
         );
     }
@@ -752,7 +752,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: ptr = param 0
+                %0: ptr = param reg
                 %1: i64 = bitcast %0
             ",
         );
@@ -766,7 +766,7 @@ mod tests {
         Module::from_str(
             "
               entry:
-                %0: i32 = param 0
+                %0: i32 = param reg
                 %1: i64 = bitcast %0
             ",
         );

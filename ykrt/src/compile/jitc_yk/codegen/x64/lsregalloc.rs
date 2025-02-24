@@ -2034,17 +2034,17 @@ mod test {
         let m = Module::from_str(
             "
           entry:
-            %0: i64 = param 0
-            %1: i64 = param 1
-            %2: i64 = param 2
-            %3: i64 = param 3
-            %4: i64 = param 4
-            %5: i64 = param 5
-            %6: i64 = param 6
-            %7: i64 = param 7
-            %8: i64 = param 8
-            %9: i64 = param 9
-            %10: i64 = param 10
+            %0: i64 = param reg
+            %1: i64 = param reg
+            %2: i64 = param reg
+            %3: i64 = param reg
+            %4: i64 = param reg
+            %5: i64 = param reg
+            %6: i64 = param reg
+            %7: i64 = param reg
+            %8: i64 = param reg
+            %9: i64 = param reg
+            %10: i64 = param reg
             %11: i64 = add %6, %7
             black_box %11
         ",

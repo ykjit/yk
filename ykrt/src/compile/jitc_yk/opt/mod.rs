@@ -970,7 +970,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i1 = param 0
+            %0: i1 = param reg
             guard false, 0i1, [%0]
         ",
             |m| opt(m).unwrap(),
@@ -1005,7 +1005,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = mul %0, 0i8
             %2: i1 = eq %1, 0i8
             guard true, %2, [%0, %1]
@@ -1026,7 +1026,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = add %0, 0i8
             black_box %1
         ",
@@ -1067,7 +1067,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = 0i8
             %2: i8 = sub %1, 1i8
             %3: i64 = 18446744073709551614i64
@@ -1098,7 +1098,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = and %0, 0i8
             black_box %1
         ",
@@ -1136,7 +1136,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: ptr = dyn_ptr_add %0, 2i8, 3
             black_box %1
         ",
@@ -1156,7 +1156,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = ashr %0, 0i8
             black_box %1
         ",
@@ -1172,7 +1172,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = ashr 0i8, %0
             black_box %1
         ",
@@ -1226,7 +1226,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = lshr %0, 0i8
             black_box %1
         ",
@@ -1242,7 +1242,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = lshr 0i8, %0
             black_box %1
         ",
@@ -1280,7 +1280,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = shl %0, 0i8
             black_box %1
         ",
@@ -1296,7 +1296,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = shl 0i8, %0
             black_box %1
         ",
@@ -1334,7 +1334,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = or %0, 0i8
             %2: i8 = or 0i8, %0
             black_box %1
@@ -1375,8 +1375,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
-            %1: i8 = param 1
+            %0: i8 = param reg
+            %1: i8 = param reg
             %2: i8 = mul %0, 0i8
             %3: i8 = add %1, %2
             %4: i8 = mul 0i8, %0
@@ -1401,8 +1401,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
-            %1: i8 = param 1
+            %0: i8 = param reg
+            %1: i8 = param reg
             %2: i8 = mul %0, 1i8
             %3: i8 = add %1, %2
             %4: i8 = mul 1i8, %0
@@ -1454,7 +1454,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i64 = param 0
+            %0: i64 = param reg
             %1: i64 = mul %0, 2i64
             %2: i64 = mul %0, 4i64
             %3: i64 = mul %0, 4611686018427387904i64
@@ -1487,7 +1487,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             %1: i8 = xor %0, 0i8
             %2: i8 = xor 0i8, %0
             black_box %1
@@ -1627,8 +1627,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
-            %1: i8 = param 1
+            %0: i8 = param reg
+            %1: i8 = param reg
             %2: i8 = 1i1 ? %0 : %1
             %3: i8 = 0i1 ? %0 : %1
             black_box %2
@@ -1649,9 +1649,9 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i1 = param 0
-            %1: i8 = param 1
-            %2: i8 = param 2
+            %0: i1 = param reg
+            %1: i8 = param reg
+            %2: i8 = param reg
             %3: i8 = %0 ? 0i8 : 0i8
             %4: i8 = %0 ? %1 : %1
             %5: i8 = %0 ? %1 : %2
@@ -1725,7 +1725,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: ptr = ptr_add %0, 0
             black_box %1
         ",
@@ -1744,7 +1744,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: ptr = dyn_ptr_add %0, 2i64, 8
             black_box %1
             %3: ptr = dyn_ptr_add %0, -1i64, 8
@@ -1778,8 +1778,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
-            %1: i8 = param 1
+            %0: i8 = param reg
+            %1: i8 = param reg
             %2: i1 = eq %0, %1
             guard true, %2, [%0, %1]
             guard true, %2, [%0, %1]
@@ -1803,7 +1803,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
+            %0: i8 = param reg
             header_start [%0]
             %2: i8 = add %0, 1i8
             header_end [%2]
@@ -1830,8 +1830,8 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param 0
-            %1: i8 = param 1
+            %0: i8 = param reg
+            %1: i8 = param reg
             body_start [%0, %1]
             %2: i8 = add %0, 1i8
             %3: i8 = add %1, %2
@@ -1859,7 +1859,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             %2: i8 = load %0
             black_box %1
@@ -1879,7 +1879,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             *%0 = %1
             %3: i8 = load %0
@@ -1903,7 +1903,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             %2: i1 = eq %1, 3i8
             guard true, %2, []
@@ -1927,7 +1927,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             *%0 = %1
             %3: i8 = load %0
@@ -1951,7 +1951,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             *%0 = %1
             black_box %1
@@ -1969,7 +1969,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             *%0 = %1
             *%0 = %1
@@ -1988,7 +1988,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             *%0 = %1
             *%0 = 3i8
@@ -2013,7 +2013,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             %2: i1 = eq %1, 3i8
             guard true, %2, []
@@ -2033,7 +2033,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: i8 = load %0
             %2: i1 = eq %1, 3i8
             guard true, %2, []
@@ -2056,7 +2056,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: ptr = ptr_add %0, 8
             %2: ptr = ptr_add %0, 9
             %3: i8 = load %2
@@ -2086,7 +2086,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: ptr = ptr_add %0, 8
             %2: ptr = ptr_add %0, 16
             *%1 = 1i64
@@ -2110,7 +2110,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: ptr = ptr_add %0, 1
             %2: ptr = ptr_add %0, 8
             *%1 = 1i8
@@ -2139,7 +2139,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
         entry:
-          %0: i8 = param 0
+          %0: i8 = param reg
           %1: i8 = add 3i8, %0
           %2: i8 = and 3i8, %0
           %3: i8 = mul 3i8, %0
@@ -2173,7 +2173,7 @@ mod test {
         Module::assert_ir_transform_eq(
             "
         entry:
-          %0: i8 = param 0
+          %0: i8 = param reg
           %1: i8 = lshr 3i8, %0
           %2: i8 = shl 3i8, %0
           %3: i8 = sub 3i8, %0
