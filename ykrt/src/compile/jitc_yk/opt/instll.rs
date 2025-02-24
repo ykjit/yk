@@ -6,8 +6,8 @@
 //! For example given the trace:
 //!
 //! ```text
-//! %0: i8 = param 0
-//! %1: ptr = param 1
+//! %0: i8 = param reg
+//! %1: ptr = param reg
 //! %2: i8 = add %0, %0
 //! %3: i8 = add %0, %0
 //! %4: i8 = load %1
@@ -101,8 +101,8 @@ mod test {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = param 0
-              %1: ptr = param 1
+              %0: i8 = param reg
+              %1: ptr = param reg
               %2: i8 = add %0, %0
               %3: i8 = add %0, %0
               %4: i8 = load %1

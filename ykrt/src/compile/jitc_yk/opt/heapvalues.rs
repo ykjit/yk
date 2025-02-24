@@ -128,7 +128,7 @@ mod test {
         let mut m = Module::from_str(
             "
           entry:
-            %0: ptr = param 0
+            %0: ptr = param reg
             %1: ptr = ptr_add %0, 1
             %2: ptr = ptr_add %1, -1
             %3: ptr = ptr_add %0, 8

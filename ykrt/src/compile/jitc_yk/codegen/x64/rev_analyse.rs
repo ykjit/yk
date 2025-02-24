@@ -432,7 +432,7 @@ mod test {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = param 0
+              %0: i8 = param reg
               header_start [%0]
               %2: i8 = %0
               header_end [%2]
@@ -450,7 +450,7 @@ mod test {
         let m = Module::from_str(
             "
             entry:
-              %0: i8 = param 0
+              %0: i8 = param reg
               header_start [%0]
               %2: i8 = add %0, %0
               %3: i8 = add %0, %0
@@ -473,7 +473,7 @@ mod test {
         let m = Module::from_str(
             "
             entry:
-              %0: ptr = param 0
+              %0: ptr = param reg
               %1: ptr = ptr_add %0, 8
               %2: i8 = load %1
               %3: ptr = ptr_add %0, 16
@@ -550,7 +550,7 @@ mod test {
         let m = Module::from_str(
             "
             entry:
-              %0: ptr = param 0
+              %0: ptr = param reg
               %1: ptr = ptr_add %0, 8
               %2: i8 = load %1
               %3: ptr = ptr_add %0, 16

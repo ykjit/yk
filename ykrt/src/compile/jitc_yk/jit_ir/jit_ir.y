@@ -80,8 +80,8 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "GUARD" "FALSE" "," Operand "," "[" OperandsList "]" {
       Ok(ASTInst::Guard{cond: $4?, is_true: false, operands: $7?})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "PARAM" "INT" {
-      Ok(ASTInst::Param{assign: $1?.span(), type_: $3?, tiidx: $6?.span()})
+  | "LOCAL_OPERAND" ":" Type "=" "PARAM" "REG" {
+      Ok(ASTInst::Param{assign: $1?.span(), type_: $3?})
     }
   | "LOCAL_OPERAND" ":" Type "=" BinOp Operand "," Operand  {
       Ok(ASTInst::BinOp{assign: $1?.span(), type_: $3?, bin_op: $5?, lhs: $6?, rhs: $8?})
