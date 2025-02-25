@@ -1500,9 +1500,15 @@ impl fmt::Display for DisplayableFunc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ty = &self.m.types[self.func_.tyidx];
         if let Ty::Func(fty) = ty {
+            let attrs = if self.func_.is_outline() {
+                "#[yk_outline]\n"
+            } else {
+                ""
+            };
             write!(
                 f,
-                "func {}({}",
+                "{}func {}({}",
+                attrs,
                 self.func_.name,
                 fty.arg_tyidxs
                     .iter()
