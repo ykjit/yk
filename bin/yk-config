@@ -88,6 +88,9 @@ handle_arg() {
             # Ensure control point is patched.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-patch-control-point"
 
+            # Patch in idempotent function return value recorders.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-patch-idempotent"
+
             # Emit stackmaps used for JIT deoptimisation.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-insert-stackmaps"
 
