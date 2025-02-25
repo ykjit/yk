@@ -8,7 +8,8 @@
 //     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     func main(%arg0: i32, %arg1: ptr) -> i32 {
+//     #[yk_outline]
+//     func foo(%arg0: i32) -> i32 {
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
@@ -24,7 +25,7 @@
 //     0
 //     exit
 
-// Check that call inlining works.
+// Check that the yk_outline attribute works.
 
 #include <assert.h>
 #include <stdio.h>
