@@ -1437,12 +1437,14 @@ pub(crate) struct Func {
     #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
     tyidx: TyIdx,
-    outline: bool,
+    flags: u8,
     #[deku(temp)]
     num_bblocks: usize,
     #[deku(count = "num_bblocks", map = "map_to_tivec")]
     bblocks: TiVec<BBlockIdx, BBlock>,
 }
+
+const FUNCFLAG_OUTLINE: u8 = 1;
 
 impl Func {
     fn is_declaration(&self) -> bool {
@@ -1450,7 +1452,7 @@ impl Func {
     }
 
     pub(crate) fn is_outline(&self) -> bool {
-        self.outline
+        self.flags & FUNCFLAG_OUTLINE != 0
     }
 
     /// Return the [BBlock] at the specified index.
