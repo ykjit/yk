@@ -2405,15 +2405,7 @@ impl<'a> Assemble<'a> {
 
         // If we're lucky -- and we normally are! -- there will be a register which we don't need
         // for the jump that we can use as the scratch register for moving spills around.
-        let scratch_reg = gp_regs
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !lsregalloc::RESERVED_GP_REGS.contains(&lsregalloc::GP_REGS[*i]))
-            .find(|(_, cnstr)| matches!(cnstr, GPConstraint::None));
-        let spare_reg = match scratch_reg {
-            Some((i, _)) => lsregalloc::GP_REGS[i],
-            None => todo!(),
-        };
+        let spare_reg = self.ra.find_empty_gp_reg().unwrap();
 
         // Second we handle moving spill locations around
         for (i, op) in src_ops.iter().enumerate() {
@@ -2429,15 +2421,18 @@ impl<'a> Assemble<'a> {
                     frame_off: off_dst,
                     size: size_dst,
                 } => match src {
-                    VarLocation::Register(Register::GP(reg)) => match size_dst {
-                        8 => dynasm!(self.asm;
-                            mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
-                        ),
-                        4 => dynasm!(self.asm;
-                            mov DWORD [rbp - i32::try_from(off_dst).unwrap()], Rd(reg.code())
-                        ),
-                        _ => todo!(),
-                    },
+                    VarLocation::Register(Register::GP(reg)) => {
+                        assert_ne!(reg, spare_reg);
+                        match size_dst {
+                            8 => dynasm!(self.asm;
+                                mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
+                            ),
+                            4 => dynasm!(self.asm;
+                                mov DWORD [rbp - i32::try_from(off_dst).unwrap()], Rd(reg.code())
+                            ),
+                            _ => todo!(),
+                        }
+                    }
                     VarLocation::ConstInt { bits, v } => match bits {
                         32 => dynasm!(self.asm;
                             mov DWORD [rbp - i32::try_from(off_dst).unwrap()], v as i32
