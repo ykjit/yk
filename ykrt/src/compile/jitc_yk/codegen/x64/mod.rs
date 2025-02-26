@@ -423,7 +423,6 @@ impl<'a> Assemble<'a> {
                 .map(|(id, (_regset, di))| (*id, di.fail_label))
                 .collect::<Vec<_>>();
             // Debugging deopt asm is much easier if the stubs are in order.
-            #[cfg(debug_assertions)]
             infos.sort_by(|a, b| a.0.cmp(&b.0));
 
             let deopt_label = self.asm.new_dynamic_label();
