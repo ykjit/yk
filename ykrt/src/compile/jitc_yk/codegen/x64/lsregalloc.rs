@@ -376,6 +376,20 @@ impl LSRegAlloc<'_> {
         self.spills[usize::from(iidx)] = SpillState::ConstInt { bits, v };
     }
 
+    /// Return a currently unused general purpose register, if one exists.
+    ///
+    /// Note: you must be *very* careful in when you use the register that's returned.
+    /// Specifically, if you call this after `assign_regs` and use the register before you have
+    /// generated outputs, undefined behaviour will occur.
+    pub(super) fn find_empty_gp_reg(&self) -> Option<Rq> {
+        for (reg_i, rs) in self.gp_reg_states.iter().enumerate() {
+            if let RegState::Empty = rs {
+                return Some(GP_REGS[reg_i]);
+            }
+        }
+        None
+    }
+
     /// Assign general purpose registers for the instruction at position `iidx`.
     ///
     /// This is a convenience function for [Self::assign_regs] when there are no FP registers.
