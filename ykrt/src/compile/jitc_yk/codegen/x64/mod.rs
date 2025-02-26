@@ -876,7 +876,11 @@ impl<'a> Assemble<'a> {
                         [GPConstraint::InputOutput {
                             op: lhs,
                             in_ext: RegExtension::Undefined,
-                            out_ext: RegExtension::Undefined,
+                            out_ext: if inst.binop() == BinOp::And {
+                                RegExtension::ZeroExtended
+                            } else {
+                                RegExtension::Undefined
+                            },
                             force_reg: None,
                         }],
                     );
@@ -3990,6 +3994,33 @@ mod tests {
                 ; %7: i1 = and %4, 1i1
                 and r.32._, 0x01
                 ...
+                ",
+            false,
+        );
+
+        // Check that AND implicitly zero extends
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = param reg
+                %1: i8 = param reg
+                %2: i1 = eq %0, 2i8
+                %3: i8 = and %1, 3i8
+                %4: i1 = eq %3, 4i8
+                black_box %2
+                black_box %4
+            ",
+            "
+                ...
+                ; %2: i1 = eq %0, 2i8
+                and r.32.a, 0xff
+                cmp r.32.a, 0x02
+                setz ...
+                ; %3: i8 = and %1, 3i8
+                and r.32.b, 0x03
+                ; %4: i1 = eq %3, 4i8
+                cmp r.32.b, 0x04
+                setz ...
                 ",
             false,
         );
