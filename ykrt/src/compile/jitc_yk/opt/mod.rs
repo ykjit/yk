@@ -580,8 +580,9 @@ impl Opt {
                     Operand::Const(cidx) => self.m.replace(iidx, Inst::Const(cidx)),
                 }
             } else {
-                self.m
-                    .replace(iidx, Inst::PtrAdd(PtrAddInst::new(inst.ptr(&self.m), off)));
+                let pa_inst = PtrAddInst::new(inst.ptr(&self.m), off);
+                self.m.replace(iidx, Inst::PtrAdd(pa_inst));
+                self.opt_ptradd(iidx, pa_inst)?;
             }
         }
 
@@ -1776,7 +1777,7 @@ mod test {
     }
 
     #[test]
-    fn opt_dynptradd_const() {
+    fn opt_dynptradd() {
         Module::assert_ir_transform_eq(
             "
           entry:
@@ -1805,6 +1806,23 @@ mod test {
             black_box %5
             black_box %0
             black_box 0x1234
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, -4
+            %2: ptr = dyn_ptr_add %1, 1i64, 4
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            black_box %0
         ",
         );
     }
