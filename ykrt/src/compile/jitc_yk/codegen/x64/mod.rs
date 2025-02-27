@@ -2016,7 +2016,7 @@ impl<'a> Assemble<'a> {
         g_iidx: InstIdx,
         g_inst: jit_ir::GuardInst,
     ) {
-        debug_assert!(!self.ra.rev_an.is_inst_var_still_used_after(g_iidx, ic_iidx));
+        assert!(!self.ra.rev_an.is_inst_var_still_used_after(g_iidx, ic_iidx));
 
         // Codegen ICmp
         let (lhs, pred, rhs) = (
@@ -3005,8 +3005,8 @@ impl<'a> Assemble<'a> {
                 GPConstraint::Temporary,
             ],
         );
-        self.patch_reg.insert(inst.gidx.into(), patch_reg);
         let fail_label = self.guard_to_deopt(inst);
+        self.patch_reg.insert(inst.gidx.into(), patch_reg);
         dynasm!(self.asm ; bt Rd(reg.code()), 0);
         if inst.expect() {
             dynasm!(self.asm ; jnb =>fail_label);
@@ -4398,8 +4398,8 @@ mod tests {
                 ...
                 ; call @puts(%0, %1, %2, %3)
                 mov rsi, rcx
-                mov rdi, rax
                 mov rcx, rbx
+                mov rdi, rax
                 and ecx, 0x01
                 and esi, 0xffff
                 and edi, 0xff
@@ -4525,9 +4525,9 @@ mod tests {
             "
                ...
                ; call @llvm.memcpy.p0.p0.i64(%0, %1, %2, 0i1)
-               mov rdi, rax
                mov rsi, rcx
                mov rcx, rdx
+               mov rdi, rax
                rep movsb
             ",
             false,
