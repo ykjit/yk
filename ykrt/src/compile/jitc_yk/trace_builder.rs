@@ -12,7 +12,8 @@ use super::{
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::CompilationError,
-    mt::CompiledTraceId,
+    log::stats::TimingState,
+    mt::MT,
     trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction},
 };
 use std::{collections::HashMap, ffi::CString, marker::PhantomData, sync::Arc};
@@ -63,15 +64,19 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
     ///  - `promotions`: Values promoted to constants during runtime.
     ///  - `debug_archors`: Debug strs recorded during runtime.
     fn new(
+        mt: &Arc<MT>,
         tracekind: TraceKind,
-        ctr_id: CompiledTraceId,
         aot_mod: &'static Module,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
     ) -> Result<Self, CompilationError> {
         Ok(Self {
             aot_mod,
-            jit_mod: jit_ir::Module::new(tracekind, ctr_id, aot_mod.global_decls_len())?,
+            jit_mod: jit_ir::Module::new(
+                tracekind,
+                mt.next_compiled_trace_id(),
+                aot_mod.global_decls_len(),
+            )?,
             local_map: HashMap::new(),
             cp_block: None,
             first_paraminst_idx: 0,
@@ -1180,6 +1185,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
     /// If `ta_iter` produces no elements.
     fn build(
         mut self,
+        mt: &Arc<MT>,
         ta_iter: Box<dyn AOTTraceIterator>,
     ) -> Result<jit_ir::Module, CompilationError> {
         // Collect the trace first so we can peek at the last element to find the control point
@@ -1189,6 +1195,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         // this information at AOT compile time and serialise it into the module (or block), so we
         // don't have to do this. Note, we also can't use `collect` here since that won't catch the
         // `TraceTooLong` error early enough and we run out of memory.
+        mt.stats.timing_state(TimingState::TraceMapping);
         let tas = ta_iter
             .map(|x| {
                 x.map_err(|e| match e {
@@ -1199,6 +1206,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        mt.stats.timing_state(TimingState::Compiling);
 
         // The previous processed block.
         let mut prev_bid = None;
@@ -1468,7 +1476,7 @@ struct InlinedFrame {
 
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.
 pub(super) fn build<Register: Send + Sync + 'static>(
-    ctr_id: CompiledTraceId,
+    mt: &Arc<MT>,
     aot_mod: &'static Module,
     ta_iter: Box<dyn AOTTraceIterator>,
     sti: Option<Arc<YkSideTraceInfo<Register>>>,
@@ -1480,6 +1488,6 @@ pub(super) fn build<Register: Send + Sync + 'static>(
     } else {
         TraceKind::HeaderOnly
     };
-    TraceBuilder::<Register>::new(tracekind, ctr_id, aot_mod, promotions, debug_strs)?
-        .build(ta_iter)
+    TraceBuilder::<Register>::new(mt, tracekind, aot_mod, promotions, debug_strs)?
+        .build(mt, ta_iter)
 }

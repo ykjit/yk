@@ -150,14 +150,8 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         let root_offset = sti.as_ref().map(|x| x.root_offset);
         let guards = sti.as_ref().map(|x| x.guards.clone());
 
-        let mut jit_mod = trace_builder::build(
-            mt.next_compiled_trace_id(),
-            aot_mod,
-            aottrace_iter,
-            sti,
-            promotions,
-            debug_strs,
-        )?;
+        let mut jit_mod =
+            trace_builder::build(&mt, aot_mod, aottrace_iter, sti, promotions, debug_strs)?;
 
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
