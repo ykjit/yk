@@ -751,12 +751,30 @@ impl Opt {
         Ok(())
     }
 
-    fn opt_ptradd(&mut self, iidx: InstIdx, inst: PtrAddInst) -> Result<(), CompilationError> {
-        match self.an.op_map(&self.m, inst.ptr(&self.m)) {
-            Operand::Const(_) => todo!(),
-            Operand::Var(op_iidx) => {
-                if inst.off() == 0 {
-                    self.m.replace(iidx, Inst::Copy(op_iidx));
+    fn opt_ptradd(
+        &mut self,
+        iidx: InstIdx,
+        mut pa_inst: PtrAddInst,
+    ) -> Result<(), CompilationError> {
+        let mut off = 0;
+        loop {
+            off += pa_inst.off();
+            match self.an.op_map(&self.m, pa_inst.ptr(&self.m)) {
+                Operand::Const(_) => todo!(),
+                Operand::Var(op_iidx) => {
+                    if let Inst::PtrAdd(x) = self.m.inst(op_iidx) {
+                        pa_inst = x;
+                    } else {
+                        if off == 0 {
+                            self.m.replace(iidx, Inst::Copy(op_iidx));
+                        } else {
+                            self.m.replace(
+                                iidx,
+                                Inst::PtrAdd(PtrAddInst::new(Operand::Var(op_iidx), off)),
+                            );
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -1721,13 +1739,31 @@ mod test {
     }
 
     #[test]
-    fn opt_ptradd_zero() {
+    fn opt_ptradd() {
         Module::assert_ir_transform_eq(
             "
           entry:
             %0: ptr = param reg
             %1: ptr = ptr_add %0, 0
             black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            black_box %0
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, 4
+            %2: ptr = ptr_add %1, 4
+            %3: ptr = ptr_add %2, -8
+            black_box %3
         ",
             |m| opt(m).unwrap(),
             "
