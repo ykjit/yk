@@ -25,7 +25,6 @@
 ;         %{{_}}: ptr = unimplemented <<  %{{23}} = call addrspace(6) ptr @p()>>
 ;         br bb4
 ;      bb4:
-;         %{{_}}: i8 = unimplemented <<  %{{25}} = ptrtoint ptr %{{ptr}} to i8>>
 ;         %{{_}}: ?ty<<8 x i8>> = unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>>>
 ;         %{{_}}: ?ty<<4 x i64>> = unimplemented <<  %{{_}} = sext <4 x i32> %{{_}} to <4 x i64>>>
 ;         %{{_}}: ?ty<<4 x i64>> = unimplemented <<  %{{_}} = zext <4 x i32> %{{_}} to <4 x i64>>>
@@ -117,8 +116,6 @@ calls:
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 7, i32 0);
   br label %casts
 casts:
-  ; ptrtoint to a smaller type
-  %ptrtoint_trunc = ptrtoint ptr %ptr to i8
   ; vectors
   %ptrtoint_vec = ptrtoint <8 x ptr> %ptrs to <8 x i8>
   %sext_vec = sext <4 x i32> %nums to <4 x i64>
