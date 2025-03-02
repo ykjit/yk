@@ -428,10 +428,7 @@ impl<'a> Assemble<'a> {
             let deopt_label = self.asm.new_dynamic_label();
             let guardcheck_label = self.asm.new_dynamic_label();
             for (deoptid, fail_label) in infos {
-                self.comment(
-                    self.asm.offset(),
-                    format!("Deopt ID and patch point for guard {:?}", deoptid),
-                );
+                self.comment(format!("Deopt ID and patch point for guard {:?}", deoptid));
                 self.ra
                     .get_ready_for_deopt(&mut self.asm, &self.deoptinfo[&deoptid].0);
                 // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
@@ -485,7 +482,7 @@ impl<'a> Assemble<'a> {
                 );
             }
 
-            self.comment(self.asm.offset(), "Call __yk_deopt".to_string());
+            self.comment("Call __yk_deopt".to_string());
             // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire module
             // is x86 only, we don't need to worry about portability.
             #[allow(clippy::fn_to_numeric_cast)]
@@ -583,7 +580,7 @@ impl<'a> Assemble<'a> {
                 next = iter.next();
                 continue;
             }
-            self.comment_inst(self.asm.offset(), iidx, inst);
+            self.comment_inst(iidx, inst);
             self.ra.expire_regs(iidx);
 
             match &inst {
@@ -660,46 +657,44 @@ impl<'a> Assemble<'a> {
 
     /// Add a comment to the trace. Note: for instructions, use [Self::comment_inst] which formats
     /// things more appropriately for instructions.
-    fn comment(&mut self, off: AssemblyOffset, line: String) {
-        self.comments.get_mut().entry(off.0).or_default().push(line);
+    fn comment(&mut self, line: String) {
+        self.comments
+            .get_mut()
+            .entry(self.asm.offset().0)
+            .or_default()
+            .push(line);
     }
 
     /// Add a comment to the trace for a "JIT IR" instruction. This function will format some
     /// instructions differently to the normal trace IR, because this x64 backend has some
     /// non-generic optimisations / modifications.
-    fn comment_inst(&mut self, off: AssemblyOffset, iidx: InstIdx, inst: Inst) {
+    fn comment_inst(&mut self, iidx: InstIdx, inst: Inst) {
         match inst {
             Inst::Load(_) => {
                 if let Some(painst) = self.ra.ptradd(iidx) {
-                    self.comment(
-                        off,
-                        format!(
-                            "%{iidx}: {} = load {} + {}",
-                            self.m.type_(inst.tyidx(self.m)).display(self.m),
-                            painst.ptr(self.m).display(self.m),
-                            painst.off()
-                        ),
-                    );
+                    self.comment(format!(
+                        "%{iidx}: {} = load {} + {}",
+                        self.m.type_(inst.tyidx(self.m)).display(self.m),
+                        painst.ptr(self.m).display(self.m),
+                        painst.off()
+                    ));
                     return;
                 }
             }
             Inst::Store(sinst) => {
                 if let Some(painst) = self.ra.ptradd(iidx) {
-                    self.comment(
-                        off,
-                        format!(
-                            "*({} + {}) = {}",
-                            painst.ptr(self.m).display(self.m),
-                            painst.off(),
-                            sinst.val(self.m).display(self.m)
-                        ),
-                    );
+                    self.comment(format!(
+                        "*({} + {}) = {}",
+                        painst.ptr(self.m).display(self.m),
+                        painst.off(),
+                        sinst.val(self.m).display(self.m)
+                    ));
                     return;
                 }
             }
             _ => (),
         }
-        self.comment(off, inst.display(self.m, iidx).to_string())
+        self.comment(inst.display(self.m, iidx).to_string())
     }
 
     /// Emit the prologue of the JITted code.
@@ -714,7 +709,7 @@ impl<'a> Assemble<'a> {
     ///
     /// Returns the offset at which to patch up the stack allocation later.
     fn emit_prologue(&mut self) -> AssemblyOffset {
-        self.comment(self.asm.offset(), "prologue".to_owned());
+        self.comment("prologue".to_owned());
 
         // Emit a dummy frame allocation instruction that initially allocates 0 bytes, but will be
         // patched later when we know how big the frame needs to be.
@@ -727,7 +722,7 @@ impl<'a> Assemble<'a> {
         // clobbers r11 (a caller saved register).
         #[cfg(debug_assertions)]
         {
-            self.comment(self.asm.offset(), "Breakpoint hack".into());
+            self.comment("Breakpoint hack".into());
             // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire
             // module is x86 only, we don't need to worry about portability.
             #[allow(clippy::fn_to_numeric_cast)]
@@ -2074,10 +2069,7 @@ impl<'a> Assemble<'a> {
             .assign_gp_regs(&mut self.asm, ic_iidx, [GPConstraint::Temporary]);
         self.patch_reg.insert(g_inst.gidx.into(), patch_reg);
         let fail_label = self.guard_to_deopt(&g_inst);
-        self.comment(
-            self.asm.offset(),
-            Inst::Guard(g_inst).display(self.m, g_iidx).to_string(),
-        );
+        self.comment(Inst::Guard(g_inst).display(self.m, g_iidx).to_string());
 
         if g_inst.expect() {
             match pred {
@@ -2506,7 +2498,7 @@ impl<'a> Assemble<'a> {
                 // traces that don't loop.
                 #[cfg(test)]
                 {
-                    self.comment(self.asm.offset(), "Unterminated trace".to_owned());
+                    self.comment("Unterminated trace".to_owned());
                     dynasm!(self.asm; ud2);
                 }
                 #[cfg(not(test))]
