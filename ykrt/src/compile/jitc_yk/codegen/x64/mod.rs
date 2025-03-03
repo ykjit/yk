@@ -536,11 +536,13 @@ impl<'a> Assemble<'a> {
         let buf = self.asm.finalize().unwrap();
 
         // Patch deopt addresses into the mov preceeding mov instruction.
-        for (mov_off, deopt_off) in patch_deopts {
-            let deopt_addr = buf.ptr(deopt_off);
-            let mov_addr = buf.ptr(AssemblyOffset(mov_off.0 + 2));
-            patch_address(mov_addr, deopt_addr as u64);
-        }
+        patch_addresses(
+            patch_deopts
+                .into_iter()
+                .map(|(mov, deopt)| (buf.ptr(AssemblyOffset(mov.0 + 2)), buf.ptr(deopt) as u64))
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
 
         #[cfg(any(debug_assertions, test))]
         let gdb_ctx = gdb::register_jitted_code(
@@ -3022,57 +3024,6 @@ struct DeoptInfo {
     guard: Guard,
 }
 
-/// Patches 8 bytes of a given address with the given value.
-/// - `target`: The address we want to patch. Needs to be 8-byte aligned and must not cross the
-///   cache-line boundary.
-/// - `val`: The new value.
-fn patch_address(target: *const u8, val: u64) {
-    // Find the beginning of the page that the patch address is in to be passed into
-    // `mprotect`.
-    let patch_addr = target as usize;
-    let mprot_addr = patch_addr - (patch_addr % page_size::get());
-
-    // Make the trace writable while keeping it executable.
-    // FIXME: This might not work on other architectures or operating systems. However, the
-    // solution is very involved and requires changing `mt.rs` to make sure no other thread is
-    // accessing the trace (which includes executing the trace itself or any of it's
-    // side-traces, or side-tracig a guard failure).
-    let res = unsafe {
-        libc::mprotect(
-            mprot_addr as *mut libc::c_void,
-            // Since we are only patching 8-bytes which are aligned, we know we can't span two
-            // pages. Passing a size of 1 still marks the entire page which is what we need.
-            1,
-            libc::PROT_EXEC | libc::PROT_READ | libc::PROT_WRITE,
-        )
-    };
-    // Check that the target address is 8-byte aligned. This is required so we can patch
-    // this atomically.
-    assert!(patch_addr % 8 == 0);
-    // Check that the target `mov` instruction does not cross a cache-line boundary.
-    let clsize = cache_size::cache_line_size(1, cache_size::CacheType::Instruction).unwrap();
-    assert!(patch_addr + 8 <= patch_addr.next_multiple_of(clsize));
-    if res == 0 {
-        // Patch the new 64-bit address into the mov instruction.
-        let patch_addr = patch_addr as *mut u64;
-        unsafe { *patch_addr = val };
-        fence(std::sync::atomic::Ordering::SeqCst);
-    } else {
-        panic!("Couldn't make trace writeable.");
-    }
-    // Make the trace unwritable again.
-    let res = unsafe {
-        libc::mprotect(
-            mprot_addr as *mut libc::c_void,
-            1,
-            libc::PROT_EXEC | libc::PROT_READ,
-        )
-    };
-    if res != 0 {
-        panic!("Couldn't make trace executable.");
-    }
-}
-
 #[derive(Debug)]
 pub(super) struct X64CompiledTrace {
     ctrid: CompiledTraceId,
@@ -3188,7 +3139,7 @@ impl CompiledTrace for X64CompiledTrace {
         let patch_addr = unsafe { self.buf.ptr(patch_offset).offset(2) };
         // FIXME: Is it better/faster to protect the entire buffer in one go and then patch each
         // address, rather than mark single pages writeable, patch, and mark readable again?
-        patch_address(patch_addr, staddr as u64);
+        patch_addresses(&[(patch_addr, staddr as u64)]);
     }
 
     fn hl(&self) -> &std::sync::Weak<parking_lot::Mutex<crate::location::HotLocation>> {
@@ -3201,6 +3152,79 @@ impl CompiledTrace for X64CompiledTrace {
 
     fn disassemble(&self, with_addrs: bool) -> Result<String, Box<dyn Error>> {
         AsmPrinter::new(&self.buf, &self.comments, with_addrs).to_string()
+    }
+}
+
+/// Patch multiple addresses in contiguous memory. The slice is a sequence of pairs `(tgt, val)`:
+/// - `tgt`: The address we want to patch. Needs to be 8-byte aligned and must not cross a
+///   cache-line boundary.
+/// - `val`: The value to be written to `tgt`.
+///
+/// This function `mprotect`s a single chunk of memory, potentially spanning multiple pages: all
+/// the addresses passed in the slice *must* be in contiguously allocated pages. Failing to do so
+/// will lead to undefined behaviour (including poor performance and outright crashes).
+///
+/// This function does not perform any locking but is not itself thread safe: if you call this in a
+/// context where other threads may also try to call this function, you must use an external lock
+/// to ensure that two instances of this function cannot run simultaneously doing so. Failing to do
+/// so will lead to undefined behaviour.
+fn patch_addresses(patches: &[(*const u8, u64)]) {
+    if patches.is_empty() {
+        return;
+    }
+
+    // Calculate the lowest page address in the patches as `mprotect` requires a page-aligned
+    // address.
+    let page_size = page_size::get();
+    let low = patches
+        .iter()
+        .map(|(x, _)| ((*x as usize) / page_size) * page_size)
+        .min()
+        .unwrap();
+    // Calculate the number of bytes from the lowest page address we will need to `mprotect`.
+    let high = patches.iter().map(|(x, _)| *x as usize).max().unwrap();
+    let len = high - low;
+
+    // Mark the range of memory as writeable.
+    if unsafe {
+        libc::mprotect(
+            low as *mut libc::c_void,
+            len,
+            libc::PROT_EXEC | libc::PROT_READ | libc::PROT_WRITE,
+        )
+    } != 0
+    {
+        todo!();
+    }
+
+    // Patch addresses.
+    for (tgt, val) in patches {
+        // The target address must be 8-byte aligned so that we do a single write. By definition,
+        // this means that we also cannot span a cache-line.
+        assert!((*tgt as usize) % 8 == 0);
+        unsafe { *(*tgt as *mut u64) = *val };
+    }
+    // This `fence` serves two purposes:
+    //   1. In all cases, it makes sure that the compiler doesn't remove any of the writes in the
+    //      `for` loop.
+    //   2. In multi-threaded contexts, it will ensure that other threads using the accompanying
+    //      lock have the same view of memory.
+    //
+    // Note: this `fence` does not, and cannot, force other threads to immediately see the same
+    // view of memory as this thread. In other words, other threads executing the same machine code
+    // may go arbitrarily long without observing the writes performed in this thread.
+    fence(std::sync::atomic::Ordering::Release);
+
+    // Mark the range of memory as unwriteable.
+    if unsafe {
+        libc::mprotect(
+            low as *mut libc::c_void,
+            len,
+            libc::PROT_EXEC | libc::PROT_READ,
+        )
+    } != 0
+    {
+        todo!();
     }
 }
 
