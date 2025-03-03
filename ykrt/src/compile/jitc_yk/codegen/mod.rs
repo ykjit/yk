@@ -5,7 +5,7 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{jitc_yk::jit_ir::Module, CompiledTrace, GuardIdx},
+    compile::{jitc_yk::jit_ir::Module, CompiledTrace},
     location::HotLocation,
     MT,
 };
@@ -38,7 +38,6 @@ pub(crate) trait CodeGen: Send + Sync {
         hl: Arc<Mutex<HotLocation>>,
         sp_offset: Option<usize>,
         root_offset: Option<usize>,
-        prevguards: Option<Vec<GuardIdx>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 

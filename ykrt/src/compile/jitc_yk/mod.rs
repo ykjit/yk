@@ -1,6 +1,6 @@
 //! Yk's built-in trace compiler.
 
-use super::{CompilationError, GuardIdx};
+use super::CompilationError;
 use crate::{
     compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, SideTraceInfo},
     location::HotLocation,
@@ -52,8 +52,6 @@ unsafe impl Sync for RootTracePtr {}
 struct YkSideTraceInfo<Register: Send + Sync> {
     /// The AOT IR block the failing guard originated from.
     bid: aot_ir::BBlockId,
-    /// The `GuardIdx`s of all failing guards leading up to here.
-    guards: Vec<GuardIdx>,
     /// Inlined calls tracked by [trace_builder] during processing of a trace. Required for
     /// side-tracing in order setup a new [trace_builder] and process a side-trace.
     callframes: Vec<jit_ir::InlinedFrame>,
@@ -148,7 +146,6 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo<Register>>().unwrap());
         let sp_offset = sti.as_ref().map(|x| x.sp_offset);
         let root_offset = sti.as_ref().map(|x| x.root_offset);
-        let guards = sti.as_ref().map(|x| x.guards.clone());
 
         let mut jit_mod =
             trace_builder::build(&mt, aot_mod, aottrace_iter, sti, promotions, debug_strs)?;
@@ -172,7 +169,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         // FIXME: This needs to be the combined stacksize of all parent traces.
         let ct = self
             .codegen
-            .codegen(jit_mod, mt, hl, sp_offset, root_offset, guards)?;
+            .codegen(jit_mod, mt, hl, sp_offset, root_offset)?;
 
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
