@@ -292,9 +292,8 @@ impl CodeGen for X64CodeGen {
         hl: Arc<Mutex<HotLocation>>,
         sp_offset: Option<usize>,
         root_offset: Option<usize>,
-        prevguards: Option<Vec<GuardIdx>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        Assemble::new(&m, sp_offset, root_offset)?.codegen(mt, hl, prevguards)
+        Assemble::new(&m, sp_offset, root_offset)?.codegen(mt, hl)
     }
 }
 
@@ -401,7 +400,6 @@ impl<'a> Assemble<'a> {
         mut self: Box<Self>,
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
-        prevguards: Option<Vec<GuardIdx>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
@@ -561,7 +559,6 @@ impl<'a> Assemble<'a> {
                 .into_iter()
                 .map(|(id, (_gsnap, di))| (id, di))
                 .collect::<HashMap<_, _>>(),
-            prevguards,
             sp_offset: self.ra.stack_size(),
             prologue_offset: self.prologue_offset.0,
             entry_vars: self.header_start_locs.clone(),
@@ -3033,8 +3030,6 @@ pub(super) struct X64CompiledTrace {
     buf: ExecutableBuffer,
     /// Deoptimisation info: maps a [GuardIdx] to [DeoptInfo].
     deoptinfo: HashMap<usize, DeoptInfo>,
-    /// [GuardIdx]'s of all failing guards leading up to this trace.
-    prevguards: Option<Vec<GuardIdx>>,
     /// Stack pointer offset from the base pointer of interpreter frame as defined in
     /// [YkSideTraceInfo::sp_offset].
     sp_offset: usize,
@@ -3099,19 +3094,8 @@ impl CompiledTrace for X64CompiledTrace {
         // FIXME: Check if RPython has found a solution to this (if there is any).
         let root_addr = unsafe { root_ctr.entry().add(root_ctr.prologue_offset) };
 
-        // Pass along [GuardIdx]'s of previous guard failures and add this guard failure's
-        // [GuardIdx] to the list.
-        let guards = if let Some(v) = &self.prevguards {
-            let mut v = v.clone();
-            v.push(gidx);
-            v
-        } else {
-            vec![gidx]
-        };
-
         Arc::new(YkSideTraceInfo {
             bid: deoptinfo.bid.clone(),
-            guards,
             lives,
             callframes,
             root_addr: RootTracePtr(root_addr),
@@ -3497,7 +3481,7 @@ mod tests {
         match_asm(
             Assemble::new(&m, None, None)
                 .unwrap()
-                .codegen(mt, Arc::new(Mutex::new(hl)), None)
+                .codegen(mt, Arc::new(Mutex::new(hl)))
                 .unwrap()
                 .as_any()
                 .downcast::<X64CompiledTrace>()
@@ -5651,7 +5635,7 @@ mod tests {
 
         Assemble::new(&m, None, None)
             .unwrap()
-            .codegen(mt, Arc::new(Mutex::new(hl)), None)
+            .codegen(mt, Arc::new(Mutex::new(hl)))
             .unwrap()
             .as_any()
             .downcast::<X64CompiledTrace>()
