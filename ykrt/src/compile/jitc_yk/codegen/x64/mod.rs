@@ -322,13 +322,10 @@ struct Assemble<'a> {
     ///
     /// Each assembly offset can have zero or more comment lines.
     comments: Cell<IndexMap<usize, Vec<String>>>,
-    /// Stack pointer offset from the base pointer of the interpreter frame. If this is a root
-    /// trace it's initialised to the size of the interpreter frame. Otherwise its value is passed
-    /// in via [YkSideTraceInfo::sp_offset].
+    /// Stack pointer offset from the base pointer of the interpreter frame:
+    ///   * For a root trace, this will be the size of the interpreter frame.
+    ///   * For side traces, it will be the parent frame's stack offset.
     sp_offset: usize,
-    /// The stack pointer offset of the root trace's frame from the base pointer of the interpreter
-    /// frame. If this is the root trace, this will be None.
-    root_offset: Option<usize>,
     /// The offset after the trace's prologue. This is the re-entry point when returning from
     /// side-traces.
     prologue_offset: AssemblyOffset,
@@ -343,7 +340,7 @@ impl<'a> Assemble<'a> {
             .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
         // Since we are executing the trace in the main interpreter frame we need this to
         // initialise the trace's register allocator in order to access local variables.
-        let (sp_offset, root_offset) = match m.tracekind() {
+        let sp_offset = match m.tracekind() {
             TraceKind::HeaderOnly | TraceKind::HeaderAndBody => {
                 // This is a normal trace, so we need to retrieve the stack size of the main
                 // interpreter frame.
@@ -361,14 +358,14 @@ impl<'a> Assemble<'a> {
                     } else {
                         rec.size
                     };
-                    (usize::try_from(size).unwrap(), None)
+                    usize::try_from(size).unwrap()
                 } else {
                     // The unit tests in this file don't have AOT code. So if we don't find stackmaps here
                     // that's ok. In real-world programs and our C-tests this shouldn't happen though.
                     #[cfg(not(test))]
                     panic!("Couldn't find AOT stackmaps.");
                     #[cfg(test)]
-                    (0, None)
+                    0
                 }
             }
             TraceKind::Sidetrace(sti) => {
@@ -378,7 +375,7 @@ impl<'a> Assemble<'a> {
                     .as_any()
                     .downcast::<YkSideTraceInfo<Register>>()
                     .unwrap();
-                (sti.sp_offset, Some(sti.root_offset()))
+                sti.sp_offset
             }
         };
 
@@ -392,7 +389,6 @@ impl<'a> Assemble<'a> {
             patch_reg: HashMap::new(),
             comments: Cell::new(IndexMap::new()),
             sp_offset,
-            root_offset,
             prologue_offset: AssemblyOffset(0),
         }))
     }
