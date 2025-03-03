@@ -539,11 +539,13 @@ impl<'a> Assemble<'a> {
         let buf = self.asm.finalize().unwrap();
 
         // Patch deopt addresses into the mov preceeding mov instruction.
-        for (mov_off, deopt_off) in patch_deopts {
-            let deopt_addr = buf.ptr(deopt_off);
-            let mov_addr = buf.ptr(AssemblyOffset(mov_off.0 + 2));
-            patch_address(mov_addr, deopt_addr as u64);
-        }
+        patch_addresses(
+            patch_deopts
+                .into_iter()
+                .map(|(mov, deopt)| (buf.ptr(AssemblyOffset(mov.0 + 2)), buf.ptr(deopt) as u64))
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
 
         #[cfg(any(debug_assertions, test))]
         let gdb_ctx = gdb::register_jitted_code(
@@ -3145,7 +3147,7 @@ impl CompiledTrace for X64CompiledTrace {
         let patch_addr = unsafe { self.buf.ptr(patch_offset).offset(2) };
         // FIXME: Is it better/faster to protect the entire buffer in one go and then patch each
         // address, rather than mark single pages writeable, patch, and mark readable again?
-        patch_address(patch_addr, staddr as u64);
+        patch_addresses(&[(patch_addr, staddr as u64)]);
     }
 
     fn hl(&self) -> &std::sync::Weak<parking_lot::Mutex<crate::location::HotLocation>> {
@@ -3161,54 +3163,56 @@ impl CompiledTrace for X64CompiledTrace {
     }
 }
 
-/// Patches 8 bytes of a given address with the given value.
-/// - `target`: The address we want to patch. Needs to be 8-byte aligned and must not cross the
+/// Patch multiple addresses in memory. The slice is a series of pairs `(tgt, val)` where:
+/// - `tgt`: The address we want to patch. Needs to be 8-byte aligned and must not cross a
 ///   cache-line boundary.
-/// - `val`: The new value.
-fn patch_address(target: *const u8, val: u64) {
-    // Find the beginning of the page that the patch address is in to be passed into
-    // `mprotect`.
-    let patch_addr = target as usize;
-    let mprot_addr = patch_addr - (patch_addr % page_size::get());
+/// - `val`: The value to be written to `tgt`.
+fn patch_addresses(patches: &[(*const u8, u64)]) {
+    for (tgt, val) in patches {
+        // Find the beginning of the page that the patch address is in to be passed into
+        // `mprotect`.
+        let patch_addr = *tgt as usize;
+        let mprot_addr = patch_addr - (patch_addr % page_size::get());
 
-    // Make the trace writable while keeping it executable.
-    // FIXME: This might not work on other architectures or operating systems. However, the
-    // solution is very involved and requires changing `mt.rs` to make sure no other thread is
-    // accessing the trace (which includes executing the trace itself or any of it's
-    // side-traces, or side-tracig a guard failure).
-    let res = unsafe {
-        libc::mprotect(
-            mprot_addr as *mut libc::c_void,
-            // Since we are only patching 8-bytes which are aligned, we know we can't span two
-            // pages. Passing a size of 1 still marks the entire page which is what we need.
-            1,
-            libc::PROT_EXEC | libc::PROT_READ | libc::PROT_WRITE,
-        )
-    };
-    // Check that the target address is 8-byte aligned. This is required so we can patch
-    // this atomically.
-    assert!(patch_addr % 8 == 0);
-    // Check that the target `mov` instruction does not cross a cache-line boundary.
-    let clsize = cache_size::cache_line_size(1, cache_size::CacheType::Instruction).unwrap();
-    assert!(patch_addr + 8 <= patch_addr.next_multiple_of(clsize));
-    if res == 0 {
-        // Patch the new 64-bit address into the mov instruction.
-        let patch_addr = patch_addr as *mut u64;
-        unsafe { *patch_addr = val };
-        fence(std::sync::atomic::Ordering::SeqCst);
-    } else {
-        panic!("Couldn't make trace writeable.");
-    }
-    // Make the trace unwritable again.
-    let res = unsafe {
-        libc::mprotect(
-            mprot_addr as *mut libc::c_void,
-            1,
-            libc::PROT_EXEC | libc::PROT_READ,
-        )
-    };
-    if res != 0 {
-        panic!("Couldn't make trace executable.");
+        // Make the trace writable while keeping it executable.
+        // FIXME: This might not work on other architectures or operating systems. However, the
+        // solution is very involved and requires changing `mt.rs` to make sure no other thread is
+        // accessing the trace (which includes executing the trace itself or any of it's
+        // side-traces, or side-tracig a guard failure).
+        let res = unsafe {
+            libc::mprotect(
+                mprot_addr as *mut libc::c_void,
+                // Since we are only patching 8-bytes which are aligned, we know we can't span two
+                // pages. Passing a size of 1 still marks the entire page which is what we need.
+                1,
+                libc::PROT_EXEC | libc::PROT_READ | libc::PROT_WRITE,
+            )
+        };
+        // Check that the target address is 8-byte aligned. This is required so we can patch
+        // this atomically.
+        assert!(patch_addr % 8 == 0);
+        // Check that the target `mov` instruction does not cross a cache-line boundary.
+        let clsize = cache_size::cache_line_size(1, cache_size::CacheType::Instruction).unwrap();
+        assert!(patch_addr + 8 <= patch_addr.next_multiple_of(clsize));
+        if res == 0 {
+            // Patch the new 64-bit address into the mov instruction.
+            let patch_addr = patch_addr as *mut u64;
+            unsafe { *patch_addr = *val };
+            fence(std::sync::atomic::Ordering::SeqCst);
+        } else {
+            panic!("Couldn't make trace writeable.");
+        }
+        // Make the trace unwritable again.
+        let res = unsafe {
+            libc::mprotect(
+                mprot_addr as *mut libc::c_void,
+                1,
+                libc::PROT_EXEC | libc::PROT_READ,
+            )
+        };
+        if res != 0 {
+            panic!("Couldn't make trace executable.");
+        }
     }
 }
 
