@@ -144,8 +144,6 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         }
 
         let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo<Register>>().unwrap());
-        let sp_offset = sti.as_ref().map(|x| x.sp_offset);
-        let root_offset = sti.as_ref().map(|x| x.root_offset);
 
         let mut jit_mod =
             trace_builder::build(&mt, aot_mod, aottrace_iter, sti, promotions, debug_strs)?;
@@ -167,9 +165,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         }
 
         // FIXME: This needs to be the combined stacksize of all parent traces.
-        let ct = self
-            .codegen
-            .codegen(jit_mod, mt, hl, sp_offset, root_offset)?;
+        let ct = self.codegen.codegen(jit_mod, mt, hl)?;
 
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
