@@ -1820,6 +1820,71 @@ mod test {
             black_box 4i8
         ",
         );
+
+        Module::assert_ir_transform_eq(
+            "
+          func_decl x(i8)
+
+          entry:
+            %0: i8 = param reg
+            %1: ptr = param reg
+            %2: i8 = load %1
+            call @x(%0)
+            %4: i8 = load %1
+            %5: i8 = load %1
+            black_box %2
+            black_box %4
+            black_box %5
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            %1: ptr = param ...
+            %2: i8 = load %1
+            call @x(%0)
+            %4: i8 = load %1
+            black_box %2
+            black_box %4
+            black_box %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_indirect_call() {
+        Module::assert_ir_transform_eq(
+            "
+          func_type x(i8)
+
+          entry:
+            %0: i8 = param reg
+            %1: ptr = param reg
+            %2: ptr = param reg
+            %3: i8 = load %1
+            icall<x> %2()
+            %5: i8 = load %1
+            %6: i8 = load %1
+            black_box %3
+            black_box %5
+            black_box %6
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            %1: ptr = param ...
+            %2: ptr = param ...
+            %3: i8 = load %1
+            icall %2()
+            %5: i8 = load %1
+            black_box %3
+            black_box %5
+            black_box %5
+        ",
+        );
     }
 
     #[test]
