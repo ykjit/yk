@@ -179,11 +179,19 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         assign,
                         name: name_span,
                         args,
+                        idem_const,
                     } => {
                         let name = &self.lexer.span_str(name_span)[1..];
                         let fd_idx = self.m.find_func_decl_idx_by_name(name);
                         let ops = self.process_operands(args)?;
-                        let inst = DirectCallInst::new(self.m, fd_idx, ops)
+                        let idem_const = match idem_const {
+                            Some(x) => match self.process_operand(x) {
+                                Ok(Operand::Var(_)) | Err(_) => panic!(),
+                                Ok(Operand::Const(cidx)) => Some(cidx),
+                            },
+                            None => None,
+                        };
+                        let inst = DirectCallInst::new(self.m, fd_idx, ops, idem_const)
                             .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
                         if let Some(x) = assign {
                             self.push_assign(inst.into(), x)?;
@@ -736,6 +744,7 @@ enum ASTInst {
         assign: Option<Span>,
         name: Span,
         args: Vec<ASTOperand>,
+        idem_const: Option<ASTOperand>,
     },
     Guard {
         cond: ASTOperand,

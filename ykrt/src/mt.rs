@@ -995,7 +995,7 @@ enum MTThreadState {
         hl: Arc<Mutex<HotLocation>>,
         /// What tracer is being used to record this trace? Needed for trace mapping.
         thread_tracer: Box<dyn TraceRecorder>,
-        /// Records the content of data recorded via `yk_promote`.
+        /// Records the content of data recorded via `yk_promote_*` and `yk_idempotent_promote_*`.
         promotions: Vec<u8>,
         /// Records the content of data recorded via `yk_debug_str`.
         debug_strs: Vec<String>,

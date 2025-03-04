@@ -40,10 +40,10 @@ pub(crate) struct TraceBuilder<Register: Send + Sync> {
     /// Current count of recursive calls to the function in which outlining was started. Will be 0
     /// if `outline_target_blk` is None.
     recursion_count: usize,
-    /// Values promoted to trace-level constants. Values are stored as native-endian sequences of
-    /// bytes: the AOT code must be examined to determine the size of a given a value at a given
-    /// point. Currently (and probably forever) only values that are a multiple of 8 bits are
-    /// supported.
+    /// Values promoted to trace-level constants by `yk_promote_*` and `yk_idempotent_promote_*`.
+    /// Values are stored as native-endian sequences of bytes: the AOT code must be examined to
+    /// determine the size of a given a value at a given point. Currently (and probably forever)
+    /// only values that are a multiple of 8 bits are supported.
     promotions: Box<[u8]>,
     /// The trace's current position in the promotions array.
     promote_idx: usize,
@@ -170,11 +170,8 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
 
         for inst in blk.insts.iter() {
             match inst {
-                aot_ir::Inst::Promote {
-                    val: aot_ir::Operand::LocalVariable(_),
-                    tyidx,
-                    ..
-                } => {
+                aot_ir::Inst::Promote { tyidx, .. }
+                | aot_ir::Inst::IdempotentPromote { tyidx, .. } => {
                     // Consume the correct number of bytes from the promoted values array.
                     let width_bits = match self.aot_mod.type_(*tyidx) {
                         aot_ir::Ty::Integer(x) => x.bitw(),
@@ -326,6 +323,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 aot_ir::Inst::DebugStr { .. } => {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_debug_str(bid, iidx, nextinst)
+                }
+                aot_ir::Inst::IdempotentPromote { val, .. } => {
+                    let nextinst = blk.insts.last().unwrap();
+                    self.handle_idempotent_promote(bid, iidx, val, nextinst)
                 }
                 _ => todo!("{:?}", inst),
             }?;
@@ -776,8 +777,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         // Check if this is a recursive call by scanning the call stack for the callee.
         let is_recursive = self.frames.iter().any(|f| f.funcidx == Some(*callee));
 
+        let func = self.aot_mod.func(*callee);
         if inst.is_mappable_call(self.aot_mod)
-            && !self.aot_mod.func(*callee).is_outline()
+            && !func.is_outline()
+            && !func.is_idempotent()
             && !is_recursive
         {
             // This is a mappable call that we want to inline.
@@ -801,10 +804,25 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
             // call) or the compiler annotated it with `yk_outline`.
+            let idem_const = if func.is_idempotent() {
+                let aot_ir::Ty::Func(fty) = self.aot_mod.type_(func.tyidx()) else {
+                    panic!();
+                };
+                let ret_tyidx = self.handle_type(self.aot_mod.type_(fty.ret_ty()))?;
+                Some(self.promote_bytes_to_const(ret_tyidx)?)
+            } else {
+                None
+            };
+
             self.outline_until_after_call(bid, nextinst);
             let jit_func_decl_idx = self.handle_func(*callee)?;
-            let inst =
-                jit_ir::DirectCallInst::new(&mut self.jit_mod, jit_func_decl_idx, jit_args)?.into();
+            let inst = jit_ir::DirectCallInst::new(
+                &mut self.jit_mod,
+                jit_func_decl_idx,
+                jit_args,
+                idem_const,
+            )?
+            .into();
             self.copy_inst(inst, bid, aot_inst_idx)
         }
     }
@@ -1092,6 +1110,40 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         }
     }
 
+    /// Consume bytes from `self.promotions` and build a constant from them of type `tyidx`.
+    fn promote_bytes_to_const(
+        &mut self,
+        tyidx: jit_ir::TyIdx,
+    ) -> Result<jit_ir::ConstIdx, CompilationError> {
+        let ty = self.jit_mod.type_(tyidx);
+        let c = match ty {
+            jit_ir::Ty::Void => unreachable!(),
+            jit_ir::Ty::Integer(bitw) => {
+                let bytew = ty.byte_size().unwrap();
+                let v = match *bitw {
+                    64 => u64::from_ne_bytes(
+                        self.promotions[self.promote_idx..self.promote_idx + bytew]
+                            .try_into()
+                            .unwrap(),
+                    ),
+                    32 => u64::from(u32::from_ne_bytes(
+                        self.promotions[self.promote_idx..self.promote_idx + bytew]
+                            .try_into()
+                            .unwrap(),
+                    )),
+                    x => todo!("{x}"),
+                };
+                self.promote_idx += bytew;
+                Const::Int(tyidx, ArbBitInt::from_u64(*bitw, v))
+            }
+            jit_ir::Ty::Ptr => todo!(),
+            jit_ir::Ty::Func(_) => todo!(),
+            jit_ir::Ty::Float(_) => todo!(),
+            jit_ir::Ty::Unimplemented(_) => todo!(),
+        };
+        self.jit_mod.insert_const(c)
+    }
+
     fn handle_promote(
         &mut self,
         bid: &aot_ir::BBlockId,
@@ -1111,33 +1163,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 // same each time.
                 let tyidx = self.handle_type(self.aot_mod.type_(*tyidx))?;
                 // Create the constant from the runtime value.
-                let ty = self.jit_mod.type_(tyidx);
-                let c = match ty {
-                    jit_ir::Ty::Void => unreachable!(),
-                    jit_ir::Ty::Integer(bitw) => {
-                        let bytew = ty.byte_size().unwrap();
-                        let v = match *bitw {
-                            64 => u64::from_ne_bytes(
-                                self.promotions[self.promote_idx..self.promote_idx + bytew]
-                                    .try_into()
-                                    .unwrap(),
-                            ),
-                            32 => u64::from(u32::from_ne_bytes(
-                                self.promotions[self.promote_idx..self.promote_idx + bytew]
-                                    .try_into()
-                                    .unwrap(),
-                            )),
-                            x => todo!("{x}"),
-                        };
-                        self.promote_idx += bytew;
-                        Const::Int(tyidx, ArbBitInt::from_u64(*bitw, v))
-                    }
-                    jit_ir::Ty::Ptr => todo!(),
-                    jit_ir::Ty::Func(_) => todo!(),
-                    jit_ir::Ty::Float(_) => todo!(),
-                    jit_ir::Ty::Unimplemented(_) => todo!(),
-                };
-                let cidx = self.jit_mod.insert_const(c)?;
+                let cidx = self.promote_bytes_to_const(tyidx)?;
                 let cmp_instr = jit_ir::ICmpInst::new(
                     jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
                     aot_ir::Predicate::Equal,
@@ -1146,6 +1172,27 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 let jit_cond = self.jit_mod.push_and_make_operand(cmp_instr.into())?;
                 let guard = self.create_guard(bid, &jit_cond, true, safepoint)?;
                 self.copy_inst(guard.into(), bid, aot_inst_idx)
+            }
+            jit_ir::Operand::Const(_cidx) => todo!(),
+        }
+    }
+
+    fn handle_idempotent_promote(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        val: &aot_ir::Operand,
+        nextinst: &'static aot_ir::Inst,
+    ) -> Result<(), CompilationError> {
+        // Note that the promoted value is not consumed out of the promote buffer here. It's
+        // consumed at the callsite to the idempotent function and attached to the call
+        // instruction.
+        self.outline_until_after_call(bid, nextinst);
+        match self.handle_operand(val)? {
+            jit_ir::Operand::Var(ref_iidx) => {
+                self.jit_mod.push(jit_ir::Inst::Copy(ref_iidx))?;
+                self.link_iid_to_last_inst(bid, aot_inst_idx);
+                Ok(())
             }
             jit_ir::Operand::Const(_cidx) => todo!(),
         }

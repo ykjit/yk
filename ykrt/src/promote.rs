@@ -48,3 +48,13 @@ pub extern "C" fn __yk_promote_usize(val: usize) -> usize {
     });
     val
 }
+
+/// Records the return value of an idempotent function during trace recording.
+#[no_mangle]
+pub extern "C" fn __yk_idempotent_promote_usize(val: usize) -> usize {
+    MTThread::with_borrow_mut(|mtt| {
+        // We ignore the return value as we can't really cancel tracing from this function.
+        mtt.promote_usize(val);
+    });
+    val
+}

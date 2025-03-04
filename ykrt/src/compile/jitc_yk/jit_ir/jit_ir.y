@@ -86,11 +86,11 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" BinOp Operand "," Operand  {
       Ok(ASTInst::BinOp{assign: $1?.span(), type_: $3?, bin_op: $5?, lhs: $6?, rhs: $8?})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "CALL" "GLOBAL" "(" OperandsList ")" {
-      Ok(ASTInst::Call{assign: Some($1?.span()), name: $6?.span(), args: $8?})
+  | "LOCAL_OPERAND" ":" Type "=" "CALL" "GLOBAL" "(" OperandsList ")" IdemConstOpt {
+      Ok(ASTInst::Call{assign: Some($1?.span()), name: $6?.span(), args: $8?, idem_const: $10?})
     }
-  | "CALL" "GLOBAL" "(" OperandsList ")" {
-      Ok(ASTInst::Call{assign: None, name: $2?.span(), args: $4?})
+  | "CALL" "GLOBAL" "(" OperandsList ")" IdemConstOpt {
+      Ok(ASTInst::Call{assign: None, name: $2?.span(), args: $4?, idem_const: $6? })
     }
   | "LOCAL_OPERAND" ":" Type "=" "ICALL" "<" "ID" ">" Operand "(" OperandsList ")" {
       Ok(ASTInst::ICall{assign: Some($1?.span()), func_type: $7?.span(), target: $9?, args: $11?})
@@ -150,6 +150,11 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "HEADER_END"  "[" OperandsList "]" { Ok(ASTInst::TraceHeaderEnd($3?)) }
   | "BODY_START" "[" OperandsList "]" { Ok(ASTInst::TraceBodyStart($3?)) }
   | "BODY_END"  "[" OperandsList "]" { Ok(ASTInst::TraceBodyEnd($3?)) }
+  ;
+
+IdemConstOpt -> Result<Option<ASTOperand>, Box<dyn Error>>:
+    "<" "IDEM_CONST" "CONST_INT" ">" { Ok(Some(ASTOperand::ConstInt($3?.span()))) }
+  | { Ok(None) }
   ;
 
 Operand -> Result<ASTOperand, Box<dyn Error>>:

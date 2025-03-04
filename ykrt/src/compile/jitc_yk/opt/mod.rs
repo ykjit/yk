@@ -9,9 +9,9 @@
 use super::{
     arbbitint::ArbBitInt,
     jit_ir::{
-        BinOp, BinOpInst, Const, ConstIdx, DynPtrAddInst, GuardInst, ICmpInst, Inst, InstIdx,
-        LoadInst, Module, Operand, Predicate, PtrAddInst, SExtInst, SelectInst, StoreInst,
-        TraceKind, TruncInst, Ty, ZExtInst,
+        BinOp, BinOpInst, Const, ConstIdx, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst,
+        Inst, InstIdx, LoadInst, Module, Operand, Predicate, PtrAddInst, SExtInst, SelectInst,
+        StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
     },
 };
 use crate::compile::CompilationError;
@@ -169,7 +169,8 @@ impl Opt {
                 unreachable!()
             }
             Inst::BinOp(x) => self.opt_binop(iidx, x)?,
-            Inst::Call(_) | Inst::IndirectCall(_) => {
+            Inst::Call(x) => self.opt_direct_call(iidx, x)?,
+            Inst::IndirectCall(_) => {
                 self.an.heap_barrier();
             }
             Inst::DynPtrAdd(x) => self.opt_dynptradd(iidx, x)?,
@@ -548,6 +549,26 @@ impl Opt {
             }
         }
 
+        Ok(())
+    }
+
+    fn opt_direct_call(
+        &mut self,
+        iidx: InstIdx,
+        inst: DirectCallInst,
+    ) -> Result<(), CompilationError> {
+        if let Some(cidx) = inst.idem_const() {
+            for aidx in inst.iter_args_idx() {
+                if let Operand::Var(_) = self.m.arg(aidx) {
+                    self.an.heap_barrier();
+                    return Ok(());
+                }
+            }
+            // Elide the call (and don't emit a memory barrier either).
+            self.m.replace(iidx, Inst::Const(cidx));
+            return Ok(());
+        }
+        self.an.heap_barrier();
         Ok(())
     }
 
@@ -1772,6 +1793,96 @@ mod test {
           entry:
             %0: ptr = param ...
             black_box %0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_direct_call() {
+        Module::assert_ir_transform_eq(
+            "
+          func_decl x(i8) -> i8
+
+          entry:
+            %0: i8 = param reg
+            %1: i8 = call @x(%0)
+            %2: i8 = call @x(%0) <idem_const 2i8>
+            %3: i8 = call @x(3i8) <idem_const 4i8>
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            %1: i8 = call @x(%0)
+            %2: i8 = call @x(%0) <idem_const 2i8>
+            black_box 4i8
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          func_decl x(i8)
+
+          entry:
+            %0: i8 = param reg
+            %1: ptr = param reg
+            %2: i8 = load %1
+            call @x(%0)
+            %4: i8 = load %1
+            %5: i8 = load %1
+            black_box %2
+            black_box %4
+            black_box %5
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            %1: ptr = param ...
+            %2: i8 = load %1
+            call @x(%0)
+            %4: i8 = load %1
+            black_box %2
+            black_box %4
+            black_box %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_indirect_call() {
+        Module::assert_ir_transform_eq(
+            "
+          func_type x(i8)
+
+          entry:
+            %0: i8 = param reg
+            %1: ptr = param reg
+            %2: ptr = param reg
+            %3: i8 = load %1
+            icall<x> %2()
+            %5: i8 = load %1
+            %6: i8 = load %1
+            black_box %3
+            black_box %5
+            black_box %6
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            %1: ptr = param ...
+            %2: ptr = param ...
+            %3: i8 = load %1
+            icall %2()
+            %5: i8 = load %1
+            black_box %3
+            black_box %5
+            black_box %5
         ",
         );
     }

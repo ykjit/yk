@@ -1762,7 +1762,7 @@ impl Inst {
                     .iter_args_idx()
                     .map(|x| op_mapper(m, &m.arg(x)))
                     .collect::<Vec<_>>();
-                let dc = DirectCallInst::new(m, dc.target, args)?;
+                let dc = DirectCallInst::new(m, dc.target, args, dc.idem_const)?;
                 Inst::Call(dc)
             }
             Inst::IndirectCall(iidx) => {
@@ -2047,14 +2047,20 @@ impl fmt::Display for DisplayableInst<'_> {
                     .unwrap_or("<not valid UTF-8>")
             ),
             Inst::Call(x) => {
+                let idem_const = if let Some(cidx) = x.idem_const {
+                    &format!(" <idem_const {}>", self.m.const_(cidx).display(self.m))
+                } else {
+                    ""
+                };
                 write!(
                     f,
-                    "call @{}({})",
+                    "call @{}({}){}",
                     self.m.func_decl(x.target).name(),
                     (0..x.num_args())
                         .map(|y| format!("{}", x.operand(self.m, y).display(self.m)))
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join(", "),
+                    idem_const
                 )
             }
             Inst::IndirectCall(x) => {
@@ -2539,6 +2545,9 @@ pub struct DirectCallInst {
     args_idx: ArgsIdx,
     /// How many arguments in [Module::args] is this call passing?
     num_args: u16,
+    /// If this is a call to an idempotent function, then this will contain the [ConstIdx] of the
+    /// return value (dynamically captured during tracing).
+    idem_const: Option<ConstIdx>,
 }
 
 impl DirectCallInst {
@@ -2546,6 +2555,7 @@ impl DirectCallInst {
         m: &mut Module,
         target: FuncDeclIdx,
         args: Vec<Operand>,
+        idem_const: Option<ConstIdx>,
     ) -> Result<DirectCallInst, CompilationError> {
         let num_args = u16::try_from(args.len()).map_err(|_| {
             CompilationError::LimitExceeded(format!(
@@ -2559,6 +2569,7 @@ impl DirectCallInst {
             target,
             args_idx,
             num_args,
+            idem_const,
         })
     }
 
@@ -2585,6 +2596,11 @@ impl DirectCallInst {
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
         m.arg(ArgsIdx::try_from(usize::from(self.args_idx) + idx).unwrap())
+    }
+
+    /// Return this function call's idempotent constant, if one exists.
+    pub(crate) fn idem_const(&self) -> Option<ConstIdx> {
+        self.idem_const
     }
 }
 
@@ -3243,7 +3259,7 @@ mod tests {
             i32_tyidx,
         )))
         .unwrap();
-        let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
+        let ci = DirectCallInst::new(&mut m, func_decl_idx, args, None).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Var(InstIdx(0)));
@@ -3270,7 +3286,7 @@ mod tests {
             Operand::Var(InstIdx(1)),
             Operand::Var(InstIdx(2)),
         ];
-        let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
+        let ci = DirectCallInst::new(&mut m, func_decl_idx, args, None).unwrap();
 
         // Request an operand with an out-of-bounds index.
         ci.operand(&m, 3);
