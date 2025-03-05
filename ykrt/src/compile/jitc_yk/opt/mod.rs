@@ -782,7 +782,20 @@ impl Opt {
         loop {
             off += pa_inst.off();
             match self.an.op_map(&self.m, pa_inst.ptr(&self.m)) {
-                Operand::Const(_) => todo!(),
+                Operand::Const(cidx) => {
+                    let Const::Ptr(cptr) = self.m.const_(cidx) else {
+                        panic!();
+                    };
+                    // Important details:
+                    //  - offsets can be negative
+                    //  - LLVM semantics require the offset to be sign extended or truncated to
+                    //    the "pointer index type" before computing the offset.
+                    let cidx = self
+                        .m
+                        .insert_const(Const::Ptr((*cptr as isize + off as isize) as usize))?;
+                    self.m.replace(iidx, Inst::Const(cidx));
+                    break;
+                }
                 Operand::Var(op_iidx) => {
                     if let Inst::PtrAdd(x) = self.m.inst(op_iidx) {
                         pa_inst = x;
@@ -861,6 +874,7 @@ impl Opt {
                             debug_assert_eq!(lhs.bitw(), rhs.bitw());
                             lhs == rhs
                         }
+                        (Const::Ptr(lhs), Const::Ptr(rhs)) => lhs == rhs,
                         x => todo!("{x:?}"),
                     },
                 },
@@ -1762,6 +1776,12 @@ mod test {
 
     #[test]
     fn opt_ptradd() {
+        // FIXME: The offset operand of ptr_add should allow specifying a type (e.g. `ptr_add %0,
+        // 8i8`) so that we can test the different offset types that can arise. Requires some
+        // parser hacking.
+        //
+        // FIXME: test two's compliment overflow/underflow of a ptr_add, which according to LLVM
+        // semantics is permitted. Probably should come after fixing the above FIXME.
         Module::assert_ir_transform_eq(
             "
           entry:
@@ -1794,6 +1814,24 @@ mod test {
             %0: ptr = param ...
             black_box %0
         ",
+        );
+
+        // constant pointer optimisations.
+        Module::assert_ir_transform_eq(
+            "
+            entry:
+            %0: ptr = ptr_add 0x0, 0
+            %1: ptr = ptr_add 0x6, 10
+            black_box %0
+            black_box %1
+            ",
+            |m| opt(m).unwrap(),
+            "
+            ...
+            entry:
+            black_box 0x0
+            black_box 0x10
+            ",
         );
     }
 
