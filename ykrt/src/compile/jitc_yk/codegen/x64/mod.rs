@@ -644,6 +644,8 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
                 jit_ir::Inst::FNeg(i) => self.cg_fneg(iidx, i),
                 jit_ir::Inst::DebugStr(..) => (),
+                jit_ir::Inst::PtrToInt(i) => self.cg_ptrtoint(iidx, i),
+                jit_ir::Inst::IntToPtr(i) => self.cg_inttoptr(iidx, i),
             }
 
             next = iter.next();
@@ -2654,6 +2656,54 @@ impl<'a> Assemble<'a> {
                 force_reg: None,
             }],
         );
+    }
+
+    fn cg_ptrtoint(&mut self, iidx: InstIdx, inst: &jit_ir::PtrToIntInst) {
+        let src = inst.val(self.m);
+        let src_bitw = self.m.type_(self.m.ptr_tyidx()).bitw();
+        let dest_bitw = self.m.type_(inst.dest_tyidx()).bitw();
+
+        if dest_bitw <= src_bitw {
+            // A pointer is being converted to an integer the same size as, or smaller than the
+            // pointer.
+            let [_reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                iidx,
+                [GPConstraint::InputOutput {
+                    op: src,
+                    in_ext: RegExtension::Undefined,
+                    out_ext: RegExtension::Undefined,
+                    force_reg: None,
+                }],
+            );
+        } else {
+            // A pointer is being converted to an integer larger than the pointer.
+            todo!();
+        }
+    }
+
+    fn cg_inttoptr(&mut self, iidx: InstIdx, inst: &jit_ir::IntToPtrInst) {
+        let src = inst.val(self.m);
+        let src_bitw = self.m.type_(src.tyidx(self.m)).bitw();
+        let dest_bitw = self.m.type_(self.m.ptr_tyidx()).bitw();
+
+        if src_bitw <= dest_bitw {
+            // An integer the same size as a pointer, or smaller than a pointer, is being converted
+            // to a pointer.
+            let [_reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                iidx,
+                [GPConstraint::InputOutput {
+                    op: src,
+                    in_ext: RegExtension::ZeroExtended,
+                    out_ext: RegExtension::ZeroExtended,
+                    force_reg: None,
+                }],
+            );
+        } else {
+            // An integer larger than a pointer being truncated into a pointer.
+            todo!();
+        }
     }
 
     fn cg_bitcast(&mut self, iidx: InstIdx, inst: &jit_ir::BitCastInst) {
@@ -5599,6 +5649,97 @@ mod tests {
                 xorpd fp.128.a, fp.128.y
                 ...
             ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_ptrtoint() {
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: i64 = ptr_to_int %0
+                %2: i32 = ptr_to_int %0
+                %3: i11 = ptr_to_int %0
+                %4: i1 = ptr_to_int %0
+                black_box %1
+                black_box %2
+                black_box %3
+                black_box %4
+            ",
+            "
+                ...
+                ; %0: ptr = param ...
+                ; %1: i64 = ptr_to_int %0
+                mov r.64.x, r.64.w
+                ; %2: i32 = ptr_to_int %0
+                mov r.64.y, r.64.x
+                ; %3: i11 = ptr_to_int %0
+                mov r.64.z, r.64.y
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn cg_ptrtoint_to_larger() {
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: i128 = ptr_to_int %0
+                black_box %1
+            ",
+            "todo",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_inttoptr() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = param reg
+                %1: i32 = param reg
+                %2: i17 = param reg
+                %3: i1 = param reg
+                %4: ptr = int_to_ptr %0
+                %5: ptr = int_to_ptr %1
+                %6: ptr = int_to_ptr %2
+                %7: ptr = int_to_ptr %3
+                black_box %4
+                black_box %5
+                black_box %6
+                black_box %7
+            ",
+            "
+            ...
+            ; %4: ptr = int_to_ptr %0
+            ; %5: ptr = int_to_ptr %1
+            mov r.32.x, r.32.x
+            ; %6: ptr = int_to_ptr %2
+            and r.32.y, 0x1ffff
+            ; %7: ptr = int_to_ptr %3
+            and r.32.z, 0x01
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_inttoptr_from_larger() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i128 = param reg
+                %1: ptr = int_to_ptr %0
+                black_box %1
+            ",
+            "todo",
             false,
         );
     }

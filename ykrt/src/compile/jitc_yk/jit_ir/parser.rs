@@ -19,9 +19,9 @@ use super::super::{
     jit_ir::{
         BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
         FNegInst, FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
-        IndirectCallInst, Inst, InstIdx, LoadInst, Module, Operand, PackedOperand, ParamIdx,
-        ParamInst, PtrAddInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
-        ZExtInst,
+        IndirectCallInst, Inst, InstIdx, IntToPtrInst, LoadInst, Module, Operand, PackedOperand,
+        ParamIdx, ParamInst, PtrAddInst, PtrToIntInst, SExtInst, SIToFPInst, SelectInst, StoreInst,
+        TruncInst, Ty, TyIdx, ZExtInst,
     },
 };
 use fm::FMBuilder;
@@ -389,6 +389,17 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::ZExt { assign, type_, val } => {
                         let inst =
                             ZExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::PtrToInt { assign, type_, val } => {
+                        let inst = PtrToIntInst::new(
+                            &self.process_operand(val)?,
+                            self.process_type(type_)?,
+                        );
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::IntToPtr { assign, val, .. } => {
+                        let inst = IntToPtrInst::new(&self.process_operand(val)?);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::BitCast { assign, type_, val } => {
@@ -804,6 +815,18 @@ enum ASTInst {
         val: ASTOperand,
     },
     ZExt {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        val: ASTOperand,
+    },
+    PtrToInt {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        val: ASTOperand,
+    },
+    IntToPtr {
         assign: Span,
         #[allow(dead_code)]
         type_: ASTType,

@@ -8,7 +8,7 @@
 //     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i64 = zext %{{2}}
+//     %{{1}}: i64 = ptr_to_int %{{2}}
 //     ...
 //     --- End jit-pre-opt ---
 //     ptr: {{ptr}}

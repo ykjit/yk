@@ -122,6 +122,12 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "ZEXT" Operand {
       Ok(ASTInst::ZExt{assign: $1?.span(), type_: $3?, val: $6? })
     }
+  | "LOCAL_OPERAND" ":" Type "=" "PTR_TO_INT" Operand {
+      Ok(ASTInst::PtrToInt{assign: $1?.span(), type_: $3?, val: $6? })
+    }
+  | "LOCAL_OPERAND" ":" Type "=" "INT_TO_PTR" Operand {
+      Ok(ASTInst::IntToPtr{assign: $1?.span(), type_: $3?, val: $6? })
+    }
   | "LOCAL_OPERAND" ":" Type "=" "BITCAST" Operand {
       Ok(ASTInst::BitCast{assign: $1?.span(), type_: $3?, val: $6? })
     }
