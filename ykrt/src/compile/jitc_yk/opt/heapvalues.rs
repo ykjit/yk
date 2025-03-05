@@ -4,7 +4,7 @@
 //!
 //! Broadly speaking, loads add new information; stores tend to remove most old information and add
 //! new information; and barriers remove all information.
-use super::super::jit_ir::{Inst, InstIdx, Module, Operand};
+use super::super::jit_ir::{Const, Inst, InstIdx, Module, Operand};
 use std::collections::HashMap;
 
 /// An abstract "address" representing a location in RAM.
@@ -40,7 +40,12 @@ impl Address {
                 }
                 Address::PtrPlusOff(iidx, off)
             }
-            Operand::Const(_) => todo!(),
+            Operand::Const(cidx) => {
+                let Const::Ptr(v) = m.const_(cidx) else {
+                    panic!();
+                };
+                Address::Const(*v)
+            }
         }
     }
 }

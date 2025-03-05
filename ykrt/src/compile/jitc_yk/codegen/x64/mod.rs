@@ -276,6 +276,7 @@ impl From<&VarLocation> for yksmp::Location {
                     todo!(">32 bit constant")
                 }
             }
+            VarLocation::ConstPtr(v) => yksmp::Location::LargeConstant(u64::try_from(*v).unwrap()),
             e => todo!("{:?}", e),
         }
     }
@@ -1271,7 +1272,7 @@ impl<'a> Assemble<'a> {
                     .force_assign_inst_indirect(iidx, i32::try_from(frame_off).unwrap());
             }
             VarLocation::ConstInt { bits, v } => {
-                self.ra.assign_const(iidx, bits, v);
+                self.ra.assign_const_int(iidx, bits, v);
             }
             e => panic!("{:?}", e),
         }
@@ -2465,7 +2466,7 @@ impl<'a> Assemble<'a> {
                     // match. But since the value can't change we can safely ignore this.
                 }
                 VarLocation::Register(_reg) => (), // Handled in the earlier loop
-                _ => todo!(),
+                _ => todo!("{dst:?}"),
             }
         }
 
@@ -2609,7 +2610,10 @@ impl<'a> Assemble<'a> {
                             );
                         }
                         VarLocation::ConstInt { bits, v } => {
-                            self.ra.assign_const(iidx, bits, v);
+                            self.ra.assign_const_int(iidx, bits, v);
+                        }
+                        VarLocation::ConstPtr(v) => {
+                            self.ra.assign_const_ptr(iidx, v);
                         }
                         e => panic!("{:?}", e),
                     }

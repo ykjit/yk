@@ -789,7 +789,16 @@ impl Opt {
             // `checked_add` with `wrapping_add`.
             off = off.checked_add(i64::from(pa_inst.off())).unwrap();
             match self.an.op_map(&self.m, pa_inst.ptr(&self.m)) {
-                Operand::Const(_) => todo!(),
+                Operand::Const(cidx) => {
+                    let Const::Ptr(cptr) = self.m.const_(cidx) else {
+                        panic!();
+                    };
+                    // FIXME: JIT IR assumes a usize is pointer-sized.
+                    let off = usize::try_from(off.cast_unsigned()).unwrap();
+                    let cidx = self.m.insert_const(Const::Ptr(cptr.wrapping_add(off)))?;
+                    self.m.replace(iidx, Inst::Const(cidx));
+                    break;
+                }
                 Operand::Var(op_iidx) => {
                     if let Inst::PtrAdd(x) = self.m.inst(op_iidx) {
                         pa_inst = x;
@@ -870,6 +879,7 @@ impl Opt {
                             debug_assert_eq!(lhs.bitw(), rhs.bitw());
                             lhs == rhs
                         }
+                        (Const::Ptr(lhs), Const::Ptr(rhs)) => lhs == rhs,
                         x => todo!("{x:?}"),
                     },
                 },
@@ -1803,6 +1813,60 @@ mod test {
             %0: ptr = param ...
             black_box %0
         ",
+        );
+
+        // constant pointer optimisations.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = ptr_add 0x0, 0
+            %1: ptr = ptr_add 0x6, 10
+            black_box %0
+            black_box %1
+            ",
+            |m| opt(m).unwrap(),
+            "
+            ...
+          entry:
+            black_box 0x0
+            black_box 0x10
+         ",
+        );
+
+        #[cfg(target_pointer_width = "64")]
+        Module::assert_ir_transform_eq(
+            "
+            entry:
+              %0: ptr = ptr_add 0x8, -16
+              %1: ptr = ptr_add 0xffffffffffffffff, 16
+              black_box %0
+              black_box %1
+            ",
+            |m| opt(m).unwrap(),
+            "
+            ...
+            entry:
+              black_box 0xfffffffffffffff8
+              black_box 0xf
+            ",
+        );
+
+        #[cfg(target_pointer_width = "32")]
+        Module::assert_ir_transform_eq(
+            "
+            entry:
+              %0: ptr = ptr_add 0x8, -16
+              %1: ptr = ptr_add 0xffffffff, 16
+              black_box %0
+              black_box %1
+            ",
+            |m| opt(m).unwrap(),
+            "
+            ...
+            entry:
+              black_box 0xfffffff8
+              black_box 0xf
+            ",
         );
 
         Module::assert_ir_transform_eq(
