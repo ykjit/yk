@@ -102,6 +102,6 @@ uintptr_t __yk_promote_usize(uintptr_t);
 /// shown when the trace is displayed.
 ///
 /// `msg` must be a pointer to a UTF-8 compatible string.
-void yk_debug_str(char *fmt, ...);
+void yk_debug_str(char *fmt);
 
 #endif
