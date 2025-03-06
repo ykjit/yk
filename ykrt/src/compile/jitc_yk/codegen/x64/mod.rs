@@ -1240,25 +1240,7 @@ impl<'a> Assemble<'a> {
         debug_assert!(self.m.inst(iidx).def_bitw(self.m) <= 64);
         match m {
             VarLocation::Register(Register::GP(reg)) => {
-                // If this register is not used by a "meaningful" (i.e. non-`Guard`-or-`*End`)
-                // instruction, we immediately spill it, so that the register allocator has more
-                // free registers to play with from the very beginning.
-                let mut meaningful = false;
-                for iidx in self.ra.rev_an.iter_uses(iidx) {
-                    match self.m.inst(iidx) {
-                        Inst::Guard(_) | Inst::TraceHeaderEnd | Inst::TraceBodyEnd => (),
-                        _ => {
-                            meaningful = true;
-                            break;
-                        }
-                    }
-                }
-                if meaningful {
-                    self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
-                } else {
-                    self.ra
-                        .force_assign_and_spill_inst_gp_reg(&mut self.asm, iidx, reg);
-                }
+                self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
             }
             VarLocation::Register(Register::FP(reg)) => {
                 self.ra.force_assign_inst_fp_reg(iidx, reg);
@@ -4716,8 +4698,7 @@ mod tests {
             "
                 ...
                 ; guard true, %0, [] ; ...
-                movzx r.64._, byte ptr ...
-                bt r.32._, 0x00
+                bt r.32.a, 0x00
                 jnb 0x...
                 ...
                 ; deopt id and patch point for guard 0
@@ -4748,8 +4729,7 @@ mod tests {
             "
                 ...
                 ; guard false, %0, [] ; ...
-                movzx r.64._, byte ptr ...
-                bt r.32._, 0x00
+                bt r.32.a, 0x00
                 jb 0x...
                 ...
                 ; deopt id and patch point for guard 0
@@ -4783,12 +4763,11 @@ mod tests {
             "
                 ...
                 ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8] ; trace_gidx 0 safepoint_id 0
-                movzx r.64._, byte ptr ...
-                bt r.32._, 0x00
+                bt r.32.a, 0x00
                 jb 0x...
                 ...
                 ; deopt id and patch point for guard 0
-                and r.32._, 0x01
+                and r.32.a, 0x01
                 nop
                 ...
                 push rsi
@@ -5615,10 +5594,9 @@ mod tests {
             "
                 ...
                 ; %0: i8 = param ...
-                ...
                 ; header_start [%0]
                 ; header_end [42i8]
-                mov byte ptr [rbp-0x01], 0x2a
+                mov r.32._, 0x2a
                 jmp ...
             ",
             false,
