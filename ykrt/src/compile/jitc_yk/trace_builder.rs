@@ -1144,7 +1144,17 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 self.promote_idx += bytew;
                 Const::Int(tyidx, ArbBitInt::from_u64(*bitw, v))
             }
-            jit_ir::Ty::Ptr => todo!(),
+            jit_ir::Ty::Ptr => {
+                let bytew = ty.byte_size().unwrap();
+                assert_eq!(bytew, std::mem::size_of::<usize>());
+                let v = usize::from_ne_bytes(
+                    self.promotions[self.promote_idx..self.promote_idx + bytew]
+                        .try_into()
+                        .unwrap(),
+                );
+                self.promote_idx += bytew;
+                Const::Ptr(v)
+            }
             jit_ir::Ty::Func(_) => todo!(),
             jit_ir::Ty::Float(_) => todo!(),
             jit_ir::Ty::Unimplemented(_) => todo!(),

@@ -88,13 +88,15 @@ void yk_location_drop(YkLocation);
                                int: __yk_promote_c_int, \
                                unsigned int: __yk_promote_c_unsigned_int, \
                                long long: __yk_promote_c_long_long, \
-                               uintptr_t: __yk_promote_usize \
+                               uintptr_t: __yk_promote_usize, \
+                               void *: __yk_promote_ptr \
                               )(X)
 int __yk_promote_c_int(int);
 unsigned int __yk_promote_c_unsigned_int(unsigned int);
 long long __yk_promote_c_long_long(long long);
 // Rust defines `usize` to be layout compatible with `uintptr_t`.
 uintptr_t __yk_promote_usize(uintptr_t);
+void *__yk_promote_ptr(void *);
 
 /// Associate a UTF-8 compatible string to the next instruction to be traced.
 /// The string will be copied by this function, so callers can safely reuse the
