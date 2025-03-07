@@ -778,9 +778,24 @@ impl Opt {
         iidx: InstIdx,
         mut pa_inst: PtrAddInst,
     ) -> Result<(), CompilationError> {
-        let mut off = 0;
+        // Although we store ptr_add offsets as an i32, LLVM semantics require the offset to wrap
+        // as though they were "pointer index typed" (a pointer-sized integer, for addrspace 0, the
+        // only address space we support right now).
+        let mut off: isize = 0;
+
         loop {
-            off += pa_inst.off();
+            // LLVM semantics permit silent wrapping.
+            // The unwrap() can't fail on platforms we care about.
+            off = match off.checked_add(isize::try_from(pa_inst.off()).unwrap()) {
+                Some(off) => off,
+                None => {
+                    // Folding the offset caused a wrap. This isn't hard to fix (replace
+                    // checked_add with wrapping_add), but it is annoying to test, because we'd
+                    // have to have hundreds of thousands of ptr_adds in a row to cause a wrap.
+                    // Cross this bridge when it shows in a real program.
+                    todo!()
+                }
+            };
             match self.an.op_map(&self.m, pa_inst.ptr(&self.m)) {
                 Operand::Const(_) => todo!(),
                 Operand::Var(op_iidx) => {
@@ -790,10 +805,13 @@ impl Opt {
                         if off == 0 {
                             self.m.replace(iidx, Inst::Copy(op_iidx));
                         } else {
-                            self.m.replace(
-                                iidx,
-                                Inst::PtrAdd(PtrAddInst::new(Operand::Var(op_iidx), off)),
-                            );
+                            // We can only optimise if the offset can be expressed by an i32.
+                            if let Ok(off) = i32::try_from(off) {
+                                self.m.replace(
+                                    iidx,
+                                    Inst::PtrAdd(PtrAddInst::new(Operand::Var(op_iidx), off)),
+                                );
+                            }
                         }
                         break;
                     }
@@ -1793,6 +1811,49 @@ mod test {
           entry:
             %0: ptr = param ...
             black_box %0
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, -1
+            %2: ptr = ptr_add %1, -1
+            %3: ptr = ptr_add %2, -1
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %3: ptr = ptr_add %0, -3
+            black_box %3
+        ",
+        );
+
+        // Check that the optimisation doesn't kick in if the offset wouldn't
+        // be expressible as an i32.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, 2147483646
+            %2: ptr = ptr_add %1, 1
+            %3: ptr = ptr_add %2, 1
+            black_box %2
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %2: ptr = ptr_add %0, 2147483647
+            %3: ptr = ptr_add %2, 1
+            black_box %2
+            black_box %3
         ",
         );
     }

@@ -3618,14 +3618,21 @@ mod tests {
             "
               entry:
                 %0: ptr = param reg
-                %1: i32 = ptr_add %0, 64
+                %1: ptr = ptr_add %0, 64
+                %2: ptr = ptr_add %0, -1
+                %3: ptr = ptr_add %0, 2147483647
                 black_box %1
+                black_box %2
+                black_box %3
             ",
             "
                 ...
                 ; %1: ptr = ptr_add %0, 64
-                lea r.64.x, [r.64._+0x40]
-                ...
+                lea r.64.x, [r.64.p+0x40]
+                ; %2: ptr = ptr_add %0, -1
+                lea r.64.y, [r.64.p-0x01]
+                ; %3: ptr = ptr_add %0, 2147483647
+                lea r.64.p, [r.64.p+0x7fffffff]
                 ",
             false,
         );
@@ -3643,9 +3650,15 @@ mod tests {
                 %4: ptr = ptr_add %1, 32
                 %5: i64 = load %4
                 %6: ptr = ptr_add %4, 1
+                %7: ptr = ptr_add %4, -1
+                %8: i64 = load %7
+                %9: ptr = ptr_add %4, 2147483647
+                %10: i64 = load %9
                 black_box %3
                 black_box %5
                 black_box %6
+                black_box %8
+                black_box %10
             ",
             "
                 ...
@@ -3658,6 +3671,10 @@ mod tests {
                 mov r.64._, [r.64.z+0x20]
                 ; %6: ptr = ptr_add %4, 1
                 lea r.64._, [r.64.y+0x01]
+                ; %8: i64 = load %4 + -1
+                mov r.64._, [r.64.y-0x01]
+                ; %10: i64 = load %4 + 2147483647
+                mov r.64._, [r.64.y+0x7fffffff]
                 ",
             false,
         );
@@ -3675,6 +3692,10 @@ mod tests {
                 %4: ptr = ptr_add %1, 32
                 %5: i64 = load %4
                 *%4 = 2i8
+                %7: ptr = ptr_add %0, -1
+                *%7 = 255i8
+                %9: ptr = ptr_add %0, 2147483647
+                *%9 = 65535i16
                 black_box %5
             ",
             "
@@ -3685,7 +3706,10 @@ mod tests {
                 mov r.64.y, [r.64.x+0x20]
                 ; *(%1 + 32) = 2i8
                 mov byte ptr [r.64.x+0x20], 0x02
-                ...
+                ; *(%0 + -1) = 255i8
+                mov byte ptr [r.64._-0x01], 0xff
+                ; *(%0 + 2147483647) = 65535i16
+                mov word ptr [r.64._+0x7fffffff], 0xffff
                 ",
             false,
         );
