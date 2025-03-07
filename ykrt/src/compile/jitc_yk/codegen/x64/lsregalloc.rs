@@ -1780,7 +1780,8 @@ fn reg_copies_to_actions(copies: [Option<Rq>; 16]) -> Vec<(Rq, RegAction)> {
     let mut actions = Vec::new();
     let mut action_regset = RegSet::with_gp_reserved();
 
-    // Step 1: get the copies into a dependency order.
+    // Step 1: create a sequence of copies in dependency order, without worrying about whether
+    // there are cycles.
     for (to_reg_i, from_reg) in copies.into_iter().enumerate() {
         if let Some(from_reg) = from_reg {
             let to_reg = GP_REGS[to_reg_i];
