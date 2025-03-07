@@ -5,6 +5,7 @@
 ;       bb0:
 ;         ...
 ;         %{{_}}: ?ty<<8 x ptr>> = unimplemented <<  %{{4}} = getelementptr i32, <8 x ptr> %{{1}}, i32 1>>
+;         %{{_}}: ptr = unimplemented <<  %{{_}} = getelementptr [8 x i8], ptr %{{_}}, i512 %{{_}}>>
 ;         br bb1
 ;       bb1:
 ;         %{{_}}: ptr = unimplemented <<  %{{6}} = alloca inalloca i32, align 4>>
@@ -68,12 +69,14 @@ define ptr @p() addrspace(6) {
 
 declare void @llvm.experimental.stackmap(i64, i32, ...);
 
-define void @main(ptr %ptr, <8 x ptr> %ptrs, i32 %num, float %flt, <4 x i32>
-%vecnums, ptr addrspace(10) %asptr, i1 %choice, <4 x i32> %nums) optnone noinline {
+define void @main(ptr %ptr, <8 x ptr> %ptrs, i32 %num, float %flt, <4 x i32> %vecnums, ptr addrspace(10) %asptr, i1 %choice, <4 x i32> %nums, i512 %wide) optnone noinline {
 geps:
   ; note `getelementptr inrange` cannot appear as a dedicated instruction, only
   ; as an inline expression. Hence no check for that in instruction form.
   %gep1 = getelementptr i32, <8 x ptr> %ptrs, i32 1
+  ; A gep with a dynamic index whose type is wider than an Rust isize. 512 bits
+  ; should cover `isize` on any platform we may encounter in our lifetimes.
+  %gep2 = getelementptr [8 x i8], ptr %ptr, i512 %wide
   br label %allocas
 allocas:
   ; `inalloca` keyword
