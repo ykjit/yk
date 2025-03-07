@@ -1776,12 +1776,13 @@ pub(crate) enum GPConstraint {
 /// The input format is: one copy per `Some`. For example `[None, Some(R15), Some(RDX)...]` means
 /// "RAX doesn't copy anything; RCX copies R15's value; and RDX's value remains unchanged". When a
 /// register's value remains unchanged a `RegAction::Keep` is generated.
-fn reg_copies_to_actions(moves: [Option<Rq>; 16]) -> Vec<(Rq, RegAction)> {
+fn reg_copies_to_actions(copies: [Option<Rq>; 16]) -> Vec<(Rq, RegAction)> {
     let mut actions = Vec::new();
     let mut action_regset = RegSet::with_gp_reserved();
 
-    // Step 1: get the actions into a dependency order.
-    for (to_reg_i, from_reg) in moves.into_iter().enumerate() {
+    // Step 1: create a sequence of copies in dependency order, without worrying about whether
+    // there are cycles.
+    for (to_reg_i, from_reg) in copies.into_iter().enumerate() {
         if let Some(from_reg) = from_reg {
             let to_reg = GP_REGS[to_reg_i];
             action_regset.set(to_reg);
@@ -1821,7 +1822,7 @@ fn reg_copies_to_actions(moves: [Option<Rq>; 16]) -> Vec<(Rq, RegAction)> {
                                     match action_regset.find_empty() {
                                         Some(empty_reg) => {
                                             tmp_reg = Some(empty_reg);
-                                            assert_ne!(empty_reg, to_reg, "{moves:?}");
+                                            assert_ne!(empty_reg, to_reg, "{copies:?}");
                                             actions.insert(
                                                 i,
                                                 (empty_reg, RegAction::CopyFrom(to_reg)),
