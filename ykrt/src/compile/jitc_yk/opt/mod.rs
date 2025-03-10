@@ -582,8 +582,8 @@ impl Opt {
                 panic!()
             };
             // LLVM IR semantics are such that GEP indices are sign-extended or truncated to the
-            // "pointer index size" (which for address space zero is a pointer-sized signed
-            // integer). First make sure we will be operating on that type.
+            // "pointer index size" (which for address space zero is a pointer-sized integer).
+            // First make sure we will be operating on that type.
             let v = v.to_sign_ext_isize().unwrap();
             // Now multiply by the element size.
             //
