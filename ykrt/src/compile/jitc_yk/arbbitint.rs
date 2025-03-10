@@ -123,6 +123,11 @@ impl ArbBitInt {
         Some(self.val.sign_extend(self.bitw, 64) as i64)
     }
 
+    /// Sign extend the underlying value and, if it is representable as an `isize`, return it.
+    pub(crate) fn to_sign_ext_isize(&self) -> Option<isize> {
+        Some(self.val.sign_extend(self.bitw, 64) as isize)
+    }
+
     /// zero extend the underlying value and, if it is representable as an `u8`, return it.
     pub(crate) fn to_zero_ext_u8(&self) -> Option<u8> {
         u8::try_from(self.val.truncate(self.bitw)).ok()
