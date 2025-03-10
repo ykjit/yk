@@ -581,20 +581,27 @@ impl Opt {
             let Const::Int(_, v) = self.m.const_(cidx) else {
                 panic!()
             };
-            // DynPtrAdd indices are signed, so we have to be careful to interpret the
-            // constant as such.
-            let v = v.to_sign_ext_i64().unwrap();
-            // LLVM IR allows `off` to be an `i64` but our IR currently allows only an
-            // `i32`. On that basis, we can hit our limits before the program has
-            // itself hit UB, at which point we can't go any further.
-            let off = i32::try_from(v)
-                .map_err(|_| ())
-                .and_then(|v| v.checked_mul(i32::from(inst.elem_size())).ok_or(()))
-                .map_err(|_| {
-                    CompilationError::LimitExceeded(
-                        "`DynPtrAdd` offset exceeded `i32` bounds".into(),
-                    )
-                })?;
+            // LLVM IR semantics are such that GEP indices are sign-extended or truncated to the
+            // "pointer index size" (which for address space zero is a pointer-sized signed
+            // integer). First make sure we will be operating on that type.
+            let v = v.to_sign_ext_isize().unwrap();
+            // Now multiply by the element size.
+            //
+            // In LLVM slient two's compliment wrapping is permitted, but in Rust an
+            // `unchecked_mul()` that wraps is UB.
+            //
+            // The unwrap cannot fail on platforms we care about.
+            let Some(off) = v.checked_mul(isize::try_from(inst.elem_size()).unwrap()) else {
+                // Currently the overflow case can't happen (on any platform we care about) because
+                // elem_size can only range from [u16::MIN, ui16::MAX].
+                unreachable!();
+            };
+            // Now check we can actually represent the folded offset in an i32.
+            let Ok(off) = i32::try_from(off) else {
+                // Don't do the optimisation.
+                return Ok(());
+            };
+            // Proceed to optimise.
             if off == 0 {
                 match self.an.op_map(&self.m, inst.ptr(&self.m)) {
                     Operand::Var(op_iidx) => self.m.replace(iidx, Inst::Copy(op_iidx)),
@@ -1995,6 +2002,24 @@ mod test {
           entry:
             %0: ptr = param ...
             black_box %0
+        ",
+        );
+
+        // Check that we don't fold dyn_ptr_add if the resulting offset isn't representable in i32.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = dyn_ptr_add %0, 2147483647i32, 2
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: ptr = dyn_ptr_add %0, 2147483647i32, 2
+            black_box %1
         ",
         );
     }
