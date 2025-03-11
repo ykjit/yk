@@ -2640,12 +2640,12 @@ mod test {
             ]
         );
 
-        // Fuzz `moves_to_actions` with lots of random data.
+        // Fuzz `reg_copies_to_actions` with lots of random data.
         let mut rng = rand::rng();
         for _ in 0..10000 {
             let mut moves = Vec::new();
             // Note: if we crank the `10` below any higher, we get into register pressure
-            // situations where we hit a `todo` in `moves_to_actions`. Since I haven't yet seen
+            // situations where we hit a `todo` in `reg_copies_to_actions`. Since I haven't yet seen
             // that case in real life, I'm not hugely inclined to spend a lot of time implementing
             // it yet. If/when we do, the `10` should become a `16`.
             for _ in 0..rng.random_range(1..10) {
