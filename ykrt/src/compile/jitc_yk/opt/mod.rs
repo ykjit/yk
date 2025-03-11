@@ -572,6 +572,7 @@ impl Opt {
         Ok(())
     }
 
+    #[cfg(target_pointer_width = "64")]
     fn opt_dynptradd(
         &mut self,
         iidx: InstIdx,
@@ -581,20 +582,18 @@ impl Opt {
             let Const::Int(_, v) = self.m.const_(cidx) else {
                 panic!()
             };
-            // DynPtrAdd indices are signed, so we have to be careful to interpret the
-            // constant as such.
+            // LLVM IR semantics are such that GEP indices are sign-extended or truncated to the
+            // "pointer index size" (which for address space zero is a pointer-sized integer).
+            // First make sure we will be operating on that type.
             let v = v.to_sign_ext_i64().unwrap();
-            // LLVM IR allows `off` to be an `i64` but our IR currently allows only an
-            // `i32`. On that basis, we can hit our limits before the program has
-            // itself hit UB, at which point we can't go any further.
-            let off = i32::try_from(v)
-                .map_err(|_| ())
-                .and_then(|v| v.checked_mul(i32::from(inst.elem_size())).ok_or(()))
-                .map_err(|_| {
-                    CompilationError::LimitExceeded(
-                        "`DynPtrAdd` offset exceeded `i32` bounds".into(),
-                    )
-                })?;
+            // Now multiply by the element size.
+            //
+            // In LLVM slient two's compliment wrapping is permitted, but in Rust an
+            // `unchecked_mul()` that wraps is UB. Currently the overflow case can't happen because
+            // `inst.elem_size` can only range from [u16::MIN, ui16::MAX].
+            let off = v.checked_mul(i64::from(inst.elem_size())).unwrap();
+            let off = i32::try_from(off).unwrap();
+            // Proceed to optimise.
             if off == 0 {
                 match self.an.op_map(&self.m, inst.ptr(&self.m)) {
                     Operand::Var(op_iidx) => self.m.replace(iidx, Inst::Copy(op_iidx)),
@@ -773,14 +772,22 @@ impl Opt {
         Ok(())
     }
 
+    #[cfg(target_pointer_width = "64")]
     fn opt_ptradd(
         &mut self,
         iidx: InstIdx,
         mut pa_inst: PtrAddInst,
     ) -> Result<(), CompilationError> {
-        let mut off = 0;
+        // LLVM semantics require pointer arithmetic to wrap as though they were "pointer index
+        // typed" (a pointer-sized integer, for addrspace 0, the only address space we support
+        // right now).
+        let mut off: i64 = 0;
+
         loop {
-            off += pa_inst.off();
+            // FIXME: LLVM semantics permit a silent wrap here. We don't support it yet, but to
+            // implement it it (when it arises, and we find a good way to test it) replace
+            // `checked_add` with `wrapping_add`.
+            off = off.checked_add(i64::from(pa_inst.off())).unwrap();
             match self.an.op_map(&self.m, pa_inst.ptr(&self.m)) {
                 Operand::Const(_) => todo!(),
                 Operand::Var(op_iidx) => {
@@ -790,6 +797,8 @@ impl Opt {
                         if off == 0 {
                             self.m.replace(iidx, Inst::Copy(op_iidx));
                         } else {
+                            // FIXME: will panic if the folded offset doesn't fit.
+                            let off = i32::try_from(off).unwrap();
                             self.m.replace(
                                 iidx,
                                 Inst::PtrAdd(PtrAddInst::new(Operand::Var(op_iidx), off)),
@@ -1795,6 +1804,51 @@ mod test {
             black_box %0
         ",
         );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, -1
+            %2: ptr = ptr_add %1, -1
+            %3: ptr = ptr_add %2, -1
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %3: ptr = ptr_add %0, -3
+            black_box %3
+        ",
+        );
+    }
+
+    #[should_panic] // but only because we haven't implemented this yet.
+    #[test]
+    fn opt_ptradd_offset_doesnt_fit() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, 2147483646
+            %2: ptr = ptr_add %1, 1
+            %3: ptr = ptr_add %2, 1
+            black_box %2
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %2: ptr = ptr_add %0, 2147483647
+            %3: ptr = ptr_add %2, 1
+            black_box %2
+            black_box %3
+        ",
+        );
     }
 
     #[test]
@@ -1934,6 +1988,27 @@ mod test {
           entry:
             %0: ptr = param ...
             black_box %0
+        ",
+        );
+    }
+
+    #[should_panic] // but only because we haven't implemented it yet.
+    #[test]
+    fn opt_dynptradd_offset_doesnt_fit() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = dyn_ptr_add %0, 2147483647i32, 2
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: ptr = dyn_ptr_add %0, 2147483647i32, 2
+            black_box %1
         ",
         );
     }

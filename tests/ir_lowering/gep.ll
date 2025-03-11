@@ -40,6 +40,12 @@
 ;         %5_2: ptr = ptr_add @mixed0, 5 + (%0_0 * 8)
 ;         %5_3: ptr = ptr_add @mixed1, 10
 ;         %5_4: ptr = ptr_add @mixed1, 8 + (%0_0 * 8) + (%0_1 * 1)
+;         br bb6
+;       bb6:
+;         %6_0: ptr = ptr_add 0x0, 0
+;         br bb7
+;       bb7:
+;         %7_0: ptr = ptr_add 0x0, -8
 ;         ret
 ;     }
 ;     ...
@@ -76,7 +82,7 @@ entry:
   %4 = getelementptr [4 x i7], ptr @arr4, i32 3
   br label %bb1
 bb1:
-  ; >1 index array indexing.
+  ; array indexing with more than a single index.
   ;
   ; When the first array index is 0, you index into the elements of the array.
   %5 = getelementptr [3 x i8], ptr @arr0, i32 0, i32 1
@@ -110,5 +116,13 @@ bb5:
   %21 = getelementptr [4 x {i32, i8, i8, i8, i8}], ptr @mixed0, i32 0, i32 %arg0, i32 2
   %22 = getelementptr {[4 x i8], [2 x {i32, [4 x i8]}]}, ptr @mixed1, i32 0, i32 1, i32 0, i32 1, i32 2
   %23 = getelementptr {[4 x i8], [2 x {i32, [4 x i8]}]}, ptr @mixed1, i32 0, i32 1, i32 %arg0, i32 1, i32 %arg1
+  br label %bb6
+bb6:
+  ; truncated index types.
+  %trunc = getelementptr [1 x [1 x i8]], ptr zeroinitializer, i512 0, i512 -1, i8 1
+  br label %bb7
+bb7:
+  ; negative indices
+  %neg = getelementptr [10 x i8], ptr zeroinitializer, i32 0, i64 -8
   ret void
 }

@@ -1260,4 +1260,28 @@ mod tests {
             ",
         );
     }
+
+    #[test]
+    #[should_panic(expected = "number too large to fit in target type")]
+    fn ptr_add_offset_too_large() {
+        Module::from_str(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, 2147483648
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "number too small to fit in target type")]
+    fn ptr_add_offset_too_small() {
+        Module::from_str(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, -2147483649
+            ",
+        );
+    }
 }
