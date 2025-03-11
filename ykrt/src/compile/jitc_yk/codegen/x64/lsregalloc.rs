@@ -422,7 +422,9 @@ impl LSRegAlloc<'_> {
             cnstrs
                 .iter()
                 .filter(|x| match x {
-                    GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } =>
+                    GPConstraint::Input { op, .. }
+                    | GPConstraint::InputOutput { op, .. }
+                    | GPConstraint::AlignExtension { op, .. } =>
                         matches!(self.m.type_(op.tyidx(self.m)), Ty::Float(_)),
                     GPConstraint::Output { .. }
                     | GPConstraint::Clobber { .. }
@@ -438,7 +440,9 @@ impl LSRegAlloc<'_> {
             cnstrs
                 .iter()
                 .filter(|x| match x {
-                    GPConstraint::InputOutput { .. } | GPConstraint::Output { .. } => true,
+                    GPConstraint::InputOutput { .. }
+                    | GPConstraint::Output { .. }
+                    | GPConstraint::AlignExtension { .. } => true,
                     GPConstraint::Input { .. }
                     | GPConstraint::Clobber { .. }
                     | GPConstraint::Temporary
@@ -499,7 +503,11 @@ impl LSRegAlloc<'_> {
         for (cnstr, reg) in cnstrs.iter().zip(cnstr_regs.into_iter()) {
             match cnstr {
                 GPConstraint::Input { op, in_ext, .. }
-                | GPConstraint::InputOutput { op, in_ext, .. } => {
+                | GPConstraint::InputOutput { op, in_ext, .. }
+                | GPConstraint::AlignExtension {
+                    op,
+                    out_ext: in_ext,
+                } => {
                     self.put_input_in_gp_reg(asm, op, reg, *in_ext);
                     if let RegState::FromInst(iidxs, _) =
                         &self.gp_reg_states[usize::from(reg.code())]
@@ -531,6 +539,12 @@ impl LSRegAlloc<'_> {
                         RegState::FromInst(vec![iidx], out_ext);
                 }
                 GPConstraint::Output { out_ext, .. } => {
+                    self.gp_regset.set(reg);
+                    self.gp_reg_states[usize::from(reg.code())] =
+                        RegState::FromInst(vec![iidx], out_ext);
+                }
+                GPConstraint::AlignExtension { out_ext, .. } => {
+                    assert!(self.gp_regset.is_set(reg));
                     self.gp_regset.set(reg);
                     self.gp_reg_states[usize::from(reg.code())] =
                         RegState::FromInst(vec![iidx], out_ext);
@@ -585,7 +599,9 @@ impl LSRegAlloc<'_> {
                     cnstr_regs[i] = Some(*force_reg);
                     asgn_regs.set(*force_reg);
                 }
-                GPConstraint::Temporary | GPConstraint::None => (),
+                GPConstraint::AlignExtension { .. }
+                | GPConstraint::Temporary
+                | GPConstraint::None => (),
             }
         }
 
@@ -595,7 +611,9 @@ impl LSRegAlloc<'_> {
                 continue;
             }
             match cnstr {
-                GPConstraint::Output { .. } | GPConstraint::InputOutput { .. } => {
+                GPConstraint::Output { .. }
+                | GPConstraint::InputOutput { .. }
+                | GPConstraint::AlignExtension { .. } => {
                     if let Some(Register::GP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
                         if !asgn_regs.is_set(reg) {
                             cnstr_regs[i] = Some(reg);
@@ -618,7 +636,9 @@ impl LSRegAlloc<'_> {
                 continue;
             }
             match cnstr {
-                GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } => {
+                GPConstraint::Input { op, .. }
+                | GPConstraint::InputOutput { op, .. }
+                | GPConstraint::AlignExtension { op, .. } => {
                     if let Some(reg) = self.find_op_in_gp_reg(op) {
                         if !asgn_regs.is_set(reg) {
                             assert!(self.gp_regset.is_set(reg));
@@ -793,7 +813,9 @@ impl LSRegAlloc<'_> {
         // Find registers which contain operands we need to satisfy our constraints.
         for (cnstr, cnstr_reg) in cnstrs.iter().zip(cnstr_regs.iter()) {
             match cnstr {
-                GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } => {
+                GPConstraint::Input { op, .. }
+                | GPConstraint::InputOutput { op, .. }
+                | GPConstraint::AlignExtension { op, .. } => {
                     if self.is_input_in_gp_reg(op, *cnstr_reg) {
                         // The very happy case: the operand is already in the right register.
                         moves[usize::from(cnstr_reg.code())] = Some(*cnstr_reg);
@@ -858,6 +880,7 @@ impl LSRegAlloc<'_> {
                 }
                 | GPConstraint::InputOutput { .. }
                 | GPConstraint::Output { .. }
+                | GPConstraint::AlignExtension { .. }
                 | GPConstraint::Clobber { .. }
                 | GPConstraint::Temporary => {
                     clobber_regs.set(*cnstr_reg);
@@ -1807,6 +1830,9 @@ pub(crate) enum GPConstraint {
         force_reg: Option<Rq>,
         can_be_same_as_input: bool,
     },
+    /// Align `op`'s upper bits to `out_ext`: the instruction must not use the resulting register
+    /// for any purposes.
+    AlignExtension { op: Operand, out_ext: RegExtension },
     /// This instruction clobbers `force_reg`.
     Clobber { force_reg: Rq },
     /// A temporary register that the instruction will clobber.
