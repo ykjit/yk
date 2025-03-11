@@ -2642,11 +2642,9 @@ impl<'a> Assemble<'a> {
         let [_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
-            [GPConstraint::InputOutput {
+            [GPConstraint::AlignExtension {
                 op: sinst.val(self.m),
-                in_ext: RegExtension::SignExtended,
                 out_ext: RegExtension::SignExtended,
-                force_reg: None,
             }],
         );
     }
@@ -2655,11 +2653,9 @@ impl<'a> Assemble<'a> {
         let [_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
-            [GPConstraint::InputOutput {
+            [GPConstraint::AlignExtension {
                 op: zinst.val(self.m),
-                in_ext: RegExtension::ZeroExtended,
                 out_ext: RegExtension::ZeroExtended,
-                force_reg: None,
             }],
         );
     }
