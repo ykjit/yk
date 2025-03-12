@@ -2387,6 +2387,17 @@ impl<'a> Assemble<'a> {
             if let VarLocation::Register(reg) = dst {
                 match reg {
                     Register::GP(r) => {
+                        if let GPConstraint::Input { op: cur_op, .. } =
+                            &gp_regs[usize::from(r.code())]
+                        {
+                            // Two operands both have to end up in the same register: if our
+                            // existing candidate is already in a register (i.e. is cheaper than
+                            // unspilling), we prefer that, otherwise we hope that the "new" one
+                            // we've seen might be in a register.
+                            if self.ra.find_op_in_gp_reg(cur_op).is_some() {
+                                continue;
+                            }
+                        }
                         gp_regs[usize::from(r.code())] = GPConstraint::Input {
                             op: op.clone(),
                             in_ext: RegExtension::Undefined,
