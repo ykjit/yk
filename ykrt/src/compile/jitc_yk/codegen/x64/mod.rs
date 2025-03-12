@@ -4702,6 +4702,41 @@ mod tests {
                 ",
             false,
         );
+
+        // Check that `zext`ing zero extended things doesn't allocate a new register.
+        codegen_and_test(
+            "
+              entry:
+                %0: i16 = param reg
+                %1: i32 = param reg
+                %2: i64 = param reg
+                %3: i32 = zext %0
+                %4: i64 = zext %0
+                %5: i64 = zext %3
+                %6: i64 = add %4, %5
+                black_box %0
+                black_box %1
+                black_box %2
+                black_box %3
+                black_box %4
+                black_box %5
+                black_box %6
+                ",
+            "
+                ...
+                ; %0: i16 = param ...
+                ; %1: i32 = param ...
+                ; %2: i64 = param ...
+                ; %3: i32 = zext %0
+                and eax, 0xffff
+                ; %4: i64 = zext %0
+                ; %5: i64 = zext %3
+                ; %6: i64 = add %4, %5
+                mov r.64._, rax
+                add rax, rax
+                ",
+            false,
+        );
     }
 
     #[test]
