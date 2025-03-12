@@ -4,7 +4,7 @@ set -eu
 
 # What git commit hash of yklua & ykcbf will we test in buildbot?
 YKLUA_REPO="https://github.com/ykjit/yklua.git"
-YKLUA_COMMIT="8a7a2082d941291de90c8314b52fc2bc91353e0c"
+YKLUA_COMMIT="31435c33e98b2a33b8036fd05d714f2d0cdac0bd"
 YKCBF_REPO="https://github.com/ykjit/ykcbf.git"
 YKCBF_COMMIT="431b92593180e1e376d08ecf383c4a1ab8473b3d"
 
