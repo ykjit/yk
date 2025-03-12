@@ -1623,9 +1623,8 @@ impl IntegerTy {
     /// Return the number of bytes required to store this integer type.
     ///
     /// Padding for alignment is not included.
-    #[cfg(test)]
-    pub(crate) fn bytew(&self) -> usize {
-        usize::try_from(self.bitw().div_ceil(8)).unwrap()
+    pub(crate) fn bytew(&self) -> u32 {
+        self.bitw().div_ceil(8)
     }
 
     /// Format a constant integer value that is of the type described by `self`.
@@ -1839,6 +1838,14 @@ impl Ty {
 
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableTy<'a> {
         DisplayableTy { type_: self, m }
+    }
+
+    pub(crate) fn bytew(&self) -> u32 {
+        match self {
+            Self::Integer(it) => it.bytew(),
+            Self::Ptr => u32::try_from(std::mem::size_of::<*const ()>()).unwrap(),
+            _ => todo!(),
+        }
     }
 }
 
