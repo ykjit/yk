@@ -173,12 +173,8 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 aot_ir::Inst::Promote { tyidx, .. }
                 | aot_ir::Inst::IdempotentPromote { tyidx, .. } => {
                     // Consume the correct number of bytes from the promoted values array.
-                    let width_bits = match self.aot_mod.type_(*tyidx) {
-                        aot_ir::Ty::Integer(x) => x.bitw(),
-                        _ => unreachable!(),
-                    };
-                    let width_bytes = usize::try_from(width_bits.div_ceil(8)).unwrap();
-                    self.promote_idx += width_bytes;
+                    self.promote_idx +=
+                        usize::try_from(self.aot_mod.type_(*tyidx).bytew()).unwrap();
                 }
                 aot_ir::Inst::DebugStr { .. } => {
                     // Skip this debug string.
