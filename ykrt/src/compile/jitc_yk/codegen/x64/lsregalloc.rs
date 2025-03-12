@@ -313,11 +313,22 @@ impl<'a> LSRegAlloc<'a> {
 impl LSRegAlloc<'_> {
     /// Forcibly assign the machine register `reg` to the value produced by instruction `iidx`.
     /// Note that if this register is already used, a spill will be generated instead.
-    pub(crate) fn force_assign_inst_gp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
+    pub(crate) fn force_assign_inst_gp_reg(
+        &mut self,
+        _asm: &mut Assembler,
+        iidx: InstIdx,
+        reg: Rq,
+    ) {
         if self.gp_regset.is_set(reg) {
-            // Input values alias to a single register. To avoid the rest of the register allocator
-            // having to think about this, we "dealias" the values by spilling.
-            self.force_assign_and_spill_inst_gp_reg(asm, iidx, reg);
+            match &mut self.gp_reg_states[usize::from(reg.code())] {
+                RegState::Reserved | RegState::Empty => unreachable!(),
+                RegState::FromConst(_, _) => todo!(),
+                RegState::FromInst(ref mut iidxs, _) => {
+                    // We have to assume that if LLVM told us that multiple instructions can live
+                    // in a single register that they can do safely.
+                    iidxs.push(iidx);
+                }
+            }
         } else {
             self.gp_regset.set(reg);
             self.gp_reg_states[usize::from(reg.code())] =
@@ -1030,7 +1041,7 @@ impl LSRegAlloc<'_> {
 
     /// Return a GP register containing the value for `op` or `None` if that value is not in any
     /// register.
-    fn find_op_in_gp_reg(&self, op: &Operand) -> Option<Rq> {
+    pub(super) fn find_op_in_gp_reg(&self, op: &Operand) -> Option<Rq> {
         self.find_op_in_gp_regs(op).nth(0)
     }
 
