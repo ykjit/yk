@@ -59,12 +59,22 @@ pub extern "C" fn __yk_promote_ptr(val: *const c_void) -> *const c_void {
     val
 }
 
-/// Records the return value of an idempotent function during trace recording.
+/// Records a 64-bit return value of an idempotent function during trace recording.
 #[no_mangle]
-pub extern "C" fn __yk_idempotent_promote_usize(val: usize) -> usize {
+pub extern "C" fn __yk_idempotent_promote_i64(val: i64) -> i64 {
     MTThread::with_borrow_mut(|mtt| {
         // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_usize(val);
+        mtt.promote_i64(val);
+    });
+    val
+}
+
+/// Records a 32-bit return value of an idempotent function during trace recording.
+#[no_mangle]
+pub extern "C" fn __yk_idempotent_promote_i32(val: i32) -> i32 {
+    MTThread::with_borrow_mut(|mtt| {
+        // We ignore the return value as we can't really cancel tracing from this function.
+        mtt.promote_i32(val);
     });
     val
 }
