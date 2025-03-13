@@ -28,8 +28,6 @@ pub(crate) struct TraceBuilder<Register: Send + Sync> {
     local_map: HashMap<aot_ir::InstID, jit_ir::Operand>,
     /// BBlock containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BBlockId>,
-    /// Index of the first [ParameterInst].
-    first_paraminst_idx: usize,
     /// Inlined calls.
     ///
     /// For a valid trace, this always contains at least one element, otherwise the trace returned
@@ -79,7 +77,6 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             )?,
             local_map: HashMap::new(),
             cp_block: None,
-            first_paraminst_idx: 0,
             // We have to insert a placeholder frame to represent the place we started tracing, as
             // we don't know where that is yet. We'll update it as soon as we do.
             frames: vec![InlinedFrame {
@@ -234,12 +231,6 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                     dyn_elem_sizes,
                     ..
                 } => {
-                    if self.cp_block.as_ref() == Some(bid) && iidx == self.first_paraminst_idx {
-                        // We've reached the trace inputs part of the control point block. There's
-                        // no point in copying these instructions over and we can just skip to the
-                        // next block.
-                        return Ok(());
-                    }
                     self.handle_ptradd(bid, iidx, ptr, *const_off, dyn_elem_counts, dyn_elem_sizes)
                 }
                 aot_ir::Inst::BinaryOp { lhs, binop, rhs } => {
