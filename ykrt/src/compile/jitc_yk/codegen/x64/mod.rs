@@ -3289,24 +3289,21 @@ impl<'a> AsmPrinter<'a> {
         let mut out = Vec::new();
         let len = self.buf.len();
         let bptr = self.buf.ptr(AssemblyOffset(0));
+        let start_ip = u64::try_from(bptr.addr()).unwrap();
         let code = unsafe { slice::from_raw_parts(bptr, len) };
         let fmt = zydis::Formatter::intel();
         let dec = zydis::Decoder::new64();
-        for insn_info in dec.decode_all::<zydis::VisibleOperands>(code, 0) {
-            let (off, _raw_bytes, insn) = insn_info.unwrap();
+        for insn_info in dec.decode_all::<zydis::VisibleOperands>(code, start_ip) {
+            let (ip, _raw_bytes, insn) = insn_info.unwrap();
+            let off = ip - start_ip;
             if let Some(lines) = self.comments.get(&usize::try_from(off).unwrap()) {
                 for line in lines {
                     out.push(format!("; {line}"));
                 }
             }
-            let istr = fmt.format(Some(off), &insn).unwrap();
+            let istr = fmt.format(Some(ip), &insn).unwrap();
             if self.with_addrs {
-                out.push(format!(
-                    "{:016x} {:08x}: {}",
-                    (bptr as u64) + off,
-                    off,
-                    istr
-                ));
+                out.push(format!("{:016x} {:08x}: {}", ip, off, istr));
             } else {
                 out.push(istr.to_string());
             }
@@ -4984,11 +4981,11 @@ mod tests {
                 ...
                 ; header_start [%0]
                 ; %2: i8 = add %0, %0
-                {{_}} {{off}}: ...
+                {{addr}} {{_}}: ...
                 ...
                 ; header_end [%0]
                 ...
-                {{_}} {{_}}: jmp 0x00000000{{off}}
+                {{_}} {{_}}: jmp 0x{{addr}}
             ",
             true,
         );
@@ -5082,12 +5079,12 @@ mod tests {
                 ...
                 ; %3: float = %2 ? %0 : %1
                 {{_}} {{_}}: bt r.32._, 0x00
-                {{_}} {{_}}: jb 0x00000000{{true_label}}
+                {{_}} {{_}}: jb 0x{{true_label}}
                 {{_}} {{_}}: movss fp.128.x, fp.128.y
-                {{_}} {{_}}: jmp 0x00000000{{done_label}}
-                {{_}} {{true_label}}: movss fp.128.x, fp.128.z
+                {{_}} {{_}}: jmp 0x{{done_label}}
+                {{true_label}} {{_}}: movss fp.128.x, fp.128.z
                 ; %4: float = fadd %0, %1
-                {{_}} {{done_label}}: ...
+                {{done_label}} {{_}}: ...
             ",
             true,
         );
@@ -5107,12 +5104,12 @@ mod tests {
                 ...
                 ; %3: double = %2 ? %0 : %1
                 {{_}} {{_}}: bt r.32._, 0x00
-                {{_}} {{_}}: jb 0x00000000{{true_label}}
+                {{_}} {{_}}: jb 0x{{true_label}}
                 {{_}} {{_}}: movsd fp.128.x, fp.128.y
-                {{_}} {{_}}: jmp 0x00000000{{done_label}}
-                {{_}} {{true_label}}: movsd fp.128.x, fp.128.z
+                {{_}} {{_}}: jmp 0x{{done_label}}
+                {{true_label}} {{_}}: movsd fp.128.x, fp.128.z
                 ; %4: double = fadd %0, %1
-                {{_}} {{done_label}}: ...
+                {{done_label}} {{_}}: ...
             ",
             true,
         );
