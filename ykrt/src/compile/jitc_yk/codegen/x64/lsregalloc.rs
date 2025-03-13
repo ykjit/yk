@@ -523,24 +523,17 @@ impl LSRegAlloc<'_> {
                 }
                 GPConstraint::AlignExtension { op, out_ext } => {
                     if self.is_input_in_gp_reg(op, reg) {
-                        if !self.is_inst_mergeable_into_reg(iidx, *out_ext, reg) {
-                            match op {
-                                Operand::Var(op_iidx) => {
-                                    let RegState::FromInst(_, cur_ext) =
-                                        self.gp_reg_states[usize::from(reg.code())]
-                                    else {
-                                        panic!()
-                                    };
-                                    self.gp_reg_states[usize::from(reg.code())] =
-                                        RegState::FromInst(vec![*op_iidx], cur_ext);
-                                }
-                                Operand::Const(_const_idx) => todo!(),
-                            }
-                        }
                         self.align_extensions(asm, reg, *out_ext);
                     } else {
                         self.put_input_in_gp_reg(asm, op, reg, *out_ext);
                     }
+                    let RegState::FromInst(ref mut iidxs, ext) =
+                        &mut self.gp_reg_states[usize::from(reg.code())]
+                    else {
+                        panic!()
+                    };
+                    assert_eq!(out_ext, ext);
+                    iidxs.push(iidx);
                 }
                 GPConstraint::Output { .. }
                 | GPConstraint::Clobber { force_reg: _ }
@@ -569,23 +562,8 @@ impl LSRegAlloc<'_> {
                     self.gp_reg_states[usize::from(reg.code())] =
                         RegState::FromInst(vec![iidx], out_ext);
                 }
-                GPConstraint::AlignExtension { op, out_ext } => {
+                GPConstraint::AlignExtension { .. } => {
                     assert!(self.gp_regset.is_set(reg));
-                    if self.is_input_in_gp_reg(&op, reg)
-                        && self.is_inst_mergeable_into_reg(iidx, out_ext, reg)
-                    {
-                        match &mut self.gp_reg_states[usize::from(reg.code())] {
-                            RegState::Reserved | RegState::Empty => unreachable!(),
-                            RegState::FromConst(_, _) => todo!(),
-                            RegState::FromInst(iidxs, cur_ext) => {
-                                iidxs.push(iidx);
-                                *cur_ext = out_ext;
-                            }
-                        }
-                    } else {
-                        self.gp_reg_states[usize::from(reg.code())] =
-                            RegState::FromInst(vec![iidx], out_ext);
-                    }
                 }
                 GPConstraint::Clobber { .. } | GPConstraint::Temporary => {
                     self.gp_regset.unset(reg);
@@ -691,9 +669,7 @@ impl LSRegAlloc<'_> {
                         RegExtension::SignExtended | RegExtension::ZeroExtended
                     );
                     for reg in self.find_op_in_gp_regs(op) {
-                        if !asgn_regs.is_set(reg)
-                            && self.is_inst_mergeable_into_reg(iidx, *out_ext, reg)
-                        {
+                        if !asgn_regs.is_set(reg) {
                             assert!(self.gp_regset.is_set(reg));
                             input_regs.set(reg);
                             cnstr_regs[i] = Some(reg);
@@ -924,16 +900,9 @@ impl LSRegAlloc<'_> {
                     op,
                     clobber_reg: false,
                     ..
-                } => {
-                    if !self.is_input_in_gp_reg(op, *cnstr_reg) {
-                        clobber_regs.set(*cnstr_reg);
-                    }
-                    asgn_regs.set(*cnstr_reg);
                 }
-                GPConstraint::AlignExtension { op, out_ext } => {
-                    if !(self.is_input_in_gp_reg(op, *cnstr_reg)
-                        && self.is_inst_mergeable_into_reg(iidx, *out_ext, *cnstr_reg))
-                    {
+                | GPConstraint::AlignExtension { op, out_ext: _ } => {
+                    if !self.is_input_in_gp_reg(op, *cnstr_reg) {
                         clobber_regs.set(*cnstr_reg);
                     }
                     asgn_regs.set(*cnstr_reg);
@@ -987,41 +956,6 @@ impl LSRegAlloc<'_> {
         out
     }
 
-    /// If:
-    ///   1. `iidx` contains a `sext`/`zext` instruction and wants to produce a value with
-    ///      extension `ext`, and
-    ///   2. `reg` already contains the [Operand] that will be sign/zero extended,
-    ///
-    /// can the result be merged into the register `reg`?
-    ///
-    /// The preconditions above are quite persnickety for a good reason: this function has much
-    /// more limited applicability than you might first think.
-    fn is_inst_mergeable_into_reg(&self, iidx: InstIdx, ext: RegExtension, reg: Rq) -> bool {
-        match &self.gp_reg_states[usize::from(reg.code())] {
-            RegState::Reserved => panic!(),
-            RegState::Empty => panic!(),
-            RegState::FromConst(_, _) => {
-                // TODO: constants currently aren't mergeable.
-            }
-            RegState::FromInst(iidxs, cur_ext) => {
-                // We can only merge if all the instructions in a register are
-                // the same bitwidth as what we want to merge in.
-                let new_bitw = self.m.inst(iidx).def_bitw(self.m);
-                if iidxs
-                    .iter()
-                    .all(|x| self.m.inst(*x).def_bitw(self.m) <= new_bitw)
-                {
-                    // We can only merge if we're not changing the extension or the
-                    // existing extension is undefined.
-                    if ext == *cur_ext || cur_ext == &RegExtension::Undefined {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
-    }
-
     /// Align `reg`'s sign/zero extension with `next_ext`. Returns the previous extension state of
     /// the register.
     fn align_extensions(
@@ -1043,7 +977,7 @@ impl LSRegAlloc<'_> {
                 iidxs
                     .iter()
                     .map(|x| self.m.inst(*x).def_bitw(self.m))
-                    .max()
+                    .min()
                     .unwrap(),
                 ext,
             ),
@@ -2586,6 +2520,7 @@ mod test {
                 %15: i64 = add %14, %5
                 %16: i64 = add %15, %5
                 %17: i64 = add %16, %5
+                %18: i64 = add %17, %5
                 black_box %3
                 black_box %6
                 black_box %7
@@ -2599,6 +2534,7 @@ mod test {
                 black_box %15
                 black_box %16
                 black_box %17
+                black_box %18
         ",
         );
 
@@ -2726,38 +2662,29 @@ mod test {
         check_reg_states(
             &reg_states,
             InstIdx::unchecked_from(6),
-            HashMap::from([
-                (
-                    "rax",
-                    RegState::FromInst(
-                        vec![
-                            InstIdx::unchecked_from(0),
-                            InstIdx::unchecked_from(3),
-                            InstIdx::unchecked_from(4),
-                            InstIdx::unchecked_from(5),
-                        ],
-                        RegExtension::ZeroExtended,
-                    ),
+            HashMap::from([(
+                "rax",
+                RegState::FromInst(
+                    vec![
+                        InstIdx::unchecked_from(0),
+                        InstIdx::unchecked_from(3),
+                        InstIdx::unchecked_from(4),
+                        InstIdx::unchecked_from(5),
+                        InstIdx::unchecked_from(6),
+                    ],
+                    RegExtension::SignExtended,
                 ),
-                (
-                    "r15",
-                    RegState::FromInst(
-                        vec![InstIdx::unchecked_from(3), InstIdx::unchecked_from(6)],
-                        RegExtension::SignExtended,
-                    ),
-                ),
-            ]),
+            )]),
         );
 
         #[allow(clippy::needless_range_loop)]
-        for i in 7..16 {
+        for i in 7..17 {
             assert!(spill_states[i]
                 .iter()
                 .all(|x| matches!(x, SpillState::Empty)));
         }
 
-        assert_matches!(spill_states[17][3], SpillState::Stack(_));
-        assert_matches!(spill_states[17][6], SpillState::Stack(_));
+        assert_matches!(spill_states[18][7], SpillState::Stack(_));
     }
 
     #[test]
