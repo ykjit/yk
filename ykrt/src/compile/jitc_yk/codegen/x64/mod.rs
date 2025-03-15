@@ -2376,13 +2376,7 @@ impl<'a> Assemble<'a> {
             .collect::<Vec<_>>();
         for (i, op) in src_ops.iter().enumerate() {
             let op = op.unpack(self.m);
-            let src = self.op_to_var_location(op.clone());
-            let dst = tgt_vars[i];
-            if dst == src {
-                // The value is already in the correct place.
-                continue;
-            }
-            if let VarLocation::Register(reg) = dst {
+            if let VarLocation::Register(reg) = tgt_vars[i] {
                 match reg {
                     Register::GP(r) => {
                         gp_regs[usize::from(r.code())] = GPConstraint::Input {
