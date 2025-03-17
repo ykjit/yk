@@ -1241,25 +1241,7 @@ impl<'a> Assemble<'a> {
         debug_assert!(self.m.inst(iidx).def_bitw(self.m) <= 64);
         match m {
             VarLocation::Register(Register::GP(reg)) => {
-                // If this register is not used by a "meaningful" (i.e. non-`Guard`-or-`*End`)
-                // instruction, we immediately spill it, so that the register allocator has more
-                // free registers to play with from the very beginning.
-                let mut meaningful = false;
-                for iidx in self.ra.rev_an.iter_uses(iidx) {
-                    match self.m.inst(iidx) {
-                        Inst::Guard(_) | Inst::TraceHeaderEnd | Inst::TraceBodyEnd => (),
-                        _ => {
-                            meaningful = true;
-                            break;
-                        }
-                    }
-                }
-                if meaningful {
-                    self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
-                } else {
-                    self.ra
-                        .force_assign_and_spill_inst_gp_reg(&mut self.asm, iidx, reg);
-                }
+                self.ra.force_assign_inst_gp_reg(&mut self.asm, iidx, reg);
             }
             VarLocation::Register(Register::FP(reg)) => {
                 self.ra.force_assign_inst_fp_reg(iidx, reg);
@@ -2027,20 +2009,24 @@ impl<'a> Assemble<'a> {
         if bitw == 32 || bitw == 64 {
             in_ext = RegExtension::Undefined;
         }
-        if let Some(v) = imm {
-            let [lhs_reg] = self.ra.assign_gp_regs(
+        let patch_reg = if let Some(v) = imm {
+            let [lhs_reg, patch_reg] = self.ra.assign_gp_regs(
                 &mut self.asm,
                 ic_iidx,
-                [GPConstraint::Input {
-                    op: lhs,
-                    in_ext,
-                    force_reg: None,
-                    clobber_reg: false,
-                }],
+                [
+                    GPConstraint::Input {
+                        op: lhs,
+                        in_ext,
+                        force_reg: None,
+                        clobber_reg: false,
+                    },
+                    GPConstraint::Temporary,
+                ],
             );
             self.cg_cmp_const(bitw, lhs_reg, v);
+            patch_reg
         } else {
-            let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
+            let [lhs_reg, rhs_reg, patch_reg] = self.ra.assign_gp_regs(
                 &mut self.asm,
                 ic_iidx,
                 [
@@ -2056,16 +2042,14 @@ impl<'a> Assemble<'a> {
                         force_reg: None,
                         clobber_reg: false,
                     },
+                    GPConstraint::Temporary,
                 ],
             );
             self.cg_cmp_regs(bitw, lhs_reg, rhs_reg);
-        }
+            patch_reg
+        };
 
         // Codegen guard
-        self.ra.expire_regs(g_iidx);
-        let [patch_reg] = self
-            .ra
-            .assign_gp_regs(&mut self.asm, ic_iidx, [GPConstraint::Temporary]);
         self.patch_reg.insert(g_inst.gidx.into(), patch_reg);
         let fail_label = self.guard_to_deopt(&g_inst);
         self.comment(Inst::Guard(g_inst).display(self.m, g_iidx).to_string());
@@ -2379,6 +2363,17 @@ impl<'a> Assemble<'a> {
             if let VarLocation::Register(reg) = tgt_vars[i] {
                 match reg {
                     Register::GP(r) => {
+                        if let GPConstraint::Input { op: cur_op, .. } =
+                            &gp_regs[usize::from(r.code())]
+                        {
+                            // Two operands both have to end up in the same register: if our
+                            // existing candidate is already in a register (i.e. is cheaper than
+                            // unspilling), we prefer that, otherwise we hope that the "new" one
+                            // we've seen might be in a register.
+                            if self.ra.find_op_in_gp_reg(cur_op).is_some() {
+                                continue;
+                            }
+                        }
                         gp_regs[usize::from(r.code())] = GPConstraint::Input {
                             op: op.clone(),
                             in_ext: RegExtension::Undefined,
@@ -2634,11 +2629,9 @@ impl<'a> Assemble<'a> {
         let [_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
-            [GPConstraint::InputOutput {
+            [GPConstraint::AlignExtension {
                 op: sinst.val(self.m),
-                in_ext: RegExtension::SignExtended,
                 out_ext: RegExtension::SignExtended,
-                force_reg: None,
             }],
         );
     }
@@ -2647,11 +2640,9 @@ impl<'a> Assemble<'a> {
         let [_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
-            [GPConstraint::InputOutput {
+            [GPConstraint::AlignExtension {
                 op: zinst.val(self.m),
-                in_ext: RegExtension::ZeroExtended,
                 out_ext: RegExtension::ZeroExtended,
-                force_reg: None,
             }],
         );
     }
@@ -4698,6 +4689,41 @@ mod tests {
                 ",
             false,
         );
+
+        // Check that `zext`ing zero extended things doesn't allocate a new register.
+        codegen_and_test(
+            "
+              entry:
+                %0: i16 = param reg
+                %1: i32 = param reg
+                %2: i64 = param reg
+                %3: i32 = zext %0
+                %4: i64 = zext %0
+                %5: i64 = zext %3
+                %6: i64 = add %4, %5
+                black_box %0
+                black_box %1
+                black_box %2
+                black_box %3
+                black_box %4
+                black_box %5
+                black_box %6
+                ",
+            "
+                ...
+                ; %0: i16 = param ...
+                ; %1: i32 = param ...
+                ; %2: i64 = param ...
+                ; %3: i32 = zext %0
+                and eax, 0xffff
+                ; %4: i64 = zext %0
+                ; %5: i64 = zext %3
+                ; %6: i64 = add %4, %5
+                mov r.64._, rax
+                add rax, rax
+                ",
+            false,
+        );
     }
 
     #[test]
@@ -4735,7 +4761,6 @@ mod tests {
             "
                 ...
                 ; guard true, %0, [] ; ...
-                movzx r.64._, byte ptr ...
                 bt r.32._, 0x00
                 jnb 0x...
                 ...
@@ -4767,7 +4792,6 @@ mod tests {
             "
                 ...
                 ; guard false, %0, [] ; ...
-                movzx r.64._, byte ptr ...
                 bt r.32._, 0x00
                 jb 0x...
                 ...
@@ -4802,7 +4826,6 @@ mod tests {
             "
                 ...
                 ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8] ; trace_gidx 0 safepoint_id 0
-                movzx r.64._, byte ptr ...
                 bt r.32._, 0x00
                 jb 0x...
                 ...
@@ -5637,7 +5660,7 @@ mod tests {
                 ...
                 ; header_start [%0]
                 ; header_end [42i8]
-                mov byte ptr [rbp-0x01], 0x2a
+                mov eax, 0x2a
                 jmp ...
             ",
             false,
