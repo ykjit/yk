@@ -1,7 +1,7 @@
 //! The main end-user interface to the meta-tracing system.
 
 use std::{
-    assert_matches::{assert_matches, debug_assert_matches},
+    assert_matches::debug_assert_matches,
     cell::RefCell,
     cmp,
     collections::{HashMap, HashSet, VecDeque},
@@ -892,10 +892,38 @@ impl MT {
     /// Inform this `MT` instance that `deopt` has occurred: this updates the stack of
     /// [MTThreadState]s.
     pub(crate) fn deopt(self: &Arc<Self>) {
-        MTThread::with_borrow_mut(|mtt| {
-            let st = mtt.pop_tstate();
-            assert_matches!(st, MTThreadState::Executing { .. });
-        });
+        loop {
+            let st = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
+            match st {
+                MTThreadState::Interpreting => todo!(),
+                MTThreadState::Tracing {
+                    hl, thread_tracer, ..
+                } => {
+                    let mut lk = hl.lock();
+                    match &lk.kind {
+                        HotLocationKind::Compiled(_) => todo!(),
+                        HotLocationKind::Compiling => todo!(),
+                        HotLocationKind::Counting(_) => todo!(),
+                        HotLocationKind::DontTrace => todo!(),
+                        HotLocationKind::Tracing => match lk.tracecompilation_error(self) {
+                            TraceFailed::KeepTrying => {
+                                lk.kind = HotLocationKind::Counting(0);
+                            }
+                            TraceFailed::DontTrace => {
+                                lk.kind = HotLocationKind::DontTrace;
+                            }
+                        },
+                        HotLocationKind::SideTracing { root_ctr, .. } => {
+                            lk.kind = HotLocationKind::Compiled(Arc::clone(root_ctr));
+                        }
+                    }
+                    drop(lk);
+                    thread_tracer.stop().ok();
+                    self.log.log(Verbosity::JITEvent, "tracing-aborted");
+                }
+                MTThreadState::Executing { .. } => return,
+            }
+        }
     }
 
     /// Inform this meta-tracer that guard `gidx` has failed.
@@ -974,7 +1002,6 @@ unsafe extern "C" fn __yk_exec_trace(
 
 /// [MTThread]'s major job is to record what state in the "interpreting/tracing/executing"
 /// state-machine this thread is in. This enum contains the states.
-#[derive(Debug)]
 enum MTThreadState {
     /// This thread is executing in the normal interpreter: it is not executing a trace or
     /// recording a trace.
@@ -1019,6 +1046,16 @@ enum MTThreadState {
         /// [MT] instance.
         ctr: Arc<dyn CompiledTrace>,
     },
+}
+
+impl std::fmt::Debug for MTThreadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interpreting => write!(f, "Interpreting"),
+            Self::Tracing { .. } => write!(f, "Tracing"),
+            Self::Executing { .. } => write!(f, "Executing"),
+        }
+    }
 }
 
 /// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
@@ -1070,7 +1107,9 @@ impl MTThread {
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn is_tracing(&self) -> bool {
-        matches!(self.tstate.last().unwrap(), &MTThreadState::Tracing { .. })
+        self.tstate
+            .iter()
+            .any(|x| matches!(x, &MTThreadState::Tracing { .. }))
     }
 
     /// Return a reference to the [CompiledTrace] with ID `ctrid`.
@@ -1080,10 +1119,12 @@ impl MTThread {
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn running_trace(&self, ctrid: CompiledTraceId) -> Arc<dyn CompiledTrace> {
-        let MTThreadState::Executing { ctr } = self.peek_tstate() else {
-            panic!()
-        };
-        Arc::clone(&ctr.mt().as_ref().compiled_traces.lock()[&ctrid])
+        for tstate in self.tstate.iter().rev() {
+            if let MTThreadState::Executing { ctr } = tstate {
+                return Arc::clone(&ctr.mt().as_ref().compiled_traces.lock()[&ctrid]);
+            }
+        }
+        panic!();
     }
 
     /// Return a reference to the last element on the stack of [MTThreadState]s.
