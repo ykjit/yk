@@ -30,8 +30,6 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int foo(int i) { return i + 3; }
-
 struct P {
   int *yklocs;
   int *code;
