@@ -62,6 +62,8 @@ handle_arg() {
             OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-embed-ir"
             # Add pthread_create wrapper function (__wrap_pthread_create)
             OUTPUT="${OUTPUT} -Wl,--wrap=pthread_create"
+            # Add wrapper for `pthread_exit`.
+            OUTPUT="${OUTPUT} -Wl,--wrap=pthread_exit"
 
             # Disable machine passes that would interfere with block mapping.
             #

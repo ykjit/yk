@@ -716,6 +716,12 @@ impl GlobalDecl {
         self.is_threadlocal
     }
 
+    /// Return the global variable's name.
+    #[cfg(not(test))]
+    pub(crate) fn name(&self) -> &CString {
+        &self.name
+    }
+
     /// Return the declaration's index in the global variable pointer array.
     #[cfg(not(test))]
     pub(crate) fn global_ptr_idx(&self) -> aot_ir::GlobalDeclIdx {
