@@ -10,7 +10,7 @@
 //     yk-jit-event: deoptimise
 //     ...
 
-// Check that inlining a function with a void return type works.
+// Check inlining a function into the trace that has a void return type.
 
 #include <assert.h>
 #include <stdio.h>

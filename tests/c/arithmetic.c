@@ -40,8 +40,6 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int foo(int i) { return i + 3; }
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);

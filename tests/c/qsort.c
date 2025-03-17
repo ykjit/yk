@@ -40,7 +40,7 @@ int cmp(const void *a, const void *b) {
     return 1;
 }
 
-__attribute__((noinline)) void print_elems(int elems[]) {
+void print_elems(int elems[]) {
   for (int i = 0; i < N_ELEMS; i++)
     fprintf(stderr, "%d ", elems[i]);
   fprintf(stderr, "end\n");

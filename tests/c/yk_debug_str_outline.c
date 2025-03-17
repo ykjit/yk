@@ -46,7 +46,7 @@
 
 #define MAX_MSG 128
 
-__attribute__((yk_outline,noinline))
+__attribute__((yk_outline))
 void f() {
   yk_debug_str("inside f");
 }

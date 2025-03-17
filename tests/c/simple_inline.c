@@ -22,7 +22,8 @@
 //     yk-jit-event: deoptimise
 //     exit
 
-// Check that return values of inlined functions are properly mapped.
+// Check that return values of fucntions inlined into the trace are properly
+// mapped.
 
 #include <assert.h>
 #include <stdio.h>
