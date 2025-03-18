@@ -630,7 +630,7 @@ impl LSRegAlloc<'_> {
                 GPConstraint::Output { .. }
                 | GPConstraint::InputOutput { .. }
                 | GPConstraint::AlignExtension { .. } => {
-                    if let Some(Register::GP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
+                    if let Some(Register::GP(reg)) = self.rev_an.reg_hint(iidx) {
                         if !asgn_regs.is_set(reg) {
                             cnstr_regs[i] = Some(reg);
                             asgn_regs.set(reg);
@@ -1408,7 +1408,7 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Output
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::InputOutput(_) => {
-                    if let Some(Register::FP(reg)) = self.rev_an.reg_hints[usize::from(iidx)] {
+                    if let Some(Register::FP(reg)) = self.rev_an.reg_hint(iidx) {
                         if !avoid.is_set(reg) {
                             *cnstr = match cnstr {
                                 RegConstraint::Output => RegConstraint::OutputFromReg(reg),

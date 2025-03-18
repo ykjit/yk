@@ -45,7 +45,7 @@ pub(crate) struct RevAnalyse<'a> {
     /// `[[2, 1], [], [4, 3]]` but `[[1, 2], ..]` is invalid.
     def_use: Vec<Vec<InstIdx>>,
     /// What [Register] should an instruction aim to put its output to?
-    pub(crate) reg_hints: Vec<Option<Register>>,
+    reg_hints: Vec<Option<Register>>,
 }
 
 impl<'a> RevAnalyse<'a> {
@@ -226,6 +226,12 @@ impl<'a> RevAnalyse<'a> {
     pub(super) fn used_later_than(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
         self.inst_vals_alive_until[usize::from(cur_iidx)]
             >= self.inst_vals_alive_until[usize::from(query_iidx)]
+    }
+
+    /// Which register should the output of `cur_iidx` ideally be put into? Note: this is a hint,
+    /// not a demand, and not following it does not affect correctness!
+    pub(super) fn reg_hint(&self, cur_iidx: InstIdx) -> Option<Register> {
+        self.reg_hints[usize::from(cur_iidx)]
     }
 
     /// Record that `use_iidx` is used at instruction `def_iidx`.
