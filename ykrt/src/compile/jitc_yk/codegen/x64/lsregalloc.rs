@@ -630,7 +630,7 @@ impl LSRegAlloc<'_> {
                 GPConstraint::Output { .. }
                 | GPConstraint::InputOutput { .. }
                 | GPConstraint::AlignExtension { .. } => {
-                    if let Some(Register::GP(reg)) = self.rev_an.reg_hint(iidx) {
+                    if let Some(Register::GP(reg)) = self.rev_an.reg_hint(iidx, iidx) {
                         if !asgn_regs.is_set(reg) {
                             cnstr_regs[i] = Some(reg);
                             asgn_regs.set(reg);
@@ -705,6 +705,27 @@ impl LSRegAlloc<'_> {
                     Operand::Const(_) => {
                         reusable_input_cnstr = Some(i);
                     }
+                }
+            }
+        }
+
+        // For input values we will need to unspill, put them in a hint register if possible.
+        for (i, cnstr) in constraints.iter().enumerate() {
+            if cnstr_regs[i].is_some() {
+                // We've already allocated this constraint.
+                continue;
+            }
+            if let GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } = cnstr {
+                match op {
+                    Operand::Var(query_iidx) => {
+                        if let Some(Register::GP(reg)) = self.rev_an.reg_hint(iidx, *query_iidx) {
+                            if !asgn_regs.is_set(reg) {
+                                cnstr_regs[i] = Some(reg);
+                                asgn_regs.set(reg);
+                            }
+                        }
+                    }
+                    Operand::Const(_) => (),
                 }
             }
         }
@@ -933,6 +954,23 @@ impl LSRegAlloc<'_> {
                         .iter()
                         .any(|x| self.rev_an.is_inst_var_still_used_after(iidx, *x))
                     {
+                        // If a variable has a register hint, and that register is available, it's
+                        // a perfect candidate for moving. We could be really clever here, and copy
+                        // multiple times if `op_iidx.len() > 1`. For now, we just find the first
+                        // variable with a hint that maps to an unused register.
+                        for op_iidx in op_iidxs {
+                            if let Some(Register::GP(hint_reg)) =
+                                self.rev_an.reg_hint(iidx.checked_add(1).unwrap(), *op_iidx)
+                            {
+                                if !asgn_regs.is_set(reg) {
+                                    out.push((hint_reg, RegAction::CopyFrom(reg)));
+                                    asgn_regs.set(hint_reg);
+                                    continue 'a;
+                                }
+                            }
+                        }
+
+                        // Try and find any empty register that's available.
                         for (empty_reg_i, _) in self
                             .gp_reg_states
                             .iter()
@@ -1408,7 +1446,7 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Output
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::InputOutput(_) => {
-                    if let Some(Register::FP(reg)) = self.rev_an.reg_hint(iidx) {
+                    if let Some(Register::FP(reg)) = self.rev_an.reg_hint(iidx, iidx) {
                         if !avoid.is_set(reg) {
                             *cnstr = match cnstr {
                                 RegConstraint::Output => RegConstraint::OutputFromReg(reg),
