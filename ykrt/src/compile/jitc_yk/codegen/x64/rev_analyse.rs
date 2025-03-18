@@ -16,8 +16,9 @@ use super::{Register, VarLocation};
 use crate::compile::jitc_yk::{
     codegen::x64::{ARG_FP_REGS, ARG_GP_REGS},
     jit_ir::{
-        BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, ICmpInst, Inst, InstIdx, LoadInst, Module,
-        Operand, PtrAddInst, SExtInst, SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
+        BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, ICmpInst, IndirectCallInst, Inst, InstIdx,
+        LoadInst, Module, Operand, PtrAddInst, SExtInst, SelectInst, StoreInst, TraceKind,
+        TruncInst, Ty, ZExtInst,
     },
     YkSideTraceInfo,
 };
@@ -184,7 +185,7 @@ impl<'a> RevAnalyse<'a> {
                 Inst::BinOp(x) => self.an_binop(iidx, x),
                 Inst::Call(x) => self.an_call(iidx, x),
                 Inst::ICmp(x) => self.an_icmp(iidx, x),
-                Inst::PtrAdd(x) => self.an_ptradd(iidx, x),
+                Inst::IndirectCall(x) => self.an_indirect_call(iidx, self.m.indirect_call(x)),
                 Inst::DynPtrAdd(x) => self.an_dynptradd(iidx, x),
                 // "Inline" `PtrAdd`s into loads/stores, and don't mark the `PtrAdd` as used. This
                 // means that some (though not all) `PtrAdd`s will not lead to actual code being
@@ -194,6 +195,7 @@ impl<'a> RevAnalyse<'a> {
                         return;
                     }
                 }
+                Inst::PtrAdd(x) => self.an_ptradd(iidx, x),
                 Inst::Store(x) => {
                     if self.an_store(iidx, x) {
                         return;
@@ -376,6 +378,28 @@ impl<'a> RevAnalyse<'a> {
 
     fn an_icmp(&mut self, iidx: InstIdx, icinst: ICmpInst) {
         self.push_reg_hint(iidx, icinst.lhs(self.m));
+    }
+
+    fn an_indirect_call(&mut self, iidx: InstIdx, cinst: &IndirectCallInst) {
+        let mut gp_regs = ARG_GP_REGS.iter();
+        let mut fp_regs = ARG_FP_REGS.iter();
+        for aidx in cinst.iter_args_idx() {
+            match self.m.type_(self.m.arg(aidx).tyidx(self.m)) {
+                Ty::Void => unreachable!(),
+                Ty::Integer(_) | Ty::Ptr => {
+                    if let Some(reg) = gp_regs.next() {
+                        self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::GP(*reg));
+                    }
+                }
+                Ty::Func(_) => todo!(),
+                Ty::Float(_) => {
+                    if let Some(reg) = fp_regs.next() {
+                        self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::FP(*reg));
+                    }
+                }
+                Ty::Unimplemented(_) => panic!(),
+            }
+        }
     }
 
     fn an_ptradd(&mut self, iidx: InstIdx, painst: PtrAddInst) {
