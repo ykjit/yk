@@ -16,9 +16,9 @@ use super::{Register, VarLocation};
 use crate::compile::jitc_yk::{
     codegen::x64::{ARG_FP_REGS, ARG_GP_REGS},
     jit_ir::{
-        BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, ICmpInst, IndirectCallInst, Inst, InstIdx,
-        LoadInst, Module, Operand, PtrAddInst, SExtInst, SelectInst, StoreInst, TraceKind,
-        TruncInst, Ty, ZExtInst,
+        BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst, IndirectCallInst,
+        Inst, InstIdx, LoadInst, Module, Operand, PtrAddInst, SExtInst, SelectInst, StoreInst,
+        TraceKind, TruncInst, Ty, ZExtInst,
     },
     YkSideTraceInfo,
 };
@@ -184,6 +184,7 @@ impl<'a> RevAnalyse<'a> {
                 }
                 Inst::BinOp(x) => self.an_binop(iidx, x),
                 Inst::Call(x) => self.an_call(iidx, x),
+                Inst::Guard(x) => self.an_guard(iidx, x),
                 Inst::ICmp(x) => self.an_icmp(iidx, x),
                 Inst::IndirectCall(x) => self.an_indirect_call(iidx, self.m.indirect_call(x)),
                 Inst::DynPtrAdd(x) => self.an_dynptradd(iidx, x),
@@ -408,6 +409,10 @@ impl<'a> RevAnalyse<'a> {
 
     fn an_dynptradd(&mut self, iidx: InstIdx, dpainst: DynPtrAddInst) {
         self.push_reg_hint(iidx, dpainst.num_elems(self.m));
+    }
+
+    fn an_guard(&mut self, iidx: InstIdx, ginst: GuardInst) {
+        self.push_reg_hint(iidx, ginst.cond(self.m));
     }
 
     /// Analyse a [LoadInst]. Returns `true` if it has been inlined and should not go through the
