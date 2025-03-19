@@ -16,6 +16,7 @@
 
 use super::{
     super::{
+        arbbitint::ArbBitInt,
         jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, TraceKind, Ty},
         CompilationError,
     },
@@ -1981,11 +1982,16 @@ impl<'a> Assemble<'a> {
     /// zero-extended to 32 bits, otherwise return `None`.
     fn op_to_zero_ext_i32(&self, op: &Operand) -> Option<i32> {
         if let Operand::Const(cidx) = op {
-            if let Const::Int(_, x) = self.m.const_(*cidx) {
-                return x.to_zero_ext_u32().map(|x| x as i32);
+            match self.m.const_(*cidx) {
+                Const::Float(_, _) => todo!(),
+                Const::Int(_, v) => v.to_zero_ext_u32().map(|x| x.cast_signed()),
+                Const::Ptr(v) => ArbBitInt::from_u64(64, u64::try_from(*v).unwrap())
+                    .to_zero_ext_u32()
+                    .map(|x| x.cast_signed()),
             }
+        } else {
+            None
         }
-        None
     }
 
     fn cg_cmp_const(&mut self, bitw: u32, lhs_reg: Rq, rhs: i32) {
@@ -3603,7 +3609,7 @@ mod tests {
     }
 
     #[test]
-    fn cg_load_const_ptr() {
+    fn cg_store_const_ptr() {
         codegen_and_test(
             "
               entry:
@@ -3613,10 +3619,27 @@ mod tests {
             "
                 ...
                 ; *%0 = 0x0
-                mov r.64.x, 0x00
-                mov [r.64.y], r.64.x
-                ...
+                mov qword ptr [rax], 0x00
                 ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_const_ptr() {
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: i1 = eq %0, 0x1234
+                black_box %1
+            ",
+            "
+                ...
+                ; %1: i1 = eq %0, 0x1234
+                cmp rax, 0x1234
+                setz r.8._
+            ",
             false,
         );
     }
