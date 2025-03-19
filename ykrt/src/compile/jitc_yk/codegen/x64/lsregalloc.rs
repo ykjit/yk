@@ -1199,37 +1199,52 @@ impl LSRegAlloc<'_> {
             RegState::Empty => (),
             RegState::FromConst(_, _) => (),
             RegState::FromInst(query_iidxs, ext) => {
-                for query_iidx in query_iidxs {
-                    if self
-                        .rev_an
-                        .is_inst_var_still_used_after(cur_iidx, *query_iidx)
-                        && self.spills[usize::from(*query_iidx)] == SpillState::Empty
-                    {
-                        let inst = self.m.inst(*query_iidx);
-                        let bitw = inst.def_bitw(self.m);
-                        let bytew = inst.def_byte_size(self.m);
-                        debug_assert!(usize::try_from(bitw).unwrap() >= bytew);
-                        self.stack.align(bytew);
-                        let frame_off = self.stack.grow(bytew);
-                        let off = i32::try_from(frame_off).unwrap();
-                        match bitw {
-                            1 => {
-                                if *ext == RegExtension::ZeroExtended {
-                                    dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code()));
-                                } else {
-                                    dynasm!(asm
-                                        ; bt Rd(reg.code()), 0
-                                        ; setc BYTE [rbp - off]
-                                    );
-                                }
+                // First work out the non-strict subset of `query_iidx`s which are not yet spilled.
+                let need_spilling = query_iidxs
+                    .iter()
+                    .filter(|x| {
+                        self.rev_an.is_inst_var_still_used_after(cur_iidx, **x)
+                            && self.spills[usize::from(**x)] == SpillState::Empty
+                    })
+                    .collect::<Vec<_>>();
+                if !need_spilling.is_empty() {
+                    // When multiple variables exist in a single register, we only need to spill
+                    // the maximum-sized variable: the other values are all contained within it.
+                    // Conveniently, because the stack grows downwards, the offset is correct for
+                    // each variable too.
+                    let bitw = need_spilling
+                        .iter()
+                        .map(|x| self.m.inst(**x).def_bitw(self.m))
+                        .max()
+                        .unwrap();
+                    let bytew = need_spilling
+                        .iter()
+                        .map(|x| self.m.inst(**x).def_byte_size(self.m))
+                        .max()
+                        .unwrap();
+                    self.stack.align(bytew);
+                    let frame_off = self.stack.grow(bytew);
+                    let off = i32::try_from(frame_off).unwrap();
+                    match bitw {
+                        1 => {
+                            if *ext == RegExtension::ZeroExtended {
+                                dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code()));
+                            } else {
+                                dynasm!(asm
+                                    ; bt Rd(reg.code()), 0
+                                    ; setc BYTE [rbp - off]
+                                );
                             }
-                            8 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
-                            16 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
-                            32 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
-                            64 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
-                            _ => unreachable!(),
                         }
-                        self.spills[usize::from(*query_iidx)] = SpillState::Stack(off);
+                        8 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
+                        16 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
+                        32 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
+                        64 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
+                        _ => unreachable!(),
+                    }
+
+                    for iidx in need_spilling {
+                        self.spills[usize::from(*iidx)] = SpillState::Stack(off);
                     }
                 }
             }
@@ -2392,8 +2407,9 @@ mod test {
             %11: i8 = add %0, %10
             %12: i8 = add %0, %11
             %13: i8 = add %0, %12
-            %14: i8 = add %0, %13
+            %14: i64 = zext %1
             %15: i8 = add %0, %13
+            %16: i8 = add %0, %13
             black_box %1
             black_box %2
             black_box %3
@@ -2409,6 +2425,7 @@ mod test {
             black_box %13
             black_box %14
             black_box %15
+            black_box %16
         ",
         );
 
@@ -2456,6 +2473,16 @@ mod test {
                     }
                     _ => panic!(),
                 },
+                Inst::ZExt(zinst) => {
+                    let [_reg] = ra.assign_gp_regs(
+                        &mut asm,
+                        iidx,
+                        [GPConstraint::AlignExtension {
+                            op: zinst.val(&m),
+                            out_ext: RegExtension::ZeroExtended,
+                        }],
+                    );
+                }
                 _ => panic!(),
             }
             gp_regsets.push(ra.gp_regset);
@@ -2490,7 +2517,6 @@ mod test {
             );
         }
 
-        assert_matches!(spill_states[14][1], SpillState::Stack(_),);
         assert!(spill_states[14]
             .iter()
             .enumerate()
@@ -2506,28 +2532,28 @@ mod test {
                 ),
                 (
                     "r15",
-                    RegState::FromInst(vec![InstIdx::unchecked_from(14)], RegExtension::Undefined),
+                    RegState::FromInst(
+                        vec![InstIdx::unchecked_from(1), InstIdx::unchecked_from(14)],
+                        RegExtension::ZeroExtended,
+                    ),
                 ),
             ]),
         );
 
         assert_matches!(spill_states[15][1], SpillState::Stack(_),);
-        assert!(spill_states[15]
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != 1)
-            .all(|(_, x)| matches!(*x, SpillState::Empty)));
+        assert_matches!(spill_states[15][14], SpillState::Stack(_),);
+        assert_eq!(spill_states[15][1], spill_states[15][14]);
         check_reg_states(
             &reg_states,
             InstIdx::unchecked_from(15),
             HashMap::from([
                 (
                     "rax",
-                    RegState::FromInst(vec![InstIdx::unchecked_from(15)], RegExtension::Undefined),
+                    RegState::FromInst(vec![InstIdx::unchecked_from(0)], RegExtension::Undefined),
                 ),
                 (
                     "r15",
-                    RegState::FromInst(vec![InstIdx::unchecked_from(14)], RegExtension::Undefined),
+                    RegState::FromInst(vec![InstIdx::unchecked_from(15)], RegExtension::Undefined),
                 ),
             ]),
         );
