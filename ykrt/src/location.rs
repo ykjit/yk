@@ -284,7 +284,6 @@ impl HotLocation {
 }
 
 /// A `Location`'s non-counting states.
-#[derive(Debug)]
 pub(crate) enum HotLocationKind {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
@@ -313,6 +312,19 @@ pub(crate) enum HotLocationKind {
         /// descendent of `root_ctr`.
         parent_ctr: Arc<dyn CompiledTrace>,
     },
+}
+
+impl std::fmt::Debug for HotLocationKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Compiled(_) => write!(f, "Compiled"),
+            Self::Compiling => write!(f, "Compiling"),
+            Self::Counting(_) => write!(f, "Counting"),
+            Self::DontTrace => write!(f, "DontTrace"),
+            Self::Tracing => write!(f, "Tracing"),
+            Self::SideTracing { .. } => write!(f, "SideTracing"),
+        }
+    }
 }
 
 /// When a [HotLocation] has failed to compile a valid trace, should the [HotLocation] be tried

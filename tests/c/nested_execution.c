@@ -7,7 +7,7 @@
 //     yk-jit-event: start-tracing
 //     6
 //     enter
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     5
 //     yk-jit-event: start-tracing
 //     4
@@ -24,7 +24,7 @@
 //     yk-jit-event: start-tracing
 //     5
 //     enter
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     4
 //     yk-jit-event: enter-jit-code
 //     3
@@ -33,7 +33,7 @@
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-side-tracing
 //     return
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     4
 //     enter
 //     yk-jit-event: enter-jit-code
@@ -46,7 +46,7 @@
 //     c
 //     3
 //     enter
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     2
 //     yk-jit-event: enter-jit-code
 //     1
@@ -56,7 +56,7 @@
 //     b
 //     2
 //     enter
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     1
 //     return
 //     yk-jit-event: start-tracing

@@ -6,7 +6,7 @@
 //     6
 //     yk-jit-event: start-tracing
 //     5
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     ...
 
 // Check that traces that end in a different frame than they started in are

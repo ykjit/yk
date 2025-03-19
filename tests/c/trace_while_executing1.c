@@ -18,7 +18,7 @@
 //     1: 3
 //     0: 2
 //     0: 1
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted: tracing continued into a JIT frame
 //     yk-jit-event: deoptimise
 //     exit
 
