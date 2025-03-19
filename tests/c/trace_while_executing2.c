@@ -17,7 +17,7 @@
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-tracing
 //     1: 3
-//     yk-warning: tracing-aborted
+//     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     0: 2
 //     yk-jit-event: start-tracing
 //     0: 1
@@ -54,9 +54,6 @@ void loop(YkMT *mt, YkLocation *loc1, YkLocation *loc2, int i, int depth) {
 
 __attribute__((yk_outline))
 void indirect(YkMT *mt, YkLocation *loc1, YkLocation *loc2, int i, int depth) {
-  // for (int j = 0; j < i; j++)
-  //   printf(".");
-  // printf("\n");
   if (depth == 0 && i == 3)
     loop(mt, loc1, loc2, i, 1);
 }
