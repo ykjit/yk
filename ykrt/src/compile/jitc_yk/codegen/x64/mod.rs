@@ -1718,11 +1718,24 @@ impl<'a> Assemble<'a> {
                     .iter()
                     .position(|x| *x == Rq::RAX)
                     .unwrap();
-                gp_cnstrs[rax_i] = GPConstraint::Output {
-                    out_ext: RegExtension::ZeroExtended,
-                    force_reg: Some(Rq::RAX),
-                    can_be_same_as_input: false,
-                };
+                if callee.is_some() {
+                    // Direct call
+                    gp_cnstrs[rax_i] = GPConstraint::Output {
+                        out_ext: RegExtension::ZeroExtended,
+                        force_reg: Some(Rq::RAX),
+                        can_be_same_as_input: false,
+                    };
+                } else if let Some(op) = callee_op.clone() {
+                    // Indirect call
+                    if !fty.is_vararg() {
+                        gp_cnstrs[rax_i] = GPConstraint::InputOutput {
+                            op,
+                            in_ext: RegExtension::ZeroExtended,
+                            out_ext: RegExtension::ZeroExtended,
+                            force_reg: Some(Rq::RAX),
+                        };
+                    }
+                }
             }
             Ty::Func(_) => todo!(),
             Ty::Unimplemented(_) => todo!(),
@@ -1769,23 +1782,33 @@ impl<'a> Assemble<'a> {
             }
             (None, Some(op)) => {
                 // Indirect call
-                gp_cnstrs.push(GPConstraint::Input {
-                    op,
-                    in_ext: RegExtension::ZeroExtended,
-                    force_reg: None,
-                    clobber_reg: false,
-                });
-                let ([.., op_reg], _): ([Rq; CALLER_CLOBBER_REGS.len() + 1], [Rx; 16]) =
-                    self.ra.assign_regs(
-                        &mut self.asm,
-                        iidx,
-                        gp_cnstrs.clone().try_into().unwrap(),
-                        fp_cnstrs,
-                    );
-                if fty.is_vararg() {
-                    dynasm!(self.asm; mov rax, num_float_args); // SysV x64 ABI
+                if !fty.is_vararg() {
+                    let ([..], _): ([Rq; CALLER_CLOBBER_REGS.len()], [Rx; 16]) =
+                        self.ra.assign_regs(
+                            &mut self.asm,
+                            iidx,
+                            gp_cnstrs.clone().try_into().unwrap(),
+                            fp_cnstrs,
+                        );
+                    dynasm!(self.asm; call rax);
+                } else {
+                    gp_cnstrs.push(GPConstraint::Input {
+                        op,
+                        in_ext: RegExtension::ZeroExtended,
+                        force_reg: None,
+                        clobber_reg: false,
+                    });
+                    let ([.., op_reg], _): ([Rq; CALLER_CLOBBER_REGS.len() + 1], [Rx; 16]) =
+                        self.ra.assign_regs(
+                            &mut self.asm,
+                            iidx,
+                            gp_cnstrs.clone().try_into().unwrap(),
+                            fp_cnstrs,
+                        );
+                    dynasm!(self.asm
+                        ; mov rax, num_float_args
+                        ; call Rq(op_reg.code()));
                 }
-                dynasm!(self.asm; call Rq(op_reg.code()));
             }
             _ => unreachable!(),
         }
@@ -4607,6 +4630,55 @@ mod tests {
                ; %2: i64 = call @llvm.smax.i64(%0, %1)
                cmp r.64.a, r.64.b
                cmovl r.64.a, r.64.b
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_icall() {
+        codegen_and_test(
+            "
+              func_type f(i8) -> i16
+
+              entry:
+                %0: i8 = param reg
+                %1: ptr = param reg
+                %2: i16 = icall<f> %1(%0)
+                black_box %2
+            ",
+            "
+                ...
+                ; %2: i16 = icall %1(%0)
+                mov rdi, rax
+                mov rax, rcx
+                and edi, 0xff
+                call rax
+            ",
+            false,
+        );
+
+        codegen_and_test(
+            "
+              func_type f(i8, ...) -> i16
+
+              entry:
+                %0: i8 = param reg
+                %1: ptr = param reg
+                %2: double = param reg
+                %3: i16 = icall<f> %1(%0, %0, %2)
+                black_box %3
+            ",
+            "
+                ...
+                ; %3: i16 = icall %1(%0, %0, %2)
+                mov rsi, rax
+                mov rdi, rax
+                mov r15, rcx
+                and esi, 0xff
+                and edi, 0xff
+                mov rax, 0x01
+                call r15
             ",
             false,
         );
