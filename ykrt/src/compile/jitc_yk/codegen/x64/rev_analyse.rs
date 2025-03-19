@@ -16,13 +16,14 @@ use super::{Register, VarLocation};
 use crate::compile::jitc_yk::{
     codegen::x64::{ARG_FP_REGS, ARG_GP_REGS},
     jit_ir::{
-        BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, ICmpInst, Inst, InstIdx, LoadInst, Module,
-        Operand, PtrAddInst, SExtInst, SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
+        BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst, IndirectCallInst,
+        Inst, InstIdx, LoadInst, Module, Operand, PtrAddInst, SExtInst, SelectInst, StoreInst,
+        TraceKind, TruncInst, Ty, ZExtInst,
     },
     YkSideTraceInfo,
 };
 use dynasmrt::x64::Rq;
-use std::sync::Arc;
+use std::{assert_matches::assert_matches, sync::Arc};
 use vob::Vob;
 
 pub(crate) struct RevAnalyse<'a> {
@@ -44,8 +45,11 @@ pub(crate) struct RevAnalyse<'a> {
     /// *must* be sorted in reverse order (see [Self::next_use]) e.g. a valid `def_use` is
     /// `[[2, 1], [], [4, 3]]` but `[[1, 2], ..]` is invalid.
     def_use: Vec<Vec<InstIdx>>,
-    /// What [Register] should an instruction aim to put its output to?
-    pub(crate) reg_hints: Vec<Option<Register>>,
+    /// For each instruction, record the register we would prefer it to be in as the trace
+    /// progresses. For example `[[(1, rax), (4, rdi)], ...]` means "when generating code for
+    /// instruction %1, we would like %0 to already be in rax; when generating code for instruction
+    /// %2, we would like %) to already be in rdi".
+    reg_hints: Vec<Vec<(InstIdx, Register)>>,
 }
 
 impl<'a> RevAnalyse<'a> {
@@ -56,7 +60,7 @@ impl<'a> RevAnalyse<'a> {
             ptradds: vec![None; m.insts_len()],
             used_insts: Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1),
             def_use: vec![vec![]; m.insts_len()],
-            reg_hints: vec![None; m.insts_len()],
+            reg_hints: vec![vec![]; m.insts_len()],
         }
     }
 
@@ -66,20 +70,32 @@ impl<'a> RevAnalyse<'a> {
         // First we populate the register hints for the end of the trace...
         match self.m.tracekind() {
             TraceKind::HeaderOnly => {
-                for ((iidx, inst), jump_op) in
-                    self.m.iter_skipping_insts().zip(self.m.trace_header_end())
+                // Not all tests create "fully valid" traces, in the sense that -- to keep things
+                // simple -- they don't end with `TraceHeaderEnd`.
+                if let Some((hend_iidx, _)) = self
+                    .m
+                    .iter_skipping_insts()
+                    .find(|(_, x)| matches!(x, Inst::TraceHeaderEnd))
                 {
-                    match inst {
-                        Inst::Param(pinst) => {
-                            if let VarLocation::Register(reg) = VarLocation::from_yksmp_location(
-                                self.m,
-                                iidx,
-                                self.m.param(pinst.paramidx()),
-                            ) {
-                                self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
+                    for ((iidx, inst), jump_op) in
+                        self.m.iter_skipping_insts().zip(self.m.trace_header_end())
+                    {
+                        match inst {
+                            Inst::Param(pinst) => {
+                                if let VarLocation::Register(reg) = VarLocation::from_yksmp_location(
+                                    self.m,
+                                    iidx,
+                                    self.m.param(pinst.paramidx()),
+                                ) {
+                                    self.push_reg_hint_fixed(
+                                        hend_iidx,
+                                        jump_op.unpack(self.m),
+                                        reg,
+                                    );
+                                }
                             }
+                            _ => break,
                         }
-                        _ => break,
                     }
                 }
             }
@@ -97,9 +113,11 @@ impl<'a> RevAnalyse<'a> {
                 // `trace_header_end` to store the jump variables.
                 debug_assert_eq!(vlocs.len(), self.m.trace_header_end().len());
 
+                let stend_iidx = self.m.last_inst_idx();
+                assert_matches!(self.m.inst(stend_iidx), Inst::SidetraceEnd);
                 for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
                     if let VarLocation::Register(reg) = *vloc {
-                        self.push_reg_hint_fixed(jump_op.unpack(self.m), reg);
+                        self.push_reg_hint_fixed(stend_iidx, jump_op.unpack(self.m), reg);
                     }
                 }
             }
@@ -136,9 +154,11 @@ impl<'a> RevAnalyse<'a> {
     ///   1. the trace is [TraceKind::HeaderAndBody]
     ///   2. [Self::analyse_header] has already been called.
     pub fn analyse_body(&mut self, header_end_vlocs: &[VarLocation]) {
+        let bend_iidx = self.m.last_inst_idx();
+        assert_matches!(self.m.inst(bend_iidx), Inst::TraceBodyEnd);
         for (jump_op, vloc) in self.m.trace_body_end().iter().zip(header_end_vlocs) {
             if let VarLocation::Register(reg) = vloc {
-                self.push_reg_hint_fixed(jump_op.unpack(self.m), *reg);
+                self.push_reg_hint_fixed(bend_iidx, jump_op.unpack(self.m), *reg);
             }
         }
 
@@ -164,8 +184,9 @@ impl<'a> RevAnalyse<'a> {
                 }
                 Inst::BinOp(x) => self.an_binop(iidx, x),
                 Inst::Call(x) => self.an_call(iidx, x),
+                Inst::Guard(x) => self.an_guard(iidx, x),
                 Inst::ICmp(x) => self.an_icmp(iidx, x),
-                Inst::PtrAdd(x) => self.an_ptradd(iidx, x),
+                Inst::IndirectCall(x) => self.an_indirect_call(iidx, self.m.indirect_call(x)),
                 Inst::DynPtrAdd(x) => self.an_dynptradd(iidx, x),
                 // "Inline" `PtrAdd`s into loads/stores, and don't mark the `PtrAdd` as used. This
                 // means that some (though not all) `PtrAdd`s will not lead to actual code being
@@ -175,6 +196,7 @@ impl<'a> RevAnalyse<'a> {
                         return;
                     }
                 }
+                Inst::PtrAdd(x) => self.an_ptradd(iidx, x),
                 Inst::Store(x) => {
                     if self.an_store(iidx, x) {
                         return;
@@ -228,6 +250,19 @@ impl<'a> RevAnalyse<'a> {
             >= self.inst_vals_alive_until[usize::from(query_iidx)]
     }
 
+    /// Which register should the output of `cur_iidx` ideally be put into? Note: this is a hint,
+    /// not a demand, and not following it does not affect correctness!
+    pub(super) fn reg_hint(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> Option<Register> {
+        for (x, y) in &self.reg_hints[usize::from(query_iidx)] {
+            if usize::from(cur_iidx) >= usize::from(*x) {
+                return Some(*y);
+            }
+        }
+        self.reg_hints[usize::from(query_iidx)]
+            .last()
+            .map(|(_, y)| *y)
+    }
+
     /// Record that `use_iidx` is used at instruction `def_iidx`.
     fn push_def_use(&mut self, def_iidx: InstIdx, use_iidx: InstIdx) {
         debug_assert!(def_iidx < use_iidx);
@@ -268,7 +303,9 @@ impl<'a> RevAnalyse<'a> {
     /// for `op`.
     fn push_reg_hint(&mut self, iidx: InstIdx, op: Operand) {
         if let Operand::Var(op_iidx) = op {
-            self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
+            if let Some(reg) = self.reg_hint(iidx, iidx) {
+                self.reg_hints[usize::from(op_iidx)].push((iidx, reg));
+            }
         }
     }
 
@@ -282,15 +319,15 @@ impl<'a> RevAnalyse<'a> {
             // This needs to be kept carefully in sync with the logic in
             // [ls_regalloc::RegConstraint::OutputCanBeSameAsInput].
             if !self.is_inst_var_still_used_after(iidx, op_iidx) {
-                self.reg_hints[usize::from(op_iidx)] = self.reg_hints[usize::from(iidx)];
+                self.push_reg_hint(iidx, op);
             }
         }
     }
 
     /// Set the hint for to `op` to `reg`, if appropriate for `op`.
-    fn push_reg_hint_fixed(&mut self, op: Operand, reg: Register) {
+    fn push_reg_hint_fixed(&mut self, iidx: InstIdx, op: Operand, reg: Register) {
         if let Operand::Var(op_iidx) = op {
-            self.reg_hints[usize::from(op_iidx)] = Some(reg);
+            self.reg_hints[usize::from(op_iidx)].push((iidx, reg));
         }
     }
 
@@ -301,10 +338,10 @@ impl<'a> RevAnalyse<'a> {
             }
             BinOp::AShr | BinOp::LShr | BinOp::Shl => {
                 self.push_reg_hint(iidx, binst.lhs(self.m));
-                self.push_reg_hint_fixed(binst.rhs(self.m), Register::GP(Rq::RCX));
+                self.push_reg_hint_fixed(iidx, binst.rhs(self.m), Register::GP(Rq::RCX));
             }
             BinOp::Mul | BinOp::SDiv | BinOp::UDiv => {
-                self.push_reg_hint_fixed(binst.lhs(self.m), Register::GP(Rq::RAX));
+                self.push_reg_hint_fixed(iidx, binst.lhs(self.m), Register::GP(Rq::RAX));
             }
             BinOp::Sub => match (binst.lhs(self.m), binst.rhs(self.m)) {
                 (Operand::Const(_), _) => {
@@ -318,7 +355,7 @@ impl<'a> RevAnalyse<'a> {
         }
     }
 
-    fn an_call(&mut self, _: InstIdx, cinst: DirectCallInst) {
+    fn an_call(&mut self, iidx: InstIdx, cinst: DirectCallInst) {
         let mut gp_regs = ARG_GP_REGS.iter();
         let mut fp_regs = ARG_FP_REGS.iter();
         for aidx in cinst.iter_args_idx() {
@@ -326,13 +363,13 @@ impl<'a> RevAnalyse<'a> {
                 Ty::Void => unreachable!(),
                 Ty::Integer(_) | Ty::Ptr => {
                     if let Some(reg) = gp_regs.next() {
-                        self.push_reg_hint_fixed(self.m.arg(aidx), Register::GP(*reg));
+                        self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::GP(*reg));
                     }
                 }
                 Ty::Func(_) => todo!(),
                 Ty::Float(_) => {
                     if let Some(reg) = fp_regs.next() {
-                        self.push_reg_hint_fixed(self.m.arg(aidx), Register::FP(*reg));
+                        self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::FP(*reg));
                     }
                 }
                 Ty::Unimplemented(_) => panic!(),
@@ -344,12 +381,38 @@ impl<'a> RevAnalyse<'a> {
         self.push_reg_hint(iidx, icinst.lhs(self.m));
     }
 
+    fn an_indirect_call(&mut self, iidx: InstIdx, cinst: &IndirectCallInst) {
+        let mut gp_regs = ARG_GP_REGS.iter();
+        let mut fp_regs = ARG_FP_REGS.iter();
+        for aidx in cinst.iter_args_idx() {
+            match self.m.type_(self.m.arg(aidx).tyidx(self.m)) {
+                Ty::Void => unreachable!(),
+                Ty::Integer(_) | Ty::Ptr => {
+                    if let Some(reg) = gp_regs.next() {
+                        self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::GP(*reg));
+                    }
+                }
+                Ty::Func(_) => todo!(),
+                Ty::Float(_) => {
+                    if let Some(reg) = fp_regs.next() {
+                        self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::FP(*reg));
+                    }
+                }
+                Ty::Unimplemented(_) => panic!(),
+            }
+        }
+    }
+
     fn an_ptradd(&mut self, iidx: InstIdx, painst: PtrAddInst) {
         self.push_reg_hint_outputcanbesameasinput(iidx, painst.ptr(self.m));
     }
 
     fn an_dynptradd(&mut self, iidx: InstIdx, dpainst: DynPtrAddInst) {
         self.push_reg_hint(iidx, dpainst.num_elems(self.m));
+    }
+
+    fn an_guard(&mut self, iidx: InstIdx, ginst: GuardInst) {
+        self.push_reg_hint(iidx, ginst.cond(self.m));
     }
 
     /// Analyse a [LoadInst]. Returns `true` if it has been inlined and should not go through the
@@ -543,6 +606,75 @@ mod test {
             let next_iidx = next_iidx.map(|x| InstIdx::try_from(x).unwrap());
             assert_eq!(rev_an.next_use(cur_iidx, query_iidx), next_iidx);
         }
+    }
+
+    #[test]
+    fn reg_hints() {
+        let m = Module::from_str(
+            "
+            func_decl f(i8, i8)
+            entry:
+              %0: i8 = param reg
+              %1: i8 = param reg
+              %2: i8 = add %0, %1
+              call @f(%0, %1)
+              call @f(%1, %0)
+              black_box %2
+            ",
+        );
+        let rev_an = rev_analyse_header(&m);
+        assert_eq!(
+            rev_an
+                .reg_hints
+                .iter()
+                .map(|x| x.len())
+                .collect::<Vec<_>>()
+                .as_slice(),
+            &[2, 2, 0, 0, 0, 0]
+        );
+        assert_eq!(rev_an.reg_hints[0][0].0, InstIdx::unchecked_from(4));
+        assert_eq!(rev_an.reg_hints[0][1].0, InstIdx::unchecked_from(3));
+        assert_eq!(rev_an.reg_hints[1][0].0, InstIdx::unchecked_from(4));
+        assert_eq!(rev_an.reg_hints[1][1].0, InstIdx::unchecked_from(3));
+        assert_eq!(rev_an.reg_hints[0][0].1, rev_an.reg_hints[1][1].1);
+        assert_eq!(rev_an.reg_hints[0][1].1, rev_an.reg_hints[1][0].1);
+        assert!((0..5).all(|i| rev_an
+            .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(0))
+            .is_some()));
+        assert!((1..5).all(|i| rev_an
+            .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(0))
+            .is_some()));
+        assert!((2..5).all(|i| rev_an
+            .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(2))
+            .is_none()));
+        assert_eq!(
+            (0..5)
+                .map(|i| rev_an
+                    .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(0))
+                    .unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                rev_an.reg_hints[0][1].1,
+                rev_an.reg_hints[0][1].1,
+                rev_an.reg_hints[0][1].1,
+                rev_an.reg_hints[0][1].1,
+                rev_an.reg_hints[0][0].1
+            ]
+        );
+        assert_eq!(
+            (0..5)
+                .map(|i| rev_an
+                    .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(1))
+                    .unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                rev_an.reg_hints[1][1].1,
+                rev_an.reg_hints[1][1].1,
+                rev_an.reg_hints[1][1].1,
+                rev_an.reg_hints[1][1].1,
+                rev_an.reg_hints[1][0].1
+            ]
+        );
     }
 
     #[test]
