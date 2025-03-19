@@ -18,7 +18,7 @@
 //     b1
 //     ret1
 //     9
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted
 //     b3
 //     8
 //     yk-jit-event: enter-jit-code

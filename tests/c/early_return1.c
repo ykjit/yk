@@ -6,7 +6,7 @@
 //     yk-jit-event: start-tracing
 //     early return
 //     6
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted
 //     5
 //     4
 //     yk-jit-event: start-tracing

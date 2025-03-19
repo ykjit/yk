@@ -428,7 +428,7 @@ impl MT {
                     _ => unreachable!(),
                 });
                 thread_tracer.stop().ok();
-                self.log.log(Verbosity::JITEvent, "tracing-aborted");
+                self.log.log(Verbosity::Warning, "tracing-aborted");
             }
             TransitionControlPoint::Execute(ctr) => {
                 self.log.log(Verbosity::JITEvent, "enter-jit-code");
@@ -482,7 +482,7 @@ impl MT {
                                     // FIXME: This is stupidly brutal.
                                     lk.kind = HotLocationKind::DontTrace;
                                     drop(lk);
-                                    self.log.log(Verbosity::JITEvent, "start-tracing-abort");
+                                    self.log.log(Verbosity::Warning, "start-tracing-abort");
                                 } else {
                                     todo!("{e:?}");
                                 }
@@ -919,7 +919,7 @@ impl MT {
                     }
                     drop(lk);
                     thread_tracer.stop().ok();
-                    self.log.log(Verbosity::JITEvent, "tracing-aborted");
+                    self.log.log(Verbosity::Warning, "tracing-aborted");
                 }
                 MTThreadState::Executing { .. } => return,
             }

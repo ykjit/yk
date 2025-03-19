@@ -17,7 +17,7 @@
 //     yk-jit-event: deoptimise
 //     yk-jit-event: start-tracing
 //     1: 3
-//     yk-jit-event: tracing-aborted
+//     yk-warning: tracing-aborted
 //     0: 2
 //     yk-jit-event: start-tracing
 //     0: 1
