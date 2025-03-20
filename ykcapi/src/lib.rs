@@ -130,6 +130,14 @@ pub extern "C" fn __ykrt_control_point_real(
 ) {
     let mt = unsafe { &*mt };
     let loc = unsafe { &*loc };
+
+    // If this thread is tracing, count how many times we've seen the control point since starting.
+    //
+    // This has to happen before the `loc.is_null()` check below because we have to include calls
+    // to the control point with null locations.
+    use ykrt::MTThread;
+    MTThread::inc_cp_idx();
+
     if !loc.is_null() {
         let arc = unsafe { Arc::from_raw(mt) };
         arc.control_point(loc, frameaddr, smid);
