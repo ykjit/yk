@@ -143,6 +143,31 @@ static LK_PATCH: Mutex<()> = Mutex::new(());
 /// x86 NOP opcode.
 const NOP_OPCODE: u8 = 0x90;
 
+/// Returns the offset of the given thread local in relation to the segment register `fs`. At JIT
+/// runtime we use this offset to calculate the absolute address of the thread local for each
+/// thread.
+fn get_tls_offset(name: &std::ffi::CString) -> i32 {
+    let gaddr = unsafe { libc::dlsym(std::ptr::null_mut(), name.as_ptr()) } as usize;
+    if gaddr == 0 {
+        panic!(
+            "Unable to find global address: {}",
+            name.clone().into_string().unwrap()
+        )
+    }
+    let mut fsaddr: usize;
+    unsafe {
+        std::arch::asm!(
+            "mov {fsaddr}, fs:0",
+            fsaddr = out(reg) fsaddr,
+        );
+    }
+    let off = (fsaddr - gaddr).try_into().unwrap();
+    // The segment register pointer should always be bigger than any of the thread local pointers.
+    // For simplicity and since that what dynasmrt expects later we return an `i32` here.
+    assert!(off > 0);
+    off
+}
+
 /// A function that we can put a debugger breakpoint on.
 /// FIXME: gross hack.
 #[cfg(debug_assertions)]
@@ -1565,9 +1590,6 @@ impl<'a> Assemble<'a> {
     #[cfg(not(test))]
     fn cg_lookupglobal(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LookupGlobalInst) {
         let decl = inst.decl(self.m);
-        if decl.is_threadlocal() {
-            todo!();
-        }
         let [tgt_reg] = self.ra.assign_gp_regs(
             &mut self.asm,
             iidx,
@@ -1577,6 +1599,14 @@ impl<'a> Assemble<'a> {
                 can_be_same_as_input: false,
             }],
         );
+        if decl.is_threadlocal() {
+            let off = get_tls_offset(decl.name());
+            dynasm!(self.asm
+                ; fs mov Rq(tgt_reg.code()), [0]
+                ; sub Rq(tgt_reg.code()), off
+            );
+            return;
+        }
         let sym_addr = self.m.globalvar_ptr(inst.global_decl_idx()).addr();
         dynasm!(self.asm ; mov Rq(tgt_reg.code()), QWORD i64::try_from(sym_addr).unwrap());
     }
