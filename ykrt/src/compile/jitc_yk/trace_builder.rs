@@ -1239,6 +1239,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         mut self,
         mt: &Arc<MT>,
         ta_iter: Box<dyn AOTTraceIterator>,
+        mut start_cp_idx: usize,
     ) -> Result<jit_ir::Module, CompilationError> {
         // Collect the trace first so we can peek at the last element to find the control point
         // block during side-tracing.
@@ -1259,6 +1260,50 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             })
             .collect::<Result<Vec<_>, _>>()?;
         mt.stats.timing_state(TimingState::Compiling);
+
+        // Find the block containing the control point. This will be the last block of the trace.
+        let cp_blk = match &tas.last() {
+            Some(b) => self.lookup_aot_block(b),
+            _ => todo!(),
+        };
+        // Find the (sole) successor block of the control point. This will be the first block of
+        // the trace.
+        let cp_succ_blk = match &tas.first() {
+            Some(b) => self.lookup_aot_block(b),
+            _ => todo!(),
+        };
+
+        // If we decided to compile an inner loop, then we need to skip up until the start of the
+        // innter loop. This is equivalent to skipping until just after the `start_cp_idx`th
+        // occurance of the control point.
+        let mut skip_tas: usize = 0;
+        let mut ta_iter = tas.iter().peekable();
+        // We will be starting at the control point successor block.
+        assert_eq!(self.lookup_aot_block(ta_iter.peek().unwrap()), cp_succ_blk);
+        while start_cp_idx != 0 {
+            let ta = ta_iter.next().unwrap();
+            skip_tas += 1;
+            if let TraceAction::MappedAOTBBlock { .. } = ta {
+                let blk = self.lookup_aot_block(ta);
+                if blk == cp_blk {
+                    // skip unmapped internals of control point.
+                    assert!(matches!(
+                        ta_iter.next().unwrap(),
+                        TraceAction::UnmappableBBlock
+                    ));
+                    skip_tas += 1;
+                    // skip end of control point block (after the call to the CP)
+                    let ta = ta_iter.next().unwrap();
+                    assert_eq!(self.lookup_aot_block(ta), cp_blk);
+                    skip_tas += 1;
+                    // That's one more control point down.
+                    start_cp_idx -= 1;
+                }
+            }
+        }
+        assert_eq!(self.lookup_aot_block(ta_iter.peek().unwrap()), cp_succ_blk);
+        // XXX can we just pass the iterator forward?
+        let tas = &tas[(skip_tas)..];
 
         // The previous processed block.
         let mut prev_bid = None;
@@ -1534,12 +1579,16 @@ pub(super) fn build<Register: Send + Sync + 'static>(
     sti: Option<Arc<YkSideTraceInfo<Register>>>,
     promotions: Box<[u8]>,
     debug_strs: Vec<String>,
+    start_cp_idx: usize,
 ) -> Result<jit_ir::Module, CompilationError> {
     let tracekind = if let Some(x) = sti {
         TraceKind::Sidetrace(x)
     } else {
         TraceKind::HeaderOnly
     };
-    TraceBuilder::<Register>::new(mt, tracekind, aot_mod, promotions, debug_strs)?
-        .build(mt, ta_iter)
+    TraceBuilder::<Register>::new(mt, tracekind, aot_mod, promotions, debug_strs)?.build(
+        mt,
+        ta_iter,
+        start_cp_idx,
+    )
 }
