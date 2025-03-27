@@ -598,7 +598,7 @@ impl MT {
                         } = mtt.peek_mut_tstate()
                         {
                             let mut akind = None;
-                            if frameaddr != *tracing_frameaddr {
+                            if !std::ptr::eq(frameaddr, *tracing_frameaddr) {
                                 // We're tracing but no longer in the frame we started in, so we
                                 // need to stop tracing and report the original [HotLocation] as
                                 // having failed to trace properly.
@@ -811,7 +811,7 @@ impl MT {
                             else {
                                 panic!()
                             };
-                            if frameaddr != *tracing_frameaddr {
+                            if !std::ptr::eq(frameaddr, *tracing_frameaddr) {
                                 // We're tracing but no longer in the frame we started in, so we
                                 // need to stop tracing and report the original [HotLocation] as
                                 // having failed to trace properly.
