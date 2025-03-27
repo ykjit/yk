@@ -412,6 +412,88 @@ impl LSRegAlloc<'_> {
         None
     }
 
+    /// Forcibly obtain a register, spilling whatever's in there, even if it is "used" by the
+    /// current instruction. This is suitable for guards / calls / etc. The register returned is
+    /// guaranteed not to be in the set `avoid`.
+    fn force_tmp_register(&mut self, asm: &mut Assembler, avoid: RegSet<Rq>) -> Rq {
+        for (reg_i, rs) in self.gp_reg_states.iter().enumerate() {
+            if avoid.is_set(GP_REGS[reg_i]) {
+                continue;
+            }
+            if let RegState::Empty = rs {
+                // The happy case: an empty register is already available!
+                return GP_REGS[reg_i];
+            }
+        }
+
+        // The moderately happy case: a register with a constant in it, or whose instructions are
+        // all already spilled.
+        for (reg_i, rs) in self.gp_reg_states.iter().enumerate() {
+            if avoid.is_set(GP_REGS[reg_i]) {
+                continue;
+            }
+            match rs {
+                RegState::Reserved => (),
+                RegState::Empty => todo!(),
+                RegState::FromConst(_, _) => {
+                    self.gp_reg_states[reg_i] = RegState::Empty;
+                    self.gp_regset.unset(GP_REGS[reg_i]);
+                    return GP_REGS[reg_i];
+                }
+                RegState::FromInst(from_iidxs, _) => {
+                    if from_iidxs
+                        .iter()
+                        .all(|x| self.spills[usize::from(*x)] != SpillState::Empty)
+                    {
+                        self.gp_reg_states[reg_i] = RegState::Empty;
+                        self.gp_regset.unset(GP_REGS[reg_i]);
+                        return GP_REGS[reg_i];
+                    }
+                }
+            }
+        }
+
+        // The not happy case: we have to pick a random register and spill it.
+        let reg = avoid.find_empty().unwrap();
+        self.force_spill_gp(asm, false, reg);
+        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+        self.gp_regset.unset(reg);
+        reg
+    }
+
+    /// Return the `(condition register, patch register)` a normal guard instruction needs. This
+    /// function guarantees not to set CPU flags. It is not suitable for use outside `cg_guard`.
+    pub(super) fn tmp_registers_for_guard(
+        &mut self,
+        asm: &mut Assembler,
+        _iidx: InstIdx,
+        cond: Operand,
+    ) -> (Rq, Rq) {
+        let cond_reg = match self.find_op_in_gp_reg(&cond) {
+            Some(x) => x,
+            None => {
+                let reg = self.force_tmp_register(asm, RegSet::with_gp_reserved());
+                self.put_input_in_gp_reg(asm, &cond, reg, RegExtension::Undefined);
+                reg
+            }
+        };
+        let mut avoid = RegSet::with_gp_reserved();
+        avoid.set(cond_reg);
+        let patch_reg = self.force_tmp_register(asm, avoid);
+        assert_ne!(cond_reg, patch_reg);
+        (cond_reg, patch_reg)
+    }
+
+    /// Return the `patch register` a combined icmp/guard instruction needs. This function
+    /// guarantees not to set CPU flags. It is not suitable for use outside `cg_icmp_guard`.
+    pub(super) fn tmp_register_for_icmp_guard(
+        &mut self,
+        asm: &mut Assembler,
+        _iidx: InstIdx,
+    ) -> Rq {
+        self.force_tmp_register(asm, RegSet::with_gp_reserved())
+    }
+
     /// Assign general purpose registers for the instruction at position `iidx`.
     ///
     /// This is a convenience function for [Self::assign_regs] when there are no FP registers.
@@ -1198,14 +1280,32 @@ impl LSRegAlloc<'_> {
             RegState::Reserved => unreachable!(),
             RegState::Empty => (),
             RegState::FromConst(_, _) => (),
+            RegState::FromInst(query_iidxs, _) => {
+                if query_iidxs.iter().any(|x| {
+                    self.rev_an.is_inst_var_still_used_after(cur_iidx, *x)
+                        && self.spills[usize::from(*x)] == SpillState::Empty
+                }) {
+                    self.force_spill_gp(asm, true, reg);
+                }
+            }
+        }
+    }
+
+    /// Spill the value(s) stored in `reg` if it is not already spilled. This updates `self.spills`
+    /// (if necessary) but not `self.gp_reg_state` or `self.gp_regset`.
+    ///
+    /// If `set_cpu_flags` is set to `true`, this function can change the CPU Flags: doing so
+    /// allows it to generate more efficient code.
+    fn force_spill_gp(&mut self, asm: &mut Assembler, set_cpu_flags: bool, reg: Rq) {
+        match &self.gp_reg_states[usize::from(reg.code())] {
+            RegState::Reserved => unreachable!(),
+            RegState::Empty => (),
+            RegState::FromConst(_, _) => (),
             RegState::FromInst(query_iidxs, ext) => {
                 // First work out the non-strict subset of `query_iidx`s which are not yet spilled.
                 let need_spilling = query_iidxs
                     .iter()
-                    .filter(|x| {
-                        self.rev_an.is_inst_var_still_used_after(cur_iidx, **x)
-                            && self.spills[usize::from(**x)] == SpillState::Empty
-                    })
+                    .filter(|x| self.spills[usize::from(**x)] == SpillState::Empty)
                     .collect::<Vec<_>>();
                 if !need_spilling.is_empty() {
                     // When multiple variables exist in a single register, we only need to spill
@@ -1229,11 +1329,13 @@ impl LSRegAlloc<'_> {
                         1 => {
                             if *ext == RegExtension::ZeroExtended {
                                 dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code()));
-                            } else {
+                            } else if set_cpu_flags {
                                 dynasm!(asm
                                     ; bt Rd(reg.code()), 0
                                     ; setc BYTE [rbp - off]
                                 );
+                            } else {
+                                todo!();
                             }
                         }
                         8 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),

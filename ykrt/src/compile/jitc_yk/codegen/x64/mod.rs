@@ -2068,24 +2068,20 @@ impl<'a> Assemble<'a> {
         if bitw == 32 || bitw == 64 {
             in_ext = RegExtension::Undefined;
         }
-        let patch_reg = if let Some(v) = imm {
-            let [lhs_reg, patch_reg] = self.ra.assign_gp_regs(
+        if let Some(v) = imm {
+            let [lhs_reg] = self.ra.assign_gp_regs(
                 &mut self.asm,
                 ic_iidx,
-                [
-                    GPConstraint::Input {
-                        op: lhs,
-                        in_ext,
-                        force_reg: None,
-                        clobber_reg: false,
-                    },
-                    GPConstraint::Temporary,
-                ],
+                [GPConstraint::Input {
+                    op: lhs,
+                    in_ext,
+                    force_reg: None,
+                    clobber_reg: false,
+                }],
             );
             self.cg_cmp_const(bitw, lhs_reg, v);
-            patch_reg
         } else {
-            let [lhs_reg, rhs_reg, patch_reg] = self.ra.assign_gp_regs(
+            let [lhs_reg, rhs_reg] = self.ra.assign_gp_regs(
                 &mut self.asm,
                 ic_iidx,
                 [
@@ -2101,14 +2097,14 @@ impl<'a> Assemble<'a> {
                         force_reg: None,
                         clobber_reg: false,
                     },
-                    GPConstraint::Temporary,
                 ],
             );
             self.cg_cmp_regs(bitw, lhs_reg, rhs_reg);
-            patch_reg
         };
 
         // Codegen guard
+        self.ra.expire_regs(g_iidx);
+        let patch_reg = self.ra.tmp_register_for_icmp_guard(&mut self.asm, g_iidx);
         self.patch_reg.insert(g_inst.gidx.into(), patch_reg);
         let fail_label = self.guard_to_deopt(&g_inst);
         self.comment(Inst::Guard(g_inst).display(self.m, g_iidx).to_string());
@@ -3078,19 +3074,7 @@ impl<'a> Assemble<'a> {
 
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
         let cond = inst.cond(self.m);
-        let [reg, patch_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [
-                GPConstraint::Input {
-                    op: cond,
-                    in_ext: RegExtension::Undefined,
-                    force_reg: None,
-                    clobber_reg: false,
-                },
-                GPConstraint::Temporary,
-            ],
-        );
+        let (reg, patch_reg) = self.ra.tmp_registers_for_guard(&mut self.asm, iidx, cond);
         let fail_label = self.guard_to_deopt(inst);
         self.patch_reg.insert(inst.gidx.into(), patch_reg);
         dynasm!(self.asm ; bt Rd(reg.code()), 0);
