@@ -955,14 +955,16 @@ impl LSRegAlloc<'_> {
                 GPConstraint::Input {
                     clobber_reg: true, ..
                 }
-                | GPConstraint::InputOutput { .. }
-                | GPConstraint::Output { .. }
-                | GPConstraint::Clobber { .. }
-                | GPConstraint::Temporary => {
+                | GPConstraint::InputOutput { .. } => {
                     clobber_regs.set(*cnstr_reg);
                     asgn_regs.set(*cnstr_reg);
                 }
-                _ => (),
+                GPConstraint::Output { .. }
+                | GPConstraint::Clobber { .. }
+                | GPConstraint::Temporary => {
+                    clobber_regs.set(*cnstr_reg);
+                }
+                GPConstraint::None => (),
             }
         }
 
@@ -986,7 +988,7 @@ impl LSRegAlloc<'_> {
                             if let Some(Register::GP(hint_reg)) =
                                 self.rev_an.reg_hint(iidx.checked_add(1).unwrap(), *op_iidx)
                             {
-                                if !asgn_regs.is_set(hint_reg) {
+                                if !asgn_regs.is_set(hint_reg) && !clobber_regs.is_set(hint_reg) {
                                     out.push((hint_reg, RegAction::Spill));
                                     out.push((hint_reg, RegAction::CopyFrom(reg)));
                                     asgn_regs.set(hint_reg);
@@ -1003,7 +1005,7 @@ impl LSRegAlloc<'_> {
                             .filter(|(_, rs)| matches!(rs, &RegState::Empty))
                         {
                             let empty_reg = GP_REGS[empty_reg_i];
-                            if !asgn_regs.is_set(empty_reg) {
+                            if !asgn_regs.is_set(empty_reg) && !clobber_regs.is_set(empty_reg) {
                                 out.push((empty_reg, RegAction::Spill));
                                 out.push((empty_reg, RegAction::CopyFrom(reg)));
                                 asgn_regs.set(empty_reg);
@@ -1236,7 +1238,11 @@ impl LSRegAlloc<'_> {
                 let need_spilling = query_iidxs
                     .iter()
                     .filter(|x| {
-                        self.rev_an.is_inst_var_still_used_after(cur_iidx, **x)
+                        // This is deliberately "at" and not "after" to handle one main case: a
+                        // guard whose values are all in registers and when we want to allocate a
+                        // `Temporary`. We might need to spill a value that seems like it will be
+                        // "used" straightaway.
+                        self.rev_an.is_inst_var_still_used_at(cur_iidx, **x)
                             && self.spills[usize::from(**x)] == SpillState::Empty
                     })
                     .collect::<Vec<_>>();
