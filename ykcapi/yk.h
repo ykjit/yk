@@ -64,6 +64,16 @@ void yk_mt_sidetrace_threshold_set(YkMT *, YkHotThreshold);
 // appropriate clean-up.
 YkLocation yk_location_new(void);
 
+// Force the location to have a HotLocation and assign it a debug string.
+//
+// Debug strings (where present) are displayed in some log messages.
+//
+// The intended use of this is for interpreters to add source-level information
+// to locations for ease of debugging and human comprehension.
+//
+// This function is only avaliable if yk was built with the "ykd" feature.
+YkLocation yk_location_set_debug_str(YkLocation *, char *);
+
 // Create a new NULL-equivalent `Location`. Such a `YkLocation` denotes a point
 // in a program which can never contribute to a trace.
 YkLocation yk_location_null(void);

@@ -27,12 +27,11 @@ regex = "1.9"
 tempfile = "3.9.0"
 ykbuild = { path = "../ykbuild" }
 ykrt = { path = "../ykrt", features = ["yk_testing", "ykd"] }
+ykcapi = { path = "../ykcapi", features = ["yk_testing", "ykd"] }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
 lang_tester = "0.9"
-ykcapi = { path = "../ykcapi", features = ["yk_testing"] }
-ykrt = { path = "../ykrt", features = ["yk_testing", "ykd"] }
 
 [build-dependencies]
 rerun_except = "1.0.0"

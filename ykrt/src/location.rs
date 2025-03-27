@@ -179,7 +179,7 @@ impl Location {
     ///   2. has not had a `HotLocation` allocated for it
     ///
     /// return its count, or `None` otherwise
-    #[cfg(test)]
+    #[cfg(feature = "ykd")]
     pub(crate) fn count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);
         if x & STATE_TAG_MASK == STATE_NOT_HOT {
@@ -214,6 +214,30 @@ impl Location {
                     Arc::from_raw(cl);
                 }
                 None
+            }
+        }
+    }
+
+    #[cfg(feature = "ykd")]
+    pub fn set_hl_debug_str(&self, s: String) {
+        match self.hot_location() {
+            Some(hl) => {
+                hl.lock().debug_str = Some(s);
+            }
+            None => {
+                let Some(count) = self.count() else {
+                    // We clashed with another thread.
+                    todo!();
+                };
+                let hl = HotLocation {
+                    kind: HotLocationKind::Counting(count),
+                    tracecompilation_errors: 0,
+                    debug_str: Some(s),
+                };
+                if self.count_to_hot_location(count, hl).is_none() {
+                    // We clashed with another thread.
+                    todo!();
+                }
             }
         }
     }
@@ -268,6 +292,9 @@ pub(crate) struct HotLocation {
     /// How often has tracing or compilation starting directly from this hot location led to an
     /// error?
     pub(crate) tracecompilation_errors: TraceCompilationErrorThreshold,
+    /// An optional debug string for this hot location.
+    #[cfg(feature = "ykd")]
+    pub(crate) debug_str: Option<String>,
 }
 
 impl HotLocation {

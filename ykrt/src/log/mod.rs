@@ -3,8 +3,13 @@
 //! Note that some of these features are only meaningfully available when the `ykd` feature is
 //! available: otherwise we expose no-op functions.
 
+#[cfg(feature = "ykd")]
+use parking_lot::Mutex;
 use std::{env, error::Error, fs::File, io::Write, path::PathBuf};
 use strum::{EnumCount, FromRepr};
+
+#[cfg(feature = "ykd")]
+use crate::location::HotLocation;
 
 pub(crate) mod stats;
 
@@ -66,6 +71,17 @@ impl Log {
                 level: Verbosity::Error,
             }),
         }
+    }
+
+    #[cfg(feature = "ykd")]
+    pub(crate) fn log_with_hl_debug(&self, level: Verbosity, msg: &str, hl: &Mutex<HotLocation>) {
+        // If the hot location has a debug string, append it to the log message.
+        let msg = if let Some(dstr) = hl.lock().debug_str.as_ref() {
+            &format!("{}: {}", msg, dstr)
+        } else {
+            msg
+        };
+        self.log(level, msg);
     }
 
     /// Log `msg` with the [Verbosity] level `verbosity`.
