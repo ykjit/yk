@@ -299,6 +299,17 @@ impl<'a> RevAnalyse<'a> {
         self.def_use[usize::from(iidx)].iter().cloned().rev()
     }
 
+    /// Iterate, in ascending order, over all uses of `query_iidx` after (not including!)
+    /// `cur_iidx`.
+    pub(crate) fn iter_uses_after(
+        &self,
+        cur_iidx: InstIdx,
+        query_iidx: InstIdx,
+    ) -> impl Iterator<Item = InstIdx> + '_ {
+        self.iter_uses(query_iidx)
+            .skip_while(move |x| usize::from(*x) <= usize::from(cur_iidx))
+    }
+
     /// Propagate the hint for the instruction being processed at `iidx` to `op`, if appropriate
     /// for `op`.
     fn push_reg_hint(&mut self, iidx: InstIdx, op: Operand) {

@@ -39,7 +39,7 @@ use dynasmrt::{
     },
     DynasmApi, Register as dynasmrtRegister,
 };
-use std::{assert_matches::assert_matches, marker::PhantomData, mem};
+use std::{assert_matches::assert_matches, cmp::Ordering, marker::PhantomData, mem};
 
 /// The complete set of general purpose x64 registers, in the order that dynasmrt defines them.
 /// Note that large portions of the code rely on these registers mapping to the integers 0..15
@@ -412,6 +412,88 @@ impl LSRegAlloc<'_> {
         None
     }
 
+    /// Forcibly obtain a register, spilling whatever's in there, even if it is "used" by the
+    /// current instruction. This is suitable for guards / calls / etc. The register returned is
+    /// guaranteed not to be in the set `avoid`.
+    fn force_tmp_register(&mut self, asm: &mut Assembler, avoid: RegSet<Rq>) -> Rq {
+        for (reg_i, rs) in self.gp_reg_states.iter().enumerate() {
+            if avoid.is_set(GP_REGS[reg_i]) {
+                continue;
+            }
+            if let RegState::Empty = rs {
+                // The happy case: an empty register is already available!
+                return GP_REGS[reg_i];
+            }
+        }
+
+        // The moderately happy case: a register with a constant in it, or whose instructions are
+        // all already spilled.
+        for (reg_i, rs) in self.gp_reg_states.iter().enumerate() {
+            if avoid.is_set(GP_REGS[reg_i]) {
+                continue;
+            }
+            match rs {
+                RegState::Reserved => (),
+                RegState::Empty => todo!(),
+                RegState::FromConst(_, _) => {
+                    self.gp_reg_states[reg_i] = RegState::Empty;
+                    self.gp_regset.unset(GP_REGS[reg_i]);
+                    return GP_REGS[reg_i];
+                }
+                RegState::FromInst(from_iidxs, _) => {
+                    if from_iidxs
+                        .iter()
+                        .all(|x| self.spills[usize::from(*x)] != SpillState::Empty)
+                    {
+                        self.gp_reg_states[reg_i] = RegState::Empty;
+                        self.gp_regset.unset(GP_REGS[reg_i]);
+                        return GP_REGS[reg_i];
+                    }
+                }
+            }
+        }
+
+        // The not happy case: we have to pick a random register and spill it.
+        let reg = avoid.find_empty().unwrap();
+        self.force_spill_gp(asm, false, reg);
+        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+        self.gp_regset.unset(reg);
+        reg
+    }
+
+    /// Return the `(condition register, patch register)` a normal guard instruction needs. This
+    /// function guarantees not to set CPU flags. It is not suitable for use outside `cg_guard`.
+    pub(super) fn tmp_registers_for_guard(
+        &mut self,
+        asm: &mut Assembler,
+        _iidx: InstIdx,
+        cond: Operand,
+    ) -> (Rq, Rq) {
+        let cond_reg = match self.find_op_in_gp_reg(&cond) {
+            Some(x) => x,
+            None => {
+                let reg = self.force_tmp_register(asm, RegSet::with_gp_reserved());
+                self.put_input_in_gp_reg(asm, &cond, reg, RegExtension::Undefined);
+                reg
+            }
+        };
+        let mut avoid = RegSet::with_gp_reserved();
+        avoid.set(cond_reg);
+        let patch_reg = self.force_tmp_register(asm, avoid);
+        assert_ne!(cond_reg, patch_reg);
+        (cond_reg, patch_reg)
+    }
+
+    /// Return the `patch register` a combined icmp/guard instruction needs. This function
+    /// guarantees not to set CPU flags. It is not suitable for use outside `cg_icmp_guard`.
+    pub(super) fn tmp_register_for_icmp_guard(
+        &mut self,
+        asm: &mut Assembler,
+        _iidx: InstIdx,
+    ) -> Rq {
+        self.force_tmp_register(asm, RegSet::with_gp_reserved())
+    }
+
     /// Assign general purpose registers for the instruction at position `iidx`.
     ///
     /// This is a convenience function for [Self::assign_regs] when there are no FP registers.
@@ -754,78 +836,11 @@ impl LSRegAlloc<'_> {
             let reg = match self.gp_regset.find_empty_avoiding(asgn_regs) {
                 Some(reg) => reg,
                 None => {
-                    // We need to find a register to spill. Our heuristic is (in order):
-                    //   1. If a register's value contains a constant, use that.
-                    //   2. If a register's value is already spilt use that.
-                    //   3. Spill the register whose value is used furthest away in the trace based
-                    //      on the reverse analyser's (def, use) analysis.
-                    //   4. If (1) or (2) leads to a tie, spill the register whose values is next
-                    //      used furthest away from the current instruction.
-                    let mut cnd_const = None;
-                    let mut cnd_spill: Option<(Rq, InstIdx)> = None;
-                    let mut cnd_furthest: Option<(Rq, InstIdx)> = None;
-                    for reg in GP_REGS {
-                        if asgn_regs.is_set(reg) {
-                            continue;
-                        }
-                        match &self.gp_reg_states[usize::from(reg.code())] {
-                            RegState::Reserved => (),
-                            RegState::Empty => unreachable!(),
-                            RegState::FromConst(_, _) => todo!(),
-                            RegState::FromInst(from_iidxs, _) => {
-                                // OPT: If this register holds multiple instruction's values, we
-                                // could be more sophisticated in our checks. Using the first
-                                // instruction is always correct, though, if perhaps inefficient.
-                                let from_iidx = from_iidxs[0];
-                                match self.spills[usize::from(from_iidx)] {
-                                    SpillState::Empty => match cnd_furthest {
-                                        None => cnd_furthest = Some((reg, from_iidx)),
-                                        Some((_, furthest_iidx)) => {
-                                            if let Some(next_iidx) =
-                                                self.rev_an.next_use(iidx, from_iidx)
-                                            {
-                                                if next_iidx > furthest_iidx {
-                                                    cnd_furthest = Some((reg, from_iidx))
-                                                }
-                                            }
-                                        }
-                                    },
-                                    SpillState::Stack(_) | SpillState::Direct(_) => match cnd_spill
-                                    {
-                                        None => cnd_spill = Some((reg, from_iidx)),
-                                        Some((_, spill_iidx)) => {
-                                            if let Some(next_iidx) =
-                                                self.rev_an.next_use(iidx, from_iidx)
-                                            {
-                                                if next_iidx > spill_iidx {
-                                                    cnd_spill = Some((reg, from_iidx))
-                                                }
-                                            }
-                                        }
-                                    },
-                                    SpillState::ConstInt { .. } | SpillState::ConstPtr(_) => {
-                                        // Should we encounter multiple constants in registers
-                                        // (which isn't very likely...), we want to spill the one
-                                        // in the lowest register, since that's more likely to be
-                                        // clobbered by a CALL.
-                                        if cnd_const.is_none() {
-                                            cnd_const = Some(reg);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if let Some(reg) = cnd_const {
-                        reg
-                    } else if let Some((reg, _)) = cnd_spill {
-                        reg
-                    } else if let Some((reg, _)) = cnd_furthest {
-                        reg
-                    } else {
-                        panic!("Cannot satisfy register constraints: no registers left");
-                    }
+                    let mut clobber_regs = asgn_regs.iter_unset_bits().collect::<Vec<_>>();
+                    self.sort_clobber_regs(iidx, &mut clobber_regs);
+                    *clobber_regs
+                        .first()
+                        .expect("Cannot satisfy register constraints: no registers left")
                 }
             };
             cnstr_regs[i] = Some(reg);
@@ -850,6 +865,81 @@ impl LSRegAlloc<'_> {
         }
 
         (asgn_regs, cnstr_regs.map(|x| x.unwrap()))
+    }
+
+    /// For the registers we're willing to clobber `clobber_regs`, sort them so that the registers
+    /// we're most willing to clobber are at the start of the list.
+    fn sort_clobber_regs(&self, iidx: InstIdx, clobber_regs: &mut [Rq]) {
+        // Our heuristic is (in order):
+        // 1. Prefer to clobber registers whose values are unused in the future.
+        // 2. Prefer to clobber constants.
+        // 3. Prefer to clobber a register whose value(s) are used the fewest subsequent times in
+        //    the trace.
+        // 4. Prefer to clobber a register that is already spilled.
+        // 5. Prefer to clobber a register that is used further away in the trace.
+        // 6. Prefer to clobber a register that contains fewer variables.
+        clobber_regs.sort_unstable_by(|lhs_reg, rhs_reg| {
+            match (
+                &self.gp_reg_states[usize::from(lhs_reg.code())],
+                &self.gp_reg_states[usize::from(rhs_reg.code())],
+            ) {
+                (RegState::FromInst(lhs_iidxs, _), RegState::FromInst(rhs_iidxs, _)) => {
+                    let lhs = lhs_iidxs
+                        .iter()
+                        .map(|y| {
+                            (
+                                self.rev_an.iter_uses_after(iidx, *y).count(),
+                                self.rev_an.next_use(iidx, *y),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let lhs_count = lhs.iter().map(|(count, _)| count).max().unwrap();
+                    let lhs_next = lhs.iter().map(|(_, iidx)| iidx).min().unwrap();
+                    let rhs = rhs_iidxs
+                        .iter()
+                        .map(|y| {
+                            (
+                                self.rev_an.iter_uses_after(iidx, *y).count(),
+                                self.rev_an.next_use(iidx, *y),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let rhs_count = rhs.iter().map(|(count, _)| count).max().unwrap();
+                    let rhs_next = rhs.iter().map(|(_, iidx)| iidx).min().unwrap();
+
+                    if lhs_next.is_none() && rhs_next.is_some() {
+                        Ordering::Less
+                    } else if lhs_next.is_some() && rhs_next.is_none() {
+                        Ordering::Greater
+                    } else {
+                        match lhs_count.cmp(rhs_count) {
+                            x @ Ordering::Less | x @ Ordering::Greater => x,
+                            Ordering::Equal => {
+                                let lhs_spilled = lhs_iidxs.iter().all(|x| {
+                                    !matches!(self.spills[usize::from(*x)], SpillState::Empty)
+                                });
+                                let rhs_spilled = rhs_iidxs.iter().all(|x| {
+                                    !matches!(self.spills[usize::from(*x)], SpillState::Empty)
+                                });
+
+                                if lhs_spilled && !rhs_spilled {
+                                    Ordering::Less
+                                } else if !lhs_spilled && rhs_spilled {
+                                    Ordering::Greater
+                                } else {
+                                    lhs_next
+                                        .cmp(rhs_next)
+                                        .then_with(|| lhs_iidxs.len().cmp(&rhs_iidxs.len()))
+                                }
+                            }
+                        }
+                    }
+                }
+                (_, RegState::FromInst(_, _)) => Ordering::Less,
+                (RegState::FromInst(_, _), _) => Ordering::Greater,
+                (_, _) => Ordering::Equal,
+            }
+        });
     }
 
     /// For each input constraint in `cnstrs`, generate a register move if that constraint's
@@ -942,7 +1032,15 @@ impl LSRegAlloc<'_> {
             }
         }
 
-        'a: for reg in clobber_regs.iter_set_bits() {
+        // We now know which registers we're going to clobber and have to choose which values we'll
+        // move and spill. As a simple heuristic we try to first move those registers whose values
+        // will be used most often in the remainder of the trace. `clobber_regs` will (after the
+        // `sort_by_key` be in ascending order: i.e. the registers whose values we most want to
+        // keep will be at the end.
+        let mut clobber_regs = clobber_regs.iter_set_bits().collect::<Vec<_>>();
+        self.sort_clobber_regs(iidx, &mut clobber_regs);
+
+        'a: for reg in clobber_regs.iter() {
             match &self.gp_reg_states[usize::from(reg.code())] {
                 RegState::Reserved => (),
                 RegState::Empty => (),
@@ -962,8 +1060,8 @@ impl LSRegAlloc<'_> {
                             if let Some(Register::GP(hint_reg)) =
                                 self.rev_an.reg_hint(iidx.checked_add(1).unwrap(), *op_iidx)
                             {
-                                if !asgn_regs.is_set(reg) {
-                                    out.push((hint_reg, RegAction::CopyFrom(reg)));
+                                if !asgn_regs.is_set(*reg) {
+                                    out.push((hint_reg, RegAction::CopyFrom(*reg)));
                                     asgn_regs.set(hint_reg);
                                     continue 'a;
                                 }
@@ -979,12 +1077,12 @@ impl LSRegAlloc<'_> {
                         {
                             let empty_reg = GP_REGS[empty_reg_i];
                             if !asgn_regs.is_set(empty_reg) {
-                                out.push((empty_reg, RegAction::CopyFrom(reg)));
+                                out.push((empty_reg, RegAction::CopyFrom(*reg)));
                                 asgn_regs.set(empty_reg);
                                 continue 'a;
                             }
                         }
-                        out.push((reg, RegAction::Spill));
+                        out.push((*reg, RegAction::Spill));
                     }
                 }
             }
@@ -1198,14 +1296,32 @@ impl LSRegAlloc<'_> {
             RegState::Reserved => unreachable!(),
             RegState::Empty => (),
             RegState::FromConst(_, _) => (),
+            RegState::FromInst(query_iidxs, _) => {
+                if query_iidxs.iter().any(|x| {
+                    self.rev_an.is_inst_var_still_used_after(cur_iidx, *x)
+                        && self.spills[usize::from(*x)] == SpillState::Empty
+                }) {
+                    self.force_spill_gp(asm, true, reg);
+                }
+            }
+        }
+    }
+
+    /// Spill the value(s) stored in `reg` if it is not already spilled. This updates `self.spills`
+    /// (if necessary) but not `self.gp_reg_state` or `self.gp_regset`.
+    ///
+    /// If `set_cpu_flags` is set to `true`, this function can change the CPU Flags: doing so
+    /// allows it to generate more efficient code.
+    fn force_spill_gp(&mut self, asm: &mut Assembler, set_cpu_flags: bool, reg: Rq) {
+        match &self.gp_reg_states[usize::from(reg.code())] {
+            RegState::Reserved => unreachable!(),
+            RegState::Empty => (),
+            RegState::FromConst(_, _) => (),
             RegState::FromInst(query_iidxs, ext) => {
                 // First work out the non-strict subset of `query_iidx`s which are not yet spilled.
                 let need_spilling = query_iidxs
                     .iter()
-                    .filter(|x| {
-                        self.rev_an.is_inst_var_still_used_after(cur_iidx, **x)
-                            && self.spills[usize::from(**x)] == SpillState::Empty
-                    })
+                    .filter(|x| self.spills[usize::from(**x)] == SpillState::Empty)
                     .collect::<Vec<_>>();
                 if !need_spilling.is_empty() {
                     // When multiple variables exist in a single register, we only need to spill
@@ -1229,11 +1345,13 @@ impl LSRegAlloc<'_> {
                         1 => {
                             if *ext == RegExtension::ZeroExtended {
                                 dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code()));
-                            } else {
+                            } else if set_cpu_flags {
                                 dynasm!(asm
                                     ; bt Rd(reg.code()), 0
                                     ; setc BYTE [rbp - off]
                                 );
+                            } else {
+                                todo!();
                             }
                         }
                         8 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
@@ -2161,6 +2279,12 @@ impl RegSet<Rq> {
             .filter(|x| self.is_set(GP_REGS[*x]))
             .map(|x| GP_REGS[x])
     }
+
+    fn iter_unset_bits(&self) -> impl Iterator<Item = Rq> + '_ {
+        (0usize..16)
+            .filter(|x| !self.is_set(GP_REGS[*x]))
+            .map(|x| GP_REGS[x])
+    }
 }
 
 impl From<Rq> for RegSet<Rq> {
@@ -2560,6 +2684,168 @@ mod test {
     }
 
     #[test]
+    fn spilling2() {
+        let m = Module::from_str(
+            "
+          func_decl f(i8, i8, i8, i8, i8, i8)
+          entry:
+            %0: i8 = param reg
+            %1: i8 = add %0, %0
+            %2: i8 = add %0, %1
+            %3: i8 = add %0, %2
+            %4: i8 = add %0, %3
+            %5: i8 = add %0, %4
+            %6: i8 = add %0, %5
+            %7: i8 = add %0, %6
+            %8: i8 = add %0, %7
+            %9: i8 = add %0, %8
+            %10: i8 = add %0, %9
+            %11: i8 = add %0, %10
+            %12: i8 = add %1, %11
+            %13: i8 = add %2, %12
+            %14: i8 = add %3, %13
+            %15: i8 = add %4, %14
+            %16: i8 = add %5, %15
+            %17: i8 = add %6, %16
+            %18: i8 = add %7, %17
+            %19: i8 = add %8, %18
+            %20: i8 = add %9, %19
+            %21: i8 = add %10, %20
+            %22: i8 = add %11, %21
+            %23: i8 = add %12, %22
+            call @f(%2, %4, %6, %8, %10, %12)
+            black_box %1
+            black_box %2
+            black_box %3
+            black_box %4
+            black_box %5
+            black_box %6
+            black_box %7
+            black_box %8
+            black_box %9
+            black_box %10
+            black_box %11
+            black_box %12
+            black_box %13
+            black_box %14
+            black_box %15
+            black_box %16
+            black_box %17
+            black_box %18
+            black_box %19
+            black_box %20
+            black_box %21
+            black_box %22
+            black_box %23
+        ",
+        );
+
+        let mut ra = LSRegAlloc::new(&m, 0);
+        let mut asm = dynasmrt::x64::Assembler::new().unwrap();
+        let mut gp_regsets = Vec::with_capacity(m.insts_len());
+        let mut reg_states = Vec::with_capacity(m.insts_len());
+        let mut spill_states = Vec::with_capacity(m.insts_len());
+        for (iidx, inst) in m.iter_skipping_insts() {
+            match inst {
+                Inst::BlackBox(_) => (),
+                Inst::Param(pinst) => {
+                    match VarLocation::from_yksmp_location(&m, iidx, m.param(pinst.paramidx())) {
+                        VarLocation::Register(Register::GP(reg)) => {
+                            ra.force_assign_inst_gp_reg(&mut asm, iidx, reg);
+                        }
+                        _ => todo!(),
+                    }
+                }
+                Inst::BinOp(binst) => match binst.binop() {
+                    BinOp::Add => {
+                        let [_, _, _] = ra.assign_gp_regs(
+                            &mut asm,
+                            iidx,
+                            [
+                                GPConstraint::Input {
+                                    op: binst.lhs(&m),
+                                    in_ext: RegExtension::Undefined,
+                                    force_reg: None,
+                                    clobber_reg: false,
+                                },
+                                GPConstraint::Input {
+                                    op: binst.rhs(&m),
+                                    in_ext: RegExtension::Undefined,
+                                    force_reg: None,
+                                    clobber_reg: false,
+                                },
+                                GPConstraint::Output {
+                                    out_ext: RegExtension::Undefined,
+                                    force_reg: None,
+                                    can_be_same_as_input: true,
+                                },
+                            ],
+                        );
+                    }
+                    _ => panic!(),
+                },
+                Inst::Call(_) => {
+                    // We don't need to fill this out for our particular test.
+                }
+                Inst::ZExt(zinst) => {
+                    let [_reg] = ra.assign_gp_regs(
+                        &mut asm,
+                        iidx,
+                        [GPConstraint::AlignExtension {
+                            op: zinst.val(&m),
+                            out_ext: RegExtension::ZeroExtended,
+                        }],
+                    );
+                }
+                _ => panic!(),
+            }
+            gp_regsets.push(ra.gp_regset);
+            reg_states.push(ra.gp_reg_states.clone());
+            spill_states.push(ra.spills.clone());
+        }
+
+        #[allow(clippy::needless_range_loop)]
+        for i in 14..15 {
+            assert_eq!(
+                spill_states[i]
+                    .iter()
+                    .filter(|x| matches!(x, SpillState::Stack(_)))
+                    .count(),
+                i - 13
+            )
+        }
+
+        assert_eq!(
+            spill_states[16]
+                .iter()
+                .filter(|x| matches!(x, SpillState::Stack(_)))
+                .count(),
+            2
+        );
+        assert_eq!(
+            spill_states[17]
+                .iter()
+                .filter(|x| matches!(x, SpillState::Stack(_)))
+                .count(),
+            3
+        );
+        assert_eq!(
+            spill_states[18]
+                .iter()
+                .filter(|x| matches!(x, SpillState::Stack(_)))
+                .count(),
+            4
+        );
+        assert_eq!(
+            spill_states[19]
+                .iter()
+                .filter(|x| matches!(x, SpillState::Stack(_)))
+                .count(),
+            5
+        );
+    }
+
+    #[test]
     fn multiple_instructions_in_one_reg() {
         // This (long!) sequence tests two things: first that we merge zext/sext instructions when
         // possible and that we spill at the correct point (hence all the `add`s).
@@ -2585,6 +2871,8 @@ mod test {
                 %16: i64 = add %15, %5
                 %17: i64 = add %16, %5
                 %18: i64 = add %17, %5
+                %19: i64 = add %18, %5
+                %20: i64 = add %19, %5
                 black_box %3
                 black_box %6
                 black_box %7
@@ -2599,6 +2887,8 @@ mod test {
                 black_box %16
                 black_box %17
                 black_box %18
+                black_box %19
+                black_box %20
         ",
         );
 
@@ -2742,13 +3032,14 @@ mod test {
         );
 
         #[allow(clippy::needless_range_loop)]
-        for i in 7..17 {
+        for i in 7..19 {
             assert!(spill_states[i]
                 .iter()
                 .all(|x| matches!(x, SpillState::Empty)));
         }
 
-        assert_matches!(spill_states[18][7], SpillState::Stack(_));
+        assert_matches!(spill_states[20][3], SpillState::Stack(_));
+        assert_matches!(spill_states[20][6], SpillState::Stack(_));
     }
 
     #[test]
