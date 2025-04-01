@@ -4,7 +4,7 @@ use std::{
     assert_matches::debug_assert_matches,
     cell::RefCell,
     cmp,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     env,
     error::Error,
     ffi::c_void,
@@ -273,7 +273,8 @@ impl MT {
     /// job is related to.
     fn queue_root_compile_job(
         self: &Arc<Self>,
-        trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>, Vec<String>),
+        // FIXME: this tuple is too long.
+        trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>, Vec<String>, usize),
         hl_arc: Arc<Mutex<HotLocation>>,
     ) {
         self.stats.trace_recorded_ok();
@@ -290,6 +291,7 @@ impl MT {
                 Arc::clone(&hl_arc),
                 trace_iter.1,
                 trace_iter.2,
+                trace_iter.3,
             ) {
                 Ok(ctr) => {
                     mt.compiled_traces
@@ -468,7 +470,8 @@ impl MT {
                             promotions: Vec::new(),
                             debug_strs: Vec::new(),
                             frameaddr,
-                            seen_hls: HashSet::new(),
+                            seen_hls: HashMap::new(),
+                            cp_idx: 0,
                         });
                     }),
                     Err(e) => {
@@ -495,7 +498,7 @@ impl MT {
                     }
                 }
             }
-            TransitionControlPoint::StopTracing => {
+            TransitionControlPoint::StopTracing { start_cp_idx } => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let (hl, thread_tracer, promotions, debug_strs) =
@@ -507,6 +510,7 @@ impl MT {
                             debug_strs,
                             frameaddr: tracing_frameaddr,
                             seen_hls: _,
+                            cp_idx: _,
                         } => {
                             // If this assert fails then the code in `transition_control_point`,
                             // which rejects traces that end in another frame, didn't work.
@@ -518,9 +522,19 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        self.log.log(Verbosity::JITEvent, "stop-tracing");
+                        if start_cp_idx == 0 {
+                            self.log.log(Verbosity::JITEvent, "stop-tracing");
+                        } else {
+                            self.log
+                                .log(Verbosity::JITEvent, "stop-tracing (inner loop detected)");
+                        }
                         self.queue_root_compile_job(
-                            (utrace, promotions.into_boxed_slice(), debug_strs),
+                            (
+                                utrace,
+                                promotions.into_boxed_slice(),
+                                debug_strs,
+                                start_cp_idx,
+                            ),
                             hl,
                         );
                     }
@@ -548,6 +562,7 @@ impl MT {
                             debug_strs,
                             frameaddr: tracing_frameaddr,
                             seen_hls: _,
+                            cp_idx: _,
                         } => {
                             assert_eq!(frameaddr, tracing_frameaddr);
                             (hl, thread_tracer, promotions, debug_strs)
@@ -592,8 +607,9 @@ impl MT {
                     if is_tracing {
                         if let MTThreadState::Tracing {
                             frameaddr: tracing_frameaddr,
-                            hl: tracing_hl,
+                            hl: ref mut tracing_hl,
                             seen_hls,
+                            cp_idx,
                             ..
                         } = mtt.peek_mut_tstate()
                         {
@@ -605,11 +621,34 @@ impl MT {
                                 akind = Some(AbortKind::OutOfFrame);
                             }
 
-                            if let Some(x) =
-                                loc.hot_location().map(|x| x as *const Mutex<HotLocation>)
-                            {
-                                if !seen_hls.insert(x) {
-                                    akind = Some(AbortKind::Unrolled);
+                            if let Some(x) = loc.hot_location() {
+                                let seen_key = x as *const Mutex<HotLocation>;
+                                if seen_hls.contains_key(&seen_key) {
+                                    // We found an inner loop. Compile that instead.
+                                    let mut new_lk = hl.lock();
+                                    // First check that the inner loop's start location is in the
+                                    // counting state: i.e. it hasn't already been compiled and no
+                                    // other thread is currently tracing/compiling that location
+                                    // already.
+                                    match new_lk.kind {
+                                        HotLocationKind::Counting(_) => {
+                                            // XXX is Counting(0) what we want?location.rs
+                                            let mut old_lk = tracing_hl.lock();
+                                            old_lk.kind = HotLocationKind::Counting(0);
+                                            drop(old_lk);
+                                            new_lk.kind = HotLocationKind::Compiling;
+                                            *tracing_hl = loc.hot_location_arc_clone().unwrap();
+                                            return TransitionControlPoint::StopTracing {
+                                                start_cp_idx: seen_hls[&seen_key],
+                                            };
+                                        }
+                                        _ => {
+                                            // There's no point in tracing the inner loop.
+                                            akind = Some(AbortKind::Unrolled);
+                                        }
+                                    }
+                                } else {
+                                    seen_hls.insert(x, *cp_idx);
                                 }
                             }
 
@@ -722,7 +761,7 @@ impl MT {
                                     } else {
                                         // ...and it's this location...
                                         lk.kind = HotLocationKind::Compiling;
-                                        TransitionControlPoint::StopTracing
+                                        TransitionControlPoint::StopTracing { start_cp_idx: 0 }
                                     }
                                 }
                                 _ => {
@@ -806,6 +845,7 @@ impl MT {
                             let MTThreadState::Tracing {
                                 frameaddr: tracing_frameaddr,
                                 seen_hls,
+                                cp_idx,
                                 ..
                             } = mtt.peek_mut_tstate()
                             else {
@@ -817,8 +857,10 @@ impl MT {
                                 // having failed to trace properly.
                                 return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
                             }
-                            if !seen_hls.insert(hl_ptr) {
-                                return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
+                            if seen_hls.contains_key(&hl_ptr) {
+                                todo!();
+                            } else {
+                                seen_hls.insert(hl_ptr as *const Mutex<HotLocation>, *cp_idx);
                             }
                         }
                         return TransitionControlPoint::NoAction;
@@ -959,7 +1001,8 @@ impl MT {
                             promotions: Vec::new(),
                             debug_strs: Vec::new(),
                             frameaddr,
-                            seen_hls: HashSet::new(),
+                            seen_hls: HashMap::new(),
+                            cp_idx: 0,
                         })
                     }),
                     Err(e) => todo!("{e:?}"),
@@ -1014,15 +1057,20 @@ enum MTThreadState {
     Interpreting,
     /// This thread is recording a trace.
     Tracing {
-        /// Which [Location]s have we seen so far in this trace? If we see a [Location] twice
-        /// then we know we've got an undesirable trace (e.g. we started tracing an outer loop and
-        /// have started to unroll an inner loop).
+        /// Which [Location]s have we seen so far in this trace? If we see a [Location] twice then
+        /// we know we've found an inner loop (e.g. we started tracing an outer loop and have
+        /// started to unroll an inner loop).
         ///
         /// Tracking [Location]s directly is tricky as they have no inherent ID. To solve that, for
         /// the time being we force every `Location` that we encounter in a trace to become a
         /// [HotLocation] (with kind [HotLocationKind::Counting]) if it is not already. We can then
         /// use the (unmoving) pointer to a [HotLocation]'s inner [Mutex] as an ID.
-        seen_hls: HashSet<*const Mutex<HotLocation>>,
+        ///
+        /// Maps the [HotLocation]'s "ID" to the occurance of the control point where we last saw
+        /// it (if we count the calls the control point in the trace, starting from zero).
+        seen_hls: HashMap<*const Mutex<HotLocation>, usize>,
+        /// How many times we've seen the control point since starting tracing.
+        cp_idx: usize,
         /// The [HotLocation] the trace will end at. For a top-level trace, this will be the same
         /// [HotLocation] the trace started at; for a side-trace, tracing started elsewhere.
         hl: Arc<Mutex<HotLocation>>,
@@ -1104,6 +1152,16 @@ impl MTThread {
         F: FnOnce(&mut MTThread) -> R,
     {
         THREAD_MTTHREAD.with_borrow_mut(|mtt| f(mtt))
+    }
+
+    /// Increment the counter tracking how many times we've seen the control point since starting
+    /// tracing.
+    pub fn inc_cp_idx() {
+        Self::with_borrow_mut(|mtt| {
+            if let MTThreadState::Tracing { ref mut cp_idx, .. } = mtt.peek_mut_tstate() {
+                *cp_idx += 1;
+            }
+        });
     }
 
     /// Is this thread currently tracing something?
@@ -1277,7 +1335,14 @@ enum TransitionControlPoint {
     AbortTracing(AbortKind),
     Execute(Arc<dyn CompiledTrace>),
     StartTracing(Arc<Mutex<HotLocation>>),
-    StopTracing,
+    StopTracing {
+        /// The control point to start compiling from.
+        ///
+        ///  - 0 means compile the whole lot.
+        ///  - >0 means we will be compiling an inner loop and the trace builder will have to skip
+        ///    over some prefix of the trace, up until the inner loop starts.
+        start_cp_idx: usize,
+    },
     StopSideTracing {
         gidx: GuardIdx,
         parent_ctr: Arc<dyn CompiledTrace>,
@@ -1294,7 +1359,10 @@ enum AbortKind {
     EncounteredCompiledTrace,
     /// Tracing continued while the interpreter frame address changed.
     OutOfFrame,
-    /// We unrolled a loop (i.e. we traced a [Location] more than once).
+    /// We discovered an inner loop during tracing (i.e. we traced a [Location] more than once) and
+    /// we were unable to switch to tracing that loop.
+    ///
+    /// XXX: "Unrolled" probably isn't a good name any more.
     Unrolled,
 }
 
@@ -1397,13 +1465,15 @@ mod tests {
                 promotions: Vec::new(),
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
-                seen_hls: HashSet::new(),
+                seen_hls: HashMap::new(),
+                cp_idx: 0,
             });
         });
     }
 
     fn expect_stop_tracing(mt: &Arc<MT>, loc: &Location) {
-        let TransitionControlPoint::StopTracing = mt.transition_control_point(loc, ptr::null_mut())
+        let TransitionControlPoint::StopTracing { .. } =
+            mt.transition_control_point(loc, ptr::null_mut())
         else {
             panic!()
         };
@@ -1426,7 +1496,8 @@ mod tests {
                 promotions: Vec::new(),
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
-                seen_hls: HashSet::new(),
+                seen_hls: HashMap::new(),
+                cp_idx: 0,
             });
         });
     }
@@ -1551,7 +1622,8 @@ mod tests {
                             promotions: Vec::new(),
                             debug_strs: Vec::new(),
                             frameaddr: ptr::null_mut(),
-                            seen_hls: HashSet::new(),
+                            seen_hls: HashMap::new(),
+                            cp_idx: 0,
                         });
                     });
                     break;
@@ -1787,7 +1859,8 @@ mod tests {
                                     promotions: Vec::new(),
                                     debug_strs: Vec::new(),
                                     frameaddr: ptr::null_mut(),
-                                    seen_hls: HashSet::new(),
+                                    seen_hls: HashMap::new(),
+                                    cp_idx: 0,
                                 });
                             });
                             assert!(matches!(
@@ -1819,7 +1892,7 @@ mod tests {
                             }
                             break;
                         }
-                        TransitionControlPoint::StopTracing
+                        TransitionControlPoint::StopTracing { .. }
                         | TransitionControlPoint::StopSideTracing { .. } => unreachable!(),
                     }
                 }
