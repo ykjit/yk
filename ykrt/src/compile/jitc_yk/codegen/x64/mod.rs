@@ -1732,8 +1732,27 @@ impl<'a> Assemble<'a> {
         if !matches!(ret_ty, Ty::Void) {
             debug_assert!(ret_ty.bitw().unwrap() <= 64);
         }
+        let rax_i = CALLER_CLOBBER_REGS
+            .iter()
+            .position(|x| *x == Rq::RAX)
+            .unwrap();
         match ret_ty {
-            Ty::Void => (),
+            Ty::Void => {
+                if let Some(op) = callee_op.clone() {
+                    // Indirect call
+                    if !fty.is_vararg() {
+                        gp_cnstrs[rax_i] = GPConstraint::Input {
+                            op,
+                            in_ext: RegExtension::ZeroExtended,
+                            force_reg: Some(Rq::RAX),
+                            clobber_reg: true,
+                        };
+                    } else {
+                        // We won't be able to use rax in this case!
+                        todo!();
+                    }
+                }
+            }
             Ty::Float(_) => {
                 let cnstr = match &fp_cnstrs[0] {
                     RegConstraint::InputIntoRegAndClobber(op, _) => {
@@ -1745,10 +1764,6 @@ impl<'a> Assemble<'a> {
                 fp_cnstrs[0] = cnstr;
             }
             Ty::Integer(_) | Ty::Ptr => {
-                let rax_i = CALLER_CLOBBER_REGS
-                    .iter()
-                    .position(|x| *x == Rq::RAX)
-                    .unwrap();
                 if callee.is_some() {
                     // Direct call
                     gp_cnstrs[rax_i] = GPConstraint::Output {
@@ -4716,6 +4731,26 @@ mod tests {
                 and edi, 0xff
                 mov rax, 0x01
                 call r15
+            ",
+            false,
+        );
+
+        codegen_and_test(
+            "
+              func_type f(i8)
+
+              entry:
+                %0: i8 = param reg
+                %1: ptr = param reg
+                icall<f> %1(%0)
+            ",
+            "
+                ...
+                ; icall %1(%0)
+                mov rdi, rax
+                mov rax, rcx
+                and edi, 0xff
+                call rax
             ",
             false,
         );
