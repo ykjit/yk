@@ -874,9 +874,9 @@ impl LSRegAlloc<'_> {
         // 1. Prefer to clobber registers whose values are unused in the future.
         // 2. Prefer to clobber constants.
         // 3. Prefer to clobber a register that is used further away in the trace.
-        // 4. Prefer to clobber a register whose value(s) are used the fewest subsequent times in
+        // 4. Prefer to clobber a register that is already spilled.
+        // 5. Prefer to clobber a register whose value(s) are used the fewest subsequent times in
         //    the trace.
-        // 5. Prefer to clobber a register that is already spilled.
         // 6. Prefer to clobber a register that contains fewer variables.
         clobber_regs.sort_unstable_by(|lhs_reg, rhs_reg| {
             match (
@@ -910,30 +910,25 @@ impl LSRegAlloc<'_> {
                     } else if lhs_next.is_some() && rhs_next.is_none() {
                         Ordering::Greater
                     } else if lhs_next != rhs_next {
-                        lhs_next.cmp(rhs_next)
+                        lhs_next.cmp(rhs_next).reverse()
                     } else {
-                        let lhs_count = lhs.iter().map(|(count, _)| count).max().unwrap();
-                        let rhs_count = rhs.iter().map(|(count, _)| count).max().unwrap();
-                        match lhs_count.cmp(rhs_count) {
-                            x @ Ordering::Less | x @ Ordering::Greater => x,
-                            Ordering::Equal => {
-                                let lhs_spilled = lhs_iidxs.iter().all(|x| {
-                                    !matches!(self.spills[usize::from(*x)], SpillState::Empty)
-                                });
-                                let rhs_spilled = rhs_iidxs.iter().all(|x| {
-                                    !matches!(self.spills[usize::from(*x)], SpillState::Empty)
-                                });
+                        let lhs_spilled = lhs_iidxs
+                            .iter()
+                            .all(|x| !matches!(self.spills[usize::from(*x)], SpillState::Empty));
+                        let rhs_spilled = rhs_iidxs
+                            .iter()
+                            .all(|x| !matches!(self.spills[usize::from(*x)], SpillState::Empty));
 
-                                if lhs_spilled && !rhs_spilled {
-                                    Ordering::Less
-                                } else if !lhs_spilled && rhs_spilled {
-                                    Ordering::Greater
-                                } else {
-                                    lhs_next
-                                        .cmp(rhs_next)
-                                        .then_with(|| lhs_iidxs.len().cmp(&rhs_iidxs.len()))
-                                }
-                            }
+                        if lhs_spilled && !rhs_spilled {
+                            Ordering::Less
+                        } else if !lhs_spilled && rhs_spilled {
+                            Ordering::Greater
+                        } else {
+                            let lhs_count = lhs.iter().map(|(count, _)| count).max().unwrap();
+                            let rhs_count = rhs.iter().map(|(count, _)| count).max().unwrap();
+                            lhs_count
+                                .cmp(rhs_count)
+                                .then(lhs_iidxs.len().cmp(&rhs_iidxs.len()))
                         }
                     }
                 }
@@ -2666,7 +2661,7 @@ mod test {
             ]),
         );
 
-        assert_matches!(spill_states[15][13], SpillState::Stack(_),);
+        assert_matches!(spill_states[15][12], SpillState::Stack(_),);
         check_reg_states(
             &reg_states,
             InstIdx::unchecked_from(15),
@@ -2830,28 +2825,28 @@ mod test {
                 .iter()
                 .filter(|x| matches!(x, SpillState::Stack(_)))
                 .count(),
-            3
+            2
         );
         assert_eq!(
             spill_states[16]
                 .iter()
                 .filter(|x| matches!(x, SpillState::Stack(_)))
                 .count(),
-            5
+            3
         );
         assert_eq!(
             spill_states[17]
                 .iter()
                 .filter(|x| matches!(x, SpillState::Stack(_)))
                 .count(),
-            7
+            4
         );
         assert_eq!(
             spill_states[18]
                 .iter()
                 .filter(|x| matches!(x, SpillState::Stack(_)))
                 .count(),
-            9
+            5
         );
     }
 
