@@ -910,7 +910,7 @@ impl LSRegAlloc<'_> {
                     } else if lhs_next.is_some() && rhs_next.is_none() {
                         Ordering::Greater
                     } else if lhs_next != rhs_next {
-                        lhs_next.cmp(rhs_next)
+                        lhs_next.cmp(rhs_next).reverse()
                     } else {
                         let lhs_count = lhs.iter().map(|(count, _)| count).max().unwrap();
                         let rhs_count = rhs.iter().map(|(count, _)| count).max().unwrap();
@@ -2666,7 +2666,7 @@ mod test {
             ]),
         );
 
-        assert_matches!(spill_states[15][13], SpillState::Stack(_),);
+        assert_matches!(spill_states[15][12], SpillState::Stack(_),);
         check_reg_states(
             &reg_states,
             InstIdx::unchecked_from(15),
@@ -2830,28 +2830,28 @@ mod test {
                 .iter()
                 .filter(|x| matches!(x, SpillState::Stack(_)))
                 .count(),
-            3
+            2
         );
         assert_eq!(
             spill_states[16]
                 .iter()
                 .filter(|x| matches!(x, SpillState::Stack(_)))
                 .count(),
-            5
+            3
         );
         assert_eq!(
             spill_states[17]
                 .iter()
                 .filter(|x| matches!(x, SpillState::Stack(_)))
                 .count(),
-            7
+            4
         );
         assert_eq!(
             spill_states[18]
                 .iter()
                 .filter(|x| matches!(x, SpillState::Stack(_)))
                 .count(),
-            9
+            5
         );
     }
 
