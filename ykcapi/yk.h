@@ -73,13 +73,6 @@ inline bool yk_location_is_null(YkLocation l) {
   return l.state == 0;
 }
 
-// Create a new `Location`.
-//
-// Note that a `Location` created by this call must not simply be discarded:
-// if no longer wanted, it must be passed to `yk_location_drop` to allow
-// appropriate clean-up.
-YkLocation yk_location_empty(void);
-
 // Clean-up a `Location` previously created by `yk_new_location`. The
 // `Location` must not be further used after this call or undefined behaviour
 // will occur.
