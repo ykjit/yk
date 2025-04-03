@@ -697,7 +697,15 @@ impl MT {
                                 TransitionControlPoint::Execute(Arc::clone(ctr))
                             }
                         }
-                        HotLocationKind::Compiling => TransitionControlPoint::NoAction,
+                        HotLocationKind::Compiling => {
+                            if is_tracing {
+                                TransitionControlPoint::AbortTracing(
+                                    AbortKind::EncounteredCompiledTrace,
+                                )
+                            } else {
+                                TransitionControlPoint::NoAction
+                            }
+                        }
                         HotLocationKind::Counting(c) => {
                             if is_tracing {
                                 // This thread is tracing something, so bail out as quickly as possible
