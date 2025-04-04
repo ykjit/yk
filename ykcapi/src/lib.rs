@@ -15,6 +15,8 @@
 #![allow(clippy::missing_safety_doc)]
 #![feature(naked_functions)]
 
+#[cfg(feature = "ykd")]
+use std::ffi::CStr;
 use std::{
     ffi::{c_char, c_void, CString},
     mem::forget,
@@ -154,6 +156,15 @@ pub unsafe extern "C" fn yk_mt_sidetrace_threshold_set(mt: *const MT, hot_thresh
 #[no_mangle]
 pub extern "C" fn yk_location_new() -> Location {
     Location::new()
+}
+
+#[cfg(feature = "ykd")]
+#[no_mangle]
+pub unsafe extern "C" fn yk_location_set_debug_str(loc: *mut Location, s: *const c_char) {
+    let s = unsafe { CStr::from_ptr(s) }.to_str().unwrap().to_owned();
+    let loc = unsafe { &*loc };
+    assert!(!loc.is_null());
+    loc.set_hl_debug_str(s);
 }
 
 #[no_mangle]

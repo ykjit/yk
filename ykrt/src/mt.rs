@@ -31,6 +31,20 @@ use crate::{
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
 };
 
+// Emit a log entry with hot location debug information if present and support is compiled in.
+macro_rules! yklog {
+    ($logger:expr, $level:expr, $msg:expr, $opt_hl:expr) => {
+        #[cfg(feature = "ykd")]
+        if let Some(hl) = $opt_hl {
+            $logger.log_with_hl_debug($level, $msg, hl);
+        } else {
+            $logger.log($level, $msg);
+        }
+        #[cfg(not(feature = "ykd"))]
+        $logger.log($level, $msg);
+    };
+}
+
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
 // users rather than having them try to use (say) u64::max() on a 64 bit machine and get a run-time
@@ -428,11 +442,20 @@ impl MT {
                     _ => unreachable!(),
                 });
                 thread_tracer.stop().ok();
-                self.log
-                    .log(Verbosity::Warning, &format!("tracing-aborted: {ak}"));
+                yklog!(
+                    self.log,
+                    Verbosity::Warning,
+                    &format!("tracing-aborted: {ak}"),
+                    loc.hot_location()
+                );
             }
             TransitionControlPoint::Execute(ctr) => {
-                self.log.log(Verbosity::JITEvent, "enter-jit-code");
+                yklog!(
+                    self.log,
+                    Verbosity::JITEvent,
+                    "enter-jit-code",
+                    loc.hot_location()
+                );
                 self.stats.trace_executed();
 
                 // Compute the rsp of the control_point frame.
@@ -455,7 +478,12 @@ impl MT {
                 unsafe { __yk_exec_trace(frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl) => {
-                self.log.log(Verbosity::JITEvent, "start-tracing");
+                yklog!(
+                    self.log,
+                    Verbosity::JITEvent,
+                    "start-tracing",
+                    loc.hot_location()
+                );
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
@@ -483,7 +511,12 @@ impl MT {
                                     // FIXME: This is stupidly brutal.
                                     lk.kind = HotLocationKind::DontTrace;
                                     drop(lk);
-                                    self.log.log(Verbosity::Warning, "start-tracing-abort");
+                                    yklog!(
+                                        self.log,
+                                        Verbosity::Warning,
+                                        "start-tracing-abort",
+                                        loc.hot_location()
+                                    );
                                 } else {
                                     todo!("{e:?}");
                                 }
@@ -518,7 +551,12 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        self.log.log(Verbosity::JITEvent, "stop-tracing");
+                        yklog!(
+                            self.log,
+                            Verbosity::JITEvent,
+                            "stop-tracing",
+                            loc.hot_location()
+                        );
                         self.queue_root_compile_job(
                             (utrace, promotions.into_boxed_slice(), debug_strs),
                             hl,
@@ -527,8 +565,12 @@ impl MT {
                     Err(e) => {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
-                        self.log
-                            .log(Verbosity::Warning, &format!("stop-tracing-aborted: {e}"));
+                        yklog!(
+                            self.log,
+                            Verbosity::Warning,
+                            &format!("stop-tracing-aborted: {e}"),
+                            loc.hot_location()
+                        );
                     }
                 }
             }
@@ -558,7 +600,12 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        self.log.log(Verbosity::JITEvent, "stop-tracing");
+                        yklog!(
+                            self.log,
+                            Verbosity::JITEvent,
+                            "stop-tracing",
+                            loc.hot_location()
+                        );
                         self.queue_sidetrace_compile_job(
                             (utrace, promotions.into_boxed_slice(), debug_strs),
                             hl,
@@ -570,8 +617,12 @@ impl MT {
                     Err(e) => {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
-                        self.log
-                            .log(Verbosity::Warning, &format!("stop-tracing-aborted: {e}"));
+                        yklog!(
+                            self.log,
+                            Verbosity::Warning,
+                            &format!("stop-tracing-aborted: {e}"),
+                            loc.hot_location()
+                        );
                     }
                 }
             }
@@ -804,6 +855,8 @@ impl MT {
                                 let hl = HotLocation {
                                     kind: HotLocationKind::Counting(count),
                                     tracecompilation_errors: 0,
+                                    #[cfg(feature = "ykd")]
+                                    debug_str: None,
                                 };
                                 loc.count_to_hot_location(count, hl)
                                     .map(|x| Arc::as_ptr(&x))
@@ -840,6 +893,8 @@ impl MT {
                                 let hl = HotLocation {
                                     kind: HotLocationKind::Tracing,
                                     tracecompilation_errors: 0,
+                                    #[cfg(feature = "ykd")]
+                                    debug_str: None,
                                 };
                                 if let Some(hl) = loc.count_to_hot_location(x, hl) {
                                     debug_assert!(!is_tracing);
@@ -930,9 +985,11 @@ impl MT {
                     }
                     drop(lk);
                     thread_tracer.stop().ok();
-                    self.log.log(
+                    yklog!(
+                        self.log,
                         Verbosity::Warning,
                         &format!("tracing-aborted: {}", AbortKind::BackIntoExecution),
+                        Some(&*hl)
                     );
                 }
                 MTThreadState::Executing { .. } => return,
@@ -954,7 +1011,12 @@ impl MT {
         match self.transition_guard_failure(parent, gidx) {
             TransitionGuardFailure::NoAction => (),
             TransitionGuardFailure::StartSideTracing(hl) => {
-                self.log.log(Verbosity::JITEvent, "start-side-tracing");
+                yklog!(
+                    self.log,
+                    Verbosity::JITEvent,
+                    "start-side-tracing",
+                    Some(&*hl)
+                );
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)

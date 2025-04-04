@@ -3568,6 +3568,8 @@ mod tests {
         let hl = HotLocation {
             kind: HotLocationKind::Tracing,
             tracecompilation_errors: 0,
+            #[cfg(feature = "ykd")]
+            debug_str: None,
         };
         match_asm(
             Assemble::new(&m)
@@ -5955,6 +5957,8 @@ mod tests {
         let hl = HotLocation {
             kind: HotLocationKind::Tracing,
             tracecompilation_errors: 0,
+            #[cfg(feature = "ykd")]
+            debug_str: None,
         };
 
         Assemble::new(&m)
