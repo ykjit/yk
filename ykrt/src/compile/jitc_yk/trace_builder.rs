@@ -945,7 +945,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         safepoint: &'static aot_ir::DeoptSafepoint,
         next_bb: &aot_ir::BBlockId,
         test_val: &aot_ir::Operand,
-        _default_dest: &aot_ir::BBlockIdx,
+        default_dest: &aot_ir::BBlockIdx,
         case_values: &[u64],
         case_dests: &[aot_ir::BBlockIdx],
     ) -> Result<(), CompilationError> {
@@ -978,6 +978,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 self.create_guard(bid, &jit_cond, bb == next_bb.bbidx(), safepoint)?
             }
             None => {
+                // If this assertion fails then the basic block that was executed next wasn't an
+                // arm of the switch and something has gone wrong.
+                assert_eq!(&next_bb.bbidx(), default_dest);
+
                 // The default case was traced.
                 //
                 // We need a guard that expresses that `test_val` was not any of the `case_values`.
@@ -1258,6 +1262,14 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+
+        // Peek to the last block (needed for side-tracing).
+        let lastblk = match &tas.last() {
+            Some(b) => self.lookup_aot_block(b),
+            _ => todo!(),
+        };
+        let mut trace_iter = tas.into_iter().peekable();
+
         mt.stats.timing_state(TimingState::Compiling);
 
         // The previous processed block.
@@ -1273,10 +1285,6 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             prev_bid = Some(sti.bid.clone());
 
             // Setup the trace builder for side-tracing.
-            let lastblk = match &tas.last() {
-                Some(b) => self.lookup_aot_block(b),
-                _ => todo!(),
-            };
             // Create loads for the live variables that will be passed into the side-trace from the
             // parent trace.
             for (idx, (aotid, loc)) in sti.lives().iter().enumerate() {
@@ -1309,7 +1317,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             // captures.
             //
             // Note that it is not necessary to emit such a guard into side-traces stemming from
-            // regular conditionals, since a conditional has only two sucessors. The parent trace
+            // regular conditionals, since a conditional has only two successors. The parent trace
             // captures one, so by construction the side trace must capture the other.
             let prevbb = self.aot_mod.bblock(prev_bid.as_ref().unwrap());
             if let aot_ir::Inst::Switch {
@@ -1320,15 +1328,20 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 safepoint,
             } = &prevbb.insts.last().unwrap()
             {
-                let nextbb = match &tas.first() {
-                    Some(b) => self.lookup_aot_block(b),
-                    _ => panic!(),
-                };
+                // Skip any residual bits of the block containing the switch that *could* appear at
+                // the start of the trace. It appears that this can happen when the switch dispatch
+                // is codegenned to multiple blocks (e.g. cascading conditionals).
+                while &self.lookup_aot_block(trace_iter.peek().unwrap()).unwrap()
+                    == prev_bid.as_ref().unwrap()
+                {
+                    let _ = trace_iter.next().unwrap(); // skip that block.
+                }
+                let nextbb = self.lookup_aot_block(trace_iter.peek().unwrap()).unwrap();
                 self.handle_switch(
                     prev_bid.as_ref().unwrap(), // this is safe, we've just created this above
                     prevbb.insts.len() - 1,
                     safepoint,
-                    nextbb.as_ref().unwrap(),
+                    &nextbb,
                     test_val,
                     default_dest,
                     case_values,
@@ -1344,7 +1357,6 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         // Typically, the mapper would strip this block for us, but for codegen related reasons,
         // e.g. a switch statement codegenning to many machine blocks, it's possible for multiple
         // duplicates of this same block to show up here, which all need to be skipped.
-        let mut trace_iter = tas.into_iter().peekable();
         if prev_bid.is_some() {
             while self.lookup_aot_block(trace_iter.peek().unwrap()) == prev_bid {
                 trace_iter.next().unwrap();
