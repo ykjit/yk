@@ -50,7 +50,10 @@ impl Opt {
                     // Not all tests create "fully valid" traces, in the sense that -- to keep
                     // things simple -- they don't end with `TraceHeaderEnd`. We don't want to peel
                     // such traces, but nor, in testing mode, do we consider them ill-formed.
-                    matches!(self.m.inst(self.m.last_inst_idx()), Inst::TraceHeaderEnd)
+                    matches!(
+                        self.m.inst(self.m.last_inst_idx()),
+                        Inst::TraceHeaderEnd(false)
+                    )
                 }
             }
             // If we hit this case, someone's tried to run the optimiser twice.
@@ -58,6 +61,7 @@ impl Opt {
             // If this is a sidetrace, we perform optimisations up to, but not including, loop
             // peeling.
             TraceKind::Sidetrace(_) => false,
+            TraceKind::Connector(_) => false,
         };
 
         // Note that since we will apply loop peeling here, the list of instructions grows as this
@@ -111,7 +115,7 @@ impl Opt {
                         }
                     }
                 }
-                Inst::TraceHeaderEnd => {
+                Inst::TraceHeaderEnd(_) => {
                     self.m.trace_body_end = self.m.trace_header_end().to_vec();
                     self.m.push(Inst::TraceBodyEnd)?;
                     // FIXME: We rely on `dup_and_remap_vars` not being idempotent here.
@@ -141,7 +145,7 @@ impl Opt {
             .collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
             match inst {
-                Inst::TraceHeaderStart | Inst::TraceHeaderEnd => panic!(),
+                Inst::TraceHeaderStart | Inst::TraceHeaderEnd(_) => panic!(),
                 Inst::TraceBodyStart => (),
                 _ => {
                     self.opt_inst(iidx)?;

@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     compile::{CompiledTrace, GuardIdx},
-    mt::{HotThreshold, TraceCompilationErrorThreshold, MT},
+    mt::{HotThreshold, TraceCompilationErrorThreshold, TraceId, MT},
 };
 use parking_lot::Mutex;
 
@@ -317,7 +317,7 @@ pub(crate) enum HotLocationKind {
     Compiled(Arc<dyn CompiledTrace>),
     /// A trace for this HotLocation is being compiled in another trace. When compilation is
     /// complete, the compiling thread will update the state of this HotLocation.
-    Compiling,
+    Compiling(TraceId),
     /// Because of a failure in compiling / tracing, we have reentered the `Counting` state. This
     /// can be seen as a way of implementing back-off in the face of errors.
     Counting(HotThreshold),
@@ -345,7 +345,7 @@ impl std::fmt::Debug for HotLocationKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Compiled(_) => write!(f, "Compiled"),
-            Self::Compiling => write!(f, "Compiling"),
+            Self::Compiling(_) => write!(f, "Compiling"),
             Self::Counting(_) => write!(f, "Counting"),
             Self::DontTrace => write!(f, "DontTrace"),
             Self::Tracing => write!(f, "Tracing"),

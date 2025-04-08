@@ -466,7 +466,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             let op = self.process_operand(op)?;
                             self.m.trace_header_end.push(PackedOperand::new(&op));
                         }
-                        self.m.push(Inst::TraceHeaderEnd).unwrap();
+                        self.m.push(Inst::TraceHeaderEnd(false)).unwrap();
                     }
                     ASTInst::Trunc {
                         assign,

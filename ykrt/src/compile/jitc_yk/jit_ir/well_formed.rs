@@ -38,7 +38,7 @@ impl Module {
                     );
                 }
             }
-            super::TraceKind::Sidetrace(_) => (),
+            super::TraceKind::Sidetrace(_) | super::TraceKind::Connector(_) => (),
         }
 
         let mut last_inst = None;
@@ -313,7 +313,7 @@ impl Module {
                 }
                 Inst::Param(_) => {
                     if let Some(i) = last_inst {
-                        if !matches!(i, Inst::Param(_) | Inst::TraceHeaderEnd) {
+                        if !matches!(i, Inst::Param(_) | Inst::TraceHeaderEnd(_)) {
                             panic!("Param instruction may only appear at the beginning of a trace or after another Param instruction, or after the trace header jump\n  {}",
                                 self.inst(iidx).display(self, iidx));
                         }
@@ -332,7 +332,7 @@ mod tests {
         super::{ArbBitInt, TraceKind},
         BinOp, BinOpInst, Const, Inst, Module, Operand,
     };
-    use crate::mt::CompiledTraceId;
+    use crate::mt::TraceId;
 
     #[should_panic(expected = "Instruction at position 0 passing too few arguments")]
     #[test]
@@ -403,7 +403,7 @@ mod tests {
     fn cg_add_wrong_types() {
         // The parser will reject a binop with a result type different from either operand, so to
         // get the test we want, we can't use the parser.
-        let mut m = Module::new(TraceKind::HeaderOnly, CompiledTraceId::testing(), 0).unwrap();
+        let mut m = Module::new(TraceKind::HeaderOnly, TraceId::testing(), 0).unwrap();
         let c1 = m
             .insert_const(Const::Int(m.int1_tyidx(), ArbBitInt::from_u64(1, 0)))
             .unwrap();

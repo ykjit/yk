@@ -99,8 +99,8 @@ mod well_formed;
 
 use super::aot_ir;
 use crate::{
-    compile::{jitc_yk::arbbitint::ArbBitInt, CompilationError, SideTraceInfo},
-    mt::CompiledTraceId,
+    compile::{jitc_yk::arbbitint::ArbBitInt, CompilationError, CompiledTrace, SideTraceInfo},
+    mt::TraceId,
 };
 use indexmap::IndexSet;
 use std::{
@@ -118,15 +118,28 @@ use ykaddr::addr::symbol_to_ptr;
 pub(crate) use super::aot_ir::{BinOp, FloatPredicate, FloatTy, Predicate};
 
 /// What kind of trace does this module represent?
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) enum TraceKind {
-    /// A trace which contains only a header: the trace must loop back to the very start every
-    /// time.
+    /// A self-contained looping trace that only has a header.
     HeaderOnly,
-    /// A trace with a header and a body: the trace must loop back to the start of the body.
+    /// A self-contained looping trace with a header and a body.
     HeaderAndBody,
-    /// A sidetrace: the trace must loop back to the root of the trace tree.
+    /// A header-only non-looping trace which jumps to the [CompiledTrace].
+    Connector(Arc<dyn CompiledTrace>),
+    /// A sidetrace: this will start at the point of a guard and will jump to
+    /// [SideTraceInfo::target_ctr].
     Sidetrace(Arc<dyn SideTraceInfo>),
+}
+
+impl std::fmt::Debug for TraceKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TraceKind::HeaderOnly => write!(f, "HeaderOnly"),
+            TraceKind::HeaderAndBody => write!(f, "HeaderAndBody"),
+            TraceKind::Connector(_) => write!(f, "Connector"),
+            TraceKind::Sidetrace(_) => write!(f, "Sidetrace"),
+        }
+    }
 }
 
 /// The `Module` is the top-level container for JIT IR.
@@ -142,10 +155,11 @@ pub(crate) enum TraceKind {
 pub(crate) struct Module {
     /// What kind of trace does this module represent?
     tracekind: TraceKind,
+    pub(crate) safepoint: Option<aot_ir::DeoptSafepoint>,
     /// The ID of the compiled trace this module will lead to.
     ///
     /// See the [Self::ctr_id] method for details.
-    ctr_id: CompiledTraceId,
+    ctr_id: TraceId,
     /// The IR trace as a linear sequence of instructions.
     insts: Vec<Inst>,
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
@@ -213,7 +227,7 @@ impl Module {
     /// Create a new [Module].
     pub(crate) fn new(
         tracekind: TraceKind,
-        ctr_id: CompiledTraceId,
+        ctr_id: TraceId,
         global_decls_len: usize,
     ) -> Result<Self, CompilationError> {
         Self::new_internal(tracekind, ctr_id, global_decls_len)
@@ -236,18 +250,18 @@ impl Module {
     }
 
     /// Returns the ID the module will have when it is compiled into a trace.
-    pub(crate) fn ctrid(&self) -> CompiledTraceId {
+    pub(crate) fn ctrid(&self) -> TraceId {
         self.ctr_id.clone()
     }
 
     #[cfg(test)]
     pub(crate) fn new_testing() -> Self {
-        Self::new_internal(TraceKind::HeaderOnly, CompiledTraceId::testing(), 0).unwrap()
+        Self::new_internal(TraceKind::HeaderOnly, TraceId::testing(), 0).unwrap()
     }
 
     pub(crate) fn new_internal(
         tracekind: TraceKind,
-        ctr_id: CompiledTraceId,
+        ctr_id: TraceId,
         global_decls_len: usize,
     ) -> Result<Self, CompilationError> {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows
@@ -293,6 +307,7 @@ impl Module {
 
         Ok(Self {
             tracekind,
+            safepoint: None,
             ctr_id,
             insts: Vec::new(),
             args: Vec::new(),
@@ -1495,7 +1510,9 @@ pub(crate) enum Inst {
     Guard(GuardInst),
     /// Marks the point where side-traces reenter the root trace.
     TraceHeaderStart,
-    TraceHeaderEnd,
+    /// Marks the end of a header. The `bool` will be `true` if this is a [TraceKind::Connector]
+    /// trace.
+    TraceHeaderEnd(bool),
     /// Marks the place to loop back to at the end of the JITted code.
     TraceBodyStart,
     TraceBodyEnd,
@@ -1561,7 +1578,7 @@ impl Inst {
             Self::ICmp(_) => m.int1_tyidx(),
             Self::Guard(..) => m.void_tyidx(),
             Self::TraceHeaderStart => m.void_tyidx(),
-            Self::TraceHeaderEnd => m.void_tyidx(),
+            Self::TraceHeaderEnd(_) => m.void_tyidx(),
             Self::TraceBodyStart => m.void_tyidx(),
             Self::TraceBodyEnd => m.void_tyidx(),
             Self::SidetraceEnd => m.void_tyidx(),
@@ -1610,7 +1627,7 @@ impl Inst {
         matches!(
             self,
             Inst::TraceHeaderStart
-                | Inst::TraceHeaderEnd
+                | Inst::TraceHeaderEnd(_)
                 | Inst::TraceBodyStart
                 | Inst::TraceBodyEnd
                 | Inst::SidetraceEnd
@@ -1690,7 +1707,7 @@ impl Inst {
                     x.unpack(m).map_iidx(f);
                 }
             }
-            Inst::TraceHeaderEnd => {
+            Inst::TraceHeaderEnd(_) => {
                 for x in &m.trace_header_end {
                     x.unpack(m).map_iidx(f);
                 }
@@ -1904,10 +1921,10 @@ impl Inst {
                 m.trace_body_end = m.trace_body_end.iter().map(|op| mapper(m, op)).collect();
                 Inst::TraceBodyEnd
             }
-            Inst::TraceHeaderEnd => {
+            Inst::TraceHeaderEnd(is_connector) => {
                 // Copy the header label into the body while remapping the operands.
                 m.trace_header_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
-                Inst::TraceHeaderEnd
+                Inst::TraceHeaderEnd(*is_connector)
             }
             Inst::SidetraceEnd => {
                 // Copy the header label into the body while remapping the operands.
@@ -2159,9 +2176,13 @@ impl fmt::Display for DisplayableInst<'_> {
                 }
                 write!(f, "]")
             }
-            Inst::TraceHeaderEnd => {
+            Inst::TraceHeaderEnd(is_connector) => {
                 // Just marks a location, so we format it to look like a label.
-                write!(f, "header_end [")?;
+                if *is_connector {
+                    write!(f, "connector [")?;
+                } else {
+                    write!(f, "header_end [")?;
+                }
                 for var in &self.m.trace_header_end {
                     write!(f, "{}", var.unpack(self.m).display(self.m))?;
                     if var != self.m.trace_header_end.last().unwrap() {

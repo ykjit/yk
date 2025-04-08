@@ -16,6 +16,7 @@
 
 use super::{
     super::{
+        aot_ir::DeoptSafepoint,
         arbbitint::ArbBitInt,
         jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, TraceKind, Ty},
         CompilationError,
@@ -30,12 +31,12 @@ use crate::{
         jitc_yk::{
             aot_ir,
             jit_ir::{Const, IndirectCallIdx, InlinedFrame},
-            RootTracePtr, YkSideTraceInfo,
+            YkSideTraceInfo,
         },
         CompiledTrace, Guard, GuardIdx, SideTraceInfo,
     },
     location::HotLocation,
-    mt::{CompiledTraceId, MT},
+    mt::{TraceId, MT},
 };
 use dynasmrt::{
     components::StaticLabel,
@@ -368,9 +369,7 @@ impl<'a> Assemble<'a> {
         // Since we are executing the trace in the main interpreter frame we need this to
         // initialise the trace's register allocator in order to access local variables.
         let sp_offset = match m.tracekind() {
-            TraceKind::HeaderOnly | TraceKind::HeaderAndBody => {
-                // This is a normal trace, so we need to retrieve the stack size of the main
-                // interpreter frame.
+            TraceKind::HeaderOnly | TraceKind::HeaderAndBody | TraceKind::Connector(_) => {
                 // FIXME: For now the control point stackmap id is always 0. Though
                 // we likely want to support multiple control points in the future. We can either pass
                 // the correct stackmap id in via the control point, or compute the stack size
@@ -576,6 +575,7 @@ impl<'a> Assemble<'a> {
 
         Ok(Arc::new(X64CompiledTrace {
             ctrid: self.m.ctrid(),
+            safepoint: self.m.safepoint.as_ref().cloned(),
             mt,
             buf,
             deoptinfo: self
@@ -653,8 +653,8 @@ impl<'a> Assemble<'a> {
                 }
                 jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
                 jit_ir::Inst::TraceHeaderStart => self.cg_header_start(),
-                jit_ir::Inst::TraceHeaderEnd => {
-                    self.cg_header_end(iidx);
+                jit_ir::Inst::TraceHeaderEnd(is_connector) => {
+                    self.cg_header_end(iidx, *is_connector);
                     in_header = false;
                 }
                 jit_ir::Inst::TraceBodyStart => self.cg_body_start(),
@@ -734,7 +734,7 @@ impl<'a> Assemble<'a> {
     ///
     /// Returns the offset at which to patch up the stack allocation later.
     fn emit_prologue(&mut self) -> AssemblyOffset {
-        self.comment("prologue".to_owned());
+        self.comment(format!("prologue for trace ID #{}", self.m.ctrid()));
 
         // Emit a dummy frame allocation instruction that initially allocates 0 bytes, but will be
         // patched later when we know how big the frame needs to be.
@@ -2448,15 +2448,21 @@ impl<'a> Assemble<'a> {
         let (tgt_vars, src_ops) = match self.m.tracekind() {
             TraceKind::HeaderOnly => (self.header_start_locs.clone(), self.m.trace_header_end()),
             TraceKind::HeaderAndBody => (self.body_start_locs.clone(), self.m.trace_body_end()),
-            TraceKind::Sidetrace(sti) => (
-                Arc::clone(sti)
+            TraceKind::Connector(ctr) => {
+                let ctr = Arc::clone(ctr)
+                    .as_any()
+                    .downcast::<X64CompiledTrace>()
+                    .unwrap();
+                (ctr.entry_vars().to_vec(), self.m.trace_header_end())
+            }
+            TraceKind::Sidetrace(sti) => {
+                let sti = Arc::clone(sti)
                     .as_any()
                     .downcast::<YkSideTraceInfo<Register>>()
-                    .unwrap()
-                    .entry_vars
-                    .clone(),
-                self.m.trace_header_end(),
-            ),
+                    .unwrap();
+                assert_eq!(sti.sp_offset, self.sp_offset);
+                (sti.entry_vars.clone(), self.m.trace_header_end())
+            }
         };
 
         // First of all we work out what to do with registers
@@ -2620,17 +2626,17 @@ impl<'a> Assemble<'a> {
                 // the root parent trace, then jump to it.
                 self.write_jump_vars(iidx);
                 self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
-
+                let target_ctr = sti.target_ctr();
                 dynasm!(self.asm
                     // Reset rsp to the root trace's frame.
                     ; mov rsp, rbp
-                    ; sub rsp, i32::try_from(sti.root_offset()).unwrap()
-                    ; mov rdi, QWORD sti.root_addr() as i64
+                    ; sub rsp, i32::try_from(target_ctr.entry_sp_off()).unwrap()
+                    ; mov rdi, QWORD target_ctr.entry() as i64
                     // We can safely use RDI here, since the root trace won't expect live variables in this
                     // register since it's being used as an argument to the control point.
                     ; jmp rdi);
             }
-            TraceKind::HeaderOnly | TraceKind::HeaderAndBody => panic!(),
+            TraceKind::HeaderOnly | TraceKind::HeaderAndBody | TraceKind::Connector(_) => panic!(),
         }
     }
 
@@ -2654,17 +2660,20 @@ impl<'a> Assemble<'a> {
                 dynasm!(self.asm; ->reentry:);
             }
             TraceKind::Sidetrace(_) => todo!(),
+            TraceKind::Connector(_) => (),
         }
         self.prologue_offset = self.asm.offset();
     }
 
-    fn cg_header_end(&mut self, iidx: InstIdx) {
+    fn cg_header_end(&mut self, iidx: InstIdx, is_connector: bool) {
         match self.m.tracekind() {
             TraceKind::HeaderOnly => {
+                assert!(!is_connector);
                 self.write_jump_vars(iidx);
                 dynasm!(self.asm; jmp ->tloop_start);
             }
             TraceKind::HeaderAndBody => {
+                assert!(!is_connector);
                 // FIXME: This is a bit of a roundabout way of doing things. Especially, since it means
                 // that the [ParamInst]s in the trace body are just placeholders. While, since a recent
                 // change, the register allocator makes sure the values automatically end up in the
@@ -2717,6 +2726,24 @@ impl<'a> Assemble<'a> {
                         e => panic!("{:?}", e),
                     }
                 }
+            }
+            TraceKind::Connector(ctr) => {
+                let ctr = Arc::clone(ctr)
+                    .as_any()
+                    .downcast::<X64CompiledTrace>()
+                    .unwrap();
+                self.write_jump_vars(iidx);
+                self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
+
+                self.comment(format!("Jump to root trace #{}", ctr.ctrid()));
+                dynasm!(self.asm
+                    // Reset rsp to the root trace's frame.
+                    ; mov rsp, rbp
+                    ; sub rsp, i32::try_from(ctr.sp_offset).unwrap()
+                    ; mov rdi, QWORD unsafe { ctr.entry().add(ctr.prologue_offset) } as i64
+                    // We can safely use RDI here, since the root trace won't expect live variables in this
+                    // register since it's being used as an argument to the control point.
+                    ; jmp rdi);
             }
             TraceKind::Sidetrace(_) => panic!(),
         }
@@ -3156,10 +3183,13 @@ struct DeoptInfo {
 }
 
 #[derive(Debug)]
-pub(super) struct X64CompiledTrace {
-    ctrid: CompiledTraceId,
+pub(crate) struct X64CompiledTrace {
+    /// This trace's [TraceId].
+    ctrid: TraceId,
     // Reference to the meta-tracer required for side tracing.
     mt: Arc<MT>,
+    /// For connector traces, the matching [DeoptSafePoint].
+    safepoint: Option<DeoptSafepoint>,
     /// The executable code itself.
     buf: ExecutableBuffer,
     /// Deoptimisation info: maps a [GuardIdx] to [DeoptInfo].
@@ -3194,8 +3224,12 @@ impl X64CompiledTrace {
 }
 
 impl CompiledTrace for X64CompiledTrace {
-    fn ctrid(&self) -> CompiledTraceId {
+    fn ctrid(&self) -> TraceId {
         self.ctrid.clone()
+    }
+
+    fn safepoint(&self) -> &Option<DeoptSafepoint> {
+        &self.safepoint
     }
 
     fn mt(&self) -> &Arc<MT> {
@@ -3206,10 +3240,15 @@ impl CompiledTrace for X64CompiledTrace {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
 
+    fn entry_sp_off(&self) -> usize {
+        self.sp_offset
+    }
+
     fn sidetraceinfo(
         &self,
         root_ctr: Arc<dyn CompiledTrace>,
         gidx: GuardIdx,
+        connect_ctr: Option<Arc<dyn CompiledTrace>>,
     ) -> Arc<dyn SideTraceInfo> {
         let root_ctr = root_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
         // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
@@ -3222,20 +3261,13 @@ impl CompiledTrace for X64CompiledTrace {
             .collect();
         let callframes = deoptinfo.inlined_frames.clone();
 
-        // Calculate the address inside the root trace we want side-traces to jump. Since the
-        // side-trace finishes at the control point we need to re-enter via the trace header and
-        // cannot jump back directly into the trace body.
-        // FIXME: Check if RPython has found a solution to this (if there is any).
-        let root_addr = unsafe { root_ctr.entry().add(root_ctr.prologue_offset) };
-
         Arc::new(YkSideTraceInfo {
             bid: deoptinfo.bid.clone(),
             lives,
             callframes,
-            root_addr: RootTracePtr(root_addr),
-            root_offset: root_ctr.sp_offset,
             entry_vars: root_ctr.entry_vars().to_vec(),
             sp_offset: self.sp_offset,
+            target_ctr: connect_ctr.unwrap_or(root_ctr),
         })
     }
 
@@ -3414,7 +3446,7 @@ mod tests {
             CompiledTrace,
         },
         location::{HotLocation, HotLocationKind},
-        mt::{CompiledTraceId, MT},
+        mt::{TraceId, MT},
     };
     use fm::{FMBuilder, FMatcher};
     use lazy_static::lazy_static;
@@ -5998,8 +6030,7 @@ mod tests {
 
     #[test]
     fn cg_aliasing_params() {
-        let mut m =
-            jit_ir::Module::new(TraceKind::HeaderOnly, CompiledTraceId::testing(), 0).unwrap();
+        let mut m = jit_ir::Module::new(TraceKind::HeaderOnly, TraceId::testing(), 0).unwrap();
 
         // Create two trace paramaters whose locations alias.
         let loc = yksmp::Location::Register(13, 1, [].into());

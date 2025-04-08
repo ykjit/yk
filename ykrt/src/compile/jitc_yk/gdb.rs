@@ -5,7 +5,7 @@
 //! (than just raw asm) displayed when debugging traces.
 
 use super::CompilationError;
-use crate::mt::CompiledTraceId;
+use crate::mt::TraceId;
 use deku::prelude::*;
 use indexmap::IndexMap;
 use std::{
@@ -175,7 +175,7 @@ impl Drop for GdbCtx {
 
 /// Inform gdb of newly-compiled JITted code.
 pub(crate) fn register_jitted_code(
-    ctr_id: CompiledTraceId,
+    ctr_id: TraceId,
     jitted_code: *const u8,
     jitted_code_size: usize,
     comments: &IndexMap<usize, Vec<String>>,

@@ -12,7 +12,7 @@
 //!      subsumes the functionality of `dead_code.rs`, so if you use this module for you don't need
 //!      to use `dead_code.rs` as well.
 
-use super::{Register, VarLocation};
+use super::{Register, VarLocation, X64CompiledTrace};
 use crate::compile::jitc_yk::{
     codegen::x64::{ARG_FP_REGS, ARG_GP_REGS},
     jit_ir::{
@@ -75,7 +75,7 @@ impl<'a> RevAnalyse<'a> {
                 if let Some((hend_iidx, _)) = self
                     .m
                     .iter_skipping_insts()
-                    .find(|(_, x)| matches!(x, Inst::TraceHeaderEnd))
+                    .find(|(_, x)| matches!(x, Inst::TraceHeaderEnd(_)))
                 {
                     for ((iidx, inst), jump_op) in
                         self.m.iter_skipping_insts().zip(self.m.trace_header_end())
@@ -103,6 +103,24 @@ impl<'a> RevAnalyse<'a> {
                 // We don't care where the register allocator ends at the end of the header, so we
                 // don't propagate backwards from `TraceHeaderEnd`.
             }
+            TraceKind::Connector(ctr) => {
+                let ctr = Arc::clone(ctr)
+                    .as_any()
+                    .downcast::<X64CompiledTrace>()
+                    .unwrap();
+                let vlocs = ctr.entry_vars();
+                // Side-traces don't have a trace body since we don't apply loop peeling and thus use
+                // `trace_header_end` to store the jump variables.
+                debug_assert_eq!(vlocs.len(), self.m.trace_header_end().len());
+
+                let jtend_iidx = self.m.last_inst_idx();
+                assert_matches!(self.m.inst(jtend_iidx), Inst::TraceHeaderEnd(_));
+                for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
+                    if let VarLocation::Register(reg) = *vloc {
+                        self.push_reg_hint_fixed(jtend_iidx, jump_op.unpack(self.m), reg);
+                    }
+                }
+            }
             TraceKind::Sidetrace(sti) => {
                 let sti = Arc::clone(sti)
                     .as_any()
@@ -126,7 +144,7 @@ impl<'a> RevAnalyse<'a> {
         // ...and then we perform the rest of the reverse analysis.
         let mut iter = self.m.iter_skipping_insts().rev();
         match self.m.tracekind() {
-            TraceKind::HeaderOnly | TraceKind::Sidetrace(_) => {
+            TraceKind::HeaderOnly | TraceKind::Sidetrace(_) | TraceKind::Connector(_) => {
                 for (iidx, inst) in self.m.iter_skipping_insts().rev() {
                     self.analyse(iidx, inst);
                 }
@@ -136,7 +154,7 @@ impl<'a> RevAnalyse<'a> {
                 // `TraceKind` to avoid having to find it this way.
                 let mut next = iter.next();
                 while let Some((_, inst)) = next {
-                    if let Inst::TraceHeaderEnd = inst {
+                    if let Inst::TraceHeaderEnd(_) = inst {
                         break;
                     }
                     next = iter.next();
@@ -163,7 +181,7 @@ impl<'a> RevAnalyse<'a> {
         }
 
         for (iidx, inst) in self.m.iter_skipping_insts().rev() {
-            if let Inst::TraceHeaderEnd = inst {
+            if let Inst::TraceHeaderEnd(_) = inst {
                 break;
             }
             self.analyse(iidx, inst);
@@ -179,7 +197,7 @@ impl<'a> RevAnalyse<'a> {
             self.used_insts.set(usize::from(iidx), true);
 
             match inst {
-                Inst::TraceHeaderEnd | Inst::TraceBodyEnd | Inst::SidetraceEnd => {
+                Inst::TraceHeaderEnd(_) | Inst::TraceBodyEnd | Inst::SidetraceEnd => {
                     // These are handled in [Self::analyse_header] or [Self::analyse_body].
                 }
                 Inst::BinOp(x) => self.an_binop(iidx, x),

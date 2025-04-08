@@ -3,7 +3,7 @@ use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::GuardIdx,
     log::Verbosity,
-    mt::{CompiledTraceId, MTThread},
+    mt::{MTThread, TraceId},
 };
 use dynasmrt::Register as _;
 use libc::c_void;
@@ -46,7 +46,7 @@ pub(crate) extern "C" fn __yk_deopt(
     fp_regs: &[u64; 16],
     ctrid: u64,
 ) -> *const libc::c_void {
-    let ctr = MTThread::with_borrow(|mtt| mtt.running_trace(CompiledTraceId::from_u64(ctrid)))
+    let ctr = MTThread::with_borrow(|mtt| mtt.running_trace(TraceId::from_u64(ctrid)))
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
