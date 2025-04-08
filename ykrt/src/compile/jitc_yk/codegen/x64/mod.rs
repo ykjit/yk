@@ -2515,49 +2515,52 @@ impl<'a> Assemble<'a> {
                 VarLocation::Stack {
                     frame_off: off_dst,
                     size: size_dst,
-                } => match src {
-                    VarLocation::Register(Register::GP(reg)) => {
-                        assert_ne!(reg, spare_reg);
-                        match size_dst {
-                            8 => dynasm!(self.asm;
-                                mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(reg.code())
-                            ),
-                            4 => dynasm!(self.asm;
-                                mov DWORD [rbp - i32::try_from(off_dst).unwrap()], Rd(reg.code())
-                            ),
-                            _ => todo!(),
+                } => {
+                    let off_dst = i32::try_from(off_dst).unwrap();
+                    match src {
+                        VarLocation::Register(Register::GP(reg)) => {
+                            assert_ne!(reg, spare_reg);
+                            match size_dst {
+                                8 => dynasm!(self.asm;
+                                    mov QWORD [rbp - off_dst], Rq(reg.code())
+                                ),
+                                4 => dynasm!(self.asm;
+                                    mov DWORD [rbp - off_dst], Rd(reg.code())
+                                ),
+                                _ => todo!(),
+                            }
                         }
-                    }
-                    VarLocation::ConstInt { bits, v } => match bits {
-                        32 => dynasm!(self.asm;
-                            mov DWORD [rbp - i32::try_from(off_dst).unwrap()], v as i32
-                        ),
-                        8 => dynasm!(self.asm;
-                                mov BYTE [rbp - i32::try_from(off_dst).unwrap()], v as i8),
-                        x => todo!("{x}"),
-                    },
-                    VarLocation::ConstPtr(v) => {
-                        dynasm!(self.asm
-                            ; mov Rq(spare_reg.code()), QWORD v as i64
-                            ; mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(spare_reg.code())
-                        );
-                    }
-                    VarLocation::Stack {
-                        frame_off: off_src,
-                        size: size_src,
-                    } => match size_src {
-                        8 => dynasm!(self.asm
-                            ; mov Rq(spare_reg.code()), QWORD [rbp - i32::try_from(off_src).unwrap()]
-                            ; mov QWORD [rbp - i32::try_from(off_dst).unwrap()], Rq(spare_reg.code())
-                        ),
-                        4 => dynasm!(self.asm
-                            ; mov Rd(spare_reg.code()), DWORD [rbp - i32::try_from(off_src).unwrap()]
-                            ; mov DWORD [rbp - i32::try_from(off_dst).unwrap()], Rd(spare_reg.code())
-                        ),
+                        VarLocation::ConstInt { bits, v } => match bits {
+                            32 => dynasm!(self.asm;
+                                mov DWORD [rbp - off_dst], v as i32
+                            ),
+                            8 => dynasm!(self.asm;
+                                mov BYTE [rbp - off_dst], v as i8),
+                            x => todo!("{x}"),
+                        },
+                        VarLocation::ConstPtr(v) => {
+                            dynasm!(self.asm
+                                ; mov Rq(spare_reg.code()), QWORD v as i64
+                                ; mov QWORD [rbp - off_dst], Rq(spare_reg.code())
+                            );
+                        }
+                        VarLocation::Stack {
+                            frame_off: off_src,
+                            size: size_src,
+                        } => match size_src {
+                            8 => dynasm!(self.asm
+                                ; mov Rq(spare_reg.code()), QWORD [rbp - i32::try_from(off_src).unwrap()]
+                                ; mov QWORD [rbp - off_dst], Rq(spare_reg.code())
+                            ),
+                            4 => dynasm!(self.asm
+                                ; mov Rd(spare_reg.code()), DWORD [rbp - i32::try_from(off_src).unwrap()]
+                                ; mov DWORD [rbp - off_dst], Rd(spare_reg.code())
+                            ),
+                            e => todo!("{:?}", e),
+                        },
                         e => todo!("{:?}", e),
-                    },
-                    e => todo!("{:?}", e),
-                },
+                    }
+                }
                 VarLocation::Direct { .. } => {
                     // Direct locations are read-only, so it doesn't make sense to write to
                     // them. This is likely a case where the direct value has been moved
