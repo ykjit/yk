@@ -5,7 +5,7 @@ use crate::{
     compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, SideTraceInfo},
     location::HotLocation,
     log::{log_ir, should_log_ir, IRPhase},
-    mt::MT,
+    mt::{TraceId, MT},
     trace::AOTTraceIterator,
 };
 use parking_lot::Mutex;
@@ -44,10 +44,6 @@ pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
     aot_ir::deserialise_module(ir_slice).unwrap()
 });
 
-struct RootTracePtr(*const libc::c_void);
-unsafe impl Send for RootTracePtr {}
-unsafe impl Sync for RootTracePtr {}
-
 /// Contains information required for side-tracing.
 struct YkSideTraceInfo<Register: Send + Sync> {
     /// The AOT IR block the failing guard originated from.
@@ -58,12 +54,6 @@ struct YkSideTraceInfo<Register: Send + Sync> {
     /// Mapping of AOT variables to their current location. Used to pass variables from a parent
     /// trace into a side-trace.
     lives: Vec<(aot_ir::InstID, Location)>,
-    /// The address of the root trace. This is where the side-trace needs to jump back to after it
-    /// finished its execution.
-    root_addr: RootTracePtr,
-    /// Stack pointer offset of the root trace from the interpreter frame. Required to reset RSP to
-    /// the root trace's frame, before jumping back to it.
-    root_offset: usize,
     /// The live variables at the entry point of the root trace.
     entry_vars: Vec<codegen::reg_alloc::VarLocation<Register>>,
     /// Stack pointer offset from the base pointer of the interpreter frame including the
@@ -71,11 +61,17 @@ struct YkSideTraceInfo<Register: Send + Sync> {
     /// frame, each trace adds to this value, making extra space on the stack. This then forms the
     /// new `sp_offset` for any side-traces of this trace.
     sp_offset: usize,
+    /// The trace to jump to at the end of this sidetrace.
+    target_ctr: Arc<dyn CompiledTrace>,
 }
 
 impl<Register: Send + Sync + 'static> SideTraceInfo for YkSideTraceInfo<Register> {
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
         self
+    }
+
+    fn target_ctr(&self) -> Arc<dyn CompiledTrace> {
+        Arc::clone(&self.target_ctr)
     }
 }
 
@@ -89,16 +85,6 @@ impl<Register: Send + Sync> YkSideTraceInfo<Register> {
     /// Return the live AOT variables for this guard. Used to write live values to during deopt.
     fn lives(&self) -> &[(aot_ir::InstID, Location)] {
         &self.lives
-    }
-
-    /// Get the address of the root trace. This is where we need jump to at the end of a
-    /// side-trace.
-    fn root_addr(&self) -> *const libc::c_void {
-        self.root_addr.0
-    }
-
-    fn root_offset(&self) -> usize {
-        self.root_offset
     }
 }
 
@@ -128,10 +114,12 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         &self,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
+        ctrid: TraceId,
         sti: Option<Arc<dyn SideTraceInfo>>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
+        connector_tid: Option<Arc<dyn CompiledTrace>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         // If either `unwrap` fails, there is no chance of the system working correctly.
         let aot_mod = &*AOT_MOD;
@@ -145,8 +133,16 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
 
         let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo<Register>>().unwrap());
 
-        let mut jit_mod =
-            trace_builder::build(&mt, aot_mod, aottrace_iter, sti, promotions, debug_strs)?;
+        let mut jit_mod = trace_builder::build(
+            &mt,
+            aot_mod,
+            ctrid,
+            aottrace_iter,
+            sti,
+            promotions,
+            debug_strs,
+            connector_tid,
+        )?;
 
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
@@ -189,23 +185,45 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
         &self,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
+        ctrid: TraceId,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
+        connector_tid: Option<Arc<dyn CompiledTrace>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        self.compile(mt, aottrace_iter, None, hl, promotions, debug_strs)
+        self.compile(
+            mt,
+            aottrace_iter,
+            ctrid,
+            None,
+            hl,
+            promotions,
+            debug_strs,
+            connector_tid,
+        )
     }
 
     fn sidetrace_compile(
         &self,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
+        ctrid: TraceId,
         sti: Arc<dyn SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
+        connector_tid: Option<Arc<dyn CompiledTrace>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        self.compile(mt, aottrace_iter, Some(sti), hl, promotions, debug_strs)
+        self.compile(
+            mt,
+            aottrace_iter,
+            ctrid,
+            Some(sti),
+            hl,
+            promotions,
+            debug_strs,
+            connector_tid,
+        )
     }
 }
 

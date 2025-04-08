@@ -1,6 +1,7 @@
 use crate::{
+    compile::jitc_yk::aot_ir::DeoptSafepoint,
     location::HotLocation,
-    mt::{CompiledTraceId, MT},
+    mt::{TraceId, MT},
     trace::AOTTraceIterator,
 };
 use libc::c_void;
@@ -51,9 +52,11 @@ pub(crate) trait Compiler: Send + Sync {
         &self,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
+        ctrid: TraceId,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
+        connector_tid: Option<Arc<dyn CompiledTrace>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 
     /// Compile a mapped root trace into machine code.
@@ -61,10 +64,12 @@ pub(crate) trait Compiler: Send + Sync {
         &self,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
+        ctrid: TraceId,
         sti: Arc<dyn SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
+        connector_tid: Option<Arc<dyn CompiledTrace>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
@@ -79,11 +84,13 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
 }
 
 pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
-    /// Return this trace's [CompiledTraceId].
-    fn ctrid(&self) -> CompiledTraceId;
+    /// Return this trace's [TraceId].
+    fn ctrid(&self) -> TraceId;
 
     /// Return the [MT] instance this compiled trace is associated with.
     fn mt(&self) -> &Arc<MT>;
+
+    fn safepoint(&self) -> &Option<DeoptSafepoint>;
 
     /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
     /// upcasting in Rust is incomplete.
@@ -93,6 +100,7 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
         &self,
         root_ctr: Arc<dyn CompiledTrace>,
         gidx: GuardIdx,
+        connect_ctr: Option<Arc<dyn CompiledTrace>>,
     ) -> Arc<dyn SideTraceInfo>;
 
     /// Return a reference to the guard `id`.
@@ -102,6 +110,9 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
 
     /// The pointer to this trace's executable code.
     fn entry(&self) -> *const c_void;
+
+    /// The stack adjustment necessary when calling this trace.
+    fn entry_sp_off(&self) -> usize;
 
     /// Return a weak reference to the [HotLocation] that started the top-level trace. Note that a
     /// given `CompiledTrace` may be a side (i.e. a "sub") trace of that top-level trace: the same
@@ -118,6 +129,10 @@ pub(crate) trait SideTraceInfo: fmt::Debug {
     /// Upcast this [SideTraceInfo] to `Any`. This method is a hack that's only needed since trait
     /// upcasting in Rust is incomplete.
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
+
+    /// Return the [CompiledTrace] this side-trace should jump to at its end. Note: this may be the
+    /// "root" trace of a trace tree, or a completely different trace altogether.
+    fn target_ctr(&self) -> Arc<dyn CompiledTrace>;
 }
 
 #[cfg(test)]
@@ -139,12 +154,16 @@ mod compiled_trace_testing {
     }
 
     impl CompiledTrace for CompiledTraceTestingMinimal {
-        fn ctrid(&self) -> CompiledTraceId {
-            panic!();
+        fn ctrid(&self) -> TraceId {
+            TraceId::testing()
         }
 
         fn mt(&self) -> &Arc<MT> {
             panic!();
+        }
+
+        fn safepoint(&self) -> &Option<DeoptSafepoint> {
+            todo!()
         }
 
         fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
@@ -155,6 +174,7 @@ mod compiled_trace_testing {
             &self,
             _root_ctr: Arc<dyn CompiledTrace>,
             _gidx: GuardIdx,
+            _connect_ctr: Option<Arc<dyn CompiledTrace>>,
         ) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
@@ -168,6 +188,10 @@ mod compiled_trace_testing {
         }
 
         fn entry(&self) -> *const c_void {
+            panic!();
+        }
+
+        fn entry_sp_off(&self) -> usize {
             panic!();
         }
 
@@ -198,12 +222,16 @@ mod compiled_trace_testing {
     }
 
     impl CompiledTrace for CompiledTraceTestingBasicTransitions {
-        fn ctrid(&self) -> CompiledTraceId {
+        fn ctrid(&self) -> TraceId {
             panic!();
         }
 
         fn mt(&self) -> &Arc<MT> {
             panic!();
+        }
+
+        fn safepoint(&self) -> &Option<DeoptSafepoint> {
+            todo!()
         }
 
         fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
@@ -214,6 +242,7 @@ mod compiled_trace_testing {
             &self,
             _root_ctr: Arc<dyn CompiledTrace>,
             _gidx: GuardIdx,
+            _connect_ctr: Option<Arc<dyn CompiledTrace>>,
         ) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
@@ -228,6 +257,10 @@ mod compiled_trace_testing {
         }
 
         fn entry(&self) -> *const c_void {
+            panic!();
+        }
+
+        fn entry_sp_off(&self) -> usize {
             panic!();
         }
 

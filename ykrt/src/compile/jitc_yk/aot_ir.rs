@@ -758,7 +758,7 @@ impl fmt::Display for DisplayableOperand<'_> {
 }
 
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct DeoptSafepoint {
     pub(crate) id: u64,
     #[deku(temp)]
