@@ -1647,6 +1647,11 @@ impl<'a> Assemble<'a> {
                 self.cg_memcpy(iidx, dst, src, len, is_volatile);
                 Ok(())
             }
+            "llvm.memset.p0.i64" => {
+                let [dst, val, len, is_volatile] = args.try_into().unwrap();
+                self.cg_memset(iidx, dst, val, len, is_volatile);
+                Ok(())
+            }
             x if x.starts_with("llvm.smax") => {
                 let [lhs_op, rhs_op] = args.try_into().unwrap();
                 self.cg_smax(iidx, lhs_op, rhs_op);
@@ -1941,6 +1946,41 @@ impl<'a> Assemble<'a> {
             ],
         );
         dynasm!(self.asm; rep movsb);
+    }
+
+    fn cg_memset(
+        &mut self,
+        iidx: InstIdx,
+        dst_op: Operand,
+        val_op: Operand,
+        len_op: Operand,
+        _is_volatile_op: Operand,
+    ) {
+        let [_, _, _] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [
+                GPConstraint::Input {
+                    op: dst_op.clone(),
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: Some(Rq::RDI),
+                    clobber_reg: true,
+                },
+                GPConstraint::Input {
+                    op: val_op.clone(),
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: Some(Rq::RAX),
+                    clobber_reg: true,
+                },
+                GPConstraint::Input {
+                    op: len_op.clone(),
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: Some(Rq::RCX),
+                    clobber_reg: true,
+                },
+            ],
+        );
+        dynasm!(self.asm; rep stosb);
     }
 
     fn cg_smax(&mut self, iidx: InstIdx, lhs: Operand, rhs: Operand) {
@@ -4663,6 +4703,30 @@ mod tests {
                mov rcx, rdx
                mov rdi, rax
                rep movsb
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_memset() {
+        codegen_and_test(
+            "
+             func_decl llvm.memset.p0.i64 (ptr, i8, i64, i1)
+             entry:
+               %0: ptr = param reg
+               %1: i8 = param reg
+               %2: i64 = param reg
+               call @llvm.memset.p0.i64(%0, %1, %2, 0i1)
+            ",
+            "
+               ...
+               ; call @llvm.memset.p0.i64(%0, %1, %2, 0i1)
+               mov rdi, rax
+               mov rax, rcx
+               mov rcx, rdx
+               and eax, 0xff
+               rep stosb
             ",
             false,
         );
