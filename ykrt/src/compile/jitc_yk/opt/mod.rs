@@ -37,7 +37,6 @@ impl Opt {
     }
 
     fn opt(mut self) -> Result<Module, CompilationError> {
-        let base = self.m.insts_len();
         let peel = match self.m.tracekind() {
             TraceKind::HeaderOnly => {
                 #[cfg(not(test))]
@@ -64,9 +63,7 @@ impl Opt {
             TraceKind::Connector(_) => false,
         };
 
-        // Note that since we will apply loop peeling here, the list of instructions grows as this
-        // loop runs. Each instruction we process is (after optimisations were applied), duplicated
-        // and copied to the end of the module.
+        // Step 1: optimise the module as-is.
         let mut instll = InstLinkedList::new(&self.m);
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
@@ -79,15 +76,20 @@ impl Opt {
             }
         }
 
-        if !peel {
-            return Ok(self.m);
+        // Step 2: if appropriate, peel off an iteration of the loop, and optimise it.
+        if peel {
+            self.peel()?;
         }
 
+        Ok(self.m)
+    }
+
+    fn peel(&mut self) -> Result<(), CompilationError> {
         debug_assert_matches!(self.m.tracekind(), TraceKind::HeaderOnly);
         self.m.set_tracekind(TraceKind::HeaderAndBody);
 
         // Now that we've processed the trace header, duplicate it to create the loop body.
-        let mut iidx_map = vec![InstIdx::max(); base];
+        let mut iidx_map = vec![InstIdx::max(); self.m.insts_len()];
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
             match inst {
@@ -154,7 +156,7 @@ impl Opt {
             }
         }
 
-        Ok(self.m)
+        Ok(())
     }
 
     /// Optimise instruction `iidx`.
