@@ -2400,7 +2400,6 @@ mod test {
             *%1 = 1i64
             *%2 = 1i64
             *%1 = 1i64
-            black_box %1
         ",
             |m| opt(m).unwrap(),
             "
@@ -2411,7 +2410,6 @@ mod test {
             %2: ptr = ptr_add %0, 16
             *%1 = 1i64
             *%2 = 1i64
-            black_box %1
         ",
         );
 
@@ -2419,24 +2417,42 @@ mod test {
             "
           entry:
             %0: ptr = param reg
-            %1: ptr = ptr_add %0, 1
+            %1: ptr = ptr_add %0, 7
             %2: ptr = ptr_add %0, 8
             *%1 = 1i8
             *%2 = 1i64
             *%1 = 1i8
-            black_box %1
         ",
             |m| opt(m).unwrap(),
             "
           ...
           entry:
             %0: ptr = param ...
-            %1: ptr = ptr_add %0, 1
+            %1: ptr = ptr_add %0, 7
             %2: ptr = ptr_add %0, 8
             *%1 = 1i8
             *%2 = 1i64
-            *%1 = 1i8
-            black_box %1
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, 4
+            *%1 = 1i32
+            *%0 = 1i64
+            *%1 = 1i32
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: ptr = ptr_add %0, 4
+            *%1 = 1i32
+            *%0 = 1i64
+            *%1 = 1i32
         ",
         );
     }

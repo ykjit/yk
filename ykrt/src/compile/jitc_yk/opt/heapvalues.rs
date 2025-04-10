@@ -95,12 +95,10 @@ impl HeapValues {
                 // we're writing 8 bytes and we're storing to `%3 + 8` and `%3 + 24` we can be
                 // entirely sure the stores don't overlap: in any other situation, we assume
                 // overlap is possible. This can be relaxed in the future.
-                self.hv.retain(|hv_addr, _| match hv_addr {
+                self.hv.retain(|hv_addr, hv_v| match hv_addr {
                     Address::PtrPlusOff(hv_iidx, hv_off) => {
                         let hv_off = isize::try_from(*hv_off).unwrap();
-                        let hv_bytesize =
-                            isize::try_from(m.inst_nocopy(*hv_iidx).unwrap().def_byte_size(m))
-                                .unwrap();
+                        let hv_bytesize = isize::try_from(hv_v.byte_size(m)).unwrap();
                         iidx == *hv_iidx
                             && (off + op_bytesize <= hv_off || hv_off + hv_bytesize <= off)
                     }
@@ -208,5 +206,34 @@ mod test {
 
         hv.barrier();
         assert_eq!(hv.hv.len(), 0);
+    }
+
+    #[test]
+    fn dont_confuse_ptr_for_value_size() {
+        // This test prevents us reintroducing a bug where we thought the store `%0 = 1i8` was 8
+        // bytes (because we incorrectly checked `%0`, which is 8 bytes, rather than 1i8, which
+        // is 1 byte).
+        let mut m = Module::from_str(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, 1
+            *%0 = 1i8
+            *%1 = 2i8
+        ",
+        );
+        let mut hv = HeapValues::new();
+        let addr0 = Address::from_operand(&m, Operand::Var(InstIdx::unchecked_from(0)));
+        let addr1 = Address::from_operand(&m, Operand::Var(InstIdx::unchecked_from(1)));
+        let cidx1 = m
+            .insert_const(Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 1)))
+            .unwrap();
+        let cidx2 = m
+            .insert_const(Const::Int(m.int8_tyidx(), ArbBitInt::from_u64(8, 2)))
+            .unwrap();
+        hv.store(&m, addr0.clone(), Operand::Const(cidx1));
+        hv.store(&m, addr1.clone(), Operand::Const(cidx2));
+        assert_eq!(hv.get(&m, addr0.clone(), 1), Some(Operand::Const(cidx1)));
+        assert_eq!(hv.get(&m, addr1.clone(), 1), Some(Operand::Const(cidx2)));
     }
 }
