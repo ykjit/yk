@@ -2134,36 +2134,6 @@ mod test {
         );
     }
 
-    #[ignore]
-    #[test]
-    fn opt_peeling_hoist() {
-        Module::assert_ir_transform_eq(
-            "
-          entry:
-            %0: i8 = param reg
-            %1: i8 = param reg
-            body_start [%0, %1]
-            %2: i8 = add %0, 1i8
-            %3: i8 = add %1, %2
-            body_end [%0, %3]
-        ",
-            |m| opt(m).unwrap(),
-            "
-          ...
-          entry:
-            %0: i8 = param ...
-            %1: i8 = param ...
-            head_start [%0, %1]
-            %3: i8 = add %0, 1i8
-            %4: i8 = add %1, %3
-            head_end [%0, %4, %3]
-            body_start [%0, %4, %3]
-            %10: i8 = add %4, %3
-            body_end [%0, %10, %3]
-        ",
-        );
-    }
-
     #[test]
     fn opt_dead_load() {
         Module::assert_ir_transform_eq(
