@@ -24,12 +24,12 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i{{size}} = call @idem1(%{{_}}, %{{_}}) <idem_const 10i{{size}}>
+//     %{{_}}: i{{size}} = call @idem1(%{{_}}, %{{_}}) <idem_const 28i{{size}}>
 //     ...
 //     --- End jit-pre-opt ---
 //     --- Begin jit-post-opt ---
 //     ...
-//     %31: i32 = call @fprintf(%{{_}}, %{{_}}, 4i{{size}}, 10i{{size}})
+//     %31: i32 = call @fprintf(%{{_}}, %{{_}}, 4i{{size}}, 28i{{size}})
 //     ...
 //     --- End jit-post-opt ---
 //     3: 24

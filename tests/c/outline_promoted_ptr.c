@@ -19,10 +19,16 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((yk_outline))
-void *f(void *p) {
+
+__attribute__((noinline))
+void *g(void *p) {
   p = yk_promote(p);
   return p;
+}
+
+__attribute__((yk_outline))
+void *f(void *p) {
+  return g(p);
 }
 
 int main(int argc, char **argv) {
