@@ -6,10 +6,14 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-jit-event: start-tracing
-//     4: 28
+//     4: {{val}}
 //     yk-jit-event: stop-tracing
 //     ...
 //     --- Begin aot ---
+//     ...
+//     func g(...
+//     ...
+//     %{{1_0}}: i64 = promote %{{_}} ...
 //     ...
 //     #[yk_idempotent, yk_outline]
 //     func f(...
@@ -21,21 +25,15 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i{{size}} = call @f(%{{v}}, %{{v}}) <idem_const 28i{{size}}>
+//     %{{_}}: i{{size}} = call @f(1i{{size}}) <idem_const 2i{{size}}>
 //     ...
 //     --- End jit-pre-opt ---
 //     --- Begin jit-post-opt ---
 //     ...
-//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, 4i{{size}}, 28i{{size}})
+//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, 2i{{size}})
 //     ...
 //     --- End jit-post-opt ---
-//     3: 24
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
-//     2: 20
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
-//     1: 16
+//     ...
 
 // Check that idempotent functions work when they call functions that
 // themselves promote values. This forces the trace builder to outline over the
@@ -47,21 +45,14 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-uintptr_t h(uintptr_t x, uintptr_t y) {
-  return x + y;
-}
-
-__attribute__((yk_outline))
-uintptr_t g(uintptr_t x, uintptr_t y) {
-  // idemconsts made here will be consumed and discarded by the trace builder.
-  uintptr_t a = yk_promote(h(x + 1, y + 1));
-  uintptr_t b = yk_promote(h(y + 5, x + 5));
-  return a + b;
+__attribute__((noinline))
+uintptr_t g(uintptr_t x) {
+  return yk_promote(x) + 1;
 }
 
 __attribute__((yk_idempotent))
-uintptr_t f(uintptr_t x, uintptr_t y) {
-  return g(x, y);
+uintptr_t f(uintptr_t x) {
+  return g(x);
 }
 
 int main(int argc, char **argv) {
@@ -74,8 +65,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    uintptr_t k = yk_promote(i);
-    fprintf(stderr, "%" PRIuPTR ": %" PRIuPTR "\n", i, f(k, k));
+    fprintf(stderr, "%" PRIuPTR ": %" PRIuPTR "\n", i, f(1));
     i--;
   }
   yk_location_drop(loc);

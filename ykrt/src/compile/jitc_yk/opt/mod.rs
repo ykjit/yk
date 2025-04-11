@@ -10,8 +10,8 @@ use super::{
     arbbitint::ArbBitInt,
     jit_ir::{
         BinOp, BinOpInst, Const, ConstIdx, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst,
-        Inst, InstIdx, LoadInst, Module, Operand, Predicate, PtrAddInst, SExtInst, SelectInst,
-        StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
+        IdemConst, Inst, InstIdx, LoadInst, Module, Operand, Predicate, PtrAddInst, SExtInst,
+        SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
     },
 };
 use crate::compile::CompilationError;
@@ -565,16 +565,20 @@ impl Opt {
         iidx: InstIdx,
         inst: DirectCallInst,
     ) -> Result<(), CompilationError> {
-        if let Some(cidx) = inst.idem_const() {
-            for aidx in inst.iter_args_idx() {
-                if let Operand::Var(_) = self.m.arg(aidx) {
-                    self.an.heap_barrier();
-                    return Ok(());
+        match inst.idem_const() {
+            IdemConst::Const(cidx) => {
+                for aidx in inst.iter_args_idx() {
+                    if let Operand::Var(_) = self.m.arg(aidx) {
+                        self.an.heap_barrier();
+                        return Ok(());
+                    }
                 }
+                // Elide the call (and don't emit a memory barrier either).
+                self.m.replace(iidx, Inst::Const(cidx));
+                return Ok(());
             }
-            // Elide the call (and don't emit a memory barrier either).
-            self.m.replace(iidx, Inst::Const(cidx));
-            return Ok(());
+            IdemConst::NotRequired => (),
+            IdemConst::Pending => panic!(),
         }
         self.an.heap_barrier();
         Ok(())
