@@ -6,7 +6,7 @@ use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
 use super::{
     arbbitint::ArbBitInt,
-    jit_ir::{self, Const, Operand, PackedOperand, ParamIdx, TraceKind},
+    jit_ir::{self, Const, IdemConst, Operand, PackedOperand, ParamIdx, TraceKind},
     AOT_MOD,
 };
 use crate::{
@@ -800,13 +800,12 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
             // call) or the compiler annotated it with `yk_outline`.
             let idem_const = if func.is_idempotent() {
-                let aot_ir::Ty::Func(fty) = self.aot_mod.type_(func.tyidx()) else {
-                    panic!();
-                };
-                let ret_tyidx = self.handle_type(self.aot_mod.type_(fty.ret_ty()))?;
-                Some(self.promote_bytes_to_const(ret_tyidx)?)
+                // When the idempotent function returns, we can consume the return value out of the
+                // promote buffer. We can't do it now because the callee (and its callees) may
+                // promote values and we have to consume those first.
+                IdemConst::Pending
             } else {
-                None
+                IdemConst::NotRequired
             };
 
             self.outline_until_after_call(bid, nextinst);
@@ -1427,6 +1426,38 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                             // started outlining. We are done and can continue processing
                             // blocks normally.
                             self.outline_target_blk = None;
+                            // If we started outlining due to a `yk_idempotent` annotation we must
+                            // now put the dynamically recorded return value into the (already
+                            // emitted) call instruction for the trace optimiser to pick up later.
+                            //
+                            // Because we haven't emitted any instructions (only outlined) since
+                            // emitting the call to the idempotent function, the call we need to
+                            // modify is still the last instruction in the JIT module.
+                            let last_iidx = self.jit_mod.last_inst_idx();
+                            // It's essential we use `inst_raw` here, since a call to an idempotent function is
+                            // followed by an call to `__yk_idempotent_promote_*()` which the trace
+                            // builder will convert into a [Inst::Copy] to the first call. If
+                            // we were to decopy the instruction we'd consume from the promote
+                            // buffer twice!
+                            let inst = self.jit_mod.inst_raw(last_iidx);
+                            if let jit_ir::Inst::Call(ci) = inst {
+                                if let jit_ir::IdemConst::Pending = ci.idem_const() {
+                                    let cidx =
+                                        self.promote_bytes_to_const(inst.tyidx(&self.jit_mod))?;
+                                    let args = ci
+                                        .iter_args_idx()
+                                        .map(|i| self.jit_mod.arg(i).clone())
+                                        .collect();
+                                    let new_ci = jit_ir::DirectCallInst::new(
+                                        &mut self.jit_mod,
+                                        ci.target(),
+                                        args,
+                                        IdemConst::Const(cidx),
+                                    )
+                                    .unwrap();
+                                    self.jit_mod.replace(last_iidx, jit_ir::Inst::Call(new_ci));
+                                }
+                            }
                         } else {
                             // We are outlining so just skip this block. However, we still need to
                             // process promoted values to make sure we've processed all promotion

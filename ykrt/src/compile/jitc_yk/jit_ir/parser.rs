@@ -19,9 +19,9 @@ use super::super::{
     jit_ir::{
         BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
         FNegInst, FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
-        IndirectCallInst, Inst, InstIdx, IntToPtrInst, LoadInst, Module, Operand, PackedOperand,
-        ParamIdx, ParamInst, PtrAddInst, PtrToIntInst, SExtInst, SIToFPInst, SelectInst, StoreInst,
-        TruncInst, Ty, TyIdx, ZExtInst,
+        IdemConst, IndirectCallInst, Inst, InstIdx, IntToPtrInst, LoadInst, Module, Operand,
+        PackedOperand, ParamIdx, ParamInst, PtrAddInst, PtrToIntInst, SExtInst, SIToFPInst,
+        SelectInst, StoreInst, TruncInst, Ty, TyIdx, ZExtInst,
     },
 };
 use fm::FMBuilder;
@@ -190,6 +190,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 Ok(Operand::Const(cidx)) => Some(cidx),
                             },
                             None => None,
+                        };
+                        let idem_const = match idem_const {
+                            Some(cidx) => IdemConst::Const(cidx),
+                            None => IdemConst::NotRequired,
                         };
                         let inst = DirectCallInst::new(self.m, fd_idx, ops, idem_const)
                             .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;

@@ -395,7 +395,7 @@ impl Module {
     /// This function has very few uses and unless you explicitly know why you're using it, you
     /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
     /// correctly leads to undefined behaviour.
-    fn inst_raw(&self, iidx: InstIdx) -> Inst {
+    pub(crate) fn inst_raw(&self, iidx: InstIdx) -> Inst {
         self.insts[usize::from(iidx)]
     }
 
@@ -2099,10 +2099,12 @@ impl fmt::Display for DisplayableInst<'_> {
                     .unwrap_or("<not valid UTF-8>")
             ),
             Inst::Call(x) => {
-                let idem_const = if let Some(cidx) = x.idem_const {
-                    &format!(" <idem_const {}>", self.m.const_(cidx).display(self.m))
-                } else {
-                    ""
+                let idem_const = match x.idem_const {
+                    IdemConst::NotRequired => "",
+                    IdemConst::Const(cidx) => {
+                        &format!(" <idem_const {}>", self.m.const_(cidx).display(self.m))
+                    }
+                    IdemConst::Pending => &format!(" <idem_const pending>"),
                 };
                 write!(
                     f,
@@ -2595,6 +2597,18 @@ impl IndirectCallInst {
     }
 }
 
+/// Describes an idempotent constant associated with a call instruction.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum IdemConst {
+    /// The call instruction does not require an idempotent constant.
+    NotRequired,
+    /// The call instruction requires an idempotent constant, but we haven't discovered its value
+    /// yet.
+    Pending,
+    /// The call instruction requires the idempotent constant referenced by [ConstIdx].
+    Const(ConstIdx),
+}
+
 /// The operands for a [Inst::Call]
 ///
 /// # Semantics
@@ -2609,9 +2623,9 @@ pub struct DirectCallInst {
     args_idx: ArgsIdx,
     /// How many arguments in [Module::args] is this call passing?
     num_args: u16,
-    /// If this is a call to an idempotent function, then this will contain the [ConstIdx] of the
-    /// return value (dynamically captured during tracing).
-    idem_const: Option<ConstIdx>,
+    /// The dynamically captured return value of the call (if required for idempotent function
+    /// optimisations).
+    idem_const: IdemConst,
 }
 
 impl DirectCallInst {
@@ -2619,7 +2633,7 @@ impl DirectCallInst {
         m: &mut Module,
         target: FuncDeclIdx,
         args: Vec<Operand>,
-        idem_const: Option<ConstIdx>,
+        idem_const: IdemConst,
     ) -> Result<DirectCallInst, CompilationError> {
         let num_args = u16::try_from(args.len()).map_err(|_| {
             CompilationError::LimitExceeded(format!(
@@ -2663,7 +2677,7 @@ impl DirectCallInst {
     }
 
     /// Return this function call's idempotent constant, if one exists.
-    pub(crate) fn idem_const(&self) -> Option<ConstIdx> {
+    pub(crate) fn idem_const(&self) -> IdemConst {
         self.idem_const
     }
 }
@@ -3386,7 +3400,7 @@ mod tests {
             i32_tyidx,
         )))
         .unwrap();
-        let ci = DirectCallInst::new(&mut m, func_decl_idx, args, None).unwrap();
+        let ci = DirectCallInst::new(&mut m, func_decl_idx, args, IdemConst::NotRequired).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Var(InstIdx(0)));
@@ -3413,7 +3427,7 @@ mod tests {
             Operand::Var(InstIdx(1)),
             Operand::Var(InstIdx(2)),
         ];
-        let ci = DirectCallInst::new(&mut m, func_decl_idx, args, None).unwrap();
+        let ci = DirectCallInst::new(&mut m, func_decl_idx, args, IdemConst::NotRequired).unwrap();
 
         // Request an operand with an out-of-bounds index.
         ci.operand(&m, 3);
