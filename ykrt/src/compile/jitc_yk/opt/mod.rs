@@ -136,6 +136,8 @@ impl Opt {
             }
         }
 
+        self.an.propagate_header_to_body(&iidx_map);
+
         // Create a fresh `instll`. Normal CSE in the body (a) can't possibly reference the header
         // (b) the number of instructions in the `instll`-for-the-header is wrong as a result of
         // peeling. So create a fresh `instll`.
@@ -2130,6 +2132,81 @@ mod test {
             body_start [%4]
             %6: i8 = add %4, 1i8
             body_end [%6]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_peeling_heap() {
+        // Loads
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            header_start [%0]
+            %2: i8 = load %0
+            %3: i1 = eq %2, 1i8
+            guard true, %3, []
+            %5: ptr = ptr_add %0, 1
+            %6: i8 = load %5
+            black_box %2
+            black_box %6
+            header_end [%0]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%10]
+            %15: ptr = ptr_add %10, 1
+            %16: i8 = load %15
+            black_box 1i8
+            black_box %16
+            body_end [%10]
+        ",
+        );
+
+        // Stores
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: i8 = param reg
+            header_start [%0, %1]
+            *%0 = 1i8
+            %4: i8 = add %1, 1i8
+            %5: ptr = ptr_add %0, 4
+            *%5 = %4
+            header_end [%0, %4]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%8, %9]
+            %12: i8 = add %9, 1i8
+            %13: ptr = ptr_add %8, 4
+            *%13 = %12
+            body_end [%8, %12]
+        ",
+        );
+
+        // Intermediate updates
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            header_start [%0]
+            *%0 = 1i8
+            *%0 = 2i8
+            *%0 = 1i8
+            header_end [%0]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%{{6}}]
+            *%{{6}} = 2i8
+            *%{{6}} = 1i8
+            body_end [%{{6}}]
         ",
         );
     }
