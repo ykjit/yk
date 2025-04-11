@@ -46,6 +46,13 @@ impl Analyse {
         }
     }
 
+    /// Propagate relevant analysis from the trace header to body. This must only be called at the
+    /// end of analysing the trace header; doing otherwise leads to undefined behaviour. `map` is a
+    /// 1:1 mapping of "header [InstIdx] to body [InstIdx]".
+    pub(super) fn propagate_header_to_body(&self, map: &[InstIdx]) {
+        self.heapvalues.borrow_mut().propagate_header_to_body(map);
+    }
+
     /// Map `op` based on our analysis so far. In some cases this will return `op` unchanged, but
     /// in others it may be able to turn what looks like a variable reference into a constant.
     pub(super) fn op_map(&self, m: &Module, op: Operand) -> Operand {

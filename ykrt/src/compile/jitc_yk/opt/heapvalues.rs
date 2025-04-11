@@ -17,7 +17,6 @@ pub(super) enum Address {
     /// values in bytes.
     PtrPlusOff(InstIdx, i32),
     /// This address is a constant.
-    #[allow(unused)]
     Const(usize),
 }
 
@@ -63,6 +62,31 @@ pub(super) struct HeapValues {
 impl HeapValues {
     pub(super) fn new() -> Self {
         HeapValues { hv: HashMap::new() }
+    }
+
+    /// Propagate relevant analysis from the trace header to body. This must only be called at the
+    /// end of analysing the trace header; doing otherwise leads to undefined behaviour. `map` is a
+    /// 1:1 mapping of "header [InstIdx] to body [InstIdx]".
+    pub(super) fn propagate_header_to_body(&mut self, map: &[InstIdx]) {
+        let mut new = HashMap::with_capacity(self.hv.len());
+        for (k, v) in self.hv.iter_mut() {
+            let k = match k {
+                Address::PtrPlusOff(iidx, off) => {
+                    assert_ne!(map[usize::from(*iidx)], InstIdx::max());
+                    Address::PtrPlusOff(map[usize::from(*iidx)], *off)
+                }
+                Address::Const(cidx) => Address::Const(*cidx),
+            };
+            let v = match v {
+                Operand::Var(iidx) => {
+                    assert_ne!(map[usize::from(*iidx)], InstIdx::max());
+                    continue;
+                }
+                Operand::Const(cidx) => Operand::Const(*cidx),
+            };
+            new.insert(k, v);
+        }
+        self.hv = new;
     }
 
     /// What is the currently known value at `addr` of `bytesize` bytes? Returns `None` if no value

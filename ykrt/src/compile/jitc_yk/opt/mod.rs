@@ -37,7 +37,6 @@ impl Opt {
     }
 
     fn opt(mut self) -> Result<Module, CompilationError> {
-        let base = self.m.insts_len();
         let peel = match self.m.tracekind() {
             TraceKind::HeaderOnly => {
                 #[cfg(not(test))]
@@ -64,9 +63,7 @@ impl Opt {
             TraceKind::Connector(_) => false,
         };
 
-        // Note that since we will apply loop peeling here, the list of instructions grows as this
-        // loop runs. Each instruction we process is (after optimisations were applied), duplicated
-        // and copied to the end of the module.
+        // Step 1: optimise the module as-is.
         let mut instll = InstLinkedList::new(&self.m);
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
@@ -79,15 +76,20 @@ impl Opt {
             }
         }
 
-        if !peel {
-            return Ok(self.m);
+        // Step 2: if appropriate, peel off an iteration of the loop, and optimise it.
+        if peel {
+            self.peel()?;
         }
 
+        Ok(self.m)
+    }
+
+    fn peel(&mut self) -> Result<(), CompilationError> {
         debug_assert_matches!(self.m.tracekind(), TraceKind::HeaderOnly);
         self.m.set_tracekind(TraceKind::HeaderAndBody);
 
         // Now that we've processed the trace header, duplicate it to create the loop body.
-        let mut iidx_map = vec![InstIdx::max(); base];
+        let mut iidx_map = vec![InstIdx::max(); self.m.insts_len()];
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
             match inst {
@@ -134,6 +136,8 @@ impl Opt {
             }
         }
 
+        self.an.propagate_header_to_body(&iidx_map);
+
         // Create a fresh `instll`. Normal CSE in the body (a) can't possibly reference the header
         // (b) the number of instructions in the `instll`-for-the-header is wrong as a result of
         // peeling. So create a fresh `instll`.
@@ -154,7 +158,7 @@ impl Opt {
             }
         }
 
-        Ok(self.m)
+        Ok(())
     }
 
     /// Optimise instruction `iidx`.
@@ -2132,32 +2136,77 @@ mod test {
         );
     }
 
-    #[ignore]
     #[test]
-    fn opt_peeling_hoist() {
+    fn opt_peeling_heap() {
+        // Loads
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param reg
-            %1: i8 = param reg
-            body_start [%0, %1]
-            %2: i8 = add %0, 1i8
-            %3: i8 = add %1, %2
-            body_end [%0, %3]
+            %0: ptr = param reg
+            header_start [%0]
+            %2: i8 = load %0
+            %3: i1 = eq %2, 1i8
+            guard true, %3, []
+            %5: ptr = ptr_add %0, 1
+            %6: i8 = load %5
+            black_box %2
+            black_box %6
+            header_end [%0]
         ",
             |m| opt(m).unwrap(),
             "
           ...
+            body_start [%10]
+            %15: ptr = ptr_add %10, 1
+            %16: i8 = load %15
+            black_box 1i8
+            black_box %16
+            body_end [%10]
+        ",
+        );
+
+        // Stores
+        Module::assert_ir_transform_eq(
+            "
           entry:
-            %0: i8 = param ...
-            %1: i8 = param ...
-            head_start [%0, %1]
-            %3: i8 = add %0, 1i8
-            %4: i8 = add %1, %3
-            head_end [%0, %4, %3]
-            body_start [%0, %4, %3]
-            %10: i8 = add %4, %3
-            body_end [%0, %10, %3]
+            %0: ptr = param reg
+            %1: i8 = param reg
+            header_start [%0, %1]
+            *%0 = 1i8
+            %4: i8 = add %1, 1i8
+            %5: ptr = ptr_add %0, 4
+            *%5 = %4
+            header_end [%0, %4]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%8, %9]
+            %12: i8 = add %9, 1i8
+            %13: ptr = ptr_add %8, 4
+            *%13 = %12
+            body_end [%8, %12]
+        ",
+        );
+
+        // Intermediate updates
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            header_start [%0]
+            *%0 = 1i8
+            *%0 = 2i8
+            *%0 = 1i8
+            header_end [%0]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%{{6}}]
+            *%{{6}} = 2i8
+            *%{{6}} = 1i8
+            body_end [%{{6}}]
         ",
         );
     }
