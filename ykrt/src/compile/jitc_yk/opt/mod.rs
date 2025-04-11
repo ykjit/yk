@@ -136,7 +136,7 @@ impl Opt {
             }
         }
 
-        self.an.propagate_header_to_body(&iidx_map);
+        self.an.propagate_header_to_body(&self.m, &iidx_map);
 
         // Create a fresh `instll`. Normal CSE in the body (a) can't possibly reference the header
         // (b) the number of instructions in the `instll`-for-the-header is wrong as a result of
@@ -2207,6 +2207,26 @@ mod test {
             *%{{6}} = 2i8
             *%{{6}} = 1i8
             body_end [%{{6}}]
+        ",
+        );
+
+        // Check that only stable pointers are considered
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            header_start [%0]
+            *%0 = 0i8
+            %3: ptr = ptr_add %0, 1
+            header_end [%3]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%5]
+            *%5 = 0i8
+            %8: ptr = ptr_add %5, 1
+            body_end [%8]
         ",
         );
     }
