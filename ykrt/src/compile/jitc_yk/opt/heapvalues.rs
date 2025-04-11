@@ -67,13 +67,19 @@ impl HeapValues {
     /// Propagate relevant analysis from the trace header to body. This must only be called at the
     /// end of analysing the trace header; doing otherwise leads to undefined behaviour. `map` is a
     /// 1:1 mapping of "header [InstIdx] to body [InstIdx]".
-    pub(super) fn propagate_header_to_body(&mut self, map: &[InstIdx]) {
+    pub(super) fn propagate_header_to_body(&mut self, m: &Module, map: &[InstIdx]) {
         let mut new = HashMap::with_capacity(self.hv.len());
         for (k, v) in self.hv.iter_mut() {
             let k = match k {
                 Address::PtrPlusOff(iidx, off) => {
                     assert_ne!(map[usize::from(*iidx)], InstIdx::max());
-                    Address::PtrPlusOff(map[usize::from(*iidx)], *off)
+                    match m.trace_header_start_position(Operand::Var(*iidx)) {
+                        Some(i) => match m.trace_header_end_position(Operand::Var(*iidx)) {
+                            Some(j) if i == j => Address::PtrPlusOff(map[usize::from(*iidx)], *off),
+                            _ => continue,
+                        },
+                        None => continue,
+                    }
                 }
                 Address::Const(cidx) => Address::Const(*cidx),
             };
