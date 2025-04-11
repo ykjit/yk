@@ -799,23 +799,13 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
             // call) or the compiler annotated it with `yk_outline`.
-            let idem_const = if func.is_idempotent() {
-                let aot_ir::Ty::Func(fty) = self.aot_mod.type_(func.tyidx()) else {
-                    panic!();
-                };
-                let ret_tyidx = self.handle_type(self.aot_mod.type_(fty.ret_ty()))?;
-                Some(self.promote_bytes_to_const(ret_tyidx)?)
-            } else {
-                None
-            };
-
             self.outline_until_after_call(bid, nextinst);
             let jit_func_decl_idx = self.handle_func(*callee)?;
             let inst = jit_ir::DirectCallInst::new(
                 &mut self.jit_mod,
                 jit_func_decl_idx,
                 jit_args,
-                idem_const,
+                None, // Note: the `idem_const` field may be populated later.
             )?
             .into();
             self.copy_inst(inst, bid, aot_inst_idx)
@@ -1201,9 +1191,33 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         val: &aot_ir::Operand,
         nextinst: &'static aot_ir::Inst,
     ) -> Result<(), CompilationError> {
-        // Note that the promoted value is not consumed out of the promote buffer here. It's
-        // consumed at the callsite to the idempotent function and attached to the call
-        // instruction.
+        // Sanity check: the callee whose return value was recorded must have been idempotent.
+        let aot_ir::Operand::LocalVariable(iid) = val else {
+            panic!();
+        };
+        let aot_ir::Inst::Call { callee, .. } = self.aot_mod.inst(iid) else {
+            panic!();
+        };
+        assert!(self.aot_mod.func(*callee).is_idempotent());
+        // Consume the dynamically captured return value out of the promote buffer, make it into a
+        // constant and stash its index into the (already emitted) call to the function that was
+        // marked idempotent.
+        let jit_ir::Operand::Var(call_iidx) = self.handle_operand(val)? else {
+            panic!();
+        };
+        let call_inst = self.jit_mod.inst(call_iidx);
+        let jit_ir::Inst::Call(ci) = call_inst else {
+            todo!();
+        };
+        let cidx = self.promote_bytes_to_const(call_inst.tyidx(&self.jit_mod))?;
+        let args = ci
+            .iter_args_idx()
+            .map(|i| self.jit_mod.arg(i).clone())
+            .collect();
+        let new_ci = jit_ir::DirectCallInst::new(&mut self.jit_mod, ci.target(), args, Some(cidx))?;
+        self.jit_mod.replace(call_iidx, jit_ir::Inst::Call(new_ci));
+
+        // Don't copy-in the call to the promote recorder.
         self.outline_until_after_call(bid, nextinst);
         match self.handle_operand(val)? {
             jit_ir::Operand::Var(ref_iidx) => {
@@ -1504,8 +1518,8 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             }
         }
 
-        debug_assert_eq!(self.promote_idx, self.promotions.len());
-        debug_assert_eq!(self.debug_str_idx, self.debug_strs.len());
+        assert_eq!(self.promote_idx, self.promotions.len());
+        assert_eq!(self.debug_str_idx, self.debug_strs.len());
         let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
         let cpcall = blk.insts.iter().rev().nth(1).unwrap();
         debug_assert!(cpcall.is_control_point(self.aot_mod));
