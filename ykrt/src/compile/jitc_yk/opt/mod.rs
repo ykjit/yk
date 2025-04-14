@@ -151,6 +151,46 @@ impl Opt {
             match inst {
                 Inst::TraceHeaderStart | Inst::TraceHeaderEnd(_) => panic!(),
                 Inst::TraceBodyStart => (),
+                Inst::Guard(ginst) => {
+                    // When we're peeling we might discover that the peeled iteration can never
+                    // execute the same as the first iteration. Consider a loop such as:
+                    //
+                    // ```
+                    // for x in 0..100 {
+                    //   if x % 2 == 0 { ... }
+                    //   else { ... }
+                    // }
+                    // ```
+                    //
+                    // In other words, successive iterations of the loop flip between the true/else
+                    // branches. Thus, whatever iteration we trace, the peeled iteration will never
+                    // be able to execute to its end: it will always fail at a guard before that
+                    // point.
+                    //
+                    // When we're optimising the peeled iteration, our analyses can thus detect
+                    // guards that will always fail. As soon as we discover one of those, there's
+                    // no point trying to optimise the guard or anything after it in the trace: the
+                    // guard will always fail at run-time.
+                    if let Operand::Const(cidx) = self.an.op_map(&self.m, ginst.cond(&self.m)) {
+                        let Const::Int(_, v) = self.m.const_(cidx) else {
+                            panic!()
+                        };
+                        assert_eq!(v.bitw(), 1);
+                        if (ginst.expect() && v.to_zero_ext_u8().unwrap() == 0)
+                            || (!ginst.expect() && v.to_zero_ext_u8().unwrap() == 1)
+                        {
+                            // This guard will always fail. We could be more clever than just
+                            // stopping optimising at this point. For example, we could introduce a
+                            // new type of "always fail" trace; or Tombstone all the subsequent
+                            // instructions to avoid the code generator doing pointless work. But
+                            // we're lazy, and simply stopping optimising the peeled loop at this
+                            // point is correct.
+                            break;
+                        }
+                    }
+                    self.opt_inst(iidx)?;
+                    self.cse(&mut instll, iidx);
+                }
                 _ => {
                     self.opt_inst(iidx)?;
                     self.cse(&mut instll, iidx);
@@ -2227,6 +2267,30 @@ mod test {
             *%5 = 0i8
             %8: ptr = ptr_add %5, 1
             body_end [%8]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_peeling_guard_always_false() {
+        // When we peel this loop, we'll statically detect that the guard always fails: this test
+        // very simply checks that we (a) don't panic (b) emit a guard which will always fail.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            header_start [%0]
+            %2: i1 = eq %0, 0i8
+            guard true, %2, []
+            %4: i8 = add %0, 1i8
+            header_end [%4]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%{{_}}]
+            guard true, 0i1, ...
+            body_end [1i8]
         ",
         );
     }
