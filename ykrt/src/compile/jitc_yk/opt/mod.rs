@@ -10,8 +10,8 @@ use super::{
     arbbitint::ArbBitInt,
     jit_ir::{
         BinOp, BinOpInst, Const, ConstIdx, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst,
-        Inst, InstIdx, LoadInst, Module, Operand, Predicate, PtrAddInst, PtrToIntInst, SExtInst,
-        SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
+        Inst, InstIdx, IntToPtrInst, LoadInst, Module, Operand, Predicate, PtrAddInst,
+        PtrToIntInst, SExtInst, SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
     },
 };
 use crate::compile::CompilationError;
@@ -224,6 +224,7 @@ impl Opt {
             Inst::DynPtrAdd(x) => self.opt_dynptradd(iidx, x)?,
             Inst::Guard(x) => self.opt_guard(iidx, x)?,
             Inst::ICmp(x) => self.opt_icmp(iidx, x)?,
+            Inst::IntToPtr(x) => self.opt_inttoptr(iidx, x)?,
             Inst::Load(x) => self.opt_load(iidx, x)?,
             Inst::Param(x) => {
                 // FIXME: This feels like it should be handled by trace_builder, but we can't
@@ -781,6 +782,21 @@ impl Opt {
         }
     }
 
+    fn opt_inttoptr(&mut self, iidx: InstIdx, inst: IntToPtrInst) -> Result<(), CompilationError> {
+        if let Operand::Const(cidx) = inst.val(&self.m) {
+            let Const::Int(_, v) = self.m.const_(cidx) else {
+                panic!()
+            };
+            if let Some(v) = v.to_zero_ext_usize() {
+                let pcidx = self.m.insert_const(Const::Ptr(v))?;
+                self.an.set_value(&self.m, iidx, Value::Const(pcidx));
+            } else {
+                panic!();
+            }
+        }
+
+        Ok(())
+    }
 
     fn opt_ptrtoint(&mut self, iidx: InstIdx, inst: PtrToIntInst) -> Result<(), CompilationError> {
         if let Operand::Const(cidx) = inst.val(&self.m) {
@@ -802,6 +818,7 @@ impl Opt {
 
         Ok(())
     }
+
     fn opt_load(&mut self, iidx: InstIdx, inst: LoadInst) -> Result<(), CompilationError> {
         if !inst.is_volatile() {
             let tgt = self.an.op_map(&self.m, inst.ptr(&self.m));
@@ -1746,6 +1763,34 @@ mod test {
             black_box 1i1
             black_box 0i1
             black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_inttoptr() {
+        // Test constant condition.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i64 = param reg
+            %2: ptr = int_to_ptr %0
+            %3: ptr = int_to_ptr %1
+            %4: ptr = int_to_ptr 1i8
+            %5: ptr = int_to_ptr 737894443981i64
+            black_box %2
+            black_box %3
+            black_box %4
+            black_box %5
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            black_box %2
+            black_box %3
+            black_box 0x1
+            black_box 0xabcdefabcd
         ",
         );
     }

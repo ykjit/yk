@@ -154,6 +154,12 @@ impl ArbBitInt {
         Some(self.val.truncate(self.bitw))
     }
 
+    /// zero extend the underlying value and, if it is representable as an `u64`, return it.
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) fn to_zero_ext_usize(&self) -> Option<usize> {
+        Some(self.val.truncate(self.bitw) as usize)
+    }
+
     /// Return a new [ArbBitInt] that performs two's complement wrapping addition on `self` and
     /// `other`.
     ///
