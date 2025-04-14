@@ -10,8 +10,8 @@ use super::{
     arbbitint::ArbBitInt,
     jit_ir::{
         BinOp, BinOpInst, Const, ConstIdx, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst,
-        Inst, InstIdx, LoadInst, Module, Operand, Predicate, PtrAddInst, SExtInst, SelectInst,
-        StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
+        Inst, InstIdx, LoadInst, Module, Operand, Predicate, PtrAddInst, PtrToIntInst, SExtInst,
+        SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
     },
 };
 use crate::compile::CompilationError;
@@ -242,6 +242,7 @@ impl Opt {
                 }
             }
             Inst::PtrAdd(x) => self.opt_ptradd(iidx, x)?,
+            Inst::PtrToInt(x) => self.opt_ptrtoint(iidx, x)?,
             Inst::Select(x) => self.opt_select(iidx, x)?,
             Inst::SExt(x) => self.opt_sext(iidx, x)?,
             Inst::Store(x) => self.opt_store(iidx, x)?,
@@ -780,6 +781,27 @@ impl Opt {
         }
     }
 
+
+    fn opt_ptrtoint(&mut self, iidx: InstIdx, inst: PtrToIntInst) -> Result<(), CompilationError> {
+        if let Operand::Const(cidx) = inst.val(&self.m) {
+            let Const::Ptr(v) = self.m.const_(cidx) else {
+                panic!()
+            };
+            let v = ArbBitInt::from_usize(*v);
+            let src_bitw = v.bitw();
+            let tgt_bitw = self.m.inst(iidx).def_bitw(&self.m);
+            let v = if tgt_bitw <= src_bitw {
+                v.truncate(tgt_bitw)
+            } else {
+                todo!()
+            };
+            let tyidx = self.m.insert_ty(Ty::Integer(tgt_bitw))?;
+            let cidx = self.m.insert_const(Const::Int(tyidx, v))?;
+            self.m.replace(iidx, Inst::Const(cidx));
+        }
+
+        Ok(())
+    }
     fn opt_load(&mut self, iidx: InstIdx, inst: LoadInst) -> Result<(), CompilationError> {
         if !inst.is_volatile() {
             let tgt = self.an.op_map(&self.m, inst.ptr(&self.m));
@@ -1724,6 +1746,29 @@ mod test {
             black_box 1i1
             black_box 0i1
             black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ptrtoint() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: i64 = ptr_to_int %0
+            %2: i64 = ptr_to_int 0x12345678
+            %3: i8 = ptr_to_int 0x12345678
+            black_box %1
+            black_box %2
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            black_box %1
+            black_box 305419896i64
+            black_box 120i8
         ",
         );
     }
