@@ -39,6 +39,17 @@ impl ArbBitInt {
     /// Create a new `ArbBitInt` that is `width` bits wide and has a value `val`. Any bits above
     /// `width` bits are ignored (i.e. it is safe for those bits to be set or unset when calling
     /// this function).
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) fn from_usize(val: usize) -> Self {
+        Self {
+            bitw: 64,
+            val: val as u64,
+        }
+    }
+
+    /// Create a new `ArbBitInt` that is `width` bits wide and has a value `val`. Any bits above
+    /// `width` bits are ignored (i.e. it is safe for those bits to be set or unset when calling
+    /// this function).
     #[cfg(test)]
     pub(crate) fn from_i64(bitw: u32, val: i64) -> Self {
         debug_assert!(bitw <= 64);
@@ -141,6 +152,12 @@ impl ArbBitInt {
     /// zero extend the underlying value and, if it is representable as an `u64`, return it.
     pub(crate) fn to_zero_ext_u64(&self) -> Option<u64> {
         Some(self.val.truncate(self.bitw))
+    }
+
+    /// zero extend the underlying value and, if it is representable as an `u64`, return it.
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) fn to_zero_ext_usize(&self) -> Option<usize> {
+        Some(self.val.truncate(self.bitw) as usize)
     }
 
     /// Return a new [ArbBitInt] that performs two's complement wrapping addition on `self` and
@@ -777,6 +794,104 @@ mod tests {
                 ArbBitInt::from_i64(64, x)
                     .bitxor(&ArbBitInt::from_i64(64, y)).to_sign_ext_i64(),
                 Some(x.bitxor(y))
+            );
+        }
+
+        #[test]
+        fn arbbitint_usize(x in any::<usize>(), y in any::<usize>()) {
+            match (i8::try_from(x), ArbBitInt::from_usize(x).to_sign_ext_i8()) {
+                (Ok(a), Some(b)) if a == b => (),
+                (Err(_), None) => (),
+                a => panic!("{a:?}")
+            }
+            match (i16::try_from(x), ArbBitInt::from_usize(x).to_sign_ext_i16()) {
+                (Ok(a), Some(b)) if a == b => (),
+                (Err(_), None) => (),
+                a => panic!("{a:?}")
+            }
+
+            // wrapping_add
+            // i8
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .wrapping_add(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
+                i8::try_from(x.wrapping_add(y)).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .wrapping_add(&ArbBitInt::from_usize( y)).to_sign_ext_i16(),
+                i16::try_from(x.wrapping_add(y)).ok()
+            );
+
+            // wrapping_sub
+            // i8
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .wrapping_sub(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
+                i8::try_from(x.wrapping_sub(y)).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .wrapping_sub(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
+                i16::try_from(x.wrapping_sub(y)).ok()
+            );
+
+            // wrapping_mul
+            // i8
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .wrapping_mul(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
+                i8::try_from(x.wrapping_mul(y)).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .wrapping_mul(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
+                i16::try_from(x.wrapping_mul(y)).ok()
+            );
+
+            // bitand
+            // i8
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .bitand(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
+                i8::try_from(x.bitand(y)).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .bitand(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
+                i16::try_from(x.bitand(y)).ok()
+            );
+
+            // bitor
+            // i8
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .bitor(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
+                i8::try_from(x.bitor(y)).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .bitor(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
+                i16::try_from(x.bitor(y)).ok()
+            );
+
+            // bitxor
+            // i8
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .bitxor(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
+                i8::try_from(x.bitxor(y)).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_usize(x)
+                    .bitxor(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
+                i16::try_from(x.bitxor(y)).ok()
             );
         }
 
