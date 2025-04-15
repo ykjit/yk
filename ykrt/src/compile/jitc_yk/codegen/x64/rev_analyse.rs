@@ -283,7 +283,7 @@ impl<'a> RevAnalyse<'a> {
 
     /// Record that `use_iidx` is used at instruction `def_iidx`.
     fn push_def_use(&mut self, def_iidx: InstIdx, use_iidx: InstIdx) {
-        debug_assert!(def_iidx < use_iidx);
+        assert!(def_iidx < use_iidx);
         self.def_use[usize::from(def_iidx)].push(use_iidx);
     }
 

@@ -10,8 +10,8 @@ use super::{
     arbbitint::ArbBitInt,
     jit_ir::{
         BinOp, BinOpInst, Const, ConstIdx, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst,
-        Inst, InstIdx, LoadInst, Module, Operand, Predicate, PtrAddInst, SExtInst, SelectInst,
-        StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
+        Inst, InstIdx, IntToPtrInst, LoadInst, Module, Operand, Predicate, PtrAddInst,
+        PtrToIntInst, SExtInst, SelectInst, StoreInst, TraceKind, TruncInst, Ty, ZExtInst,
     },
 };
 use crate::compile::CompilationError;
@@ -37,7 +37,6 @@ impl Opt {
     }
 
     fn opt(mut self) -> Result<Module, CompilationError> {
-        let base = self.m.insts_len();
         let peel = match self.m.tracekind() {
             TraceKind::HeaderOnly => {
                 #[cfg(not(test))]
@@ -64,9 +63,7 @@ impl Opt {
             TraceKind::Connector(_) => false,
         };
 
-        // Note that since we will apply loop peeling here, the list of instructions grows as this
-        // loop runs. Each instruction we process is (after optimisations were applied), duplicated
-        // and copied to the end of the module.
+        // Step 1: optimise the module as-is.
         let mut instll = InstLinkedList::new(&self.m);
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
@@ -79,15 +76,20 @@ impl Opt {
             }
         }
 
-        if !peel {
-            return Ok(self.m);
+        // Step 2: if appropriate, peel off an iteration of the loop, and optimise it.
+        if peel {
+            self.peel()?;
         }
 
+        Ok(self.m)
+    }
+
+    fn peel(&mut self) -> Result<(), CompilationError> {
         debug_assert_matches!(self.m.tracekind(), TraceKind::HeaderOnly);
         self.m.set_tracekind(TraceKind::HeaderAndBody);
 
         // Now that we've processed the trace header, duplicate it to create the loop body.
-        let mut iidx_map = vec![InstIdx::max(); base];
+        let mut iidx_map = vec![InstIdx::max(); self.m.insts_len()];
         let skipping = self.m.iter_skipping_insts().collect::<Vec<_>>();
         for (iidx, inst) in skipping.into_iter() {
             match inst {
@@ -134,6 +136,8 @@ impl Opt {
             }
         }
 
+        self.an.propagate_header_to_body(&self.m, &iidx_map);
+
         // Create a fresh `instll`. Normal CSE in the body (a) can't possibly reference the header
         // (b) the number of instructions in the `instll`-for-the-header is wrong as a result of
         // peeling. So create a fresh `instll`.
@@ -147,6 +151,46 @@ impl Opt {
             match inst {
                 Inst::TraceHeaderStart | Inst::TraceHeaderEnd(_) => panic!(),
                 Inst::TraceBodyStart => (),
+                Inst::Guard(ginst) => {
+                    // When we're peeling we might discover that the peeled iteration can never
+                    // execute the same as the first iteration. Consider a loop such as:
+                    //
+                    // ```
+                    // for x in 0..100 {
+                    //   if x % 2 == 0 { ... }
+                    //   else { ... }
+                    // }
+                    // ```
+                    //
+                    // In other words, successive iterations of the loop flip between the true/else
+                    // branches. Thus, whatever iteration we trace, the peeled iteration will never
+                    // be able to execute to its end: it will always fail at a guard before that
+                    // point.
+                    //
+                    // When we're optimising the peeled iteration, our analyses can thus detect
+                    // guards that will always fail. As soon as we discover one of those, there's
+                    // no point trying to optimise the guard or anything after it in the trace: the
+                    // guard will always fail at run-time.
+                    if let Operand::Const(cidx) = self.an.op_map(&self.m, ginst.cond(&self.m)) {
+                        let Const::Int(_, v) = self.m.const_(cidx) else {
+                            panic!()
+                        };
+                        assert_eq!(v.bitw(), 1);
+                        if (ginst.expect() && v.to_zero_ext_u8().unwrap() == 0)
+                            || (!ginst.expect() && v.to_zero_ext_u8().unwrap() == 1)
+                        {
+                            // This guard will always fail. We could be more clever than just
+                            // stopping optimising at this point. For example, we could introduce a
+                            // new type of "always fail" trace; or Tombstone all the subsequent
+                            // instructions to avoid the code generator doing pointless work. But
+                            // we're lazy, and simply stopping optimising the peeled loop at this
+                            // point is correct.
+                            break;
+                        }
+                    }
+                    self.opt_inst(iidx)?;
+                    self.cse(&mut instll, iidx);
+                }
                 _ => {
                     self.opt_inst(iidx)?;
                     self.cse(&mut instll, iidx);
@@ -154,7 +198,7 @@ impl Opt {
             }
         }
 
-        Ok(self.m)
+        Ok(())
     }
 
     /// Optimise instruction `iidx`.
@@ -180,6 +224,7 @@ impl Opt {
             Inst::DynPtrAdd(x) => self.opt_dynptradd(iidx, x)?,
             Inst::Guard(x) => self.opt_guard(iidx, x)?,
             Inst::ICmp(x) => self.opt_icmp(iidx, x)?,
+            Inst::IntToPtr(x) => self.opt_inttoptr(iidx, x)?,
             Inst::Load(x) => self.opt_load(iidx, x)?,
             Inst::Param(x) => {
                 // FIXME: This feels like it should be handled by trace_builder, but we can't
@@ -198,6 +243,7 @@ impl Opt {
                 }
             }
             Inst::PtrAdd(x) => self.opt_ptradd(iidx, x)?,
+            Inst::PtrToInt(x) => self.opt_ptrtoint(iidx, x)?,
             Inst::Select(x) => self.opt_select(iidx, x)?,
             Inst::SExt(x) => self.opt_sext(iidx, x)?,
             Inst::Store(x) => self.opt_store(iidx, x)?,
@@ -734,6 +780,43 @@ impl Opt {
             }
             _ => unreachable!(),
         }
+    }
+
+    fn opt_inttoptr(&mut self, iidx: InstIdx, inst: IntToPtrInst) -> Result<(), CompilationError> {
+        if let Operand::Const(cidx) = inst.val(&self.m) {
+            let Const::Int(_, v) = self.m.const_(cidx) else {
+                panic!()
+            };
+            if let Some(v) = v.to_zero_ext_usize() {
+                let pcidx = self.m.insert_const(Const::Ptr(v))?;
+                self.an.set_value(&self.m, iidx, Value::Const(pcidx));
+            } else {
+                panic!();
+            }
+        }
+
+        Ok(())
+    }
+
+    fn opt_ptrtoint(&mut self, iidx: InstIdx, inst: PtrToIntInst) -> Result<(), CompilationError> {
+        if let Operand::Const(cidx) = inst.val(&self.m) {
+            let Const::Ptr(v) = self.m.const_(cidx) else {
+                panic!()
+            };
+            let v = ArbBitInt::from_usize(*v);
+            let src_bitw = v.bitw();
+            let tgt_bitw = self.m.inst(iidx).def_bitw(&self.m);
+            let v = if tgt_bitw <= src_bitw {
+                v.truncate(tgt_bitw)
+            } else {
+                todo!()
+            };
+            let tyidx = self.m.insert_ty(Ty::Integer(tgt_bitw))?;
+            let cidx = self.m.insert_const(Const::Int(tyidx, v))?;
+            self.m.replace(iidx, Inst::Const(cidx));
+        }
+
+        Ok(())
     }
 
     fn opt_load(&mut self, iidx: InstIdx, inst: LoadInst) -> Result<(), CompilationError> {
@@ -1685,6 +1768,57 @@ mod test {
     }
 
     #[test]
+    fn opt_inttoptr() {
+        // Test constant condition.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i64 = param reg
+            %2: ptr = int_to_ptr %0
+            %3: ptr = int_to_ptr %1
+            %4: ptr = int_to_ptr 1i8
+            %5: ptr = int_to_ptr 737894443981i64
+            black_box %2
+            black_box %3
+            black_box %4
+            black_box %5
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            black_box %2
+            black_box %3
+            black_box 0x1
+            black_box 0xabcdefabcd
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ptrtoint() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: i64 = ptr_to_int %0
+            %2: i64 = ptr_to_int 0x12345678
+            %3: i8 = ptr_to_int 0x12345678
+            black_box %1
+            black_box %2
+            black_box %3
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            black_box %1
+            black_box 305419896i64
+            black_box 120i8
+        ",
+        );
+    }
+
+    #[test]
     fn opt_select() {
         // Test constant condition.
         Module::assert_ir_transform_eq(
@@ -2132,32 +2266,121 @@ mod test {
         );
     }
 
-    #[ignore]
     #[test]
-    fn opt_peeling_hoist() {
+    fn opt_peeling_heap() {
+        // Loads
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = param reg
-            %1: i8 = param reg
-            body_start [%0, %1]
-            %2: i8 = add %0, 1i8
-            %3: i8 = add %1, %2
-            body_end [%0, %3]
+            %0: ptr = param reg
+            header_start [%0]
+            %2: i8 = load %0
+            %3: i1 = eq %2, 1i8
+            guard true, %3, []
+            %5: ptr = ptr_add %0, 1
+            %6: i8 = load %5
+            black_box %2
+            black_box %6
+            header_end [%0]
         ",
             |m| opt(m).unwrap(),
             "
           ...
+            body_start [%10]
+            %15: ptr = ptr_add %10, 1
+            %16: i8 = load %15
+            black_box 1i8
+            black_box %16
+            body_end [%10]
+        ",
+        );
+
+        // Stores
+        Module::assert_ir_transform_eq(
+            "
           entry:
-            %0: i8 = param ...
-            %1: i8 = param ...
-            head_start [%0, %1]
-            %3: i8 = add %0, 1i8
-            %4: i8 = add %1, %3
-            head_end [%0, %4, %3]
-            body_start [%0, %4, %3]
-            %10: i8 = add %4, %3
-            body_end [%0, %10, %3]
+            %0: ptr = param reg
+            %1: i8 = param reg
+            header_start [%0, %1]
+            *%0 = 1i8
+            %4: i8 = add %1, 1i8
+            %5: ptr = ptr_add %0, 4
+            *%5 = %4
+            header_end [%0, %4]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%8, %9]
+            %12: i8 = add %9, 1i8
+            %13: ptr = ptr_add %8, 4
+            *%13 = %12
+            body_end [%8, %12]
+        ",
+        );
+
+        // Intermediate updates
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            header_start [%0]
+            *%0 = 1i8
+            *%0 = 2i8
+            *%0 = 1i8
+            header_end [%0]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%{{6}}]
+            *%{{6}} = 2i8
+            *%{{6}} = 1i8
+            body_end [%{{6}}]
+        ",
+        );
+
+        // Check that only stable pointers are considered
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            header_start [%0]
+            *%0 = 0i8
+            %3: ptr = ptr_add %0, 1
+            header_end [%3]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%5]
+            *%5 = 0i8
+            %8: ptr = ptr_add %5, 1
+            body_end [%8]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_peeling_guard_always_false() {
+        // When we peel this loop, we'll statically detect that the guard always fails: this test
+        // very simply checks that we (a) don't panic (b) emit a guard which will always fail.
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            header_start [%0]
+            %2: i1 = eq %0, 0i8
+            guard true, %2, []
+            %4: i8 = add %0, 1i8
+            header_end [%4]
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            body_start [%{{_}}]
+            guard true, 0i1, ...
+            body_end [1i8]
         ",
         );
     }
@@ -2400,7 +2623,6 @@ mod test {
             *%1 = 1i64
             *%2 = 1i64
             *%1 = 1i64
-            black_box %1
         ",
             |m| opt(m).unwrap(),
             "
@@ -2411,7 +2633,6 @@ mod test {
             %2: ptr = ptr_add %0, 16
             *%1 = 1i64
             *%2 = 1i64
-            black_box %1
         ",
         );
 
@@ -2419,24 +2640,42 @@ mod test {
             "
           entry:
             %0: ptr = param reg
-            %1: ptr = ptr_add %0, 1
+            %1: ptr = ptr_add %0, 7
             %2: ptr = ptr_add %0, 8
             *%1 = 1i8
             *%2 = 1i64
             *%1 = 1i8
-            black_box %1
         ",
             |m| opt(m).unwrap(),
             "
           ...
           entry:
             %0: ptr = param ...
-            %1: ptr = ptr_add %0, 1
+            %1: ptr = ptr_add %0, 7
             %2: ptr = ptr_add %0, 8
             *%1 = 1i8
             *%2 = 1i64
-            *%1 = 1i8
-            black_box %1
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: ptr = param reg
+            %1: ptr = ptr_add %0, 4
+            *%1 = 1i32
+            *%0 = 1i64
+            *%1 = 1i32
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: ptr = param ...
+            %1: ptr = ptr_add %0, 4
+            *%1 = 1i32
+            *%0 = 1i64
+            *%1 = 1i32
         ",
         );
     }

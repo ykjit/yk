@@ -643,12 +643,26 @@ impl Module {
         GuardInfoIdx::try_from(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
     }
 
+    pub(crate) fn trace_header_start(&self) -> &[PackedOperand] {
+        &self.trace_header_start
+    }
+
+    /// Return the position in the list of live variables at the trace header start, if any, of
+    /// `op`.
+    pub(crate) fn trace_header_start_position(&self, op: Operand) -> Option<usize> {
+        let pop = PackedOperand::new(&op);
+        self.trace_header_start.iter().position(|x| x == &pop)
+    }
+
     pub(crate) fn trace_header_end(&self) -> &[PackedOperand] {
         &self.trace_header_end
     }
 
-    pub(crate) fn trace_header_start(&self) -> &[PackedOperand] {
-        &self.trace_header_start
+    /// Return the position in the list of live variables at the trace header end, if any, of
+    /// `op`.
+    pub(crate) fn trace_header_end_position(&self, op: Operand) -> Option<usize> {
+        let pop = PackedOperand::new(&op);
+        self.trace_header_end.iter().position(|x| x == &pop)
     }
 
     pub(crate) fn trace_body_start(&self) -> &[PackedOperand] {
