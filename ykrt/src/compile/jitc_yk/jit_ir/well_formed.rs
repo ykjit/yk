@@ -24,7 +24,9 @@
 //!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
 //!   * [super::Inst] operands refer to values which have been previously defined.
 
-use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
+use super::{BinOp, BinOpInst, GuardInst, Inst, Module, Ty};
+#[cfg(test)]
+use super::{Const, Operand};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
@@ -125,7 +127,7 @@ impl Module {
                         }
                     }
                 }
-                Inst::Guard(GuardInst { cond, expect, .. }) => {
+                Inst::Guard(GuardInst { cond, .. }) => {
                     let cond = cond.unpack(self);
                     let tyidx = cond.tyidx(self);
                     let Ty::Integer(1) = self.type_(tyidx) else {
@@ -134,20 +136,6 @@ impl Module {
                             self.inst(iidx).display(self, iidx)
                         )
                     };
-                    if let Operand::Const(cidx) = cond {
-                        let Const::Int(_, x) = self.const_(cidx) else {
-                            unreachable!()
-                        };
-                        debug_assert_eq!(x.bitw(), 1);
-                        if (expect && x.to_zero_ext_u8().unwrap() == 0)
-                            || (!expect && x.to_zero_ext_u8().unwrap() == 1)
-                        {
-                            panic!(
-                                "Guard at position {iidx} references a constant that is at odds with the guard itself\n  {}",
-                                inst.display(self, iidx)
-                            );
-                        }
-                    }
                 }
                 Inst::ICmp(x) => {
                     if x.lhs(self).tyidx(self) != x.rhs(self).tyidx(self) {
@@ -586,20 +574,6 @@ mod tests {
             "
               entry:
                 %0: i1 = 1i1
-                guard true, %0, []
-            ",
-        );
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "Guard at position 1 references a constant that is at odds with the guard itself"
-    )]
-    fn guard_impossible_const() {
-        Module::from_str(
-            "
-              entry:
-                %0: i1 = 0i1
                 guard true, %0, []
             ",
         );
