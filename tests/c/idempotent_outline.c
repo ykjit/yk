@@ -51,7 +51,7 @@ uintptr_t h(uintptr_t x, uintptr_t y) {
   return x + y;
 }
 
-__attribute__((yk_outline))
+__attribute__((noinline))
 uintptr_t g(uintptr_t x, uintptr_t y) {
   // idemconsts made here will be consumed and discarded by the trace builder.
   uintptr_t a = yk_promote(h(x + 1, y + 1));

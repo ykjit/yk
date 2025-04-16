@@ -1458,7 +1458,7 @@ const FUNCFLAG_OUTLINE: u8 = 1;
 const FUNCFLAG_IDEMPOTENT: u8 = 1 << 1;
 
 impl Func {
-    fn is_declaration(&self) -> bool {
+    pub(crate) fn is_declaration(&self) -> bool {
         self.bblocks.is_empty()
     }
 
