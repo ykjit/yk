@@ -65,23 +65,6 @@ handle_arg() {
             # Add wrapper for `pthread_exit`.
             OUTPUT="${OUTPUT} -Wl,--wrap=pthread_exit"
 
-            # Disable machine passes that would interfere with block mapping.
-            #
-            # If you are trying to figure out which pass is breaking the
-            # mapping, you can add "-Wl,--mllvm=--print-before-all" and/or
-            # "-Wl,--mllvm=--print-after-all" to see the MIR before/after
-            # each pass. You can make the output smaller by filtering the
-            # output by function name with
-            # "-Wl,--mllvm=--filter-print-funcs=<func>". When you have found
-            # the candidate, look in `TargetPassConfig.cpp` (in ykllvm) to
-            # find the CLI switch required to disable the pass. If you can't
-            # (or don't want to) eliminate a whole pass, then you can add
-            # (or re-use) a yk-specific flag to disable only aspects of passes.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--disable-branch-fold"
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--disable-block-placement"
-            # These next two passes interfere with the BlockDisambiguate pass.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--disable-early-taildup"
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--disable-tail-duplicate"
             # Interferes with the JIT's inlining stack.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-disable-tail-call-codegen"
             # Fallthrough optimisations distort block mapping.
