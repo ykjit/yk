@@ -10,7 +10,7 @@ pub mod completion_wrapper;
 /// Return the subdirectory of Cargo's `target` directory where we should be building things.
 ///
 /// There are no guarantees about where this directory will be or what its name is.
-fn target_dir() -> PathBuf {
+pub fn target_dir() -> PathBuf {
     Path::new(env!("OUT_DIR"))
         .parent()
         .unwrap()
