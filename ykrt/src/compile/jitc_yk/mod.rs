@@ -144,6 +144,16 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
             connector_tid,
         )?;
 
+        if should_log_ir(IRPhase::TraceKind) {
+            let kind = match jit_mod.tracekind() {
+                jit_ir::TraceKind::HeaderOnly => "header",
+                jit_ir::TraceKind::HeaderAndBody => unreachable!(),
+                jit_ir::TraceKind::Connector(_) => "connector",
+                jit_ir::TraceKind::Sidetrace(_) => "side-trace",
+            };
+            log_ir(&format!("--- trace-kind {kind} ---\n"));
+        }
+
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
                 "--- Begin jit-pre-opt ---\n{jit_mod}\n--- End jit-pre-opt ---\n",
