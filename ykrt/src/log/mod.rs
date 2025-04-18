@@ -120,6 +120,8 @@ impl Log {
 pub(crate) enum IRPhase {
     /// The AOT IR.
     AOT,
+    /// The trace kind only (i.e. without IR instructions).
+    TraceKind,
     /// The JIT IR before it has been optimised.
     PreOpt,
     /// The JIT IR after it has been optimised.
@@ -173,6 +175,7 @@ mod internals {
         fn from_str(s: &str) -> Result<Self, Box<dyn Error>> {
             match s {
                 "aot" => Ok(Self::AOT),
+                "trace-kind" => Ok(Self::TraceKind),
                 "jit-pre-opt" => Ok(Self::PreOpt),
                 "jit-post-opt" => Ok(Self::PostOpt),
                 "jit-asm" => Ok(Self::Asm),

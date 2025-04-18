@@ -41,7 +41,9 @@ fn main() {
     }
 
     if !Path::new(YKLLVM_SUBMODULE_PATH).is_dir() {
-        panic!("YKLLVM Submodule ({}) was not found! To check submodules, run:\n $ git submodule update --init --recursive\n", YKLLVM_SUBMODULE_PATH);
+        panic!(
+            "ykllvm submodule not found. To checkout:\n  git submodule update --init --recursive"
+        );
     }
 
     println!("cargo::rerun-if-changed={YKLLVM_SRC_DEPEND_PATH}");
@@ -49,7 +51,7 @@ fn main() {
 
     // Build ykllvm in "target/<cargo-profile>". Note that the directory used here *must* be
     // exactly the same as that produced by `ykbuild/src/lib.rs:llvm_bin_dir` and yk-config.
-    let mut ykllvm_dir = Path::new(&env::var("OUT_DIR").unwrap())
+    let mut ykllvm_build_dir = Path::new(&env::var("OUT_DIR").unwrap())
         .parent()
         .unwrap()
         .parent()
@@ -57,8 +59,8 @@ fn main() {
         .parent()
         .unwrap()
         .to_owned();
-    ykllvm_dir.push("ykllvm");
-    create_dir_all(&ykllvm_dir).unwrap();
+    ykllvm_build_dir.push("ykllvm");
+    create_dir_all(&ykllvm_build_dir).unwrap();
 
     // We now know we want to build ykllvm. However, cargo can -- and in release mode does! -- run
     // more than 1 copy of this build script in parallel. We thus need to make sure that we don't
@@ -74,7 +76,7 @@ fn main() {
     // unexpectedly (though Windows says, in essence, that it doesn't guarantee to do the unlocking
     // very quickly), so if we fail while building, this should not cause parallel runs of this
     // build script to deadlock.
-    let mut lock_path = ykllvm_dir.clone();
+    let mut lock_path = ykllvm_build_dir.clone();
     lock_path.push("build_lock");
     let lock_file = File::create(lock_path).unwrap();
     lock_file.lock_exclusive().unwrap();
@@ -85,10 +87,10 @@ fn main() {
     //   cmake --install .
     // We have to build up the precise command in steps.
 
-    let mut build_dir = ykllvm_dir.clone();
+    let mut build_dir = ykllvm_build_dir.clone();
     build_dir.push("build");
 
-    let mut cached_env_vars = ykllvm_dir.clone();
+    let mut cached_env_vars = ykllvm_build_dir.clone();
     cached_env_vars.push(ENV_VARS_LEAF);
     let run_cfg_cmd = if cached_env_vars.exists() {
         let mut new_vars = HashMap::new();
@@ -115,7 +117,7 @@ fn main() {
         .args([
             &format!(
                 "-DCMAKE_INSTALL_PREFIX={}",
-                ykllvm_dir.as_os_str().to_str().unwrap()
+                ykllvm_build_dir.as_os_str().to_str().unwrap()
             ),
             "-DLLVM_INSTALL_UTILS=On",
             "-DCMAKE_BUILD_TYPE=release",

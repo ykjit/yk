@@ -15,14 +15,21 @@ path = "langtest_c.rs"
 harness = false
 
 [[test]]
+name = "lua_tests"
+path = "langtest_lua.rs"
+harness = false
+
+[[test]]
 name = "ir_lowering_tests"
 path = "langtest_ir_lowering.rs"
 harness = false
 
 [dependencies]
 clap = { features = ["derive"], version = "4.4" }
+fs4 = "0.8.2"
 hwtracer = { path = "../hwtracer" }
 memmap2 = "0.9.4"
+num_cpus = "1.13.1"
 regex = "1.9"
 tempfile = "3.9.0"
 ykbuild = { path = "../ykbuild" }

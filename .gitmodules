@@ -2,3 +2,6 @@
 	path = ykllvm
 	url = https://github.com/ykjit/ykllvm
 	shallow = true
+[submodule "tests/yklua"]
+	path = tests/yklua
+	url = https://github.com/ykjit/yklua
