@@ -2042,7 +2042,7 @@ impl<'a> Assemble<'a> {
             ],
         );
         match bitw {
-            32 => {
+            64 | 32 => {
                 dynasm!(self.asm
                     ; cmp Rq(lhs_reg.code()), Rq(rhs_reg.code())
                     ; cmovg Rq(lhs_reg.code()), Rq(rhs_reg.code())
@@ -4827,6 +4827,25 @@ mod tests {
 
     #[test]
     fn cg_call_smin() {
+        codegen_and_test(
+            "
+             func_decl llvm.smin.i64 (i64, i64) -> i64
+             entry:
+               %0: i64 = param reg
+               %1: i64 = param reg
+               %2: i64 = call @llvm.smin.i64(%0, %1)
+               black_box %2
+            ",
+            "
+               ...
+               ; %2: i64 = call @llvm.smin.i64(%0, %1)
+               ...
+               cmp r.64.a, r.64.b
+               cmovnle r.64.a, r.64.b
+            ",
+            false,
+        );
+
         codegen_and_test(
             "
              func_decl llvm.smin.i32 (i32, i32) -> i32
