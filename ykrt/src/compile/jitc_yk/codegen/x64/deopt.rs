@@ -325,7 +325,7 @@ pub(crate) extern "C" fn __yk_deopt(
 /// the stack frames of any running traces in the process. This deoptimises trace execution after
 /// which we can safely return to the normal execution of the interpreter.
 #[cfg(target_arch = "x86_64")]
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
     std::arch::naked_asm!(
         // Reset RSP to the end of the control point frame (this doesn't include the

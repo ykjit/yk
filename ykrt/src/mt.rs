@@ -1086,7 +1086,7 @@ impl MT {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[naked]
+#[unsafe(naked)]
 #[no_mangle]
 unsafe extern "C" fn __yk_exec_trace(
     frameaddr: *const c_void,
