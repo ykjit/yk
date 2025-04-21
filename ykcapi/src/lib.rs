@@ -60,7 +60,7 @@ pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
 
 // The new control point called after the interpreter has been patched by ykllvm.
 #[cfg(target_arch = "x86_64")]
-#[naked]
+#[unsafe(naked)]
 #[no_mangle]
 pub extern "C" fn __ykrt_control_point(
     mt: *const MT,
@@ -72,51 +72,49 @@ pub extern "C" fn __ykrt_control_point(
     // address of the control point on the stack to point to the compiled trace. This means we
     // still run the epilogue of the control point function call, which automatically restores the
     // callee-saved registers for us (so we don't have to do it here).
-    unsafe {
-        std::arch::naked_asm!(
-            // Push all registers to the stack as these may contain trace inputs (live
-            // variables) referenced by the control point's stackmap.
-            //
-            // We don't need to push and restore `rdx` since `smid` can never be a live value and
-            // thus won't be tracked by the stackmap.
-            //
-            // FIXME: In the future we want the control point to return naturally into the compiled
-            // trace (at the moment we just rip out the control point's stack), which means we then
-            // no longer need to recover callee-saved registers as the control point will do this
-            // for us.
-            "push rax",
-            "push rcx",
-            "push rbx",
-            "push rdi",
-            "push rsi",
-            "push r8",
-            "push r9",
-            "push r10",
-            "push r11",
-            "push r12",
-            "push r13",
-            "push r14",
-            "push r15",
-            // Pass the interpreter frame's base pointer via the 4th argument register.
-            "mov rcx, rbp",
-            "call __ykrt_control_point_real",
-            // Restore the previously pushed registers.
-            "pop r15",
-            "pop r14",
-            "pop r13",
-            "pop r12",
-            "pop r11",
-            "pop r10",
-            "pop r9",
-            "pop r8",
-            "pop rsi",
-            "pop rdi",
-            "pop rbx",
-            "pop rcx",
-            "pop rax",
-            "ret",
-        );
-    }
+    std::arch::naked_asm!(
+        // Push all registers to the stack as these may contain trace inputs (live
+        // variables) referenced by the control point's stackmap.
+        //
+        // We don't need to push and restore `rdx` since `smid` can never be a live value and
+        // thus won't be tracked by the stackmap.
+        //
+        // FIXME: In the future we want the control point to return naturally into the compiled
+        // trace (at the moment we just rip out the control point's stack), which means we then
+        // no longer need to recover callee-saved registers as the control point will do this
+        // for us.
+        "push rax",
+        "push rcx",
+        "push rbx",
+        "push rdi",
+        "push rsi",
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+        // Pass the interpreter frame's base pointer via the 4th argument register.
+        "mov rcx, rbp",
+        "call __ykrt_control_point_real",
+        // Restore the previously pushed registers.
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rsi",
+        "pop rdi",
+        "pop rbx",
+        "pop rcx",
+        "pop rax",
+        "ret",
+    );
 }
 
 // The actual control point, after we have pushed the callee-saved registers.
