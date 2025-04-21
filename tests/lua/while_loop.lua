@@ -8,12 +8,12 @@
 --     0
 --     1
 --     2
---     yk-jit-event: start-tracing
+--     yk-jit-event: start-tracing: while_loop.lua:25: JMP
 --     3
---     yk-jit-event: stop-tracing
+--     yk-jit-event: stop-tracing: ...
 --     --- trace-kind header ---
 --     4
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: while_loop.lua:25: JMP
 --     5
 --     6
 --     yk-jit-event: deoptimise

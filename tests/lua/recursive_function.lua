@@ -8,12 +8,12 @@
 --     6
 --     5
 --     4
---     yk-jit-event: start-tracing
+--     yk-jit-event: start-tracing: recursive_function.lua:23: GETTABUP
 --     3
---     yk-jit-event: stop-tracing
+--     yk-jit-event: stop-tracing: ...
 --     --- trace-kind header ---
 --     2
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: recursive_function.lua:23: GETTABUP
 --     1
 --     0
 --     yk-jit-event: deoptimise

@@ -9,22 +9,22 @@
 --     <0
 --     <1
 --     <2
---     yk-jit-event: start-tracing
+--     yk-jit-event: start-tracing: sidetrace.lua:34: FORLOOP
 --     <3
---     yk-jit-event: stop-tracing
+--     yk-jit-event: stop-tracing: ...
 --     --- trace-kind header ---
 --     <4
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: sidetrace.lua:34: FORLOOP
 --     yk-jit-event: deoptimise
 --     >=5
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: sidetrace.lua:34: FORLOOP
 --     yk-jit-event: deoptimise
---     yk-jit-event: start-side-tracing
+--     yk-jit-event: start-side-tracing: sidetrace.lua:34: FORLOOP
 --     >=6
---     yk-jit-event: stop-tracing
+--     yk-jit-event: stop-tracing: ...
 --     --- trace-kind side-trace ---
 --     >=7
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: sidetrace.lua:34: FORLOOP
 --     >=8
 --     >=9
 --     >=10

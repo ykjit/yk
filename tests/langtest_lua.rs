@@ -91,7 +91,11 @@ fn build() {
     // there's nothing to do, it'll finish quicker than we can notice!
     let mut make_cmd = Command::new("make");
     make_cmd
-        .args(["-j".into(), num_cpus::get().to_string()])
+        .args([
+            "-j".into(),
+            num_cpus::get().to_string(),
+            "MYCFLAGS=-DYKLUA_DEBUG_STRS=2".into(),
+        ])
         .env(
             "PATH",
             format!(

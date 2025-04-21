@@ -4,23 +4,23 @@
 --   env-var: YKD_LOG_IR=trace-kind
 --   env-var: YKD_SERIALISE_COMPILATION=1
 --   stderr:
---     yk-jit-event: start-tracing
---     yk-jit-event: stop-tracing
+--     yk-jit-event: start-tracing: nested_loops.lua:31: FORLOOP
+--     yk-jit-event: stop-tracing: ...
 --     --- trace-kind header ---
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: nested_loops.lua:31: FORLOOP
 --     yk-jit-event: deoptimise
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: nested_loops.lua:31: FORLOOP
 --     yk-jit-event: deoptimise
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: nested_loops.lua:31: FORLOOP
 --     yk-jit-event: deoptimise
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: nested_loops.lua:31: FORLOOP
 --     yk-jit-event: deoptimise
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: nested_loops.lua:31: FORLOOP
 --     yk-jit-event: deoptimise
---     yk-jit-event: start-side-tracing
---     yk-jit-event: stop-tracing
+--     yk-jit-event: start-side-tracing: nested_loops.lua:31: FORLOOP
+--     yk-jit-event: stop-tracing: ...
 --     --- trace-kind side-trace ---
---     yk-jit-event: enter-jit-code
+--     yk-jit-event: enter-jit-code: nested_loops.lua:31: FORLOOP
 --     yk-jit-event: deoptimise
 --   stdout:
 --     251502
