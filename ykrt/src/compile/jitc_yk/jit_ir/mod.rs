@@ -709,7 +709,7 @@ impl fmt::Display for Module {
         }
         write!(f, "\nentry:")?;
         for (iidx, inst) in self.iter_skipping_insts() {
-            write!(f, "\n    {}", inst.display(self, iidx))?
+            write!(f, "\n  {}", inst.display(self, iidx))?
         }
 
         Ok(())
@@ -3547,7 +3547,7 @@ mod tests {
             "global_decl tls @some_thread_local",
             "",
             "entry:",
-            "    %0: i8 = param Register(3, 1, [])",
+            "  %0: i8 = param Register(3, 1, [])",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);
