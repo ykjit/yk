@@ -777,7 +777,6 @@ impl MT {
                             let hl = HotLocation {
                                 kind: HotLocationKind::Tracing,
                                 tracecompilation_errors: 0,
-                                #[cfg(feature = "ykd")]
                                 debug_str: None,
                             };
                             if let Some(hl) = loc.count_to_hot_location(x, hl) {
@@ -938,7 +937,6 @@ impl MT {
                         let hl = HotLocation {
                             kind: HotLocationKind::Counting(count),
                             tracecompilation_errors: 0,
-                            #[cfg(feature = "ykd")]
                             debug_str: None,
                         };
                         loc.count_to_hot_location(count, hl)
