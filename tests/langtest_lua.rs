@@ -20,7 +20,7 @@ const COMMENT_PREFIX: &str = "##";
 fn build() {
     // Build yklua for testing purposes.
 
-    if !Path::new(YKLUA_SUBMODULE_PATH).is_dir() {
+    if !Path::new(&format!("{}/Makefile", YKLUA_SUBMODULE_PATH)).is_file() {
         panic!(
             "yklua submodule not found. To checkout:\n  git submodule update --init --recursive"
         );
