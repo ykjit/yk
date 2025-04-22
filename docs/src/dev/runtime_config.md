@@ -12,7 +12,10 @@ The following environment variables are available:
 
 * `YK_HOT_THRESHOLD`: an integer from 0..4294967295 (both inclusive) that
   determines how many executions of a hot loop are needed before it is traced.
-  Defaults to 50.
+  Defaults to 131.
+* `YK_SIDETRACE_THRESHOLD`: an integer from 0..4294967295 (both inclusive) that
+  determines how many times a guard needs to fail before a sidetrace is created.
+  Defaults to 5.
 
 
 ## Debugging

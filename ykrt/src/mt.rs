@@ -139,10 +139,16 @@ impl MT {
                 .map_err(|e| format!("Invalid hot threshold '{s}': {e}"))?,
             Err(_) => DEFAULT_HOT_THRESHOLD,
         };
+        let sidetrace_threshold = match env::var("YK_SIDETRACE_THRESHOLD") {
+            Ok(s) => s
+                .parse::<HotThreshold>()
+                .map_err(|e| format!("Invalid sidetrace threshold '{s}': {e}"))?,
+            Err(_) => DEFAULT_SIDETRACE_THRESHOLD,
+        };
         Ok(Arc::new(Self {
             shutdown: AtomicBool::new(false),
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
-            sidetrace_threshold: AtomicHotThreshold::new(DEFAULT_SIDETRACE_THRESHOLD),
+            sidetrace_threshold: AtomicHotThreshold::new(sidetrace_threshold),
             trace_failure_threshold: AtomicTraceCompilationErrorThreshold::new(
                 DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD,
             ),
