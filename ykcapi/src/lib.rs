@@ -13,7 +13,6 @@
 // stuff in `ykrt`, so perhaps the latter?
 
 #![allow(clippy::missing_safety_doc)]
-#![feature(naked_functions)]
 
 #[cfg(feature = "ykd")]
 use std::ffi::CStr;
