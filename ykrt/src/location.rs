@@ -179,7 +179,6 @@ impl Location {
     ///   2. has not had a `HotLocation` allocated for it
     ///
     /// return its count, or `None` otherwise
-    #[cfg(feature = "ykd")]
     pub(crate) fn count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);
         if x & STATE_TAG_MASK == STATE_NOT_HOT {
@@ -218,7 +217,6 @@ impl Location {
         }
     }
 
-    #[cfg(feature = "ykd")]
     pub fn set_hl_debug_str(&self, s: String) {
         match self.hot_location() {
             Some(hl) => {
@@ -293,7 +291,6 @@ pub(crate) struct HotLocation {
     /// error?
     pub(crate) tracecompilation_errors: TraceCompilationErrorThreshold,
     /// An optional debug string for this hot location.
-    #[cfg(feature = "ykd")]
     pub(crate) debug_str: Option<String>,
 }
 
