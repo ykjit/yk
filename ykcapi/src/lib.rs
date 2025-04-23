@@ -158,7 +158,7 @@ pub extern "C" fn yk_location_new() -> Location {
 #[cfg(feature = "ykd")]
 #[no_mangle]
 pub unsafe extern "C" fn yk_location_set_debug_str(loc: *mut Location, s: *const c_char) {
-    let s = unsafe { CStr::from_ptr(s) }.to_str().unwrap().to_owned();
+    let s = unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned();
     let loc = unsafe { &*loc };
     assert!(!loc.is_null());
     loc.set_hl_debug_str(s);
