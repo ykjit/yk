@@ -648,7 +648,17 @@ impl YkPTBlockIterator<'_> {
                         // The above `seek_tip()` ensures this can't happen!
                         unreachable!();
                     }
-                    ObjLoc::MainObj(off) => self.off_to_vaddr(&PHDR_MAIN_OBJ, off)?,
+                    ObjLoc::MainObj(off) => {
+                        // It's possible that the above `self.seek_tip()` has already landed us
+                        // back into mappable code (e.g. it skiped over a TIP.PGD and landed on a
+                        // TIP.PGE at a mappable block).
+                        let block = self.lookup_block_from_main_bin_offset(off)?;
+                        if !block.is_unknown() {
+                            return Ok(block);
+                        }
+                        // Otherwise we really do have to resort to disassembly.
+                        self.off_to_vaddr(&PHDR_MAIN_OBJ, off)?
+                    }
                 }
             }
         };
@@ -669,9 +679,13 @@ impl YkPTBlockIterator<'_> {
     ///
     /// This function does not specially handle out of context TIP packets: it will happily return
     /// out of context TIPs.
+    ///
+    /// TIP.PGD packets are skipped over since they mark the beggining of untraced code, and thus
+    /// their TIP updates are not useful to us.
     fn seek_tip(&mut self) -> Result<(), IteratorError> {
         loop {
-            if self.packet()?.kind().encodes_target_ip() {
+            let pkt = self.packet()?;
+            if pkt.kind().encodes_target_ip() && pkt.kind() != PacketKind::TIPPGD {
                 // Note that self.packet() will have update `self.cur_loc`.
                 return Ok(());
             }
@@ -685,6 +699,11 @@ impl YkPTBlockIterator<'_> {
     ///
     /// `skip_ooc` determines whether the caller wishes to skip over "Out Of Context" TIP packets
     /// or not.
+    ///
+    /// Unlike `seek_tip` this function does not skip over TIP.PGD packets.
+    ///
+    /// FIXME: ^this is a bit confusing. Maybe we should add flags to both of these functions and
+    /// let the call-sites decide if they care for TIP.PGD or not.
     fn seek_tnt_or_tip(&mut self, skip_ooc: bool) -> Result<Packet, IteratorError> {
         loop {
             let pkt = self.packet()?;
