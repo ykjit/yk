@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-cached = { version = "0.54.0", features = ["proc_macro"] }
+cached = { version = "0.55.1", features = ["proc_macro"] }
 libc = "0.2"
 memmap2 = "0.9.4"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }

@@ -1,6 +1,6 @@
 #![feature(exit_status_error)]
 
-use fs4::FileExt;
+use fs4::fs_std::FileExt;
 use rerun_except::rerun_except;
 use std::{
     collections::HashMap,
