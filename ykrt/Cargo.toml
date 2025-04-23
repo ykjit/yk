@@ -19,10 +19,10 @@ cache-size = "0.7.0"
 parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
 static_assertions = "1.1.0"
-strum = { version = "0.26.1", features = ["derive"] }
-strum_macros = "0.26.1"
+strum = { version = "0.27.1", features = ["derive"] }
+strum_macros = "0.27.1"
 tempfile = "3.8"
-thiserror = "1.0.56"
+thiserror = "2.0.12"
 typed-index-collections = "3.1.0"
 vob = "3.0.3"
 ykaddr = { path = "../ykaddr" }
@@ -33,7 +33,7 @@ zydis = "4.1.0"
 hwtracer = { path = "../hwtracer" }
 
 [dependencies.object]
-version = "0.34.0"
+version = "0.36.7"
 default-features = false
 features = ["read_core", "elf"]
 

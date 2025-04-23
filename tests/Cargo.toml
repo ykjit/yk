@@ -26,7 +26,7 @@ harness = false
 
 [dependencies]
 clap = { features = ["derive"], version = "4.4" }
-fs4 = "0.8.2"
+fs4 = { version="0.13.1", features=["sync"] }
 hwtracer = { path = "../hwtracer" }
 memmap2 = "0.9.4"
 num_cpus = "1.13.1"
