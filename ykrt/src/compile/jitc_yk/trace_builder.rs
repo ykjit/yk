@@ -92,13 +92,18 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         })
     }
 
-    // Given a mapped block, find the AOT block ID, or return `None` if it is unmapped.
+    // Given a mapped block, find the AOT block ID, or return `None` if it is unmapped or it's IR
+    // is unavailable (for example it was marked `yk_outline`).
     fn lookup_aot_block(&self, tb: &TraceAction) -> Option<aot_ir::BBlockId> {
         match tb {
             TraceAction::MappedAOTBBlock { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.funcidx(func_name);
-                Some(aot_ir::BBlockId::new(func, aot_ir::BBlockIdx::new(*bb)))
+                if !self.aot_mod.func(func).is_declaration() {
+                    Some(aot_ir::BBlockId::new(func, aot_ir::BBlockIdx::new(*bb)))
+                } else {
+                    None
+                }
             }
             TraceAction::UnmappableBBlock => None,
             TraceAction::Promotion => todo!(),

@@ -9,7 +9,7 @@
 //     --- Begin aot ---
 //     ...
 //     #[yk_outline]
-//     func foo(%arg0: i32) -> i32 {
+//     func foo(%arg0: i32) -> i32;
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
