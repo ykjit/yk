@@ -1,61 +1,55 @@
-// ## FIXME: Implement setjmp/longjmp detection for swt.
-// ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
 //   stderr:
+//     i=3
+//     after setjmp
+//     after setjmp
 //     yk-tracing: start-tracing
-//     we jumped
+//     i=2
+//     after setjmp
+//     after setjmp
 //     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: longjmp encountered
-//     ...
+//     yk-warning: trace-compilation-aborted: irregular control flow detected
+//     i=1
+//     after setjmp
+//     after setjmp
+//     exit
 
-// Tests that we can deal with setjmp/longjmp.
+// Check that something sensible happens when there's a longjmp within the
+// confines of the trace.
 
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-jmp_buf buf;
-
-void ljmp() {
-  int r = 0;
-  for (int i = 0; i < 10; i++) {
-    r += 1;
-  }
-  longjmp(buf, r);
-}
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
-  yk_mt_hot_threshold_set(mt, 0);
+  yk_mt_hot_threshold_set(mt, 1);
   YkLocation loc = yk_location_new();
+  jmp_buf buf;
 
-  int res = 9998;
-  int i = 4;
+  int i = 3;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
   NOOPT_VAL(i);
-  int r = setjmp(buf);
-  if (r == 10) {
-    fprintf(stderr, "we jumped\n");
-  }
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    if (r != 10) {
-      ljmp();
-    }
     fprintf(stderr, "i=%d\n", i);
-    res += 2;
+
+    int r = setjmp(buf);
+    fprintf(stderr, "after setjmp\n");
+
+    if (r == 0) {
+      longjmp(buf, 1);
+      fprintf(stderr, "we jumped\n");
+    }
     i--;
   }
-  printf("exit");
-  NOOPT_VAL(res);
+  fprintf(stderr, "exit");
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

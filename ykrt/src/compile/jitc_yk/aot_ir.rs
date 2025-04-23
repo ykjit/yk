@@ -508,6 +508,36 @@ impl BBlockId {
     pub(crate) fn is_entry(&self) -> bool {
         self.bbidx == BBlockIdx(0)
     }
+
+    /// Check whether `self` and `other` identify basic blocks from the same function and `self` is
+    /// a static successor of `other`.
+    pub(crate) fn static_intraprocedural_successor_of(&self, other: &Self, m: &Module) -> bool {
+        let other_bb = m.bblock(other);
+        let term_inst = other_bb.insts().last().unwrap();
+        match term_inst {
+            Inst::Br { succ } => *self == BBlockId::new(other.funcidx(), *succ),
+            Inst::CondBr {
+                true_bb, false_bb, ..
+            } => {
+                *self == BBlockId::new(other.funcidx(), *true_bb)
+                    || *self == BBlockId::new(other.funcidx(), *false_bb)
+            }
+            Inst::Switch {
+                default_dest,
+                case_dests,
+                ..
+            } => {
+                for bbidx in case_dests {
+                    if *self == BBlockId::new(other.funcidx(), *bbidx) {
+                        return true;
+                    }
+                }
+                *self == BBlockId::new(other.funcidx(), *default_dest)
+            }
+            Inst::Ret { .. } => false,
+            _ => panic!("invalid block terminator: {term_inst:?}"),
+        }
+    }
 }
 
 /// Predicates for use in numeric comparisons. These are directly based on [LLVM's `icmp`

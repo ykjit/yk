@@ -9,8 +9,13 @@ use crate::{
     errors::{HWTracerError, TemporaryErrorKind},
     Block, BlockIteratorError, ThreadTracer, Trace, Tracer,
 };
-use libc::{c_void, free, geteuid, malloc, size_t};
-use std::{fs::read_to_string, sync::Arc};
+use libc::{c_void, free, geteuid, malloc, size_t, PF_R, PF_X, PT_LOAD};
+use std::{
+    ffi::CString,
+    fs::read_to_string,
+    sync::{Arc, LazyLock},
+};
+use ykaddr::obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE};
 
 #[cfg(pt)]
 extern "C" {
@@ -28,6 +33,42 @@ extern "C" {
 }
 
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
+
+/// Make an eternal CString from the binary path that we can hand out pointers to without fear of
+/// it being dropped.
+pub static SELF_BIN_PATH_CSTRING: LazyLock<CString> =
+    LazyLock::new(|| CString::new(ykaddr::obj::SELF_BIN_PATH.to_str().unwrap()).unwrap());
+
+/// Determines:
+///  - The object to limit tracing to.
+///  - The base address and the length of the executable code (within the above object) to limit
+///    tracing to.
+///
+/// It is assumed that there is one contiguous range of executable code that we wish to trace.
+#[no_mangle]
+pub extern "C" fn get_tracing_extent(obj: *mut *const i8, base_off: *mut usize, len: *mut usize) {
+    let mut found = None;
+    // Find the main object.
+    for o in &*PHDR_OBJECT_CACHE {
+        if o.name().to_str().unwrap() == PHDR_MAIN_OBJ.to_str().unwrap() {
+            for h in o.phdrs() {
+                // Find a header that is loaded and flagged read+exec.
+                if h.type_() == PT_LOAD && (h.flags() & PF_R != 0) && (h.flags() & PF_X != 0) {
+                    // We expect only be one such entry.
+                    assert!(found.is_none());
+                    found = Some(h);
+                }
+            }
+        }
+    }
+    let Some(h) = found else {
+        panic!("couldn't find the executable range of {PHDR_MAIN_OBJ:?}");
+    };
+
+    unsafe { std::ptr::write(obj, SELF_BIN_PATH_CSTRING.as_ptr()) };
+    unsafe { std::ptr::write(base_off, usize::try_from(h.offset()).unwrap()) };
+    unsafe { std::ptr::write(len, usize::try_from(h.filesz()).unwrap()) };
+}
 
 /// The configuration for a Linux Perf collector.
 #[derive(Clone, Debug)]

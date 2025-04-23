@@ -49,11 +49,10 @@ use crate::{
 use intervaltree::IntervalTree;
 use std::{
     collections::VecDeque,
-    ffi::CString,
     fmt::{self, Debug},
     ops::Range,
     path::{Path, PathBuf},
-    ptr, slice,
+    slice,
     sync::LazyLock,
 };
 use thiserror::Error;
@@ -482,20 +481,6 @@ impl YkPTBlockIterator<'_> {
         dis.set_position(start_vaddr - seg.vaddrs.start).unwrap();
         let mut reposition: bool = false;
 
-        // `as usize` below are safe casts from raw pointer to pointer-sized integer.
-        let longjmp_vaddr = {
-            let func = CString::new("longjmp").unwrap();
-            u64::try_from(unsafe { libc::dlsym(ptr::null_mut(), func.as_ptr()) } as usize).unwrap()
-        };
-        let us_longjmp_vaddr = {
-            let func = CString::new("_longjmp").unwrap();
-            u64::try_from(unsafe { libc::dlsym(ptr::null_mut(), func.as_ptr()) } as usize).unwrap()
-        };
-        let siglongjmp_vaddr = {
-            let func = CString::new("siglongjmp").unwrap();
-            u64::try_from(unsafe { libc::dlsym(ptr::null_mut(), func.as_ptr()) } as usize).unwrap()
-        };
-
         loop {
             let vaddr = usize::try_from(dis.ip()).unwrap();
             let (obj, off) = self.vaddr_to_off(vaddr)?;
@@ -522,21 +507,6 @@ impl YkPTBlockIterator<'_> {
             if reposition {
                 dis.set_position(vaddr - seg.vaddrs.start).unwrap();
                 reposition = false;
-            }
-
-            // We can't (yet) handle longjmp in unmapped code. Crash if we spot it.
-            //
-            // We do this here, as opposed to at the callsite, because the symbols cannot be
-            // reliable detected in the face of PLT trampolines (the symbols are lazily
-            // resolved upon first use).
-            let vaddr = u64::try_from(vaddr).unwrap();
-            if (longjmp_vaddr != 0 && vaddr == longjmp_vaddr)
-                || (us_longjmp_vaddr != 0 && vaddr == us_longjmp_vaddr)
-                || (siglongjmp_vaddr == 0 && vaddr == siglongjmp_vaddr)
-            {
-                return Err(IteratorError::HWTracerError(HWTracerError::Unrecoverable(
-                    "longjmp within traces currently unsupported".to_string(),
-                )));
             }
 
             let inst = dis.decode();
@@ -670,7 +640,17 @@ impl YkPTBlockIterator<'_> {
                         // The above `seek_tip()` ensures this can't happen!
                         unreachable!();
                     }
-                    ObjLoc::MainObj(off) => self.off_to_vaddr(&PHDR_MAIN_OBJ, off)?,
+                    ObjLoc::MainObj(off) => {
+                        // It's possible that the above `self.seek_tip()` has already landed us
+                        // back into mappable code (e.g. it skiped over a TIP.PGD and landed on a
+                        // TIP.PGE at a mappable block).
+                        let block = self.lookup_block_from_main_bin_offset(off)?;
+                        if !block.is_unknown() {
+                            return Ok(block);
+                        }
+                        // Otherwise we really do have to resort to disassembly.
+                        self.off_to_vaddr(&PHDR_MAIN_OBJ, off)?
+                    }
                 }
             }
         };
@@ -691,9 +671,13 @@ impl YkPTBlockIterator<'_> {
     ///
     /// This function does not specially handle out of context TIP packets: it will happily return
     /// out of context TIPs.
+    ///
+    /// TIP.PGD packets are skipped over since they mark the beggining of untraced code, and thus
+    /// their TIP updates are not useful to us.
     fn seek_tip(&mut self) -> Result<(), IteratorError> {
         loop {
-            if self.packet()?.kind().encodes_target_ip() {
+            let pkt = self.packet()?;
+            if pkt.kind().encodes_target_ip() && pkt.kind() != PacketKind::TIPPGD {
                 // Note that self.packet() will have update `self.cur_loc`.
                 return Ok(());
             }
@@ -707,6 +691,11 @@ impl YkPTBlockIterator<'_> {
     ///
     /// `skip_ooc` determines whether the caller wishes to skip over "Out Of Context" TIP packets
     /// or not.
+    ///
+    /// Unlike `seek_tip` this function does not skip over TIP.PGD packets.
+    ///
+    /// FIXME: ^this is a bit confusing. Maybe we should add flags to both of these functions and
+    /// let the call-sites decide if they care for TIP.PGD or not.
     fn seek_tnt_or_tip(&mut self, skip_ooc: bool) -> Result<Packet, IteratorError> {
         loop {
             let pkt = self.packet()?;
