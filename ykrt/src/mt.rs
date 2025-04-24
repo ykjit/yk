@@ -487,6 +487,7 @@ impl MT {
                     &format!("tracing-aborted: {ak}"),
                     loc.hot_location()
                 );
+                self.stats.timing_state(TimingState::OutsideYk);
             }
             TransitionControlPoint::Execute(ctr) => {
                 yklog!(
@@ -614,6 +615,7 @@ impl MT {
                         );
                     }
                 }
+                self.stats.timing_state(TimingState::OutsideYk);
             }
             TransitionControlPoint::StopSideTracing {
                 gidx: guardid,
@@ -668,6 +670,7 @@ impl MT {
                         );
                     }
                 }
+                self.stats.timing_state(TimingState::OutsideYk);
             }
         }
     }
