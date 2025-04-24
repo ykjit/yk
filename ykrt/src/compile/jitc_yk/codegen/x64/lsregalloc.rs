@@ -1332,9 +1332,20 @@ impl LSRegAlloc<'_> {
                         .map(|x| self.m.inst(**x).def_byte_size(self.m))
                         .max()
                         .unwrap();
-                    self.stack.align(bytew);
-                    let frame_off = self.stack.grow(bytew);
-                    let off = i32::try_from(frame_off).unwrap();
+                    let mut off = None;
+                    if need_spilling.len() == 1 {
+                        off = self
+                            .rev_an
+                            .spill_to(*need_spilling[0])
+                            .map(|x| i32::try_from(x).unwrap());
+                    }
+                    let off = match off {
+                        Some(x) => x,
+                        None => {
+                            self.stack.align(bytew);
+                            i32::try_from(self.stack.grow(bytew)).unwrap()
+                        }
+                    };
                     match bitw {
                         1 => {
                             if *ext == RegExtension::ZeroExtended {
