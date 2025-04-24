@@ -342,23 +342,22 @@ impl Opt {
                 self.an.op_map(&self.m, inst.rhs(&self.m)),
             ) {
                 (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                    if let Const::Int(_, y) = self.m.const_(op_cidx) {
-                        if y.to_zero_ext_u64().unwrap() == 0 {
-                            // Replace `x >> 0` with `x`.
-                            self.m.replace(iidx, Inst::Copy(op_iidx));
-                        }
+                    if let Const::Int(_, y) = self.m.const_(op_cidx)
+                        && y.to_zero_ext_u64().unwrap() == 0
+                    {
+                        // Replace `x >> 0` with `x`.
+                        self.m.replace(iidx, Inst::Copy(op_iidx));
                     }
                 }
                 (Operand::Const(op_cidx), Operand::Var(_)) => {
-                    if let Const::Int(tyidx, y) = self.m.const_(op_cidx) {
-                        if y.to_zero_ext_u64().unwrap() == 0 {
-                            // Replace `0 >> x` with `0`.
-                            let new_cidx = self.m.insert_const(Const::Int(
-                                *tyidx,
-                                ArbBitInt::from_u64(y.bitw(), 0),
-                            ))?;
-                            self.m.replace(iidx, Inst::Const(new_cidx));
-                        }
+                    if let Const::Int(tyidx, y) = self.m.const_(op_cidx)
+                        && y.to_zero_ext_u64().unwrap() == 0
+                    {
+                        // Replace `0 >> x` with `0`.
+                        let new_cidx = self
+                            .m
+                            .insert_const(Const::Int(*tyidx, ArbBitInt::from_u64(y.bitw(), 0)))?;
+                        self.m.replace(iidx, Inst::Const(new_cidx));
                     }
                 }
                 (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
@@ -485,23 +484,22 @@ impl Opt {
                 self.an.op_map(&self.m, inst.rhs(&self.m)),
             ) {
                 (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                    if let Const::Int(_, y) = self.m.const_(op_cidx) {
-                        if y.to_zero_ext_u64().unwrap() == 0 {
-                            // Replace `x << 0` with `x`.
-                            self.m.replace(iidx, Inst::Copy(op_iidx));
-                        }
+                    if let Const::Int(_, y) = self.m.const_(op_cidx)
+                        && y.to_zero_ext_u64().unwrap() == 0
+                    {
+                        // Replace `x << 0` with `x`.
+                        self.m.replace(iidx, Inst::Copy(op_iidx));
                     }
                 }
                 (Operand::Const(op_cidx), Operand::Var(_)) => {
-                    if let Const::Int(tyidx, y) = self.m.const_(op_cidx) {
-                        if y.to_zero_ext_u64().unwrap() == 0 {
-                            // Replace `0 << x` with `0`.
-                            let new_cidx = self.m.insert_const(Const::Int(
-                                *tyidx,
-                                ArbBitInt::from_u64(y.bitw(), 0),
-                            ))?;
-                            self.m.replace(iidx, Inst::Const(new_cidx));
-                        }
+                    if let Const::Int(tyidx, y) = self.m.const_(op_cidx)
+                        && y.to_zero_ext_u64().unwrap() == 0
+                    {
+                        // Replace `0 << x` with `0`.
+                        let new_cidx = self
+                            .m
+                            .insert_const(Const::Int(*tyidx, ArbBitInt::from_u64(y.bitw(), 0)))?;
+                        self.m.replace(iidx, Inst::Const(new_cidx));
                     }
                 }
                 (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
@@ -527,11 +525,11 @@ impl Opt {
                 self.an.op_map(&self.m, inst.rhs(&self.m)),
             ) {
                 (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
-                    if let Const::Int(_, y) = self.m.const_(op_cidx) {
-                        if y.to_zero_ext_u64().unwrap() == 0 {
-                            // Replace `x - 0` with `x`.
-                            self.m.replace(iidx, Inst::Copy(op_iidx));
-                        }
+                    if let Const::Int(_, y) = self.m.const_(op_cidx)
+                        && y.to_zero_ext_u64().unwrap() == 0
+                    {
+                        // Replace `x - 0` with `x`.
+                        self.m.replace(iidx, Inst::Copy(op_iidx));
                     }
                 }
                 (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
@@ -1051,13 +1049,12 @@ impl Opt {
             Some(Inst::Const(_)) | Some(Inst::Tombstone) => return,
             Some(inst @ Inst::Guard(ginst)) => {
                 for (_, back_inst) in instll.rev_iter(&self.m, inst) {
-                    if let Inst::Guard(back_ginst) = back_inst {
-                        if ginst.cond(&self.m) == back_ginst.cond(&self.m)
-                            && ginst.expect() == back_ginst.expect()
-                        {
-                            self.m.replace(iidx, Inst::Tombstone);
-                            return;
-                        }
+                    if let Inst::Guard(back_ginst) = back_inst
+                        && ginst.cond(&self.m) == back_ginst.cond(&self.m)
+                        && ginst.expect() == back_ginst.expect()
+                    {
+                        self.m.replace(iidx, Inst::Tombstone);
+                        return;
                     }
                 }
                 inst

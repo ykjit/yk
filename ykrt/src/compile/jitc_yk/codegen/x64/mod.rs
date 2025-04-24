@@ -449,7 +449,7 @@ impl<'a> Assemble<'a> {
             let deopt_label = self.asm.new_dynamic_label();
             let guardcheck_label = self.asm.new_dynamic_label();
             for (deoptid, fail_label) in infos {
-                self.comment(format!("Deopt ID and patch point for guard {:?}", deoptid));
+                self.comment(format!("Deopt ID and patch point for guard {deoptid:?}"));
                 self.ra
                     .get_ready_for_deopt(&mut self.asm, &self.deoptinfo[&deoptid].0);
                 // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
@@ -632,20 +632,20 @@ impl<'a> Assemble<'a> {
                     next = iter.next();
                     // We have a special optimisation for `ICmp`s iff they're immediately followed
                     // by a `Guard`.
-                    if let Some((next_iidx, Inst::Guard(g_inst))) = next {
-                        if let Operand::Var(cond_idx) = g_inst.cond(self.m) {
-                            // NOTE: If the value of the condition will be used later, we have to
-                            // materialise it.
-                            if cond_idx == iidx
-                                && !self
-                                    .ra
-                                    .rev_an
-                                    .is_inst_var_still_used_after(next_iidx, cond_idx)
-                            {
-                                self.cg_icmp_guard(iidx, ic_inst, next_iidx, g_inst);
-                                next = iter.next();
-                                continue;
-                            }
+                    if let Some((next_iidx, Inst::Guard(g_inst))) = next
+                        && let Operand::Var(cond_idx) = g_inst.cond(self.m)
+                    {
+                        // NOTE: If the value of the condition will be used later, we have to
+                        // materialise it.
+                        if cond_idx == iidx
+                            && !self
+                                .ra
+                                .rev_an
+                                .is_inst_var_still_used_after(next_iidx, cond_idx)
+                        {
+                            self.cg_icmp_guard(iidx, ic_inst, next_iidx, g_inst);
+                            next = iter.next();
+                            continue;
                         }
                     }
                     self.cg_icmp(iidx, ic_inst);
@@ -1282,7 +1282,7 @@ impl<'a> Assemble<'a> {
             VarLocation::ConstInt { bits, v } => {
                 self.ra.assign_const_int(iidx, bits, v);
             }
-            e => panic!("{:?}", e),
+            e => panic!("{e:?}"),
         }
     }
 
@@ -2070,10 +2070,10 @@ impl<'a> Assemble<'a> {
     /// If an `Operand` refers to a constant integer that can be represented as an `i32`, return it
     /// sign-extended to 32 bits, otherwise return `None`.
     fn op_to_sign_ext_i32(&self, op: &Operand) -> Option<i32> {
-        if let Operand::Const(cidx) = op {
-            if let Const::Int(_, x) = self.m.const_(*cidx) {
-                return x.to_sign_ext_i32();
-            }
+        if let Operand::Const(cidx) = op
+            && let Const::Int(_, x) = self.m.const_(*cidx)
+        {
+            return x.to_sign_ext_i32();
         }
         None
     }
@@ -2081,10 +2081,10 @@ impl<'a> Assemble<'a> {
     /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
     /// it zero-extended to 8 bits, otherwise return `None`.
     fn op_to_zero_ext_i8(&self, op: &Operand) -> Option<i8> {
-        if let Operand::Const(cidx) = op {
-            if let Const::Int(_, x) = self.m.const_(*cidx) {
-                return x.to_zero_ext_u8().map(|x| x as i8);
-            }
+        if let Operand::Const(cidx) = op
+            && let Const::Int(_, x) = self.m.const_(*cidx)
+        {
+            return x.to_zero_ext_u8().map(|x| x as i8);
         }
         None
     }
@@ -2092,10 +2092,10 @@ impl<'a> Assemble<'a> {
     /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
     /// it zero-extended to 8 bits, otherwise return `None`.
     fn op_to_zero_ext_i16(&self, op: &Operand) -> Option<i16> {
-        if let Operand::Const(cidx) = op {
-            if let Const::Int(_, x) = self.m.const_(*cidx) {
-                return x.to_zero_ext_u16().map(|x| x as i16);
-            }
+        if let Operand::Const(cidx) = op
+            && let Const::Int(_, x) = self.m.const_(*cidx)
+        {
+            return x.to_zero_ext_u16().map(|x| x as i16);
         }
         None
     }
@@ -2763,7 +2763,7 @@ impl<'a> Assemble<'a> {
                         VarLocation::ConstPtr(v) => {
                             self.ra.assign_const_ptr(iidx, v);
                         }
-                        e => panic!("{:?}", e),
+                        e => panic!("{e:?}"),
                     }
                 }
             }
@@ -3458,7 +3458,7 @@ impl<'a> AsmPrinter<'a> {
             }
             let istr = fmt.format(Some(ip), &insn).unwrap();
             if self.with_addrs {
-                out.push(format!("{:016x} {:08x}: {}", ip, off, istr));
+                out.push(format!("{ip:016x} {off:08x}: {istr}"));
             } else {
                 out.push(istr.to_string());
             }

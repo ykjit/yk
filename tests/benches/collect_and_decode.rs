@@ -37,8 +37,8 @@ fn compile_runner(tempdir: &TempDir) -> PathBuf {
 
 fn collect_and_decode_trace(runner: &Path, benchmark: usize, param: usize) {
     let out = Command::new(runner)
-        .arg(format!("{}", benchmark))
-        .arg(format!("{}", param))
+        .arg(format!("{benchmark}"))
+        .arg(format!("{param}"))
         .output()
         .unwrap();
     check_output(&out);
@@ -65,7 +65,7 @@ fn bench_native(c: &mut Criterion) {
     let (_tempdir, runner, mut group) = setup(c, "trace-decode-native");
 
     for param in [1000, 10000, 100000] {
-        group.bench_function(BenchmarkId::new("YkPT", format!("{}", param)), |b| {
+        group.bench_function(BenchmarkId::new("YkPT", format!("{param}")), |b| {
             b.iter(|| collect_and_decode_trace(&runner, 0, param))
         });
     }
@@ -77,7 +77,7 @@ fn bench_disasm(c: &mut Criterion) {
     let (_tempdir, runner, mut group) = setup(c, "trace-decode-disasm");
 
     for param in [10, 30, 50] {
-        group.bench_function(BenchmarkId::new("YkPT", format!("{}", param)), |b| {
+        group.bench_function(BenchmarkId::new("YkPT", format!("{param}")), |b| {
             b.iter(|| collect_and_decode_trace(&runner, 1, param))
         });
     }

@@ -145,13 +145,13 @@ impl Module {
                         );
                     }
 
-                    if let Ty::Ptr = self.type_(x.lhs(self).tyidx(self)) {
-                        if x.predicate().signed() {
-                            panic!(
+                    if let Ty::Ptr = self.type_(x.lhs(self).tyidx(self))
+                        && x.predicate().signed()
+                    {
+                        panic!(
                                 "Instruction at position {iidx} compares pointers using a signed predicate\n  {}",
                                 self.inst(iidx).display(self, iidx)
                             );
-                        }
                     }
                 }
                 Inst::Select(x) => {
@@ -300,11 +300,11 @@ impl Module {
                     }
                 }
                 Inst::Param(_) => {
-                    if let Some(i) = last_inst {
-                        if !matches!(i, Inst::Param(_) | Inst::TraceHeaderEnd(_)) {
-                            panic!("Param instruction may only appear at the beginning of a trace or after another Param instruction, or after the trace header jump\n  {}",
+                    if let Some(i) = last_inst
+                        && !matches!(i, Inst::Param(_) | Inst::TraceHeaderEnd(_))
+                    {
+                        panic!("Param instruction may only appear at the beginning of a trace or after another Param instruction, or after the trace header jump\n  {}",
                                 self.inst(iidx).display(self, iidx));
-                        }
                     }
                 }
                 _ => (),

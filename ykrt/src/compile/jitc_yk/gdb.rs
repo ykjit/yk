@@ -193,7 +193,7 @@ pub(crate) fn register_jitted_code(
             vaddr: code_vaddr + off,
         });
         for line in lines {
-            writeln!(src_file, "{}", line).map_err(|_| {
+            writeln!(src_file, "{line}").map_err(|_| {
                 CompilationError::InternalError("failed to write into gdb src_file".into())
             })?;
             line_num += 1;
@@ -207,7 +207,7 @@ pub(crate) fn register_jitted_code(
     // Build the symbol file we are going to give to gdb.
     //
     // unwrap safe: string cannot contain internal zero bytes.
-    let sym_name = CString::new(format!("{}{}", TRACE_SYM_PREFIX, ctr_id)).unwrap();
+    let sym_name = CString::new(format!("{TRACE_SYM_PREFIX}{ctr_id}")).unwrap();
     // unwrap safe: path is valid UTF-8 and  cannot contain internal zero bytes.
     let src_path = CString::new(src_file.path().to_str().unwrap()).unwrap();
     // Support for more lineinfos could be added if required.

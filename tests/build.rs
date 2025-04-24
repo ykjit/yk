@@ -17,7 +17,7 @@ pub fn main() {
 
     // Expose the cargo profile to run.rs so that it can set the right link flags.
     let profile = env::var("PROFILE").unwrap();
-    println!("cargo::rustc-cfg=cargo_profile=\"{}\"", profile);
+    println!("cargo::rustc-cfg=cargo_profile=\"{profile}\"");
     println!(
         r#"cargo::rustc-check-cfg=cfg(cargo_profile, values("debug", "release", "release-with-debug"))"#
     );

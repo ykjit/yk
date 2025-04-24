@@ -125,10 +125,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         let aot_mod = &*AOT_MOD;
 
         if should_log_ir(IRPhase::AOT) {
-            log_ir(&format!(
-                "--- Begin aot ---\n{}\n--- End aot ---\n",
-                aot_mod
-            ));
+            log_ir(&format!("--- Begin aot ---\n{aot_mod}\n--- End aot ---\n"));
         }
 
         let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo<Register>>().unwrap());

@@ -88,7 +88,7 @@ impl<'a> ExtraLinkage<'a> {
         }
         let out = match cmd.output() {
             Ok(x) => x,
-            Err(e) => panic!("Error when running {:?} {:?}", cmd, e),
+            Err(e) => panic!("Error when running {cmd:?} {e:?}"),
         };
         assert!(tempdir.exists());
         if !out.status.success() {

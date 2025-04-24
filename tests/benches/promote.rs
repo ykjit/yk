@@ -55,7 +55,7 @@ fn setup<'c, M: Measurement>(
 fn run_bench(bench_bin: &Path, param: usize) {
     assert!(bench_bin.exists());
     let out = Command::new(bench_bin)
-        .arg(format!("{}", param))
+        .arg(format!("{param}"))
         .env("YKD_SERIALISE_COMPILATION", "1")
         .env("YKD_LOG_JITSTATE", "1")
         .output()
@@ -69,14 +69,13 @@ fn bench_promote(c: &mut Criterion) {
     let reps = 100000;
     // Benchmark a simple loop *without* promotion.
     group.bench_function(
-        BenchmarkId::new("without promotes", format!("{}", reps)),
+        BenchmarkId::new("without promotes", format!("{reps}")),
         |b| b.iter(|| run_bench(&bin_np, reps)),
     );
     // Benchmark a simple loop *with* promotion.
-    group.bench_function(
-        BenchmarkId::new("with promotes", format!("{}", reps)),
-        |b| b.iter(|| run_bench(&bin_p, reps)),
-    );
+    group.bench_function(BenchmarkId::new("with promotes", format!("{reps}")), |b| {
+        b.iter(|| run_bench(&bin_p, reps))
+    });
 }
 
 criterion_group!(promote_benchmarks, bench_promote);

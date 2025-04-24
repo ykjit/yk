@@ -31,7 +31,7 @@ impl fmt::Debug for Block {
                 first_inst,
                 last_inst,
             } => {
-                write!(f, "Block({:x}..={:x})", first_inst, last_inst)
+                write!(f, "Block({first_inst:x}..={last_inst:x})")
             }
             Self::Unknown => {
                 write!(f, "UnknownBlock")

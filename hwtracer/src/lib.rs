@@ -137,7 +137,7 @@ where
     let tt = Arc::clone(tc).start_collector().unwrap();
     let res = f();
     let trace = tt.stop_collector().unwrap();
-    println!("traced closure with result: {}", res); // To avoid over-optimisation.
+    println!("traced closure with result: {res}"); // To avoid over-optimisation.
     trace
 }
 
