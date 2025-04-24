@@ -870,12 +870,14 @@ impl LSRegAlloc<'_> {
     fn sort_clobber_regs(&self, iidx: InstIdx, clobber_regs: &mut [Rq]) {
         // Our heuristic is (in order):
         // 1. Prefer to clobber registers whose values are unused in the future.
-        // 2. Prefer to clobber constants.
-        // 3. Prefer to clobber a register that is used further away in the trace.
-        // 4. Prefer to clobber a register that is already spilled.
-        // 5. Prefer to clobber a register whose value(s) are used the fewest subsequent times in
+        // 2. Prefer to clobber registers whose values will be spilled anyway (i.e. because they're
+        //    only referenced in the trace end and need to be spilled then).
+        // 3. Prefer to clobber constants.
+        // 4. Prefer to clobber a register that is used further away in the trace.
+        // 5. Prefer to clobber a register that is already spilled.
+        // 6. Prefer to clobber a register whose value(s) are used the fewest subsequent times in
         //    the trace.
-        // 6. Prefer to clobber a register that contains fewer variables.
+        // 7. Prefer to clobber a register that contains fewer variables.
         clobber_regs.sort_unstable_by(|lhs_reg, rhs_reg| {
             match (
                 &self.gp_reg_states[usize::from(lhs_reg.code())],
@@ -907,26 +909,36 @@ impl LSRegAlloc<'_> {
                         Ordering::Less
                     } else if lhs_next.is_some() && rhs_next.is_none() {
                         Ordering::Greater
-                    } else if lhs_next != rhs_next {
-                        lhs_next.cmp(rhs_next).reverse()
                     } else {
-                        let lhs_spilled = lhs_iidxs
-                            .iter()
-                            .all(|x| !matches!(self.spills[usize::from(*x)], SpillState::Empty));
-                        let rhs_spilled = rhs_iidxs
-                            .iter()
-                            .all(|x| !matches!(self.spills[usize::from(*x)], SpillState::Empty));
-
-                        if lhs_spilled && !rhs_spilled {
+                        let lhs_spill =
+                            lhs_iidxs.len() == 1 && self.rev_an.spill_to(lhs_iidxs[0]).is_some();
+                        let rhs_spill =
+                            rhs_iidxs.len() == 1 && self.rev_an.spill_to(rhs_iidxs[0]).is_some();
+                        if lhs_spill && !rhs_spill {
                             Ordering::Less
-                        } else if !lhs_spilled && rhs_spilled {
+                        } else if !lhs_spill && rhs_spill {
                             Ordering::Greater
+                        } else if lhs_next != rhs_next {
+                            lhs_next.cmp(rhs_next).reverse()
                         } else {
-                            let lhs_count = lhs.iter().map(|(count, _)| count).max().unwrap();
-                            let rhs_count = rhs.iter().map(|(count, _)| count).max().unwrap();
-                            lhs_count
-                                .cmp(rhs_count)
-                                .then(lhs_iidxs.len().cmp(&rhs_iidxs.len()))
+                            let lhs_spilled = lhs_iidxs.iter().all(|x| {
+                                !matches!(self.spills[usize::from(*x)], SpillState::Empty)
+                            });
+                            let rhs_spilled = rhs_iidxs.iter().all(|x| {
+                                !matches!(self.spills[usize::from(*x)], SpillState::Empty)
+                            });
+
+                            if lhs_spilled && !rhs_spilled {
+                                Ordering::Less
+                            } else if !lhs_spilled && rhs_spilled {
+                                Ordering::Greater
+                            } else {
+                                let lhs_count = lhs.iter().map(|(count, _)| count).max().unwrap();
+                                let rhs_count = rhs.iter().map(|(count, _)| count).max().unwrap();
+                                lhs_count
+                                    .cmp(rhs_count)
+                                    .then(lhs_iidxs.len().cmp(&rhs_iidxs.len()))
+                            }
                         }
                     }
                 }
