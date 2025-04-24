@@ -136,10 +136,10 @@ enum ObjLoc {
 impl Debug for ObjLoc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MainObj(v) => write!(f, "ObjLoc::MainObj(0x{:x})", v),
+            Self::MainObj(v) => write!(f, "ObjLoc::MainObj(0x{v:x})"),
             Self::OtherObjOrUnknown(e) => {
                 if let Some(e) = e {
-                    write!(f, "ObjLoc::OtherObjOrUnknown(0x{:x})", e)
+                    write!(f, "ObjLoc::OtherObjOrUnknown(0x{e:x})")
                 } else {
                     write!(f, "ObjLoc::OtherObjOrUnknown(???)")
                 }

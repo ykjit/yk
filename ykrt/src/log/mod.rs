@@ -77,7 +77,7 @@ impl Log {
     pub(crate) fn log_with_hl_debug(&self, level: Verbosity, msg: &str, hl: &Mutex<HotLocation>) {
         // If the hot location has a debug string, append it to the log message.
         let msg = if let Some(dstr) = hl.lock().debug_str.as_ref() {
-            &format!("{}: {}", msg, dstr)
+            &format!("{msg}: {dstr}")
         } else {
             msg
         };
@@ -194,7 +194,7 @@ mod internals {
 
     pub(crate) fn log_ir(s: &str) {
         match LOG_IR.as_ref().map(|(p, _)| p.as_str()) {
-            Some("-") => eprint!("{}", s),
+            Some("-") => eprint!("{s}"),
             Some(x) => {
                 File::options()
                     .append(true)

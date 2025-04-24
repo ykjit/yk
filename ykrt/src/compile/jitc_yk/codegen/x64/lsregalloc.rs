@@ -284,15 +284,14 @@ impl<'a> LSRegAlloc<'a> {
         let gi = ginst.guard_info(self.m);
         let mut regs_to_zero_ext = Vec::new();
         for op in gi.live_vars().iter().map(|(_, pop)| pop.unpack(self.m)) {
-            if let Operand::Var(op_iidx) = op {
-                if let Some(reg) = self.find_op_in_gp_reg(&op) {
-                    let RegState::FromInst(_, ext) = self.gp_reg_states[usize::from(reg.code())]
-                    else {
-                        panic!()
-                    };
-                    if ext != RegExtension::ZeroExtended {
-                        regs_to_zero_ext.push((reg, self.m.inst(op_iidx).def_bitw(self.m)));
-                    }
+            if let Operand::Var(op_iidx) = op
+                && let Some(reg) = self.find_op_in_gp_reg(&op)
+            {
+                let RegState::FromInst(_, ext) = self.gp_reg_states[usize::from(reg.code())] else {
+                    panic!()
+                };
+                if ext != RegExtension::ZeroExtended {
+                    regs_to_zero_ext.push((reg, self.m.inst(op_iidx).def_bitw(self.m)));
                 }
             }
         }
@@ -712,11 +711,11 @@ impl LSRegAlloc<'_> {
                 GPConstraint::Output { .. }
                 | GPConstraint::InputOutput { .. }
                 | GPConstraint::AlignExtension { .. } => {
-                    if let Some(Register::GP(reg)) = self.rev_an.reg_hint(iidx, iidx) {
-                        if !asgn_regs.is_set(reg) {
-                            cnstr_regs[i] = Some(reg);
-                            asgn_regs.set(reg);
-                        }
+                    if let Some(Register::GP(reg)) = self.rev_an.reg_hint(iidx, iidx)
+                        && !asgn_regs.is_set(reg)
+                    {
+                        cnstr_regs[i] = Some(reg);
+                        asgn_regs.set(reg);
                     }
                 }
                 _ => (),
@@ -735,12 +734,12 @@ impl LSRegAlloc<'_> {
             }
             match cnstr {
                 GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } => {
-                    if let Some(reg) = self.find_op_in_gp_reg(op) {
-                        if !asgn_regs.is_set(reg) {
-                            assert!(self.gp_regset.is_set(reg));
-                            input_regs.set(reg);
-                            cnstr_regs[i] = Some(reg);
-                        }
+                    if let Some(reg) = self.find_op_in_gp_reg(op)
+                        && !asgn_regs.is_set(reg)
+                    {
+                        assert!(self.gp_regset.is_set(reg));
+                        input_regs.set(reg);
+                        cnstr_regs[i] = Some(reg);
                     }
                 }
                 GPConstraint::AlignExtension { op, out_ext } => {
@@ -800,11 +799,11 @@ impl LSRegAlloc<'_> {
             if let GPConstraint::Input { op, .. } | GPConstraint::InputOutput { op, .. } = cnstr {
                 match op {
                     Operand::Var(query_iidx) => {
-                        if let Some(Register::GP(reg)) = self.rev_an.reg_hint(iidx, *query_iidx) {
-                            if !asgn_regs.is_set(reg) {
-                                cnstr_regs[i] = Some(reg);
-                                asgn_regs.set(reg);
-                            }
+                        if let Some(Register::GP(reg)) = self.rev_an.reg_hint(iidx, *query_iidx)
+                            && !asgn_regs.is_set(reg)
+                        {
+                            cnstr_regs[i] = Some(reg);
+                            asgn_regs.set(reg);
                         }
                     }
                     Operand::Const(_) => (),
@@ -827,10 +826,9 @@ impl LSRegAlloc<'_> {
                 can_be_same_as_input: true,
                 ..
             } = cnstr
+                && reusable_input_cnstr.is_some()
             {
-                if reusable_input_cnstr.is_some() {
-                    continue;
-                }
+                continue;
             }
 
             let reg = match self.gp_regset.find_empty_avoiding(asgn_regs) {
@@ -1056,12 +1054,11 @@ impl LSRegAlloc<'_> {
                         for op_iidx in op_iidxs {
                             if let Some(Register::GP(hint_reg)) =
                                 self.rev_an.reg_hint(iidx.checked_add(1).unwrap(), *op_iidx)
+                                && !asgn_regs.is_set(*reg)
                             {
-                                if !asgn_regs.is_set(*reg) {
-                                    out.push((hint_reg, RegAction::CopyFrom(*reg)));
-                                    asgn_regs.set(hint_reg);
-                                    continue 'a;
-                                }
+                                out.push((hint_reg, RegAction::CopyFrom(*reg)));
+                                asgn_regs.set(hint_reg);
+                                continue 'a;
                             }
                         }
 
@@ -1576,21 +1573,21 @@ impl LSRegAlloc<'_> {
                 RegConstraint::Output
                 | RegConstraint::OutputCanBeSameAsInput(_)
                 | RegConstraint::InputOutput(_) => {
-                    if let Some(Register::FP(reg)) = self.rev_an.reg_hint(iidx, iidx) {
-                        if !avoid.is_set(reg) {
-                            *cnstr = match cnstr {
-                                RegConstraint::Output => RegConstraint::OutputFromReg(reg),
-                                RegConstraint::OutputCanBeSameAsInput(_) => {
-                                    RegConstraint::OutputFromReg(reg)
-                                }
-                                RegConstraint::InputOutput(op) => {
-                                    RegConstraint::InputOutputIntoReg(op.clone(), reg)
-                                }
-                                _ => unreachable!(),
-                            };
-                            asgn[i] = Some(reg);
-                            avoid.set(reg);
-                        }
+                    if let Some(Register::FP(reg)) = self.rev_an.reg_hint(iidx, iidx)
+                        && !avoid.is_set(reg)
+                    {
+                        *cnstr = match cnstr {
+                            RegConstraint::Output => RegConstraint::OutputFromReg(reg),
+                            RegConstraint::OutputCanBeSameAsInput(_) => {
+                                RegConstraint::OutputFromReg(reg)
+                            }
+                            RegConstraint::InputOutput(op) => {
+                                RegConstraint::InputOutputIntoReg(op.clone(), reg)
+                            }
+                            _ => unreachable!(),
+                        };
+                        asgn[i] = Some(reg);
+                        avoid.set(reg);
                     }
                 }
                 _ => (),
@@ -1667,16 +1664,16 @@ impl LSRegAlloc<'_> {
                 | RegConstraint::InputOutput(ref op)
                 | RegConstraint::InputOutputIntoReg(ref op, _)
                 | RegConstraint::InputIntoRegAndClobber(ref op, _) => {
-                    if let Some(old_reg) = self.find_op_in_fp_reg(op) {
-                        if old_reg != new_reg {
-                            match self.fp_reg_states[usize::from(new_reg.code())] {
-                                RegState::Reserved => unreachable!(),
-                                RegState::Empty => {
-                                    self.move_fp_reg(asm, old_reg, new_reg);
-                                }
-                                RegState::FromConst(_, _) => todo!(),
-                                RegState::FromInst(_, _) => todo!(),
+                    if let Some(old_reg) = self.find_op_in_fp_reg(op)
+                        && old_reg != new_reg
+                    {
+                        match self.fp_reg_states[usize::from(new_reg.code())] {
+                            RegState::Reserved => unreachable!(),
+                            RegState::Empty => {
+                                self.move_fp_reg(asm, old_reg, new_reg);
                             }
+                            RegState::FromConst(_, _) => todo!(),
+                            RegState::FromInst(_, _) => todo!(),
                         }
                     }
                 }

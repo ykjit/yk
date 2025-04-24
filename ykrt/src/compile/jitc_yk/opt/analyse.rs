@@ -112,26 +112,26 @@ impl Analyse {
 
     /// Use the guard `inst` to update our knowledge about the variable used as its condition.
     pub(super) fn guard(&self, m: &Module, g_inst: GuardInst) {
-        if let Operand::Var(iidx) = g_inst.cond(m) {
-            if let Inst::ICmp(ic_inst) = m.inst(iidx) {
-                let lhs = self.op_map(m, ic_inst.lhs(m));
-                let pred = ic_inst.predicate();
-                let rhs = self.op_map(m, ic_inst.rhs(m));
-                match (&lhs, &rhs) {
-                    (&Operand::Const(_), &Operand::Const(_)) => {
-                        // This will have been handled by icmp/guard optimisations.
-                        unreachable!();
-                    }
-                    (&Operand::Var(iidx), &Operand::Const(cidx))
-                    | (&Operand::Const(cidx), &Operand::Var(iidx)) => {
-                        if (g_inst.expect && pred == Predicate::Equal)
-                            || (!g_inst.expect && pred == Predicate::NotEqual)
-                        {
-                            self.set_value(m, iidx, Value::Const(cidx));
-                        }
-                    }
-                    (&Operand::Var(_), &Operand::Var(_)) => (),
+        if let Operand::Var(iidx) = g_inst.cond(m)
+            && let Inst::ICmp(ic_inst) = m.inst(iidx)
+        {
+            let lhs = self.op_map(m, ic_inst.lhs(m));
+            let pred = ic_inst.predicate();
+            let rhs = self.op_map(m, ic_inst.rhs(m));
+            match (&lhs, &rhs) {
+                (&Operand::Const(_), &Operand::Const(_)) => {
+                    // This will have been handled by icmp/guard optimisations.
+                    unreachable!();
                 }
+                (&Operand::Var(iidx), &Operand::Const(cidx))
+                | (&Operand::Const(cidx), &Operand::Var(iidx)) => {
+                    if (g_inst.expect && pred == Predicate::Equal)
+                        || (!g_inst.expect && pred == Predicate::NotEqual)
+                    {
+                        self.set_value(m, iidx, Value::Const(cidx));
+                    }
+                }
+                (&Operand::Var(_), &Operand::Var(_)) => (),
             }
         }
     }

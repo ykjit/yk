@@ -244,7 +244,7 @@ mod tests {
         let res = work_loop(10000);
         let trace = tt.stop_collector().unwrap();
 
-        println!("res: {}", res); // Stop over-optimisation.
+        println!("res: {res}"); // Stop over-optimisation.
         assert!(trace.capacity() > start_bufsize);
     }
 

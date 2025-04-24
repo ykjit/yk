@@ -205,7 +205,7 @@ impl Module {
 
     #[allow(dead_code)]
     pub(crate) fn dump(&self) {
-        eprintln!("{}", self);
+        eprintln!("{self}");
     }
 
     /// If possible, retrieve the source code line described by `path` and `line_num`.
@@ -225,13 +225,12 @@ impl Module {
             }
             // lookup cannot fail due to insertion above.
             let mut f = files.get_mut(path).unwrap().as_mut();
-            if let Some(ref mut f) = f {
-                if f.seek(SeekFrom::Start(0)).is_ok() {
-                    if let Some(Ok(line)) = f.lines().nth(line_num - 1) {
-                        // success
-                        return line.trim().to_string();
-                    }
-                }
+            if let Some(ref mut f) = f
+                && f.seek(SeekFrom::Start(0)).is_ok()
+                && let Some(Ok(line)) = f.lines().nth(line_num - 1)
+            {
+                // success
+                return line.trim().to_string();
             }
         }
         // failure
@@ -252,7 +251,7 @@ impl std::fmt::Display for Module {
 
         if !self.global_decls.is_empty() {
             for gd in &self.global_decls {
-                writeln!(f, "{}", gd)?;
+                writeln!(f, "{gd}")?;
             }
         }
 
@@ -275,7 +274,7 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> 
 pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let data = fs::read(path)?;
     let ir = deserialise_module(&data)?;
-    println!("{}", ir);
+    println!("{ir}");
     Ok(())
 }
 
@@ -359,10 +358,10 @@ index!(ArgIdx);
 /// avoid type inference errors, so it's easier to have a single helper function rather than inline
 /// this into each `map` attribute.
 fn map_to_string(v: Vec<u8>) -> Result<String, DekuError> {
-    if let Ok(x) = CString::from_vec_with_nul(v) {
-        if let Ok(x) = x.into_string() {
-            return Ok(x);
-        }
+    if let Ok(x) = CString::from_vec_with_nul(v)
+        && let Ok(x) = x.into_string()
+    {
+        return Ok(x);
     }
     Err(DekuError::Parse(Cow::Borrowed("Couldn't map string")))
 }
@@ -450,7 +449,7 @@ impl Display for BinOp {
             Self::UDiv => "udiv",
             Self::URem => "urem",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -639,7 +638,7 @@ impl Display for FloatPredicate {
             Self::UnorderedNotEqual => "f_une",
             Self::True => "f_true",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -675,7 +674,7 @@ impl Display for CastKind {
             Self::IntToPtr => "int_to_ptr",
             Self::PtrToInt => "ptr_to_int",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -1007,7 +1006,7 @@ impl Inst {
             for (bbidx, bb) in f.bblocks.iter().enumerate() {
                 for (iidx, inst) in bb.insts.iter().enumerate() {
                     if std::ptr::addr_eq(inst, self) {
-                        return format!("%{}_{}", bbidx, iidx);
+                        return format!("%{bbidx}_{iidx}");
                     }
                 }
             }
@@ -1147,21 +1146,21 @@ impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // If we have source-level line info for the instruction, print a comment line containing
         // the source line.
-        if let Some(instid) = &self.instid {
-            if let Some(li) = self.m.line_infos.get(instid) {
-                let path = self.m.path(li.pathidx);
-                // Sometimes the filename cannot be determined.
-                let basename = path.file_name().unwrap_or(OsStr::new("<unknown-filename>"));
-                // We assume the filename is expressible in UTF-8.
-                let src = self.m.source_line(path, li.line_num);
-                write!(
-                    f,
-                    "# {}:{}: {}\n    ",
-                    basename.to_str().unwrap(),
-                    li.line_num,
-                    src
-                )?;
-            }
+        if let Some(instid) = &self.instid
+            && let Some(li) = self.m.line_infos.get(instid)
+        {
+            let path = self.m.path(li.pathidx);
+            // Sometimes the filename cannot be determined.
+            let basename = path.file_name().unwrap_or(OsStr::new("<unknown-filename>"));
+            // We assume the filename is expressible in UTF-8.
+            let src = self.m.source_line(path, li.line_num);
+            write!(
+                f,
+                "# {}:{}: {}\n    ",
+                basename.to_str().unwrap(),
+                li.line_num,
+                src
+            )?;
         }
         if let Some(t) = self.instruction.def_type(self.m) {
             // If the instruction defines a local, we will format the instruction like it's an
@@ -1352,9 +1351,9 @@ impl fmt::Display for DisplayableInst<'_> {
                     falseval.display(self.m)
                 )
             }
-            Inst::LoadArg { arg_idx, ty_idx: _ } => write!(f, "arg({})", arg_idx,),
+            Inst::LoadArg { arg_idx, ty_idx: _ } => write!(f, "arg({arg_idx})",),
             Inst::Unimplemented { llvm_inst_str, .. } => {
-                write!(f, "unimplemented <<{}>>", llvm_inst_str)
+                write!(f, "unimplemented <<{llvm_inst_str}>>")
             }
             Inst::Nop => write!(f, "nop"),
             Inst::FCmp { lhs, pred, rhs, .. } => {
@@ -1725,7 +1724,7 @@ impl Display for FloatTy {
             Self::Float => "float",
             Self::Double => "double",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -1816,7 +1815,7 @@ impl Ty {
                 debug_assert_eq!(c.bytes().len(), ptr_size);
                 // unwrap is safe: constant is malformed if there are too few bytes for a chunk.
                 let pval = usize::from_ne_bytes(*c.bytes().first_chunk().unwrap());
-                format!("{:#x}", pval)
+                format!("{pval:#x}")
             }
             Self::Func(_) => unreachable!(), // No such thing as a constant function in our IR.
             Self::Struct(_) => {
@@ -1829,10 +1828,10 @@ impl Ty {
                 let dval = f64::from_ne_bytes(*c.bytes().first_chunk().unwrap());
                 match ft {
                     FloatTy::Float => format!("{}float", dval as f32),
-                    FloatTy::Double => format!("{}double", dval),
+                    FloatTy::Double => format!("{dval}double"),
                 }
             }
-            Self::Unimplemented(s) => format!("?cst<{}>", s),
+            Self::Unimplemented(s) => format!("?cst<{s}>"),
         }
     }
 
@@ -1859,12 +1858,12 @@ impl fmt::Display for DisplayableTy<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.type_ {
             Ty::Void => write!(f, "void"),
-            Ty::Integer(x) => write!(f, "{}", x),
+            Ty::Integer(x) => write!(f, "{x}"),
             Ty::Ptr => write!(f, "ptr"),
             Ty::Func(ft) => write!(f, "{}", ft.display(self.m)),
             Ty::Struct(st) => write!(f, "{}", st.display(self.m)),
-            Ty::Float(ft) => write!(f, "{}", ft),
-            Ty::Unimplemented(s) => write!(f, "?ty<{}>", s),
+            Ty::Float(ft) => write!(f, "{ft}"),
+            Ty::Unimplemented(s) => write!(f, "?ty<{s}>"),
         }
     }
 }
@@ -1901,7 +1900,7 @@ impl Const {
         match self {
             Const::Val(v) => v,
             Const::Unimplemented { llvm_const_str, .. } => {
-                panic!("unimplemented const: {}", llvm_const_str)
+                panic!("unimplemented const: {llvm_const_str}")
             }
         }
     }
@@ -1924,7 +1923,7 @@ impl Display for DisplayableConst<'_> {
         match self.constant {
             Const::Val(cv) => write!(f, "{}", cv.display(self.m)),
             Const::Unimplemented { llvm_const_str, .. } => {
-                write!(f, "unimplemented <<{}>>", llvm_const_str)
+                write!(f, "unimplemented <<{llvm_const_str}>>")
             }
         }
     }

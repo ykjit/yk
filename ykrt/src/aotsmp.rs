@@ -24,7 +24,7 @@ impl AOTStackmapInfo {
 
 pub(crate) static AOT_STACKMAPS: LazyLock<Result<AOTStackmapInfo, String>> = LazyLock::new(|| {
     fn errstr(msg: &str) -> String {
-        format!("failed to load stackmaps: {}", msg)
+        format!("failed to load stackmaps: {msg}")
     }
 
     // We use an inner function so that we can use the `?` operator for errors.

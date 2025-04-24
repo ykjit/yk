@@ -174,12 +174,12 @@ impl MT {
             self.stats.output();
             let mut lk = self.active_worker_threads.lock();
             for hdl in lk.drain(..) {
-                if hdl.is_finished() {
-                    if let Err(e) = hdl.join() {
-                        // Despite the name `resume_unwind` will abort if the unwind strategy in
-                        // Rust is set to `abort`.
-                        std::panic::resume_unwind(e);
-                    }
+                if hdl.is_finished()
+                    && let Err(e) = hdl.join()
+                {
+                    // Despite the name `resume_unwind` will abort if the unwind strategy in
+                    // Rust is set to `abort`.
+                    std::panic::resume_unwind(e);
                 }
             }
         }
@@ -820,10 +820,10 @@ impl MT {
                     akind = Some(AbortKind::OutOfFrame);
                 }
 
-                if let Some(x) = loc.hot_location().map(|x| x as *const Mutex<HotLocation>) {
-                    if !seen_hls.insert(x) {
-                        akind = Some(AbortKind::Unrolled);
-                    }
+                if let Some(x) = loc.hot_location().map(|x| x as *const Mutex<HotLocation>)
+                    && !seen_hls.insert(x)
+                {
+                    akind = Some(AbortKind::Unrolled);
                 }
 
                 if let Some(akind) = akind {
