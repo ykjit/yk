@@ -2692,6 +2692,12 @@ impl<'a> Assemble<'a> {
             };
             self.header_start_locs.push(loc);
         }
+        // 16-byte align this jump target to improve performance.
+        let off = self.asm.offset().0;
+        let align = off.next_multiple_of(16);
+        for _ in 0..(align - off) {
+            self.asm.push(NOP_OPCODE);
+        }
         match self.m.tracekind() {
             TraceKind::HeaderOnly => {
                 dynasm!(self.asm; ->tloop_start:);
@@ -2798,6 +2804,12 @@ impl<'a> Assemble<'a> {
         for var in self.m.trace_body_start() {
             let loc = self.op_to_var_location(var.unpack(self.m));
             self.body_start_locs.push(loc);
+        }
+        // 16-byte align this jump target to improve performance.
+        let off = self.asm.offset().0;
+        let align = off.next_multiple_of(16);
+        for _ in 0..(align - off) {
+            self.asm.push(NOP_OPCODE);
         }
         dynasm!(self.asm; ->tloop_start:);
     }
@@ -5297,6 +5309,7 @@ mod tests {
             "
                 ...
                 ; header_start []
+                ...
                 ; header_end []
                 jmp {{target}}
             ",
@@ -5320,6 +5333,7 @@ mod tests {
                 ; %0: i8 = param ...
                 ...
                 ; header_start [%0]
+                ...
                 ; %2: i8 = add %0, %0
                 {{addr}} {{_}}: ...
                 ...
@@ -5982,6 +5996,7 @@ mod tests {
                 ; %0: i8 = param ...
                 ...
                 ; header_start [%0]
+                ...
                 ; header_end [42i8]
                 mov eax, 0x2a
                 jmp ...
