@@ -254,6 +254,9 @@ pub(crate) enum TimingState {
     /// counted towards anything and is not displayed to the user.
     #[strum(to_string = "")]
     None,
+    /// This thread is tracing.
+    #[strum(to_string = "duration_tracing")]
+    Tracing,
     /// This thread is compiling a mapped trace.
     #[strum(to_string = "duration_compiling")]
     Compiling,
