@@ -2574,6 +2574,10 @@ impl<'a> Assemble<'a> {
                             }
                         }
                         VarLocation::ConstInt { bits, v } => match bits {
+                            64 => dynasm!(self.asm
+                                ; mov Rq(spare_reg.code()), QWORD v.cast_signed()
+                                ; mov QWORD [rbp - off_dst], Rq(spare_reg.code())
+                            ),
                             32 => dynasm!(self.asm;
                                 mov DWORD [rbp - off_dst], v as i32
                             ),
