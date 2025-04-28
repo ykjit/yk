@@ -320,12 +320,6 @@ impl<'a> RevAnalyse<'a> {
         usize::from(cur_iidx) <= usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
     }
 
-    /// Is `query_iidx` used later in the trace than `cur_iidx`?
-    pub(super) fn used_later_than(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
-        self.inst_vals_alive_until[usize::from(cur_iidx)]
-            >= self.inst_vals_alive_until[usize::from(query_iidx)]
-    }
-
     /// Which register should the output of `cur_iidx` ideally be put into? Note: this is a hint,
     /// not a demand, and not following it does not affect correctness!
     pub(super) fn reg_hint(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> Option<Register> {
