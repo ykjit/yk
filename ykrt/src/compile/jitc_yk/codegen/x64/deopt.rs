@@ -314,8 +314,6 @@ pub(crate) extern "C" fn __yk_deopt(
     }
 
     mt.guard_failure(ctr, gidx, frameaddr);
-    mt.stats
-        .timing_state(crate::log::stats::TimingState::OutsideYk);
 
     // Now overwrite the existing stack with our newly recreated one.
     unsafe { replace_stack(newframedst, newstack, memsize) };

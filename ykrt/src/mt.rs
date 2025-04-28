@@ -518,6 +518,8 @@ impl MT {
                 unsafe { __yk_exec_trace(frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl) => {
+                self.stats
+                    .timing_state(crate::log::stats::TimingState::Tracing);
                 yklog!(
                     self.log,
                     Verbosity::JITEvent,
@@ -1062,8 +1064,13 @@ impl MT {
         frameaddr: *mut c_void,
     ) {
         match self.transition_guard_failure(parent, gidx) {
-            TransitionGuardFailure::NoAction => (),
+            TransitionGuardFailure::NoAction => {
+                self.stats
+                    .timing_state(crate::log::stats::TimingState::OutsideYk);
+            }
             TransitionGuardFailure::StartSideTracing(hl) => {
+                self.stats
+                    .timing_state(crate::log::stats::TimingState::Tracing);
                 yklog!(
                     self.log,
                     Verbosity::JITEvent,
