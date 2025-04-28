@@ -339,9 +339,9 @@ impl<'a> RevAnalyse<'a> {
             .map(|(_, y)| *y)
     }
 
-    /// Return the predetermined stack location for `iidx` to be spilled to, if one is known.
-    pub(super) fn spill_to(&self, iidx: InstIdx) -> Option<u32> {
-        let x = self.spill_to[usize::from(iidx)];
+    /// Return the predetermined stack location for `query_iidx` to be spilled to, if one is known.
+    pub(super) fn spill_to(&self, _cur_iidx: InstIdx, query_iidx: InstIdx) -> Option<u32> {
+        let x = self.spill_to[usize::from(query_iidx)];
         if x == u32::MAX {
             None
         } else {
