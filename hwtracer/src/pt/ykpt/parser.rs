@@ -8,8 +8,6 @@ use super::packets::*;
 
 #[derive(Clone, Copy, Debug)]
 enum PacketParserState {
-    /// Initial state, waiting for a PSB packet.
-    Init,
     /// The "normal" decoding state.
     Normal,
     /// We are decoding a PSB+ sequence.
@@ -26,7 +24,6 @@ impl PacketParserState {
         // OPT: The order below is a rough guess based on what limited traces I've seen. Benchmark
         // and optimise.
         match self {
-            Self::Init => &[PacketKind::PSB, PacketKind::CBR, PacketKind::PAD],
             Self::Normal => &[
                 PacketKind::ShortTNT,
                 PacketKind::PAD,
@@ -60,7 +57,6 @@ impl PacketParserState {
     /// kind of packet.
     fn transition(&mut self, pkt_kind: PacketKind) {
         let new = match (*self, pkt_kind) {
-            (Self::Init, PacketKind::PSB) => Self::PSBPlus,
             (Self::Normal, PacketKind::PSB) => Self::PSBPlus,
             (Self::PSBPlus, PacketKind::PSBEND) => Self::Normal,
             _ => return, // No state transition.
@@ -107,7 +103,7 @@ impl<'t> PacketParser<'t> {
     pub(super) fn new(bytes: &'t [u8]) -> Self {
         Self {
             pt_bytes: bytes,
-            state: PacketParserState::Init,
+            state: PacketParserState::Normal,
             prev_tip: 0,
         }
     }
