@@ -76,6 +76,21 @@ struct hwt_perf_ctx {
 };
 
 /*
+ * Setting up perf is slow, so we cache a number of things.
+ *
+ * Since we attach perf to a thread, all of this is per-thread too.
+ */
+struct hwt_perf_thread_cached {
+  int perf_fd;
+  void *aux_buf;
+  size_t aux_bufsize;
+  void *base_buf;
+  size_t base_bufsize;
+};
+
+thread_local struct hwt_perf_thread_cached thread_cached = { -1, NULL, 0, NULL, 0 };
+
+/*
  * Passed from Rust to C to configure tracing.
  * Must stay in sync with the Rust struct `PerfCollectorConfig`.
  */
@@ -505,11 +520,16 @@ hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf,
   tr_ctx->perf_fd = -1;
 
   // Obtain a file descriptor through which to speak to perf.
-  tr_ctx->perf_fd= open_perf(tr_conf->aux_bufsize, err);
-  if (tr_ctx->perf_fd == -1) {
-    hwt_set_cerr(err, hwt_cerror_errno, errno);
-    failing = true;
-    goto clean;
+  if (thread_cached.perf_fd == -1) {
+    tr_ctx->perf_fd = open_perf(tr_conf->aux_bufsize, err);
+    if (tr_ctx->perf_fd == -1) {
+      hwt_set_cerr(err, hwt_cerror_errno, errno);
+      failing = true;
+      goto clean;
+    }
+    thread_cached.perf_fd = tr_ctx->perf_fd;
+  } else {
+    tr_ctx->perf_fd = thread_cached.perf_fd;
   }
 
   // Allocate mmap(2) buffers for speaking to perf.
@@ -534,29 +554,51 @@ hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf,
   // Data buffer is preceded by one management page (the header), hence `1 +
   // data_bufsize'.
   int page_size = getpagesize();
-  tr_ctx->base_bufsize = (1 + tr_conf->data_bufsize) * page_size;
-  tr_ctx->base_buf = mmap(NULL, tr_ctx->base_bufsize, PROT_WRITE, MAP_SHARED,
-                          tr_ctx->perf_fd, 0);
-  if (tr_ctx->base_buf == MAP_FAILED) {
-    hwt_set_cerr(err, hwt_cerror_errno, errno);
-    failing = true;
-    goto clean;
+  size_t base_bufsize = (1 + tr_conf->data_bufsize) * page_size;
+  size_t aux_bufsize = tr_conf->aux_bufsize * page_size;
+  if (thread_cached.base_buf == NULL) {
+    tr_ctx->base_bufsize = base_bufsize;
+    tr_ctx->base_buf = mmap(NULL, tr_ctx->base_bufsize, PROT_WRITE, MAP_SHARED,
+        tr_ctx->perf_fd, 0);
+    if (tr_ctx->base_buf == MAP_FAILED) {
+      hwt_set_cerr(err, hwt_cerror_errno, errno);
+      failing = true;
+      goto clean;
+    }
+
+    // Populate the header part of the base buffer.
+    struct perf_event_mmap_page *base_header = tr_ctx->base_buf;
+    base_header->aux_offset = base_header->data_offset + base_header->data_size;
+    base_header->aux_size = tr_ctx->aux_bufsize = aux_bufsize;
+
+    thread_cached.base_bufsize = tr_ctx->base_bufsize;
+    thread_cached.base_buf = tr_ctx->base_buf;
+    thread_cached.aux_bufsize = tr_ctx->aux_bufsize;
+  } else {
+    if (base_bufsize != thread_cached.base_bufsize) {
+      errx(EXIT_FAILURE, "base buffer size mismatch");
+    }
+    if (aux_bufsize != thread_cached.aux_bufsize) {
+      errx(EXIT_FAILURE, "aux buffer size mismatch");
+    }
+    tr_ctx->base_bufsize = thread_cached.base_bufsize;
+    tr_ctx->base_buf = thread_cached.base_buf;
+    tr_ctx->aux_bufsize = thread_cached.aux_bufsize;
   }
 
-  // Populate the header part of the base buffer.
-  struct perf_event_mmap_page *base_header = tr_ctx->base_buf;
-  base_header->aux_offset = base_header->data_offset + base_header->data_size;
-  base_header->aux_size = tr_ctx->aux_bufsize =
-      tr_conf->aux_bufsize * page_size;
-
   // Allocate the AUX buffer.
-  //
-  tr_ctx->aux_buf = mmap(NULL, base_header->aux_size, PROT_READ | PROT_WRITE,
-      MAP_SHARED, tr_ctx->perf_fd, base_header->aux_offset);
-  if (tr_ctx->aux_buf == MAP_FAILED) {
-    hwt_set_cerr(err, hwt_cerror_errno, errno);
-    failing = true;
-    goto clean;
+  struct perf_event_mmap_page *base_header = tr_ctx->base_buf;
+  if (thread_cached.aux_buf == NULL) {
+    tr_ctx->aux_buf = mmap(NULL, base_header->aux_size, PROT_READ | PROT_WRITE,
+        MAP_SHARED, tr_ctx->perf_fd, base_header->aux_offset);
+    if (tr_ctx->aux_buf == MAP_FAILED) {
+      hwt_set_cerr(err, hwt_cerror_errno, errno);
+      failing = true;
+      goto clean;
+    }
+    thread_cached.aux_buf = tr_ctx->aux_buf;
+  } else {
+    tr_ctx->aux_buf = thread_cached.aux_buf;
   }
 
 clean:
@@ -715,21 +757,13 @@ bool hwt_perf_stop_collector(struct hwt_perf_ctx *tr_ctx,
  * Clean up and free a hwt_perf_ctx and its contents.
  *
  * Returns true on success or false otherwise.
+ *
+ * Note that anything which is cached is deliberately not freed. See
+ * `thread_cached` above.
  */
 bool hwt_perf_free_collector(struct hwt_perf_ctx *tr_ctx,
                              struct hwt_cerror *err) {
   int ret = true;
-
-  if ((tr_ctx->aux_buf) &&
-      (munmap(tr_ctx->aux_buf, tr_ctx->aux_bufsize) == -1)) {
-    hwt_set_cerr(err, hwt_cerror_errno, errno);
-    ret = false;
-  }
-  if ((tr_ctx->base_buf) &&
-      (munmap(tr_ctx->base_buf, tr_ctx->base_bufsize) == -1)) {
-    hwt_set_cerr(err, hwt_cerror_errno, errno);
-    ret = false;
-  }
 
   if (tr_ctx->stop_fds[1] != -1) {
     // If the write end of the pipe is still open, the thread is still running.
@@ -741,10 +775,6 @@ bool hwt_perf_free_collector(struct hwt_perf_ctx *tr_ctx,
   }
   if (tr_ctx->stop_fds[0] != -1) {
     close(tr_ctx->stop_fds[0]);
-  }
-  if (tr_ctx->perf_fd >= 0) {
-    close(tr_ctx->perf_fd);
-    tr_ctx->perf_fd = -1;
   }
   if (tr_ctx != NULL) {
     free(tr_ctx);
