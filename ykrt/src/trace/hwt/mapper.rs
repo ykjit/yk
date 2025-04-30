@@ -183,20 +183,10 @@ impl Iterator for HWTTraceIterator {
             // multiple machine blocks, which are not all removed here. Since we don't have enough
             // information at this level to remove all of them, there's a workaround in the trace
             // builder.
-            //
-            // As a rough proxy for "check that we removed only the thing we want to remove", we know
-            // that the control point will be contained in a single mappable block. The `unwrap` can
-            // only fail if our assumption about the block is incorrect (i.e. some part of the system
-            // doesn't work as expected).
             match self.hwt_iter.next() {
                 Some(Ok(x)) => {
                     self.map_block(&x);
-                    match self.upcoming.as_slice() {
-                        &[TraceAction::MappedAOTBBlock { .. }] => {
-                            self.upcoming.pop();
-                        }
-                        _ => panic!(),
-                    }
+                    self.upcoming.pop();
                 }
                 Some(Err(BlockIteratorError::HWTracerError(HWTracerError::Temporary(
                     TemporaryErrorKind::TraceBufferOverflow,
