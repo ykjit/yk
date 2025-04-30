@@ -2117,12 +2117,18 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_cmp_const(&mut self, bitw: u32, lhs_reg: Rq, rhs: i32) {
-        match bitw {
-            8 | 16 | 32 => dynasm!(self.asm; cmp Rd(lhs_reg.code()), rhs),
-            64 => {
-                dynasm!(self.asm; cmp Rq(lhs_reg.code()), rhs);
+        if rhs == 0 {
+            match bitw {
+                8 | 16 | 32 => dynasm!(self.asm; test Rd(lhs_reg.code()), Rd(lhs_reg.code())),
+                64 => dynasm!(self.asm; test Rq(lhs_reg.code()), Rq(lhs_reg.code())),
+                _ => todo!("{bitw}"),
             }
-            _ => todo!("{bitw}"),
+        } else {
+            match bitw {
+                8 | 16 | 32 => dynasm!(self.asm; cmp Rd(lhs_reg.code()), rhs),
+                64 => dynasm!(self.asm; cmp Rq(lhs_reg.code()), rhs),
+                _ => todo!("{bitw}"),
+            }
         }
     }
 
@@ -5212,6 +5218,24 @@ mod tests {
 
     #[test]
     fn cg_icmp_const() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = param reg
+                %1: i1 = eq %0, 0i8
+                black_box %1
+            ",
+            "
+                ...
+                ; %1: i1 = eq %0, 0i8
+                and r.32.x, 0xff
+                test r.32.x, r.32.x
+                setz r.8.x
+                ...
+            ",
+            false,
+        );
+
         codegen_and_test(
             "
               entry:
