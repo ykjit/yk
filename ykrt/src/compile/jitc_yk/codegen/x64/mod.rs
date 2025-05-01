@@ -2092,6 +2092,12 @@ impl<'a> Assemble<'a> {
                     ; cmovl Rq(lhs_reg.code()), Rq(rhs_reg.code())
                 );
             }
+            32 => {
+                dynasm!(self.asm
+                    ; cmp Rd(lhs_reg.code()), Rd(rhs_reg.code())
+                    ; cmovl Rd(lhs_reg.code()), Rd(rhs_reg.code())
+                );
+            }
             x => todo!("{x}"),
         }
     }
