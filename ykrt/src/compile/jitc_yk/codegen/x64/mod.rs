@@ -595,7 +595,7 @@ impl<'a> Assemble<'a> {
 
     /// Codegen an instruction.
     fn cg_insts(&mut self) -> Result<(), CompilationError> {
-        let mut iter = self.m.iter_skipping_insts();
+        let mut iter = self.m.iter_skipping_insts().peekable();
         let mut next = iter.next();
         let mut in_header = true;
         while let Some((iidx, inst)) = next {
@@ -621,7 +621,42 @@ impl<'a> Assemble<'a> {
                         self.cg_param(iidx, i);
                     }
                 }
-                jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+                jit_ir::Inst::Load(i) => {
+                    next = iter.next();
+                    // We can in some situations generate better code for:
+                    //   %1 = load ...
+                    //   %2 = add %1, ...
+                    //   *%1 = %2
+                    if let Some((b_iidx, Inst::BinOp(b_inst))) = next
+                        && b_inst.binop() == BinOp::Add
+                        && let Some((s_iidx, Inst::Store(s_inst))) = iter.peek()
+                    {
+                        // Now we have to check that -- taking into account ptr offsets -- the two
+                        // instructions really are using the same pointer.
+                        let (l_ptr_op, l_off) = match self.ra.ptradd(iidx) {
+                            Some(x) => (x.ptr(self.m), x.off()),
+                            None => (i.ptr(self.m), 0),
+                        };
+                        let (s_ptr_op, s_off) = match self.ra.ptradd(*s_iidx) {
+                            Some(x) => (x.ptr(self.m), x.off()),
+                            None => (s_inst.ptr(self.m), 0),
+                        };
+                        if l_ptr_op == s_ptr_op && l_off == s_off {
+                            // We now need to check that no-one else needs the result of the load
+                            // or the result of the binop.
+                            if !self.ra.rev_an.is_inst_var_still_used_after(b_iidx, iidx)
+                                && !self.ra.rev_an.is_inst_var_still_used_after(*s_iidx, b_iidx)
+                            {
+                                self.cg_load_bin_store(iidx, *i, b_iidx, b_inst, *s_iidx, *s_inst);
+                                let _ = iter.next();
+                                next = iter.next();
+                                continue;
+                            }
+                        }
+                    }
+                    self.cg_load(iidx, i);
+                    continue;
+                }
                 jit_ir::Inst::PtrAdd(pa_inst) => self.cg_ptradd(iidx, pa_inst),
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
                 jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
@@ -1350,7 +1385,48 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn cg_ptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
+    fn cg_load_bin_store(
+        &mut self,
+        l_iidx: InstIdx,
+        l_inst: jit_ir::LoadInst,
+        b_iidx: InstIdx,
+        b_inst: jit_ir::BinOpInst,
+        s_iidx: InstIdx,
+        s_inst: jit_ir::StoreInst,
+    ) {
+        let (ptr_op, off) = match self.ra.ptradd(l_iidx) {
+            Some(x) => (x.ptr(self.m), x.off()),
+            None => (l_inst.ptr(self.m), 0),
+        };
+        if let Some(c) = self.op_to_sign_ext_i32(&b_inst.rhs(self.m)) {
+            self.comment(Inst::BinOp(b_inst).display(self.m, b_iidx).to_string());
+            self.comment(Inst::Store(s_inst).display(self.m, s_iidx).to_string());
+            let [reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                s_iidx,
+                [GPConstraint::Input {
+                    op: ptr_op,
+                    in_ext: RegExtension::Undefined,
+                    force_reg: None,
+                    clobber_reg: false,
+                }],
+            );
+            match b_inst.binop() {
+                BinOp::Add => match Inst::Load(l_inst).def_bitw(self.m) {
+                    64 => dynasm!(&mut self.asm; add QWORD [Rq(reg.code()) + off], c),
+                    32 => dynasm!(&mut self.asm; add DWORD [Rq(reg.code()) + off], c),
+                    16 => dynasm!(&mut self.asm; add WORD [Rq(reg.code()) + off], c as i16),
+                    8 => dynasm!(&mut self.asm; add BYTE [Rq(reg.code()) + off], c as i8),
+                    x => todo!("{x}"),
+                },
+                x => todo!("{x}"),
+            }
+        } else {
+            todo!();
+        }
+    }
+
+    fn cg_ptradd(&mut self, iidx: InstIdx, inst: &jit_ir::PtrAddInst) {
         // LLVM semantics dictate that the offset should be sign-extended/truncated up/down to the
         // size of the LLVM pointer index type. For address space zero on x86, truncation can't
         // happen, and when an immediate second operand is used for x86_64 `add`, it is implicitly
@@ -3768,6 +3844,74 @@ mod tests {
                 ; %1: i32 = Load %0
                 mov r.32.x, [r.64.x]
                 ...
+                ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_load_bin_store() {
+        // Check it optimises when it should
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: i8 = load %0
+                %2: i8 = add %1, 1i8
+                *%0 = %2
+            ",
+            "
+                ...
+                ; %1: i8 = load %0
+                ; %2: i8 = add %1, 1i8
+                ; *%0 = %2
+                add byte ptr [r.64._], 0x01
+                ",
+            false,
+        );
+
+        // Check it doesn't optimise when it shouldn't
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: i8 = load %0
+                %2: i8 = add %1, 1i8
+                *%0 = %2
+                black_box %1
+            ",
+            "
+                ...
+                ; %1: i8 = load %0
+                movzx r.32.x, byte ptr [r.64.y]
+                ; %2: i8 = add %1, 1i8
+                mov r.64._, r.64.x
+                add r.32.x, 0x01
+                ; *%0 = %2
+                and r.32.x, 0xff
+                mov [r.64.y], r.8.x
+                ",
+            false,
+        );
+
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: i8 = load %0
+                %2: i8 = add %1, 1i8
+                *%0 = %2
+                black_box %2
+            ",
+            "
+                ...
+                ; %1: i8 = load %0
+                movzx r.32.x, byte ptr [r.64.y]
+                ; %2: i8 = add %1, 1i8
+                add r.32.x, 0x01
+                ; *%0 = %2
+                and r.32.x, 0xff
+                mov [r.64.y], r.8.x
                 ",
             false,
         );
