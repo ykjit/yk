@@ -43,6 +43,7 @@ lrlex = "0.13"
 lrpar = "0.13"
 regex = "1.9"
 ykbuild = { path = "../ykbuild" }
+which = "7.0"
 
 [features]
 # When set, the `ykd` feature enables a number of features that are helpful for
