@@ -1,5 +1,6 @@
 use cfgrammar::yacc::YaccKind;
 use lrlex::{CTLexerBuilder, DefaultLexerTypes};
+use which::which;
 
 use {
     std::env,
@@ -44,7 +45,14 @@ pub fn main() {
 
     // Build the gdb plugin.
     env::set_current_dir("yk_gdb_plugin").unwrap();
-    let out = Command::new("gmake").output().unwrap();
+    let make = {
+        if which("gmake").is_ok() {
+            "gmake"
+        } else {
+            "make"
+        }
+    };
+    let out = Command::new(make).output().unwrap();
     if !out.status.success() {
         io::stderr().write_all(&out.stdout).unwrap();
         io::stderr().write_all(&out.stderr).unwrap();
