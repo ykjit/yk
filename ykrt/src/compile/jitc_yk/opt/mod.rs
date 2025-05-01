@@ -685,7 +685,26 @@ impl Opt {
             (&Operand::Const(lhs_cidx), &Operand::Const(rhs_cidx)) => {
                 self.opt_icmp_both_const(iidx, lhs_cidx, pred, rhs_cidx)
             }
-            (&Operand::Var(_), &Operand::Const(_)) | (&Operand::Const(_), &Operand::Var(_)) => (),
+            (&Operand::Var(_), &Operand::Const(_)) => (),
+            (&Operand::Const(_), &Operand::Var(_)) => {
+                // Canonicalise to `rhs inv_pred lhs`.
+                let inv_pred = match pred {
+                    Predicate::Equal => Predicate::Equal,
+                    Predicate::NotEqual => Predicate::NotEqual,
+                    Predicate::UnsignedGreater => Predicate::UnsignedLess,
+                    Predicate::UnsignedGreaterEqual => Predicate::UnsignedLessEqual,
+                    Predicate::UnsignedLess => Predicate::UnsignedGreater,
+                    Predicate::UnsignedLessEqual => Predicate::UnsignedGreaterEqual,
+                    Predicate::SignedGreater => Predicate::SignedLess,
+                    Predicate::SignedGreaterEqual => Predicate::SignedLessEqual,
+                    Predicate::SignedLess => Predicate::SignedGreater,
+                    Predicate::SignedLessEqual => Predicate::SignedGreaterEqual,
+                };
+                self.m.replace(
+                    iidx,
+                    ICmpInst::new(inst.rhs(&self.m), inv_pred, inst.lhs(&self.m)).into(),
+                );
+            }
             (&Operand::Var(_), &Operand::Var(_)) => (),
         }
 
@@ -1760,6 +1779,60 @@ mod test {
             black_box 1i1
             black_box 0i1
             black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_icmp_canon() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i1 = eq 1i8, %0
+            %2: i1 = ne 1i8, %0
+            %3: i1 = ugt 1i8, %0
+            %4: i1 = uge 1i8, %0
+            %5: i1 = ult 1i8, %0
+            %6: i1 = ule 1i8, %0
+            %7: i1 = sgt 1i8, %0
+            %8: i1 = sge 1i8, %0
+            %9: i1 = slt 1i8, %0
+            %10: i1 = sle 1i8, %0
+            black_box %1
+            black_box %2
+            black_box %3
+            black_box %4
+            black_box %5
+            black_box %6
+            black_box %7
+            black_box %8
+            black_box %9
+            black_box %10
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+            %1: i1 = eq %0, 1i8
+            %2: i1 = ne %0, 1i8
+            %3: i1 = ult %0, 1i8
+            %4: i1 = ule %0, 1i8
+            %5: i1 = ugt %0, 1i8
+            %6: i1 = uge %0, 1i8
+            %7: i1 = slt %0, 1i8
+            %8: i1 = sle %0, 1i8
+            %9: i1 = sgt %0, 1i8
+            %10: i1 = sge %0, 1i8
+            black_box %1
+            black_box %2
+            black_box %3
+            black_box %4
+            black_box %5
+            black_box %6
+            black_box %7
+            black_box %8
+            black_box %9
+            black_box %10
         ",
         );
     }
