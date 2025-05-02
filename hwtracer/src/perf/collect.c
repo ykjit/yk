@@ -4,6 +4,7 @@
 // buffer. It would probably be better to either never handle it (for
 // simplicity) or fully handle it.
 
+#include <assert.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -231,7 +232,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
                         memory_order_relaxed);
 
   void *next_sample = data_tmp;
-  while (next_sample != data_tmp_end) {
+  while (next_sample < data_tmp_end) {
     struct perf_event_header *sample_hdr = next_sample;
     struct perf_record_aux_sample *rec_aux_sample;
     switch (sample_hdr->type) {
@@ -257,9 +258,13 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
       // Shouldn't happen with PT.
       errx(EXIT_FAILURE, "Unexpected PERF_RECORD_LOST_SAMPLES sample");
       break;
+    case PERF_RECORD_AUX_OUTPUT_HW_ID:
+      errx(EXIT_FAILURE, "Unimplemented PERF_RECORD_AUX_OUTPUT_HW_ID sample");
+      break;
     }
     next_sample += sample_hdr->size;
   }
+  assert(next_sample == data_tmp_end);
 
   return true;
 }

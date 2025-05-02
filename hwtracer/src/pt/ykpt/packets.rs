@@ -235,7 +235,8 @@ impl ShortTNTPacket {
                 tnts.push(bit == 1)
             }
         }
-        debug_assert!(push); // or we didn't see a stop bit!
+        assert!(push); // or we didn't see a stop bit!
+        assert_ne!(tnts.len(), 0); // No such thing as an empty TNT packet.
         tnts
     }
 }

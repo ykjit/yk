@@ -185,7 +185,7 @@ impl CompressedReturns {
     }
 
     fn push(&mut self, ret: CompRetAddr) {
-        debug_assert!(self.rets.len() <= PT_MAX_COMPRETS);
+        assert!(self.rets.len() <= PT_MAX_COMPRETS);
 
         // The stack is fixed-size. When the stack is full and a new entry is pushed, the oldest
         // entry is evicted.
