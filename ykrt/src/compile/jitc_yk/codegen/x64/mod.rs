@@ -625,10 +625,11 @@ impl<'a> Assemble<'a> {
                     next = iter.next();
                     // We can in some situations generate better code for:
                     //   %1 = load ...
-                    //   %2 = add %1, ...
+                    //   %2 = add %1, <constant>
                     //   *%1 = %2
                     if let Some((b_iidx, Inst::BinOp(b_inst))) = next
                         && b_inst.binop() == BinOp::Add
+                        && self.op_to_zero_ext_i32(&b_inst.rhs(self.m)).is_some()
                         && let Some((s_iidx, Inst::Store(s_inst))) = iter.peek()
                     {
                         // Now we have to check that -- taking into account ptr offsets -- the two
@@ -3918,6 +3919,28 @@ mod tests {
                 ; *%0 = %2
                 and r.32.x, 0xff
                 mov [r.64.y], r.8.x
+                ",
+            false,
+        );
+
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: i8 = param reg
+                %2: i8 = load %0
+                %3: i8 = add %1, %2
+                *%0 = %3
+            ",
+            "
+                ...
+                ; %2: i8 = load %0
+                movzx r.32.x, byte ptr [rax]
+                ; %3: i8 = add %1, %2
+                add r.32.y, r.32.x
+                ; *%0 = %3
+                and r.32.y, 0xff
+                mov [rax], r.8.y
                 ",
             false,
         );
