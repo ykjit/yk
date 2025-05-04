@@ -220,8 +220,7 @@ impl Iterator for PacketParser<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.pt_bytes.is_empty() {
-            let p = self.parse_packet();
-            Some(p)
+            Some(self.parse_packet())
         } else {
             None
         }

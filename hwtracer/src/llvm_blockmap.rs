@@ -25,6 +25,12 @@ pub enum SuccessorKind {
     },
     /// Choice of two successors.
     Conditional {
+        /// The number of conditional branch instructions terminating the block.
+        ///
+        /// This isn't necessarily 1 as you might expect. E.g. LLVM uses the `X86::COND_NE_OR_P`
+        /// and `X86::COND_E_AND_NP` terminators, which are actually two consecutive conditional
+        /// branches.
+        num_cond_brs: u8,
         /// The offset of the "taken" successor.
         taken_target: u64,
         /// The offset of the "not taken" successor, or `None` if control flow is divergent.
@@ -154,12 +160,13 @@ impl BlockMap {
 
                 // Read successor info.
                 // unconditional, target-address
-                // conditional, taken-address, not-taken-address
+                // conditional, num-cond-brs, taken-address, not-taken-address
                 let succ = match crsr.read_u8().unwrap() {
                     0 => SuccessorKind::Unconditional {
                         target: read_maybe_divergent_target(&mut crsr),
                     },
                     1 => SuccessorKind::Conditional {
+                        num_cond_brs: crsr.read_u8().unwrap(),
                         taken_target: crsr.read_u64::<NativeEndian>().unwrap(),
                         not_taken_target: read_maybe_divergent_target(&mut crsr),
                     },

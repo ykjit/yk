@@ -185,7 +185,7 @@ impl CompressedReturns {
     }
 
     fn push(&mut self, ret: CompRetAddr) {
-        debug_assert!(self.rets.len() <= PT_MAX_COMPRETS);
+        assert!(self.rets.len() <= PT_MAX_COMPRETS);
 
         // The stack is fixed-size. When the stack is full and a new entry is pushed, the oldest
         // entry is evicted.
@@ -310,6 +310,39 @@ impl YkPTBlockIterator<'_> {
         Ok(None)
     }
 
+    /// Find where to go next based on whether the trace took the branch(es) or not.
+    fn follow_conditional_successor(
+        &mut self,
+        num_cond_brs: u8,
+        taken_target: u64,
+        not_taken_target: Option<u64>,
+    ) -> Result<u64, IteratorError> {
+        assert_ne!(num_cond_brs, 0);
+        // Blocks with more than 2 terminating conditional branch instructions aren't an issue, but
+        // it would be informative to know if/when that happens.
+        assert!(num_cond_brs <= 2);
+
+        // Control flow went to `taken_target` if any of the conditional branches were taken.
+        let mut taken = false;
+        for _ in 0..num_cond_brs {
+            if self.tnts.is_empty() {
+                self.seek_tnt()?;
+            }
+            if self.tnts.pop_front().unwrap() {
+                taken = true;
+                break;
+            }
+        }
+        if taken {
+            Ok(taken_target)
+        } else if let Some(ntt) = not_taken_target {
+            Ok(ntt)
+        } else {
+            // Divergent control flow.
+            todo!();
+        }
+    }
+
     /// Follow the successor of the block described by the blockmap entry `ent`.
     fn follow_blockmap_successor(&mut self, ent: &BlockMapEntry) -> Result<Block, IteratorError> {
         match ent.successor() {
@@ -323,26 +356,15 @@ impl YkPTBlockIterator<'_> {
                 }
             }
             SuccessorKind::Conditional {
+                num_cond_brs,
                 taken_target,
                 not_taken_target,
             } => {
-                // If we don't have any TNT choices buffered, get more.
-                if self.tnts.is_empty() {
-                    self.seek_tnt()?;
-                }
-
-                // Find where to go next based on whether the trace took the branch or not.
-                //
-                // The `unwrap()` is guaranteed to succeed because the above call to
-                // `seek_tnt()` has populated `self.tnts()`.
-                let target_off = if self.tnts.pop_front().unwrap() {
-                    *taken_target
-                } else if let Some(ntt) = not_taken_target {
-                    *ntt
-                } else {
-                    // Divergent control flow.
-                    todo!();
-                };
+                let target_off = self.follow_conditional_successor(
+                    *num_cond_brs,
+                    *taken_target,
+                    *not_taken_target,
+                )?;
                 self.cur_loc = ObjLoc::MainObj(target_off);
                 self.lookup_block_from_main_bin_offset(target_off)
             }
@@ -767,22 +789,20 @@ impl YkPTBlockIterator<'_> {
             // So we don't let (e.g.) packets carrying a target ip inside a PSB+ update
             // `self.cur_loc`.
             if pkt.kind() == PacketKind::PSB {
-                pkt = self.skip_psb_plus()?;
-
-                // FIXME: Why does clearing the compressed return stack here (as we should) cause
-                // non-deterministic crashes?
-                //
                 // Section 33.3.7 of the Intel Manual explains that:
                 //
-                //   "the decoder should never need to retain any information (e.g., LastIP, call
-                //   stack, compound packet event) across a PSB; all compound packet events will be
-                //   completed before a PSB, and any compression state will be reset"
-                //
-                // The "compression state" it refers to is `self.comprets`, yet:
-                //
-                //   self.comprets.rets.clear();
-                //
-                // will causes us to to (sometimes) pop from an empty return stack.
+                //   "the decoder should never need to retain any information (e.g., LastIP,
+                //   call stack, compound packet event) across a PSB; all compound packet
+                //   events will be completed before a PSB, and any compression state will
+                //   be reset"
+                self.cur_loc = ObjLoc::OtherObjOrUnknown(None);
+                self.comprets.rets.clear();
+                assert!(self.tnts.is_empty());
+
+                pkt = self.skip_psb_plus()?;
+                if pkt.kind() == PacketKind::PSB {
+                    todo!("psb+ followed by psb+");
+                }
             }
 
             // If it's a MODE packet, remember we've seen it. The meaning of TIP and FUP packets
