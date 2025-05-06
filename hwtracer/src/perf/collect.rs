@@ -93,7 +93,8 @@ impl ThreadTracer for PerfThreadTracer {
         let stop_rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut stop_cerr) };
 
         // Even if stopping the collecor fails, we still have to free the collector to ensure that
-        // no resources leak.
+        // no resources leak. Critically, we must ensure that the perf fd is closed so that this
+        // thread is able to trace again!
         let mut free_cerr = PerfPTCError::new();
         let free_rc = unsafe { hwt_perf_free_collector(self.ctx, &mut free_cerr) };
 
