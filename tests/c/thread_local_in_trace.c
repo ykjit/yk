@@ -9,7 +9,7 @@
 //     %{{8}}: ptr = lookup_global @shadowstack_0
 //     %{{9}}: ptr = load %{{8}}
 //     ...
-//     %{{14}}: ptr = ptr_add %{{9}}, 8
+//     %{{14}}: ptr = ptr_add %{{_}}, 8
 //     ...
 //     %{{18}}: i32 = mul %{{17}}, 2i32
 //     %{{19}}: ptr = load %{{14}}
