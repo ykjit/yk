@@ -1,9 +1,5 @@
 #define _GNU_SOURCE
 
-// FIXME: This collector deals with overflow in the AUX but not the DATA
-// buffer. It would probably be better to either never handle it (for
-// simplicity) or fully handle it.
-
 #include <assert.h>
 #include <err.h>
 #include <errno.h>
@@ -211,7 +207,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
   __u64 head_monotonic = atomic_load_explicit((_Atomic __u64 *)&hdr->data_head,
                                               memory_order_acquire);
   __u64 size = hdr->data_size;        // No atomic load. Constant value.
-  __u64 head = head_monotonic % size; // Head must be manually wrapped.
+  __u64 head = head_monotonic % size;
   __u64 tail_monotonic = atomic_load_explicit((_Atomic __u64 *)&hdr->data_tail,
                                     memory_order_relaxed);
   __u64 tail = tail_monotonic % size;
