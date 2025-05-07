@@ -2,6 +2,8 @@
 
 set -eu
 
+ROOT_DIR=$(realpath $(pwd))
+
 # What git commit hash of yklua & ykcbf will we test in buildbot?
 YKLUA_REPO="https://github.com/ykjit/yklua.git"
 YKLUA_COMMIT="484deee46c9a26ca32434f7fc0b992b97cbcd855"
@@ -40,9 +42,9 @@ git log --pretty=format:%H -n 100 --no-show-signature origin/main | \
 cd ..
 
 # Install rustup.
-CARGO_HOME="$(pwd)/.cargo"
+CARGO_HOME="${ROOT_DIR}/.cargo"
 export CARGO_HOME
-RUSTUP_HOME="$(pwd)/.rustup"
+RUSTUP_HOME="${ROOT_DIR}/.rustup"
 export RUSTUP_HOME
 export RUSTUP_INIT_SKIP_PATH_CHECK="yes"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh
@@ -108,7 +110,7 @@ if [ "$cached_ykllvm" -eq 0 ]; then
     cmake --build .
     cmake --install .
 fi
-YKLLVM_BIN_DIR=$(pwd)/../inst/bin
+YKLLVM_BIN_DIR=${ROOT_DIR}/ykllvm/inst/bin
 export YKB_YKLLVM_BIN_DIR="${YKLLVM_BIN_DIR}"
 cd ../../
 
@@ -163,7 +165,7 @@ for _ in $(seq 10); do
 done
 
 # test yklua/hwt in debug mode.
-PATH=$(pwd)/bin:${PATH} YK_BUILD_TYPE=debug YKB_TRACER=hwt test_yklua
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug YKB_TRACER=hwt test_yklua
 
 for tracer in ${TRACERS}; do
     if [ "$tracer" = "hwt" ]; then
@@ -232,7 +234,7 @@ for tracer in $TRACERS; do
 
     if [ "${tracer}" = "hwt" ]; then
         # test yklua/hwt in release mode.
-        PATH=$(pwd)/bin:${PATH} YK_BUILD_TYPE=release YKB_TRACER=hwt test_yklua
+        PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release YKB_TRACER=hwt test_yklua
 
         # Do a quick run of the benchmark suite as a smoke test.
         pipx install rebench
@@ -261,7 +263,7 @@ git clone --depth=1 "$YKCBF_REPO"
 cd ykcbf
 git fetch --depth=1 origin "$YKCBF_COMMIT"
 git checkout "$YKCBF_COMMIT"
-PATH=$(pwd)/../bin:${PATH} YK_BUILD_TYPE=debug make
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug make
 ./bf_simple_yk lang_tests/bench.bf
 ./bf_simple_yk lang_tests/hanoi-opt.bf
 cd ..
