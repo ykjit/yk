@@ -1374,6 +1374,11 @@ impl LSRegAlloc<'_> {
                                     ; bt Rd(reg.code()), 0
                                     ; setc BYTE [rbp - off]
                                 );
+                            } else if *ext == RegExtension::Undefined {
+                                dynasm!(asm
+                                    ; and Rd(reg.code()), 0x01
+                                    ; mov BYTE [rbp - off], Rb(reg.code())
+                                );
                             } else {
                                 todo!();
                             }
