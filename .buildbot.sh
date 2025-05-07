@@ -216,15 +216,6 @@ cargo_deny_mdbook_pid=$!
 
 # We now want to test building with `--release`.
 
-if [ "$cached_ykllvm" -eq 0 ]; then
-    # If we don't have a cached copy of ykllvm, we also take this as an
-    # opportunity to check that yk can build ykllvm, which requires unsetting
-    # YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above
-    # but with `--release`.
-    unset YKB_YKLLVM_BIN_DIR
-    export YKB_YKLLVM_BUILD_ARGS="define:CMAKE_C_COMPILER=/usr/bin/clang,define:CMAKE_CXX_COMPILER=/usr/bin/clang++"
-fi
-
 for tracer in $TRACERS; do
     export YKB_TRACER="${tracer}"
     echo "===> Running ${tracer} tests"
