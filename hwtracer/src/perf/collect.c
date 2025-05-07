@@ -250,6 +250,14 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
     case PERF_RECORD_AUX_OUTPUT_HW_ID:
       errx(EXIT_FAILURE, "Unimplemented PERF_RECORD_AUX_OUTPUT_HW_ID sample");
       break;
+    case PERF_RECORD_ITRACE_START:
+      // These sample kinds are uninteresting to us.
+      break;
+    default:
+      // In the interest of exhaustive matching, catch anything we've not seen
+      // or thought about before and handle them if/when they arise.
+      errx(EXIT_FAILURE, "unhandled sample type: %d\n", sample_hdr->type);
+      break;
     }
     next_sample += sample_hdr->size;
   }
