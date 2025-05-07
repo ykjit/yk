@@ -197,8 +197,9 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
                                               memory_order_acquire);
   __u64 size = hdr->data_size;        // No atomic load. Constant value.
   __u64 head = head_monotonic % size; // Head must be manually wrapped.
-  __u64 tail = atomic_load_explicit((_Atomic __u64 *)&hdr->data_tail,
+  __u64 tail_monotonic = atomic_load_explicit((_Atomic __u64 *)&hdr->data_tail,
                                     memory_order_relaxed);
+  __u64 tail = tail_monotonic % size;
 
   // Copy samples out, removing wrap in the process.
   void *data_tmp_end = data_tmp;
@@ -213,7 +214,10 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
     memcpy(data_tmp + size - tail, data, head);
     data_tmp_end += head;
   }
-  atomic_store_explicit((_Atomic __u64 *)&hdr->data_tail, head,
+
+  // Inform the kernel that we've read up until the head. We write back the
+  // *unwrapped* value.
+  atomic_store_explicit((_Atomic __u64 *)&hdr->data_tail, head_monotonic,
                         memory_order_relaxed);
 
   void *next_sample = data_tmp;
@@ -265,9 +269,10 @@ bool read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
   __u64 head_monotonic = atomic_load_explicit((_Atomic __u64 *)&hdr->aux_head,
                                               memory_order_acquire);
   __u64 size = hdr->aux_size;         // No atomic load. Constant value.
-  __u64 head = head_monotonic % size; // Head must be manually wrapped.
-  __u64 tail = atomic_load_explicit((_Atomic __u64 *)&hdr->aux_tail,
+  __u64 head = head_monotonic % size;
+  __u64 tail_monotonic = atomic_load_explicit((_Atomic __u64 *)&hdr->aux_tail,
                                     memory_order_relaxed);
+  __u64 tail = tail_monotonic % size;
 
   // Figure out how much more space we need in the trace storage buffer.
   __u64 new_data_size;
@@ -298,7 +303,10 @@ bool read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
     memcpy(trace->buf.p + trace->len, aux_buf, head);
     trace->len += head;
   }
-  atomic_store_explicit((_Atomic __u64 *)&hdr->aux_tail, head,
+
+  // Inform the kernel that we've read up until the head. We write back the
+  // *unwrapped* value.
+  atomic_store_explicit((_Atomic __u64 *)&hdr->aux_tail, head_monotonic,
                         memory_order_release);
   return true;
 }
