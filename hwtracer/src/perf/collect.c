@@ -1,9 +1,5 @@
 #define _GNU_SOURCE
 
-// FIXME: This collector deals with overflow in the AUX but not the DATA
-// buffer. It would probably be better to either never handle it (for
-// simplicity) or fully handle it.
-
 #include <assert.h>
 #include <err.h>
 #include <errno.h>
@@ -211,7 +207,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
   __u64 head_monotonic = atomic_load_explicit((_Atomic __u64 *)&hdr->data_head,
                                               memory_order_acquire);
   __u64 size = hdr->data_size;        // No atomic load. Constant value.
-  __u64 head = head_monotonic % size; // Head must be manually wrapped.
+  __u64 head = head_monotonic % size;
   __u64 tail_monotonic = atomic_load_explicit((_Atomic __u64 *)&hdr->data_tail,
                                     memory_order_relaxed);
   __u64 tail = tail_monotonic % size;
@@ -645,6 +641,24 @@ bool hwt_perf_start_collector(struct hwt_perf_ctx *tr_ctx,
                               struct hwt_cerror *err) {
   int clean_sem = 0, clean_thread = 0;
   int ret = true;
+
+  // When a tracing session bombs out prematurely (e.g. PT overflow), it can
+  // leave the ring buffers in an inconsistent state meaning that they can't be
+  // re-used properly. Here we reset the tails to the heads thus resetting the
+  // ring buffers to the empty state.
+  //
+  // Data buffer:
+  struct perf_event_mmap_page *base_header = tr_ctx->base_buf;
+  __u64 data_head_monotonic = atomic_load_explicit(
+      (_Atomic __u64 *)&base_header->data_head,
+      memory_order_acquire);
+  atomic_store_explicit((_Atomic __u64 *) &base_header->data_tail,
+      data_head_monotonic, memory_order_relaxed);
+  // AUX buffer:
+  __u64 aux_head_monotonic = atomic_load_explicit(
+      (_Atomic __u64 *)&base_header->aux_head, memory_order_acquire);
+  atomic_store_explicit((_Atomic __u64 *) &base_header->aux_tail,
+      aux_head_monotonic, memory_order_relaxed);
 
   // A pipe to signal the trace thread to stop.
   //
