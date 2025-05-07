@@ -821,7 +821,7 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .wrapping_add(&ArbBitInt::from_usize( y)).to_sign_ext_i16(),
-                i16::try_from(x.wrapping_add(y)).ok()
+                i16::try_from(x.wrapping_add(y) as i64).ok()
             );
 
             // wrapping_sub
@@ -829,13 +829,13 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .wrapping_sub(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
-                i8::try_from(x.wrapping_sub(y)).ok()
+                i8::try_from(x.wrapping_sub(y) as i64).ok()
             );
             // i16
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .wrapping_sub(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
-                i16::try_from(x.wrapping_sub(y)).ok()
+                i16::try_from(x.wrapping_sub(y) as i64).ok()
             );
 
             // wrapping_mul
@@ -843,13 +843,13 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .wrapping_mul(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
-                i8::try_from(x.wrapping_mul(y)).ok()
+                i8::try_from(x.wrapping_mul(y) as i64).ok()
             );
             // i16
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .wrapping_mul(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
-                i16::try_from(x.wrapping_mul(y)).ok()
+                i16::try_from(x.wrapping_mul(y) as i64).ok()
             );
 
             // bitand
@@ -857,13 +857,13 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .bitand(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
-                i8::try_from(x.bitand(y)).ok()
+                i8::try_from(x.bitand(y) as i64).ok()
             );
             // i16
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .bitand(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
-                i16::try_from(x.bitand(y)).ok()
+                i16::try_from(x.bitand(y) as i64).ok()
             );
 
             // bitor
@@ -871,13 +871,13 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .bitor(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
-                i8::try_from(x.bitor(y)).ok()
+                i8::try_from(x.bitor(y) as i64).ok()
             );
             // i16
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .bitor(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
-                i16::try_from(x.bitor(y)).ok()
+                i16::try_from(x.bitor(y) as i64).ok()
             );
 
             // bitxor
@@ -885,13 +885,13 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .bitxor(&ArbBitInt::from_usize(y)).to_sign_ext_i8(),
-                i8::try_from(x.bitxor(y)).ok()
+                i8::try_from(x.bitxor(y) as i64).ok()
             );
             // i16
             assert_eq!(
                 ArbBitInt::from_usize(x)
                     .bitxor(&ArbBitInt::from_usize(y)).to_sign_ext_i16(),
-                i16::try_from(x.bitxor(y)).ok()
+                i16::try_from(x.bitxor(y) as i64).ok()
             );
         }
 
