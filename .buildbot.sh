@@ -238,12 +238,16 @@ for tracer in $TRACERS; do
 
         # Do a quick run of the benchmark suite as a smoke test.
         pipx install rebench
-        git clone https://github.com/ykjit/yk-benchmarks
+        git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/ykjit/yk-benchmarks
         cd yk-benchmarks
         ln -s ../yklua .
         sed -e 's/executions: \[Lua, YkLua\]/executions: [YkLua]/' \
             -e 's/executable: yklua/executable: lua/' \
             rebench.conf > rebench2.conf
+        # Initialise extra benchmarks.
+        cd suites/realworld/Lua/
+        sh setup.sh
+        cd ../../../
         ~/.local/bin/rebench --quick --no-denoise -c rebench2.conf
         cd ..
     fi
