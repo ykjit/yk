@@ -3377,10 +3377,6 @@ impl CompiledTrace for X64CompiledTrace {
         &self.safepoint
     }
 
-    fn mt(&self) -> &Arc<MT> {
-        &self.mt
-    }
-
     fn entry(&self) -> *const libc::c_void {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
