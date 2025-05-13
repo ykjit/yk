@@ -532,45 +532,47 @@ impl MT {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
                 };
-                match Arc::clone(&tracer).start_recorder() {
-                    Ok(tt) => MTThread::with_borrow_mut(|mtt| {
-                        mtt.push_tstate(MTThreadState::Tracing {
-                            hl,
-                            thread_tracer: tt,
-                            promotions: Vec::new(),
-                            debug_strs: Vec::new(),
-                            frameaddr,
-                            seen_hls: HashSet::new(),
-                        });
-                    }),
-                    Err(e) => {
-                        // FIXME: start_recorder needs a way of signalling temporary errors.
-                        #[cfg(tracer_hwt)]
-                        match e.downcast::<hwtracer::HWTracerError>() {
-                            Ok(e) => {
-                                if let hwtracer::HWTracerError::Temporary(_) = *e {
-                                    let mut lk = hl.lock();
-                                    debug_assert_matches!(lk.kind, HotLocationKind::Tracing);
-                                    lk.tracecompilation_error(self);
-                                    // FIXME: This is stupidly brutal.
-                                    lk.kind = HotLocationKind::DontTrace;
-                                    drop(lk);
-                                    yklog!(
-                                        self.log,
-                                        Verbosity::Warning,
-                                        "start-tracing-abort",
-                                        loc.hot_location()
-                                    );
-                                } else {
-                                    todo!("{e:?}");
-                                }
-                            }
-                            Err(e) => todo!("{e:?}"),
+                MTThread::with_borrow_mut(|mtt| {
+                    match Arc::clone(&tracer).start_recorder() {
+                        Ok(tt) => {
+                            mtt.push_tstate(MTThreadState::Tracing {
+                                hl,
+                                thread_tracer: tt,
+                                promotions: Vec::new(),
+                                debug_strs: Vec::new(),
+                                frameaddr,
+                                seen_hls: HashSet::new(),
+                            });
                         }
-                        #[cfg(not(tracer_hwt))]
-                        todo!("{e:?}");
+                        Err(e) => {
+                            // FIXME: start_recorder needs a way of signalling temporary errors.
+                            #[cfg(tracer_hwt)]
+                            match e.downcast::<hwtracer::HWTracerError>() {
+                                Ok(e) => {
+                                    if let hwtracer::HWTracerError::Temporary(_) = *e {
+                                        let mut lk = hl.lock();
+                                        debug_assert_matches!(lk.kind, HotLocationKind::Tracing);
+                                        lk.tracecompilation_error(self);
+                                        // FIXME: This is stupidly brutal.
+                                        lk.kind = HotLocationKind::DontTrace;
+                                        drop(lk);
+                                        yklog!(
+                                            self.log,
+                                            Verbosity::Warning,
+                                            "start-tracing-abort",
+                                            loc.hot_location()
+                                        );
+                                    } else {
+                                        todo!("{e:?}");
+                                    }
+                                }
+                                Err(e) => todo!("{e:?}"),
+                            }
+                            #[cfg(not(tracer_hwt))]
+                            todo!("{e:?}");
+                        }
                     }
-                }
+                });
             }
             TransitionControlPoint::StopTracing(ctrid, connector_tid) => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -1083,19 +1085,17 @@ impl MT {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
                 };
-                match Arc::clone(&tracer).start_recorder() {
-                    Ok(tt) => MTThread::with_borrow_mut(|mtt| {
-                        mtt.push_tstate(MTThreadState::Tracing {
-                            hl,
-                            thread_tracer: tt,
-                            promotions: Vec::new(),
-                            debug_strs: Vec::new(),
-                            frameaddr,
-                            seen_hls: HashSet::new(),
-                        })
+                MTThread::with_borrow_mut(|mtt| match Arc::clone(&tracer).start_recorder() {
+                    Ok(tt) => mtt.push_tstate(MTThreadState::Tracing {
+                        hl,
+                        thread_tracer: tt,
+                        promotions: Vec::new(),
+                        debug_strs: Vec::new(),
+                        frameaddr,
+                        seen_hls: HashSet::new(),
                     }),
                     Err(e) => todo!("{e:?}"),
-                }
+                });
             }
         }
     }
