@@ -1254,7 +1254,7 @@ impl MTThread {
     ///
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
-    pub(crate) fn running_trace(&self, ctrid: TraceId) -> Arc<dyn CompiledTrace> {
+    pub(crate) fn compiled_trace(&self, ctrid: TraceId) -> Arc<dyn CompiledTrace> {
         for tstate in self.tstate.iter().rev() {
             if let MTThreadState::Executing { ctr } = tstate {
                 return Arc::clone(&ctr.mt().as_ref().compiled_traces.lock()[&ctrid]);
