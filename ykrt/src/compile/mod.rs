@@ -87,9 +87,6 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// Return this trace's [TraceId].
     fn ctrid(&self) -> TraceId;
 
-    /// Return the [MT] instance this compiled trace is associated with.
-    fn mt(&self) -> &Arc<MT>;
-
     fn safepoint(&self) -> &Option<DeoptSafepoint>;
 
     /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
@@ -158,10 +155,6 @@ mod compiled_trace_testing {
             TraceId::testing()
         }
 
-        fn mt(&self) -> &Arc<MT> {
-            panic!();
-        }
-
         fn safepoint(&self) -> &Option<DeoptSafepoint> {
             todo!()
         }
@@ -223,10 +216,6 @@ mod compiled_trace_testing {
 
     impl CompiledTrace for CompiledTraceTestingBasicTransitions {
         fn ctrid(&self) -> TraceId {
-            panic!();
-        }
-
-        fn mt(&self) -> &Arc<MT> {
             panic!();
         }
 
