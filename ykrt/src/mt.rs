@@ -511,7 +511,6 @@ impl MT {
                 MTThread::with_borrow_mut(|mtt| {
                     mtt.push_tstate(MTThreadState::Executing {
                         mt: Arc::clone(self),
-                        ctr,
                     });
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
@@ -1169,23 +1168,8 @@ enum MTThreadState {
         /// at the same point that we started.
         frameaddr: *mut c_void,
     },
-    /// This thread is executing a trace. The `dyn CompiledTrace` allows another thread to tell
-    /// whether the thread that started tracing a [Location] is still alive or not by inspecting
-    /// its strong count (if the strong count is equal to 1 then the thread died while tracing).
-    /// Note that this relies on thread local storage dropping the [MTThread] instance and (by
-    /// implication) dropping the [Arc] and decrementing its strong count. Unfortunately, there is
-    /// no guarantee that thread local storage will be dropped when a thread dies (and there is
-    /// also significant platform variation in regard to dropping thread locals), so this mechanism
-    /// can't be fully relied upon: however, we can't monitor thread death in any other reasonable
-    /// way, so this will have to do.
     Executing {
         mt: Arc<MT>,
-        /// The root trace which started execution off. Note: the *actual* [CompiledTrace]
-        /// currently executing might not be *this* [CompiledTrace] (e.g. it could be a sidetrace).
-        /// However, whatever trace is executing will guarantee to have originated from the same
-        /// [MT] instance.
-        #[allow(unused)]
-        ctr: Arc<dyn CompiledTrace>,
     },
 }
 
@@ -1261,7 +1245,7 @@ impl MTThread {
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn compiled_trace(&self, ctrid: TraceId) -> Arc<dyn CompiledTrace> {
         for tstate in self.tstate.iter().rev() {
-            if let MTThreadState::Executing { mt, .. } = tstate {
+            if let MTThreadState::Executing { mt } = tstate {
                 return Arc::clone(&mt.compiled_traces.lock()[&ctrid]);
             }
         }
