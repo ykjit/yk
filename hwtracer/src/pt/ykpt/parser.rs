@@ -229,48 +229,7 @@ impl Iterator for PacketParser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::packets::*, PacketParser};
-    use crate::{trace_closure, work_loop, TracerBuilder, TracerKind};
-
-    /// Parse the packets of a small trace, checking the basic structure of the decoded trace.
-    #[test]
-    fn parse_small_trace() {
-        let tc = TracerBuilder::new()
-            .tracer_kind(TracerKind::PT(crate::perf::PerfCollectorConfig::default()))
-            .build()
-            .unwrap();
-        let trace = trace_closure(&tc, || work_loop(3));
-
-        #[derive(Clone, Copy, Debug)]
-        enum TestState {
-            /// Start here.
-            Init,
-            /// Saw the start of the PSB+ sequence.
-            SawPSBPlusStart,
-            /// Saw the end of the PSB+ sequence.
-            SawPSBPlusEnd,
-            /// Saw the packet generation enable packet.
-            SawPacketGenEnable,
-            /// Saw a TNT packet.
-            SawTNT,
-            /// Saw the packet generation disable packet.
-            SawPacketGenDisable,
-        }
-
-        let mut ts = TestState::Init;
-        for pkt in PacketParser::new(trace.bytes()) {
-            ts = match (ts, pkt.unwrap().kind()) {
-                (TestState::Init, PacketKind::PSB) => TestState::SawPSBPlusStart,
-                (TestState::SawPSBPlusStart, PacketKind::PSBEND) => TestState::SawPSBPlusEnd,
-                (TestState::SawPSBPlusEnd, PacketKind::TIPPGE) => TestState::SawPacketGenEnable,
-                (TestState::SawPacketGenEnable, PacketKind::ShortTNT)
-                | (TestState::SawPacketGenEnable, PacketKind::LongTNT) => TestState::SawTNT,
-                (TestState::SawTNT, PacketKind::TIPPGD) => TestState::SawPacketGenDisable,
-                (ts, _) => ts,
-            };
-        }
-        assert!(matches!(ts, TestState::SawPacketGenDisable));
-    }
+    use super::super::packets::*;
 
     /// Test target IP decompression when the `IPBytes = 0b000`.
     #[test]

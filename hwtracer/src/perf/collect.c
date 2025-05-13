@@ -38,6 +38,8 @@
 // The bit in the IA32_RTIT_CTL MSR that disables compressed returns.
 #define IA32_RTIT_CTL_DISRETC 1 << 11
 
+void get_tracing_extent(char **, size_t *, size_t *);
+
 enum hwt_cerror_kind {
   hwt_cerror_unused = 0,
   hwt_cerror_unknown = 1,
@@ -455,7 +457,33 @@ static int open_perf(size_t aux_bufsize, struct hwt_cerror *err) {
   ret = syscall(SYS_perf_event_open, &attr, target_tid, -1, -1, 0);
   if (ret == -1) {
     hwt_set_cerr(err, hwt_cerror_errno, errno);
-    return ret;
+    goto clean;
+  }
+
+  // `ret` now holds an open perf fd.
+  //
+  // Now configure the address range to trace. We do this so that we don't trace
+  // (and later, map) externally compiled code that we could never build traces
+  // for anyway.
+  char *fltr_obj = NULL;
+  size_t fltr_base_off = 0, fltr_size = 0;
+  get_tracing_extent(&fltr_obj, &fltr_base_off, &fltr_size);
+
+  char f_str[512];
+  if ((size_t) snprintf(f_str, sizeof(f_str), "filter 0x%zu/%zu@%s",
+        fltr_base_off, fltr_size, fltr_obj) >= sizeof(f_str))
+  {
+    hwt_set_cerr(err, hwt_cerror_unknown, 0);
+    close(ret);
+    ret = -1;
+    goto clean;
+  }
+
+  if (ioctl(ret, PERF_EVENT_IOC_SET_FILTER, f_str) == -1) {
+    hwt_set_cerr(err, hwt_cerror_errno, errno);
+    close(ret);
+    ret = -1;
+    goto clean;
   }
 
 clean:
