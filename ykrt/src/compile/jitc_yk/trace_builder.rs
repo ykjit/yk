@@ -457,7 +457,19 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 let load = jit_ir::LookupGlobalInst::new(self.handle_global(*gd_idx)?)?;
                 self.jit_mod.push_and_make_operand(load.into())
             }
-            _ => todo!("{}", op.display(self.aot_mod)),
+            aot_ir::Operand::Func(fidx) => {
+                // The JIT IR doesn't have an explicit notion of a function operand. We reduce it
+                // to a constant pointer, similarly to how LLVM does.
+                let aot_func = self.aot_mod.func(*fidx);
+                let fname = aot_func.name();
+                use ykaddr::addr::symbol_to_ptr;
+                let vaddr = symbol_to_ptr(fname).unwrap();
+                let cidx = self
+                    .jit_mod
+                    .insert_const(jit_ir::Const::Ptr(vaddr as usize))
+                    .unwrap();
+                Ok(jit_ir::Operand::Const(cidx))
+            }
         }
     }
 
