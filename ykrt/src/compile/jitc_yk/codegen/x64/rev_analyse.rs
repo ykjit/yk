@@ -50,11 +50,6 @@ pub(crate) struct RevAnalyse<'a> {
     /// instruction %1, we would like %0 to already be in rax; when generating code for instruction
     /// %2, we would like %) to already be in rdi".
     reg_hints: Vec<Vec<(InstIdx, Register)>>,
-    /// For each instruction, record whether we know whether it should spill to in advance.
-    /// Currently this only happens for instructions referenced in the header/body end, where we
-    /// have to put the value in a specific place on the stack before we loop/jump. `u32::MAX` is
-    /// used to record "there is no predetermined spill for this instruction".
-    spill_to: Vec<u32>,
 }
 
 impl<'a> RevAnalyse<'a> {
@@ -66,7 +61,6 @@ impl<'a> RevAnalyse<'a> {
             used_insts: Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1),
             def_use: vec![vec![]; m.insts_len()],
             reg_hints: vec![vec![]; m.insts_len()],
-            spill_to: vec![u32::MAX; m.insts_len()],
         }
     }
 
@@ -103,22 +97,6 @@ impl<'a> RevAnalyse<'a> {
                             _ => break,
                         }
                     }
-
-                    assert_eq!(
-                        self.m.trace_header_start().len(),
-                        self.m.trace_header_end().len()
-                    );
-                    for i in 0..self.m.trace_header_start().len() {
-                        let Inst::Param(pinst) = self.m.inst(InstIdx::unchecked_from(i)) else {
-                            panic!()
-                        };
-                        if let yksmp::Location::Indirect(_, off, _) = self.m.param(pinst.paramidx())
-                            && let Operand::Var(iidx) = self.m.trace_header_end()[i].unpack(self.m)
-                        {
-                            assert_eq!(self.spill_to[usize::from(iidx)], u32::MAX);
-                            self.spill_to[usize::from(iidx)] = u32::try_from(*off).unwrap();
-                        }
-                    }
                 }
             }
             TraceKind::HeaderAndBody => {
@@ -131,7 +109,7 @@ impl<'a> RevAnalyse<'a> {
                     .downcast::<X64CompiledTrace>()
                     .unwrap();
                 let vlocs = ctr.entry_vars();
-                // Connector traces don't have a trace body since we don't apply loop peeling and thus use
+                // Side-traces don't have a trace body since we don't apply loop peeling and thus use
                 // `trace_header_end` to store the jump variables.
                 debug_assert_eq!(vlocs.len(), self.m.trace_header_end().len());
 
@@ -140,22 +118,6 @@ impl<'a> RevAnalyse<'a> {
                 for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
                     if let VarLocation::Register(reg) = *vloc {
                         self.push_reg_hint_fixed(jtend_iidx, jump_op.unpack(self.m), reg);
-                    }
-                }
-
-                assert_eq!(
-                    self.m.trace_header_start().len(),
-                    self.m.trace_header_end().len()
-                );
-                for i in 0..self.m.trace_header_start().len() {
-                    let Inst::Param(pinst) = self.m.inst(InstIdx::unchecked_from(i)) else {
-                        panic!()
-                    };
-                    if let yksmp::Location::Indirect(_, off, _) = self.m.param(pinst.paramidx())
-                        && let Operand::Var(iidx) = self.m.trace_header_end()[i].unpack(self.m)
-                    {
-                        assert_eq!(self.spill_to[usize::from(iidx)], u32::MAX);
-                        self.spill_to[usize::from(iidx)] = u32::try_from(-*off).unwrap();
                     }
                 }
             }
@@ -174,16 +136,6 @@ impl<'a> RevAnalyse<'a> {
                 for (vloc, jump_op) in vlocs.iter().zip(self.m.trace_header_end()) {
                     if let VarLocation::Register(reg) = *vloc {
                         self.push_reg_hint_fixed(stend_iidx, jump_op.unpack(self.m), reg);
-                    }
-                }
-
-                assert_eq!(vlocs.len(), self.m.trace_header_end().len());
-                for (i, vloc) in vlocs.iter().enumerate() {
-                    if let VarLocation::Stack { frame_off, .. } = vloc
-                        && let Operand::Var(iidx) = self.m.trace_header_end()[i].unpack(self.m)
-                    {
-                        assert_eq!(self.spill_to[usize::from(iidx)], u32::MAX);
-                        self.spill_to[usize::from(iidx)] = *frame_off;
                     }
                 }
             }
@@ -233,16 +185,6 @@ impl<'a> RevAnalyse<'a> {
                 break;
             }
             self.analyse(iidx, inst);
-        }
-
-        assert_eq!(self.m.trace_body_end().len(), header_end_vlocs.len());
-        for (i, vloc) in header_end_vlocs.iter().enumerate() {
-            if let VarLocation::Stack { frame_off, .. } = vloc
-                && let Operand::Var(iidx) = self.m.trace_body_end()[i].unpack(self.m)
-            {
-                assert_eq!(self.spill_to[usize::from(iidx)], u32::MAX);
-                self.spill_to[usize::from(iidx)] = *frame_off;
-            }
         }
     }
 
@@ -331,16 +273,6 @@ impl<'a> RevAnalyse<'a> {
         self.reg_hints[usize::from(query_iidx)]
             .last()
             .map(|(_, y)| *y)
-    }
-
-    /// Return the predetermined stack location for `iidx` to be spilled to, if one is known.
-    pub(super) fn spill_to(&self, iidx: InstIdx) -> Option<u32> {
-        let x = self.spill_to[usize::from(iidx)];
-        if x == u32::MAX {
-            None
-        } else {
-            Some(x)
-        }
     }
 
     /// Record that `use_iidx` is used at instruction `def_iidx`.
