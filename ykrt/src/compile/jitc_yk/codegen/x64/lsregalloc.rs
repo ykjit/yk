@@ -414,12 +414,7 @@ impl LSRegAlloc<'_> {
     /// Forcibly obtain a register, spilling whatever's in there, even if it is "used" by the
     /// current instruction. This is suitable for guards / calls / etc. The register returned is
     /// guaranteed not to be in the set `avoid`.
-    fn force_tmp_register(
-        &mut self,
-        asm: &mut Assembler,
-        cur_iidx: InstIdx,
-        avoid: RegSet<Rq>,
-    ) -> Rq {
+    fn force_tmp_register(&mut self, asm: &mut Assembler, avoid: RegSet<Rq>) -> Rq {
         for (reg_i, rs) in self.gp_reg_states.iter().enumerate() {
             if avoid.is_set(GP_REGS[reg_i]) {
                 continue;
@@ -459,7 +454,7 @@ impl LSRegAlloc<'_> {
 
         // The not happy case: we have to pick a random register and spill it.
         let reg = avoid.find_empty().unwrap();
-        self.force_spill_gp(asm, cur_iidx, false, reg);
+        self.force_spill_gp(asm, false, reg);
         self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
         self.gp_regset.unset(reg);
         reg
@@ -470,28 +465,32 @@ impl LSRegAlloc<'_> {
     pub(super) fn tmp_registers_for_guard(
         &mut self,
         asm: &mut Assembler,
-        iidx: InstIdx,
+        _iidx: InstIdx,
         cond: Operand,
     ) -> (Rq, Rq) {
         let cond_reg = match self.find_op_in_gp_reg(&cond) {
             Some(x) => x,
             None => {
-                let reg = self.force_tmp_register(asm, iidx, RegSet::with_gp_reserved());
+                let reg = self.force_tmp_register(asm, RegSet::with_gp_reserved());
                 self.put_input_in_gp_reg(asm, &cond, reg, RegExtension::Undefined);
                 reg
             }
         };
         let mut avoid = RegSet::with_gp_reserved();
         avoid.set(cond_reg);
-        let patch_reg = self.force_tmp_register(asm, iidx, avoid);
+        let patch_reg = self.force_tmp_register(asm, avoid);
         assert_ne!(cond_reg, patch_reg);
         (cond_reg, patch_reg)
     }
 
     /// Return the `patch register` a combined icmp/guard instruction needs. This function
     /// guarantees not to set CPU flags. It is not suitable for use outside `cg_icmp_guard`.
-    pub(super) fn tmp_register_for_icmp_guard(&mut self, asm: &mut Assembler, iidx: InstIdx) -> Rq {
-        self.force_tmp_register(asm, iidx, RegSet::with_gp_reserved())
+    pub(super) fn tmp_register_for_icmp_guard(
+        &mut self,
+        asm: &mut Assembler,
+        _iidx: InstIdx,
+    ) -> Rq {
+        self.force_tmp_register(asm, RegSet::with_gp_reserved())
     }
 
     /// Assign general purpose registers for the instruction at position `iidx`.
@@ -871,14 +870,12 @@ impl LSRegAlloc<'_> {
     fn sort_clobber_regs(&self, iidx: InstIdx, clobber_regs: &mut [Rq]) {
         // Our heuristic is (in order):
         // 1. Prefer to clobber registers whose values are unused in the future.
-        // 2. Prefer to clobber registers whose values will be spilled anyway (i.e. because they're
-        //    only referenced in the trace end and need to be spilled then).
-        // 3. Prefer to clobber constants.
-        // 4. Prefer to clobber a register that is used further away in the trace.
-        // 5. Prefer to clobber a register that is already spilled.
-        // 6. Prefer to clobber a register whose value(s) are used the fewest subsequent times in
+        // 2. Prefer to clobber constants.
+        // 3. Prefer to clobber a register that is used further away in the trace.
+        // 4. Prefer to clobber a register that is already spilled.
+        // 5. Prefer to clobber a register whose value(s) are used the fewest subsequent times in
         //    the trace.
-        // 7. Prefer to clobber a register that contains fewer variables.
+        // 6. Prefer to clobber a register that contains fewer variables.
         clobber_regs.sort_unstable_by(|lhs_reg, rhs_reg| {
             match (
                 &self.gp_reg_states[usize::from(lhs_reg.code())],
@@ -910,36 +907,26 @@ impl LSRegAlloc<'_> {
                         Ordering::Less
                     } else if lhs_next.is_some() && rhs_next.is_none() {
                         Ordering::Greater
+                    } else if lhs_next != rhs_next {
+                        lhs_next.cmp(rhs_next).reverse()
                     } else {
-                        let lhs_spill = lhs_iidxs.len() == 1
-                            && self.rev_an.spill_to(iidx, lhs_iidxs[0]).is_some();
-                        let rhs_spill = rhs_iidxs.len() == 1
-                            && self.rev_an.spill_to(iidx, rhs_iidxs[0]).is_some();
-                        if lhs_spill && !rhs_spill {
-                            Ordering::Less
-                        } else if !lhs_spill && rhs_spill {
-                            Ordering::Greater
-                        } else if lhs_next != rhs_next {
-                            lhs_next.cmp(rhs_next).reverse()
-                        } else {
-                            let lhs_spilled = lhs_iidxs.iter().all(|x| {
-                                !matches!(self.spills[usize::from(*x)], SpillState::Empty)
-                            });
-                            let rhs_spilled = rhs_iidxs.iter().all(|x| {
-                                !matches!(self.spills[usize::from(*x)], SpillState::Empty)
-                            });
+                        let lhs_spilled = lhs_iidxs
+                            .iter()
+                            .all(|x| !matches!(self.spills[usize::from(*x)], SpillState::Empty));
+                        let rhs_spilled = rhs_iidxs
+                            .iter()
+                            .all(|x| !matches!(self.spills[usize::from(*x)], SpillState::Empty));
 
-                            if lhs_spilled && !rhs_spilled {
-                                Ordering::Less
-                            } else if !lhs_spilled && rhs_spilled {
-                                Ordering::Greater
-                            } else {
-                                let lhs_count = lhs.iter().map(|(count, _)| count).max().unwrap();
-                                let rhs_count = rhs.iter().map(|(count, _)| count).max().unwrap();
-                                lhs_count
-                                    .cmp(rhs_count)
-                                    .then(lhs_iidxs.len().cmp(&rhs_iidxs.len()))
-                            }
+                        if lhs_spilled && !rhs_spilled {
+                            Ordering::Less
+                        } else if !lhs_spilled && rhs_spilled {
+                            Ordering::Greater
+                        } else {
+                            let lhs_count = lhs.iter().map(|(count, _)| count).max().unwrap();
+                            let rhs_count = rhs.iter().map(|(count, _)| count).max().unwrap();
+                            lhs_count
+                                .cmp(rhs_count)
+                                .then(lhs_iidxs.len().cmp(&rhs_iidxs.len()))
                         }
                     }
                 }
@@ -1308,7 +1295,7 @@ impl LSRegAlloc<'_> {
                     self.rev_an.is_inst_var_still_used_after(cur_iidx, *x)
                         && self.spills[usize::from(*x)] == SpillState::Empty
                 }) {
-                    self.force_spill_gp(asm, cur_iidx, true, reg);
+                    self.force_spill_gp(asm, true, reg);
                 }
             }
         }
@@ -1319,13 +1306,7 @@ impl LSRegAlloc<'_> {
     ///
     /// If `set_cpu_flags` is set to `true`, this function can change the CPU Flags: doing so
     /// allows it to generate more efficient code.
-    fn force_spill_gp(
-        &mut self,
-        asm: &mut Assembler,
-        cur_iidx: InstIdx,
-        set_cpu_flags: bool,
-        reg: Rq,
-    ) {
+    fn force_spill_gp(&mut self, asm: &mut Assembler, set_cpu_flags: bool, reg: Rq) {
         match &self.gp_reg_states[usize::from(reg.code())] {
             RegState::Reserved => unreachable!(),
             RegState::Empty => (),
@@ -1351,20 +1332,9 @@ impl LSRegAlloc<'_> {
                         .map(|x| self.m.inst(**x).def_byte_size(self.m))
                         .max()
                         .unwrap();
-                    let mut off = None;
-                    if need_spilling.len() == 1 {
-                        off = self
-                            .rev_an
-                            .spill_to(cur_iidx, *need_spilling[0])
-                            .map(|x| i32::try_from(x).unwrap());
-                    }
-                    let off = match off {
-                        Some(x) => x,
-                        None => {
-                            self.stack.align(bytew);
-                            i32::try_from(self.stack.grow(bytew)).unwrap()
-                        }
-                    };
+                    self.stack.align(bytew);
+                    let frame_off = self.stack.grow(bytew);
+                    let off = i32::try_from(frame_off).unwrap();
                     match bitw {
                         1 => {
                             if *ext == RegExtension::ZeroExtended {
