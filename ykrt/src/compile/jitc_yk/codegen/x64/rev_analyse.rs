@@ -50,12 +50,11 @@ pub(crate) struct RevAnalyse<'a> {
     /// instruction %1, we would like %0 to already be in rax; when generating code for instruction
     /// %2, we would like %) to already be in rdi".
     reg_hints: Vec<Vec<(InstIdx, Register)>>,
-    /// For each instruction, record whether we know whether it should spill to once the last use
-    /// of `InstIdx` has occurred. Currently this only happens for instructions referenced in the
-    /// header/body end, where we have to put the value in a specific place on the stack before we
-    /// loop/jump: once the last use of the header value has been passed, we can reuse its stack
-    /// slot. `None` means "there is no predetermined spill for this instruction".
-    spill_to: Vec<Option<(InstIdx, u32)>>,
+    /// For each instruction, record whether we know whether it should spill to in advance.
+    /// Currently this only happens for instructions referenced in the header/body end, where we
+    /// have to put the value in a specific place on the stack before we loop/jump. `u32::MAX` is
+    /// used to record "there is no predetermined spill for this instruction".
+    spill_to: Vec<u32>,
 }
 
 impl<'a> RevAnalyse<'a> {
@@ -67,7 +66,7 @@ impl<'a> RevAnalyse<'a> {
             used_insts: Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1),
             def_use: vec![vec![]; m.insts_len()],
             reg_hints: vec![vec![]; m.insts_len()],
-            spill_to: vec![None; m.insts_len()],
+            spill_to: vec![u32::MAX; m.insts_len()],
         }
     }
 
@@ -116,9 +115,8 @@ impl<'a> RevAnalyse<'a> {
                         if let yksmp::Location::Indirect(_, off, _) = self.m.param(pinst.paramidx())
                             && let Operand::Var(iidx) = self.m.trace_header_end()[i].unpack(self.m)
                         {
-                            assert!(self.spill_to[usize::from(iidx)].is_none());
-                            self.spill_to[usize::from(iidx)] =
-                                Some((InstIdx::unchecked_from(i), u32::try_from(*off).unwrap()));
+                            assert_eq!(self.spill_to[usize::from(iidx)], u32::MAX);
+                            self.spill_to[usize::from(iidx)] = u32::try_from(*off).unwrap();
                         }
                     }
                 }
@@ -156,9 +154,8 @@ impl<'a> RevAnalyse<'a> {
                     if let yksmp::Location::Indirect(_, off, _) = self.m.param(pinst.paramidx())
                         && let Operand::Var(iidx) = self.m.trace_header_end()[i].unpack(self.m)
                     {
-                        assert!(self.spill_to[usize::from(iidx)].is_none());
-                        self.spill_to[usize::from(iidx)] =
-                            Some((InstIdx::unchecked_from(i), u32::try_from(-*off).unwrap()));
+                        assert_eq!(self.spill_to[usize::from(iidx)], u32::MAX);
+                        self.spill_to[usize::from(iidx)] = u32::try_from(-*off).unwrap();
                     }
                 }
             }
@@ -185,9 +182,8 @@ impl<'a> RevAnalyse<'a> {
                     if let VarLocation::Stack { frame_off, .. } = vloc
                         && let Operand::Var(iidx) = self.m.trace_header_end()[i].unpack(self.m)
                     {
-                        assert!(self.spill_to[usize::from(iidx)].is_none());
-                        self.spill_to[usize::from(iidx)] =
-                            Some((InstIdx::unchecked_from(i), *frame_off));
+                        assert_eq!(self.spill_to[usize::from(iidx)], u32::MAX);
+                        self.spill_to[usize::from(iidx)] = *frame_off;
                     }
                 }
             }
@@ -244,8 +240,8 @@ impl<'a> RevAnalyse<'a> {
             if let VarLocation::Stack { frame_off, .. } = vloc
                 && let Operand::Var(iidx) = self.m.trace_body_end()[i].unpack(self.m)
             {
-                assert!(self.spill_to[usize::from(iidx)].is_none());
-                self.spill_to[usize::from(iidx)] = Some((InstIdx::unchecked_from(i), *frame_off));
+                assert_eq!(self.spill_to[usize::from(iidx)], u32::MAX);
+                self.spill_to[usize::from(iidx)] = *frame_off;
             }
         }
     }
@@ -338,14 +334,13 @@ impl<'a> RevAnalyse<'a> {
     }
 
     /// Return the predetermined stack location for `query_iidx` to be spilled to, if one is known.
-    pub(super) fn spill_to(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> Option<u32> {
-        self.spill_to[usize::from(query_iidx)].and_then(|(orig_spill_iidx, off)| {
-            if self.is_inst_var_still_used_after(cur_iidx, orig_spill_iidx) {
-                None
-            } else {
-                Some(off)
-            }
-        })
+    pub(super) fn spill_to(&self, _cur_iidx: InstIdx, query_iidx: InstIdx) -> Option<u32> {
+        let x = self.spill_to[usize::from(query_iidx)];
+        if x == u32::MAX {
+            None
+        } else {
+            Some(x)
+        }
     }
 
     /// Record that `use_iidx` is used at instruction `def_iidx`.
