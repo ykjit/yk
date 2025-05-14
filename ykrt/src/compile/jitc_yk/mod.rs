@@ -141,6 +141,12 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
             connector_tid,
         )?;
 
+        let ds = if let Some(x) = &hl.lock().debug_str {
+            format!(": {}", x.as_str())
+        } else {
+            "".to_owned()
+        };
+
         if should_log_ir(IRPhase::DebugStrs) {
             let kind = match jit_mod.tracekind() {
                 jit_ir::TraceKind::HeaderOnly => "header",
@@ -149,11 +155,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
                 jit_ir::TraceKind::Sidetrace(_) => "side-trace",
             };
             let mut out = String::new();
-            if let Some(x) = &hl.lock().debug_str {
-                out.push_str(&format!("--- Begin debugstrs: {kind}: {x} ---\n"));
-            } else {
-                out.push_str(&format!("--- Begin debugstrs: {kind} ---\n"));
-            }
+            out.push_str(&format!("--- Begin debugstrs: {kind}{ds} ---\n"));
             for (_, inst) in jit_mod.iter_skipping_insts() {
                 if let jit_ir::Inst::DebugStr(x) = inst {
                     out.push_str(&format!("  {}\n", x.msg(&jit_mod)));
@@ -165,7 +167,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
 
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
-                "--- Begin jit-pre-opt ---\n{jit_mod}\n--- End jit-pre-opt ---\n",
+                "--- Begin jit-pre-opt{ds} ---\n{jit_mod}\n--- End jit-pre-opt ---\n",
             ));
         }
 
@@ -174,7 +176,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
             if should_log_ir(IRPhase::PostOpt) {
                 jit_mod.dead_code_elimination();
                 log_ir(&format!(
-                    "--- Begin jit-post-opt ---\n{jit_mod}\n--- End jit-post-opt ---\n",
+                    "--- Begin jit-post-opt{ds} ---\n{jit_mod}\n--- End jit-post-opt ---\n",
                 ));
             }
         }
@@ -184,13 +186,13 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
 
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
-                "--- Begin jit-asm ---\n{}\n--- End jit-asm ---\n",
+                "--- Begin jit-asm{ds} ---\n{}\n--- End jit-asm ---\n",
                 ct.disassemble(false).unwrap()
             ));
         }
         if should_log_ir(IRPhase::AsmFull) {
             log_ir(&format!(
-                "--- Begin jit-asm-full ---\n{}\n--- End jit-asm-full ---\n",
+                "--- Begin jit-asm-full{ds} ---\n{}\n--- End jit-asm-full ---\n",
                 ct.disassemble(true).unwrap()
             ));
         }
