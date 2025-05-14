@@ -118,7 +118,7 @@ impl<'a> RevAnalyse<'a> {
                         {
                             assert!(self.spill_to[usize::from(iidx)].is_none());
                             self.spill_to[usize::from(iidx)] =
-                                Some((InstIdx::unchecked_from(i), u32::try_from(-*off).unwrap()));
+                                Some((InstIdx::unchecked_from(i), u32::try_from(*off).unwrap()));
                         }
                     }
                 }
