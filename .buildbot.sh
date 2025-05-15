@@ -36,9 +36,21 @@ test_yklua() {
 
 # Check that the ykllvm commit in the submodule is from the main branch.
 # Due to the way github works, this may not be the case!
+#
+# We avoid using hardcoded remote names like 'origin' so that this works with
+# TryCI (e.g. where development clones may use 'upstream' -> `ykjit/ykllvm`).
+# This will always be correct on the CI server because there will only ever be
+# a single remote.
+#
+# We need to careful with our grep regex though, ensuring we only match
+# `remote/main`, and not `remote/<other_branch>` that just so happens to have `/main`
+# in its branch name.
 cd ykllvm
-git log --pretty=format:%H -n 100 --no-show-signature origin/main | \
-    grep $(git rev-parse HEAD)
+tot=$(git rev-parse HEAD)
+if ! git branch -r --contains $tot | grep -qE '^([^/]+/)?main$'; then
+    echo "Error: HEAD ($tot) did not originate from ykllvm's main branch"
+    exit 1
+fi
 cd ..
 
 # Install rustup.
