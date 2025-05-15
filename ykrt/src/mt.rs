@@ -105,10 +105,10 @@ pub struct MT {
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
     /// [JoinHandle]s to each worker thread so that when an [MT] value is dropped, we can try
-    /// joining each worker thread and see if it caused an error or not. If it did,  we can
+    /// joining each worker thread and see if it caused an error or not. If it did, we can
     /// percolate the error upwards, making it more likely that the main thread exits with an
     /// error. In other words, this [Vec] makes it harder for errors to be missed.
-    active_worker_threads: Mutex<Vec<JoinHandle<()>>>,
+    worker_threads: Mutex<Vec<JoinHandle<()>>>,
     /// The [Tracer] that should be used for creating future traces. Note that this might not be
     /// the same as the tracer(s) used to create past traces.
     tracer: Mutex<Arc<dyn Tracer>>,
@@ -157,7 +157,7 @@ impl MT {
             ),
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
-            active_worker_threads: Mutex::new(Vec::new()),
+            worker_threads: Mutex::new(Vec::new()),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             compiled_trace_id: AtomicU64::new(0),
@@ -181,7 +181,7 @@ impl MT {
         if !self.shutdown.swap(true, Ordering::Relaxed) {
             self.stats.timing_state(TimingState::None);
             self.stats.output();
-            let mut lk = self.active_worker_threads.lock();
+            let mut lk = self.worker_threads.lock();
             for hdl in lk.drain(..) {
                 if hdl.is_finished()
                     && let Err(e) = hdl.join()
@@ -274,7 +274,7 @@ impl MT {
 
         // Do we have enough active worker threads? If not, spin another up.
 
-        let mut lk = self.active_worker_threads.lock();
+        let mut lk = self.worker_threads.lock();
         if lk.len() < self.max_worker_threads.load(Ordering::Relaxed) {
             // We only keep a weak reference alive to `self`, as otherwise an active compiler job
             // causes `self` to never be dropped.
