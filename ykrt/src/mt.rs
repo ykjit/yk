@@ -347,7 +347,7 @@ impl MT {
             match compiler.root_compile(
                 Arc::clone(&mt),
                 trace_iter.0,
-                ctrid,
+                ctrid.clone(),
                 Arc::clone(&hl_arc),
                 trace_iter.1,
                 trace_iter.2,
@@ -397,7 +397,23 @@ impl MT {
                 }
             }
 
-            mt.job_queue.0.notify_one();
+            // If there are other jobs waiting on this compiled trace, wake them up. Since doing so
+            // is quite disruptive for the system, only send a wake-up to other threads if
+            // necessary. Note: the most common outcomes are that 0 or 1 jobs are waiting on us.
+            let cnt = {
+                let lk = mt.job_queue.1.lock();
+                lk.iter()
+                    .filter(|(ref connector_tid, _)| match connector_tid {
+                        Some(x) => *x == ctrid,
+                        None => false,
+                    })
+                    .count()
+            };
+            if cnt == 1 {
+                mt.job_queue.0.notify_one();
+            } else if cnt > 1 {
+                mt.job_queue.0.notify_all();
+            }
             mt.stats.timing_state(TimingState::None);
         };
 
