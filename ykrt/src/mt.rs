@@ -104,6 +104,8 @@ pub struct MT {
     )>,
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
+    /// How many worker threads are waiting for work?
+    idle_worker_threads: AtomicUsize,
     /// [JoinHandle]s to each worker thread so that when an [MT] value is dropped, we can try
     /// joining each worker thread and see if it caused an error or not. If it did, we can
     /// percolate the error upwards, making it more likely that the main thread exits with an
@@ -158,6 +160,7 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             worker_threads: Mutex::new(Vec::new()),
+            idle_worker_threads: AtomicUsize::new(0),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             compiled_trace_id: AtomicU64::new(0),
@@ -272,38 +275,49 @@ impl MT {
         mtx.lock().push_back((connector_tid, job));
         cv.notify_one();
 
-        // Do we have enough active worker threads? If not, spin another up.
-
-        let mut lk = self.worker_threads.lock();
-        if lk.len() < self.max_worker_threads.load(Ordering::Relaxed) {
-            // We only keep a weak reference alive to `self`, as otherwise an active compiler job
-            // causes `self` to never be dropped.
-            let mt = Arc::downgrade(self);
-            let jq = Arc::clone(&self.job_queue);
-            let hdl = thread::spawn(move || {
-                let (cv, mtx) = &*jq;
-                let mut lk = mtx.lock();
-                // If the strong count for `mt` is 0 then it has been dropped and there is no
-                // point trying to do further work, even if there is work in the queue.
-                while let Some(mt) = mt.upgrade() {
-                    // Search through the queue looking for the first job we can compile (i.e.
-                    // there is no connector trace ID, or the connector trade ID has been
-                    // compiled).
-                    match lk
-                        .iter()
-                        .position(|(connector_tid, _)| match connector_tid {
-                            Some(x) => mt.compiled_traces.lock().contains_key(x),
-                            None => true,
-                        }) {
-                        Some(x) => {
-                            let (_, ctr) = lk.remove(x).unwrap();
-                            MutexGuard::unlocked(&mut lk, ctr)
+        // Is there an idle worker thread that can take the job on?
+        if self.idle_worker_threads.load(Ordering::Relaxed) == 0 {
+            // Do we have enough active worker threads? If not, spin another up.
+            let mut lk = self.worker_threads.lock();
+            if lk.len() < self.max_worker_threads.load(Ordering::Relaxed) {
+                self.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
+                // We only keep a weak reference alive to `self`, as otherwise an active compiler job
+                // causes `self` to never be dropped.
+                let mt = Arc::downgrade(self);
+                let jq = Arc::clone(&self.job_queue);
+                let hdl = thread::spawn(move || {
+                    let (cv, mtx) = &*jq;
+                    let mut lk = mtx.lock();
+                    // If the strong count for `mt` is 0 then it has been dropped and there is no
+                    // point trying to do further work, even if there is work in the queue.
+                    while let Some(mt) = mt.upgrade() {
+                        // Search through the queue looking for the first job we can compile (i.e.
+                        // there is no connector trace ID, or the connector trade ID has been
+                        // compiled).
+                        mt.idle_worker_threads.fetch_sub(1, Ordering::Relaxed);
+                        let cnd = {
+                            let ct_lk = mt.compiled_traces.lock();
+                            lk.iter()
+                                .position(|(connector_tid, _)| match connector_tid {
+                                    Some(x) => ct_lk.contains_key(x),
+                                    None => true,
+                                })
+                        };
+                        match cnd {
+                            Some(x) => {
+                                let (_, ctr) = lk.remove(x).unwrap();
+                                MutexGuard::unlocked(&mut lk, ctr);
+                                mt.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
+                            }
+                            None => {
+                                mt.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
+                                cv.wait(&mut lk);
+                            }
                         }
-                        None => cv.wait(&mut lk),
                     }
-                }
-            });
-            lk.push(hdl);
+                });
+                lk.push(hdl);
+            }
         }
     }
 
