@@ -104,11 +104,13 @@ pub struct MT {
     )>,
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
+    /// How many worker threads are waiting for work?
+    idle_worker_threads: AtomicUsize,
     /// [JoinHandle]s to each worker thread so that when an [MT] value is dropped, we can try
-    /// joining each worker thread and see if it caused an error or not. If it did,  we can
+    /// joining each worker thread and see if it caused an error or not. If it did, we can
     /// percolate the error upwards, making it more likely that the main thread exits with an
     /// error. In other words, this [Vec] makes it harder for errors to be missed.
-    active_worker_threads: Mutex<Vec<JoinHandle<()>>>,
+    worker_threads: Mutex<Vec<JoinHandle<()>>>,
     /// The [Tracer] that should be used for creating future traces. Note that this might not be
     /// the same as the tracer(s) used to create past traces.
     tracer: Mutex<Arc<dyn Tracer>>,
@@ -157,7 +159,8 @@ impl MT {
             ),
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
-            active_worker_threads: Mutex::new(Vec::new()),
+            worker_threads: Mutex::new(Vec::new()),
+            idle_worker_threads: AtomicUsize::new(0),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             compiled_trace_id: AtomicU64::new(0),
@@ -181,7 +184,7 @@ impl MT {
         if !self.shutdown.swap(true, Ordering::Relaxed) {
             self.stats.timing_state(TimingState::None);
             self.stats.output();
-            let mut lk = self.active_worker_threads.lock();
+            let mut lk = self.worker_threads.lock();
             for hdl in lk.drain(..) {
                 if hdl.is_finished()
                     && let Err(e) = hdl.join()
@@ -272,38 +275,49 @@ impl MT {
         mtx.lock().push_back((connector_tid, job));
         cv.notify_one();
 
-        // Do we have enough active worker threads? If not, spin another up.
-
-        let mut lk = self.active_worker_threads.lock();
-        if lk.len() < self.max_worker_threads.load(Ordering::Relaxed) {
-            // We only keep a weak reference alive to `self`, as otherwise an active compiler job
-            // causes `self` to never be dropped.
-            let mt = Arc::downgrade(self);
-            let jq = Arc::clone(&self.job_queue);
-            let hdl = thread::spawn(move || {
-                let (cv, mtx) = &*jq;
-                let mut lk = mtx.lock();
-                // If the strong count for `mt` is 0 then it has been dropped and there is no
-                // point trying to do further work, even if there is work in the queue.
-                while let Some(mt) = mt.upgrade() {
-                    // Search through the queue looking for the first job we can compile (i.e.
-                    // there is no connector trace ID, or the connector trade ID has been
-                    // compiled).
-                    match lk
-                        .iter()
-                        .position(|(connector_tid, _)| match connector_tid {
-                            Some(x) => mt.compiled_traces.lock().contains_key(x),
-                            None => true,
-                        }) {
-                        Some(x) => {
-                            let (_, ctr) = lk.remove(x).unwrap();
-                            MutexGuard::unlocked(&mut lk, ctr)
+        // Is there an idle worker thread that can take the job on?
+        if self.idle_worker_threads.load(Ordering::Relaxed) == 0 {
+            // Do we have enough active worker threads? If not, spin another up.
+            let mut lk = self.worker_threads.lock();
+            if lk.len() < self.max_worker_threads.load(Ordering::Relaxed) {
+                self.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
+                // We only keep a weak reference alive to `self`, as otherwise an active compiler job
+                // causes `self` to never be dropped.
+                let mt = Arc::downgrade(self);
+                let jq = Arc::clone(&self.job_queue);
+                let hdl = thread::spawn(move || {
+                    let (cv, mtx) = &*jq;
+                    let mut lk = mtx.lock();
+                    // If the strong count for `mt` is 0 then it has been dropped and there is no
+                    // point trying to do further work, even if there is work in the queue.
+                    while let Some(mt) = mt.upgrade() {
+                        // Search through the queue looking for the first job we can compile (i.e.
+                        // there is no connector trace ID, or the connector trade ID has been
+                        // compiled).
+                        mt.idle_worker_threads.fetch_sub(1, Ordering::Relaxed);
+                        let cnd = {
+                            let ct_lk = mt.compiled_traces.lock();
+                            lk.iter()
+                                .position(|(connector_tid, _)| match connector_tid {
+                                    Some(x) => ct_lk.contains_key(x),
+                                    None => true,
+                                })
+                        };
+                        match cnd {
+                            Some(x) => {
+                                let (_, ctr) = lk.remove(x).unwrap();
+                                MutexGuard::unlocked(&mut lk, ctr);
+                                mt.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
+                            }
+                            None => {
+                                mt.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
+                                cv.wait(&mut lk);
+                            }
                         }
-                        None => cv.wait(&mut lk),
                     }
-                }
-            });
-            lk.push(hdl);
+                });
+                lk.push(hdl);
+            }
         }
     }
 
@@ -333,7 +347,7 @@ impl MT {
             match compiler.root_compile(
                 Arc::clone(&mt),
                 trace_iter.0,
-                ctrid,
+                ctrid.clone(),
                 Arc::clone(&hl_arc),
                 trace_iter.1,
                 trace_iter.2,
@@ -383,7 +397,23 @@ impl MT {
                 }
             }
 
-            mt.job_queue.0.notify_one();
+            // If there are other jobs waiting on this compiled trace, wake them up. Since doing so
+            // is quite disruptive for the system, only send a wake-up to other threads if
+            // necessary. Note: the most common outcomes are that 0 or 1 jobs are waiting on us.
+            let cnt = {
+                let lk = mt.job_queue.1.lock();
+                lk.iter()
+                    .filter(|(ref connector_tid, _)| match connector_tid {
+                        Some(x) => *x == ctrid,
+                        None => false,
+                    })
+                    .count()
+            };
+            if cnt == 1 {
+                mt.job_queue.0.notify_one();
+            } else if cnt > 1 {
+                mt.job_queue.0.notify_all();
+            }
             mt.stats.timing_state(TimingState::None);
         };
 
