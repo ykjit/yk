@@ -1709,6 +1709,11 @@ impl<'a> Assemble<'a> {
             "llvm.assume" => Ok(()),
             "llvm.lifetime.start.p0" => Ok(()),
             "llvm.lifetime.end.p0" => Ok(()),
+            x if x.starts_with("llvm.abs.") => {
+                let [op, is_int_min] = args.try_into().unwrap();
+                self.cg_abs(iidx, op, is_int_min);
+                Ok(())
+            }
             x if x.starts_with("llvm.ctpop") => {
                 let [op] = args.try_into().unwrap();
                 self.cg_ctpop(iidx, op);
@@ -1947,6 +1952,35 @@ impl<'a> Assemble<'a> {
         }
 
         Ok(())
+    }
+
+    fn cg_abs(&mut self, iidx: InstIdx, op: Operand, _is_int_min: Operand) {
+        let bitw = op.bitw(self.m);
+        let [io_reg, tmp_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [
+                GPConstraint::InputOutput {
+                    op: op.clone(),
+                    in_ext: RegExtension::SignExtended,
+                    out_ext: RegExtension::SignExtended,
+                    force_reg: None,
+                },
+                GPConstraint::Temporary,
+            ],
+        );
+        match bitw {
+            64 => {
+                // This returns INT_MIN for INT_MIN, which is correct whether or not `is_int_min`
+                // is 0 or 1.
+                dynasm!(self.asm
+                    ; mov Rq(tmp_reg.code()), Rq(io_reg.code())
+                    ; neg Rq(io_reg.code())
+                    ; cmovl Rq(io_reg.code()), Rq(tmp_reg.code())
+                );
+            }
+            x => todo!("{x}"),
+        }
     }
 
     fn cg_ctpop(&mut self, iidx: InstIdx, op: Operand) {
@@ -4904,6 +4938,34 @@ mod tests {
                ; call @llvm.lifetime.end.p0(16i64, %1)
                ; %5: ...
                ...
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_abs() {
+        codegen_and_test(
+            "
+             func_decl llvm.abs.i64 (i64, i1) -> i64
+             entry:
+               %0: i64 = param reg
+               %1: i64 = call @llvm.abs.i64(%0, 0i1)
+               %2: i64 = call @llvm.abs.i64(%0, 1i1)
+               black_box %1
+               black_box %2
+            ",
+            "
+               ...
+               ; %1: i64 = call @llvm.abs.i64(%0, 0i1)
+               mov r.64.y, rax
+               mov r.64.x, rax
+               neg rax
+               cmovl rax, r.64.x
+               ; %2: i64 = call @llvm.abs.i64(%0, 1i1)
+               mov r.64.x, r.64.y
+               neg r.64.y
+               cmovl r.64.y, r.64.x
             ",
             false,
         );
