@@ -10,6 +10,7 @@
 
 pub(crate) mod aotsmp;
 pub mod compile;
+mod job_queue;
 mod location;
 mod log;
 pub(crate) mod mt;
