@@ -2,33 +2,45 @@
 
 use crate::{
     compile::CompiledTrace,
-    mt::{HotThreshold, MT},
+    mt::{AtomicTraceCompilationErrorThreshold, HotThreshold, MT},
 };
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 /// Responsible for tracking how often a guard in a `CompiledTrace` fails. A hotness counter is
 /// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores
 /// the side-trace once its compiled.
 #[derive(Debug)]
-pub(crate) struct Guard(Mutex<GuardState>);
+pub(crate) struct Guard {
+    kind: Mutex<GuardState>,
+    /// How many errors have been encountered when tracing or compiling traces resulting from this
+    /// guard?
+    errors: AtomicTraceCompilationErrorThreshold,
+}
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum GuardState {
     Counting(HotThreshold),
+    /// We are either creating a trace or waiting for that trace to compile.
     SideTracing,
     Compiled,
+    /// This guard encountered errors sufficiently often when tracing or compiling that we don't
+    /// want to try again.
+    DontTrace,
 }
 
 impl Guard {
     pub(crate) fn new() -> Self {
-        Self(Mutex::new(GuardState::Counting(0)))
+        Self {
+            kind: Mutex::new(GuardState::Counting(0)),
+            errors: AtomicTraceCompilationErrorThreshold::new(0),
+        }
     }
 
     /// This guard has failed (i.e. evaluated to true/false when false/true was expected). Returns
     /// `true` if this guard has failed often enough to be worth side-tracing.
     pub fn inc_failed(&self, mt: &Arc<MT>) -> bool {
-        let mut lk = self.0.lock();
+        let mut lk = self.kind.lock();
         match &*lk {
             GuardState::Counting(x) => {
                 if x + 1 >= mt.sidetrace_threshold() {
@@ -39,8 +51,23 @@ impl Guard {
                     false
                 }
             }
-            GuardState::SideTracing => false,
-            GuardState::Compiled => false,
+            GuardState::SideTracing | GuardState::Compiled | GuardState::DontTrace => false,
+        }
+    }
+
+    /// Inform this guard that a trace started from it failed (either in tracing or compiling).
+    pub fn trace_or_compile_failed(&self, mt: &Arc<MT>) {
+        let mut lk = self.kind.lock();
+        if let GuardState::SideTracing = &*lk {
+            let failures = self.errors.fetch_add(1, Ordering::Relaxed);
+            if failures >= mt.trace_failure_threshold() {
+                assert_eq!(*lk, GuardState::SideTracing);
+                *lk = GuardState::DontTrace;
+            } else {
+                *lk = GuardState::Counting(0);
+            }
+        } else {
+            panic!();
         }
     }
 
@@ -55,7 +82,7 @@ impl Guard {
         parent: &Arc<dyn CompiledTrace>,
         gidx: GuardIdx,
     ) {
-        let mut lk = self.0.lock();
+        let mut lk = self.kind.lock();
         let addr = ctr.entry();
         match &*lk {
             GuardState::SideTracing => *lk = GuardState::Compiled,
