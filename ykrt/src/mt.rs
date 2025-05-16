@@ -21,7 +21,7 @@ use parking_lot_core::SpinWait;
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
-    job_queue::JobQueue,
+    job_queue::{Job, JobQueue},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     log::{
         stats::{Stats, TimingState},
@@ -237,9 +237,13 @@ impl MT {
         connector_tid: Option<TraceId>,
     ) {
         self.stats.trace_recorded_ok();
+
+        let ctrid_cl = ctrid.clone();
+        let hl_arc_cl = Arc::clone(&hl_arc);
+
         let mt = Arc::clone(self);
         let connector_tid_cl = connector_tid.clone();
-        let do_compile = move || {
+        let main = move || {
             let compiler = {
                 let lk = mt.compiler.lock();
                 Arc::clone(&*lk)
@@ -264,6 +268,7 @@ impl MT {
                     debug_assert_matches!(hl.kind, HotLocationKind::Compiling(_));
                     hl.kind = HotLocationKind::Compiled(ctr);
                     mt.stats.trace_compiled_ok();
+                    mt.job_queue.notify_success(ctrid);
                 }
                 Err(e) => {
                     mt.stats.trace_compiled_err();
@@ -297,15 +302,29 @@ impl MT {
                                 .log(Verbosity::Error, &format!("trace-compilation-aborted: {e}"));
                         }
                     }
+                    mt.job_queue.notify_failure(&mt, ctrid);
                 }
             }
 
-            mt.job_queue.notify_success(ctrid);
             mt.stats.timing_state(TimingState::None);
         };
 
-        self.job_queue
-            .push(self, connector_tid, Box::new(do_compile));
+        let mt = Arc::clone(self);
+        let failure = move || {
+            let mut hl = hl_arc_cl.lock();
+            debug_assert_matches!(hl.kind, HotLocationKind::Compiling(_));
+            if let TraceFailed::DontTrace = hl.tracecompilation_error(&mt) {
+                hl.kind = HotLocationKind::DontTrace;
+            } else {
+                hl.kind = HotLocationKind::Counting(0);
+            }
+            mt.job_queue.notify_failure(&mt, ctrid_cl);
+        };
+
+        self.job_queue.push(
+            self,
+            Job::new(Box::new(main), connector_tid, Box::new(failure)),
+        );
     }
 
     /// Add a compilation job for a sidetrace where: `hl_arc` is the [HotLocation] this compilation
@@ -328,8 +347,9 @@ impl MT {
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
+        let parent_ctr_cl = Arc::clone(&parent_ctr);
         let connector_tid_cl = connector_tid.clone();
-        let do_compile = move || {
+        let main = move || {
             let compiler = {
                 let lk = mt.compiler.lock();
                 Arc::clone(&*lk)
@@ -358,13 +378,13 @@ impl MT {
                     mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {
-                    // FIXME: We need to track how often compiling a guard fails.
+                    parent_ctr.guard(guardid).trace_or_compile_failed(&mt);
                     mt.stats.trace_compiled_err();
                     match e {
                         CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
                             mt.log.log(
                                 Verbosity::Warning,
-                                &format!("trace-compilation-aborted: {e}"),
+                                &format!("sidetrace-compilation-aborted: {e}"),
                             );
                         }
                         CompilationError::InternalError(e) => {
@@ -374,13 +394,15 @@ impl MT {
                             {
                                 mt.log.log(
                                     Verbosity::Error,
-                                    &format!("trace-compilation-aborted: {e}"),
+                                    &format!("sidetrace-compilation-aborted: {e}"),
                                 );
                             }
                         }
                         CompilationError::ResourceExhausted(e) => {
-                            mt.log
-                                .log(Verbosity::Error, &format!("trace-compilation-aborted: {e}"));
+                            mt.log.log(
+                                Verbosity::Error,
+                                &format!("sidetrace-compilation-aborted: {e}"),
+                            );
                         }
                     }
                 }
@@ -389,8 +411,14 @@ impl MT {
             mt.stats.timing_state(TimingState::None);
         };
 
-        self.job_queue
-            .push(self, connector_tid, Box::new(do_compile));
+        let mt = Arc::clone(self);
+        let failure = move || {
+            parent_ctr_cl.guard(guardid).trace_or_compile_failed(&mt);
+        };
+        self.job_queue.push(
+            self,
+            Job::new(Box::new(main), connector_tid, Box::new(failure)),
+        );
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -551,7 +579,7 @@ impl MT {
                 self.stats.timing_state(TimingState::OutsideYk);
             }
             TransitionControlPoint::StopSideTracing {
-                gidx: guardid,
+                gidx,
                 parent_ctr,
                 root_ctr,
                 connector_tid,
@@ -589,13 +617,13 @@ impl MT {
                             hl,
                             root_ctr,
                             parent_ctr,
-                            guardid,
+                            gidx,
                             connector_tid,
                         );
                     }
                     Err(e) => {
                         MTThread::set_not_tracing();
-                        self.stats.timing_state(TimingState::None);
+                        parent_ctr.guard(gidx).trace_or_compile_failed(self);
                         self.stats.trace_recorded_err();
                         yklog!(
                             self.log,
@@ -603,6 +631,7 @@ impl MT {
                             &format!("stop-tracing-aborted: {e}"),
                             loc.hot_location()
                         );
+                        self.stats.timing_state(TimingState::None);
                     }
                 }
                 self.stats.timing_state(TimingState::OutsideYk);
