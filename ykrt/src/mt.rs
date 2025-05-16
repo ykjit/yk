@@ -3,26 +3,25 @@
 use std::{
     assert_matches::debug_assert_matches,
     cell::RefCell,
-    cmp,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     env,
     error::Error,
     ffi::c_void,
     marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering},
         Arc,
     },
-    thread::{self, JoinHandle},
 };
 
-use parking_lot::{Condvar, Mutex, MutexGuard};
+use parking_lot::Mutex;
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
 
 use crate::{
     aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
+    job_queue::JobQueue,
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     log::{
         stats::{Stats, TimingState},
@@ -95,22 +94,8 @@ pub struct MT {
     hot_threshold: AtomicHotThreshold,
     sidetrace_threshold: AtomicHotThreshold,
     trace_failure_threshold: AtomicTraceCompilationErrorThreshold,
-    /// The ordered queue of compilation worker functions, each a pair `(Option<connector_tid>,
-    /// job)`. Before `job` is run, `connector_tid`, if it is `Some`, must be present in
-    /// [MT::compiled_traces].
-    job_queue: Arc<(
-        Condvar,
-        Mutex<VecDeque<(Option<TraceId>, Box<dyn FnOnce() + Send>)>>,
-    )>,
-    /// The hard cap on the number of worker threads.
-    max_worker_threads: AtomicUsize,
-    /// How many worker threads are waiting for work?
-    idle_worker_threads: AtomicUsize,
-    /// [JoinHandle]s to each worker thread so that when an [MT] value is dropped, we can try
-    /// joining each worker thread and see if it caused an error or not. If it did, we can
-    /// percolate the error upwards, making it more likely that the main thread exits with an
-    /// error. In other words, this [Vec] makes it harder for errors to be missed.
-    worker_threads: Mutex<Vec<JoinHandle<()>>>,
+    /// The queue of compiling jobs.
+    job_queue: Arc<JobQueue>,
     /// The [Tracer] that should be used for creating future traces. Note that this might not be
     /// the same as the tracer(s) used to create past traces.
     tracer: Mutex<Arc<dyn Tracer>>,
@@ -122,7 +107,7 @@ pub struct MT {
     /// The currently available compiled traces. This is a [HashMap] because it is potentially a
     /// sparse mapping due to (1) (one day!) we might garbage collect traces (2) some
     /// [TraceId]s that we hand out are "lost" because a trace failed to compile.
-    compiled_traces: Mutex<HashMap<TraceId, Arc<dyn CompiledTrace>>>,
+    pub(crate) compiled_traces: Mutex<HashMap<TraceId, Arc<dyn CompiledTrace>>>,
     pub(crate) log: Log,
     pub(crate) stats: Stats,
 }
@@ -157,10 +142,7 @@ impl MT {
             trace_failure_threshold: AtomicTraceCompilationErrorThreshold::new(
                 DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD,
             ),
-            job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
-            max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
-            worker_threads: Mutex::new(Vec::new()),
-            idle_worker_threads: AtomicUsize::new(0),
+            job_queue: JobQueue::new(),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             compiled_trace_id: AtomicU64::new(0),
@@ -184,16 +166,7 @@ impl MT {
         if !self.shutdown.swap(true, Ordering::Relaxed) {
             self.stats.timing_state(TimingState::None);
             self.stats.output();
-            let mut lk = self.worker_threads.lock();
-            for hdl in lk.drain(..) {
-                if hdl.is_finished()
-                    && let Err(e) = hdl.join()
-                {
-                    // Despite the name `resume_unwind` will abort if the unwind strategy in
-                    // Rust is set to `abort`.
-                    std::panic::resume_unwind(e);
-                }
-            }
+            self.job_queue.shutdown();
         }
     }
 
@@ -239,12 +212,6 @@ impl MT {
             .store(trace_failure_threshold, Ordering::Relaxed);
     }
 
-    /// Return this meta-tracer's maximum number of worker threads. Notice that this value can be
-    /// changed by other threads and is thus potentially stale as soon as it is read.
-    pub fn max_worker_threads(self: &Arc<Self>) -> usize {
-        self.max_worker_threads.load(Ordering::Relaxed)
-    }
-
     /// Return the unique ID for the next compiled trace.
     pub(crate) fn next_compiled_trace_id(self: &Arc<Self>) -> TraceId {
         // Note: fetch_add is documented to wrap on overflow.
@@ -255,70 +222,6 @@ impl MT {
             panic!("Ran out of trace IDs");
         }
         TraceId(ctr_id)
-    }
-
-    /// Queue `job` to be run on a worker thread. If `connector_tid` is `Some`, wait for the
-    /// relevant trace to be compiled before running `job`.
-    fn queue_job(self: &Arc<Self>, connector_tid: Option<TraceId>, job: Box<dyn FnOnce() + Send>) {
-        #[cfg(feature = "yk_testing")]
-        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
-            // To ensure that we properly test that compilation can occur in another thread, we
-            // spin up a new thread for each compilation. This is only acceptable because a)
-            // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
-            // checking correctness, not performance.
-            thread::spawn(job).join().unwrap();
-            return;
-        }
-
-        // Push the job onto the queue.
-        let (cv, mtx) = &*self.job_queue;
-        mtx.lock().push_back((connector_tid, job));
-        cv.notify_one();
-
-        // Is there an idle worker thread that can take the job on?
-        if self.idle_worker_threads.load(Ordering::Relaxed) == 0 {
-            // Do we have enough active worker threads? If not, spin another up.
-            let mut lk = self.worker_threads.lock();
-            if lk.len() < self.max_worker_threads.load(Ordering::Relaxed) {
-                self.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
-                // We only keep a weak reference alive to `self`, as otherwise an active compiler job
-                // causes `self` to never be dropped.
-                let mt = Arc::downgrade(self);
-                let jq = Arc::clone(&self.job_queue);
-                let hdl = thread::spawn(move || {
-                    let (cv, mtx) = &*jq;
-                    let mut lk = mtx.lock();
-                    // If the strong count for `mt` is 0 then it has been dropped and there is no
-                    // point trying to do further work, even if there is work in the queue.
-                    while let Some(mt) = mt.upgrade() {
-                        // Search through the queue looking for the first job we can compile (i.e.
-                        // there is no connector trace ID, or the connector trade ID has been
-                        // compiled).
-                        mt.idle_worker_threads.fetch_sub(1, Ordering::Relaxed);
-                        let cnd = {
-                            let ct_lk = mt.compiled_traces.lock();
-                            lk.iter()
-                                .position(|(connector_tid, _)| match connector_tid {
-                                    Some(x) => ct_lk.contains_key(x),
-                                    None => true,
-                                })
-                        };
-                        match cnd {
-                            Some(x) => {
-                                let (_, ctr) = lk.remove(x).unwrap();
-                                MutexGuard::unlocked(&mut lk, ctr);
-                                mt.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
-                            }
-                            None => {
-                                mt.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
-                                cv.wait(&mut lk);
-                            }
-                        }
-                    }
-                });
-                lk.push(hdl);
-            }
-        }
     }
 
     /// Add a compilation job for a root trace where:
@@ -397,27 +300,12 @@ impl MT {
                 }
             }
 
-            // If there are other jobs waiting on this compiled trace, wake them up. Since doing so
-            // is quite disruptive for the system, only send a wake-up to other threads if
-            // necessary. Note: the most common outcomes are that 0 or 1 jobs are waiting on us.
-            let cnt = {
-                let lk = mt.job_queue.1.lock();
-                lk.iter()
-                    .filter(|(ref connector_tid, _)| match connector_tid {
-                        Some(x) => *x == ctrid,
-                        None => false,
-                    })
-                    .count()
-            };
-            if cnt == 1 {
-                mt.job_queue.0.notify_one();
-            } else if cnt > 1 {
-                mt.job_queue.0.notify_all();
-            }
+            mt.job_queue.notify_success(ctrid);
             mt.stats.timing_state(TimingState::None);
         };
 
-        self.queue_job(connector_tid, Box::new(do_compile));
+        self.job_queue
+            .push(self, connector_tid, Box::new(do_compile));
     }
 
     /// Add a compilation job for a sidetrace where: `hl_arc` is the [HotLocation] this compilation
@@ -501,7 +389,8 @@ impl MT {
             mt.stats.timing_state(TimingState::None);
         };
 
-        self.queue_job(connector_tid, Box::new(do_compile));
+        self.job_queue
+            .push(self, connector_tid, Box::new(do_compile));
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -1511,7 +1400,7 @@ mod tests {
         compile::{CompiledTraceTestingBasicTransitions, CompiledTraceTestingMinimal},
         trace::TraceRecorderError,
     };
-    use std::{assert_matches::assert_matches, hint::black_box, ptr};
+    use std::{assert_matches::assert_matches, hint::black_box, ptr, thread};
     use test::bench::Bencher;
 
     // We only implement enough of the equality function for the tests we have.
