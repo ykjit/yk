@@ -16,9 +16,10 @@ use super::{Register, VarLocation, X64CompiledTrace};
 use crate::compile::jitc_yk::{
     codegen::x64::{ARG_FP_REGS, ARG_GP_REGS},
     jit_ir::{
-        BinOp, BinOpInst, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst, IndirectCallInst,
-        Inst, InstIdx, LoadInst, Module, Operand, PtrAddInst, SExtInst, SelectInst, StoreInst,
-        TraceKind, TruncInst, Ty, ZExtInst,
+        BinOp, BinOpInst, BitCastInst, DirectCallInst, DynPtrAddInst, GuardInst, ICmpInst,
+        IndirectCallInst, Inst, InstIdx, IntToPtrInst, LoadInst, Module, Operand, PtrAddInst,
+        PtrToIntInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TraceKind, TruncInst, Ty,
+        ZExtInst,
     },
     YkSideTraceInfo,
 };
@@ -224,6 +225,12 @@ impl<'a> RevAnalyse<'a> {
                 Inst::ZExt(x) => self.an_zext(iidx, x),
                 Inst::Select(x) => self.an_select(iidx, x),
                 Inst::Trunc(x) => self.an_trunc(iidx, x),
+                Inst::LookupGlobal(_) => (), // Nothing to do
+                Inst::SIToFP(x) => self.an_sitofp(iidx, x),
+                Inst::BitCast(x) => self.an_bitcast(iidx, x),
+                Inst::IntToPtr(x) => self.an_inttoptr(iidx, x),
+                Inst::PtrToInt(x) => self.an_ptrtoint(iidx, x),
+                // FIXME: FP instructions
                 _ => (),
             }
 
@@ -498,6 +505,37 @@ impl<'a> RevAnalyse<'a> {
 
     fn an_select(&mut self, iidx: InstIdx, sinst: SelectInst) {
         self.push_reg_hint(iidx, sinst.trueval(self.m));
+    }
+
+    fn an_sitofp(&mut self, iidx: InstIdx, siinst: SIToFPInst) {
+        self.push_reg_hint(iidx, siinst.val(self.m));
+    }
+
+    fn an_bitcast(&mut self, iidx: InstIdx, bcinst: BitCastInst) {
+        match self.m.type_(bcinst.dest_tyidx()) {
+            Ty::Float(_) => self.push_reg_hint(iidx, bcinst.val(self.m)),
+            _ => todo!(),
+        }
+    }
+
+    fn an_inttoptr(&mut self, iidx: InstIdx, inst: IntToPtrInst) {
+        let src_bitw = self.m.type_(inst.val(self.m).tyidx(self.m)).bitw();
+        let dest_bitw = self.m.type_(self.m.ptr_tyidx()).bitw();
+        if src_bitw <= dest_bitw {
+            self.push_reg_hint(iidx, inst.val(self.m));
+        } else {
+            todo!();
+        }
+    }
+
+    fn an_ptrtoint(&mut self, iidx: InstIdx, inst: PtrToIntInst) {
+        let src_bitw = self.m.type_(self.m.ptr_tyidx()).bitw();
+        let dest_bitw = self.m.type_(inst.dest_tyidx()).bitw();
+        if dest_bitw <= src_bitw {
+            self.push_reg_hint(iidx, inst.val(self.m));
+        } else {
+            todo!();
+        }
     }
 }
 
