@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=3
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=aot
 //   stderr:

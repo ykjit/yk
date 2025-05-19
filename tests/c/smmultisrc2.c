@@ -3,7 +3,7 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=3
 //   stdout:
 //     1 2 3 4 5 6
 //     1 2 3 4 5 6

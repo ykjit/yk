@@ -1,7 +1,7 @@
 -- ignore-if: test "$YKB_TRACER" = "swt"
 -- Run-time:
 --   env-var: YK_HOT_THRESHOLD=3
---   env-var: YKD_LOG=5
+--   env-var: YKD_LOG=4
 --   env-var: YKD_LOG_IR=debugstrs
 --   env-var: YKD_SERIALISE_COMPILATION=1
 --   stderr:

@@ -3,7 +3,7 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=5
+//   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
 //     i=1

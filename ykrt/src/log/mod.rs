@@ -23,8 +23,6 @@ pub(crate) enum Verbosity {
     Error,
     /// Log warnings.
     Warning,
-    /// Log transitions of a [Location].
-    LocationTransition,
     /// Log tracing events (start/stop tracing etc.).
     Tracing,
     /// Log execution events (execute trace / deopt etc.).
@@ -97,7 +95,6 @@ impl Log {
                 Verbosity::Disabled => panic!(),
                 Verbosity::Error => "yk-error",
                 Verbosity::Warning => "yk-warning",
-                Verbosity::LocationTransition => "yk-location-transition",
                 Verbosity::Tracing => "yk-tracing",
                 Verbosity::Execution => "yk-execution",
             };
