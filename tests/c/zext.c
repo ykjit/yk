@@ -1,13 +1,13 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     int to long 4
 //     long to long long 4
 //     uint8_t to uint32_t 3
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
@@ -19,14 +19,14 @@
 //     int to long 3
 //     long to long long 3
 //     uint8_t to uint32_t 3
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     int to long 2
 //     long to long long 2
 //     uint8_t to uint32_t 3
 //     int to long 1
 //     long to long long 1
 //     uint8_t to uint32_t 3
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     exit
 
 // Test zero extend.

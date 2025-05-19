@@ -3,13 +3,13 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt,jit-post-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     add 5
 //     sub 3
 //     mul 12
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{1}}: i32 = add %{{2}}, %{{argc}}
@@ -21,14 +21,14 @@
 //     add 4
 //     sub 2
 //     mul 9
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     add 3
 //     sub 1
 //     mul 6
 //     add 2
 //     sub 0
 //     mul 3
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     exit
 
 // Test some binary operations.

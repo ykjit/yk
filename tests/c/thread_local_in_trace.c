@@ -3,7 +3,7 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     ...
 //     %{{8}}: ptr = lookup_global @shadowstack_0
@@ -18,7 +18,7 @@
 //     Run trace in a thread.
 //     ...
 //     res: {{thread_ptr}} 2
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     res: {{thread_ptr}} 2
 //     ...
 

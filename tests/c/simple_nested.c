@@ -1,15 +1,15 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     i=5
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     i=4
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     i=3
 //     i=2
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     ...
 
 // Check that basic trace compilation works with nested calls.

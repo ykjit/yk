@@ -1,19 +1,19 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     5.100000
 //     5.200000
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     4.100000
 //     4.200000
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     3.100000
 //     3.200000
 //     2.100000
 //     2.200000
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 
 // Check that passing floats to/from a function works correctly.
 

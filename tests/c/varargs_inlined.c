@@ -3,11 +3,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     i=1
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     call llvm.va_start...
@@ -16,10 +16,10 @@
 //     ...
 //     --- End aot ---
 //     i=1
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     i=1
 //     i=1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 
 // Check that inlining works when the function is vararg.
 

@@ -1,19 +1,19 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     ...
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     3:1
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     2:1
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     1:1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     ...
 
 // Check that we can handle struct field accesses.

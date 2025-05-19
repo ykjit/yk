@@ -1,21 +1,21 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     ptr: {{ptr}}
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{1}}: i64 = ptr_to_int %{{2}}
 //     ...
 //     --- End jit-pre-opt ---
 //     ptr: {{ptr}}
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     ptr: {{ptr}}
 //     ptr: {{ptr}}
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     exit
 
 // Check that pointer to integer conversion works.

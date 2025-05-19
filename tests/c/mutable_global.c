@@ -1,11 +1,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     i=4, g=1000
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ..~
 //     %{{14}}: ptr = lookup_global @g
@@ -14,10 +14,10 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     i=3, g=1005
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     i=2, g=1010
 //     i=1, g=1015
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     ...
 
 // Check that mutating a global works.

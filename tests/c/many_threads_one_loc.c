@@ -3,7 +3,7 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     ...
 //     --- Begin aot ---
@@ -15,7 +15,7 @@
 //     }
 //     ...
 //     --- End aot ---
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     ...
 
 // Check that compiling and running traces in parallel works.

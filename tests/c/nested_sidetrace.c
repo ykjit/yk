@@ -1,16 +1,16 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     1
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     2
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     3
 //     4
 //     5
@@ -19,54 +19,54 @@
 //     8
 //     9
 //     10
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     12
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise
 //     14
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise
 //     16
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise
 //     18
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise
 //     20
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
-//     yk-jit-event: start-side-tracing
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise
+//     yk-tracing: start-side-tracing
 //     22
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     24
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     26
 //     28
 //     30
 //     ...
 //     36
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise
 //     ...
 //     42
-//     yk-jit-event: enter-jit-code
-//     yk-jit-event: deoptimise
-//     yk-jit-event: start-side-tracing
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise
+//     yk-tracing: start-side-tracing
 //     45
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     48
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     51
 //     54
 //     57
 //     60
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //   stdout:
 //     exit
 

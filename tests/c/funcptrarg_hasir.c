@@ -2,11 +2,11 @@
 // ignore-if: true
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     ...
 //     FIXME: match the indirect call
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     z=4
 //     ...
 

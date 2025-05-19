@@ -1,20 +1,20 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=jit-pre-opt
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     z=3
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{17}}: i64 = icall %{{8}}(%{{16}})
 //     ...
 //     --- End jit-pre-opt ---
 //     z=3
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     z=3
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 
 // Test indirect calls where we don't have IR for the callee.
 

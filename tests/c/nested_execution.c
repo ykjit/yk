@@ -1,65 +1,65 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=jit-pre-opt
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     enter
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     6
 //     enter
 //     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     5
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     4
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     3
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     2
 //     1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     return
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     5
 //     enter
 //     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     4
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     3
 //     2
 //     1
-//     yk-jit-event: deoptimise
-//     yk-jit-event: start-side-tracing
+//     yk-execution: deoptimise
+//     yk-tracing: start-side-tracing
 //     return
 //     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     4
 //     enter
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     3
 //     2
 //     1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     return
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     c
 //     3
 //     enter
 //     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     2
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     return
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     b
 //     2
 //     enter
 //     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     1
 //     return
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     a
 //     1
 //     enter

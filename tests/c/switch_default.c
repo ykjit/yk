@@ -1,11 +1,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     i=3
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     switch %{{10_1}}, bb{{bb15}}, [299 -> bb{{bb11}}, 298 -> bb{{bb13}}]...
@@ -20,9 +20,9 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     i=2
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     i=1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     ...
 
 // Check that tracing the default arm of a switch works correctly.

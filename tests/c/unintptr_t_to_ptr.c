@@ -3,11 +3,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     4: 0x4
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     %{{11_2}}: ptr = int_to_ptr %{{11_1}}, ptr
@@ -16,10 +16,10 @@
 //     ...
 //     --- End aot ---
 //     3: 0x3
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     2: 0x2
 //     1: 0x1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 
 // Check that converting an integer to a pointer works.
 

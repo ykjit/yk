@@ -1,18 +1,18 @@
 // Run-time:
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     pc=0, mem=4
 //     pc=1, mem=4
 //     pc=2, mem=4
 //     pc=3, mem=3
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     pc=0, mem=3
 //     pc=1, mem=3
 //     pc=2, mem=3
 //     pc=3, mem=2
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     pc=0, mem=2
 //     pc=1, mem=2
 //     pc=2, mem=2
@@ -21,7 +21,7 @@
 //     pc=1, mem=1
 //     pc=2, mem=1
 //     pc=3, mem=0
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     pc=4, mem=0
 //     pc=5, mem=0
 

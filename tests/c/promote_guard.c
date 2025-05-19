@@ -1,22 +1,22 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     y=100
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     y=200
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     y=300
 //     y=400
 //     y=500
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     y=700
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     y=800
 //     y=900
 //     y=1000
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     y=1999
 
 // Check that promotions are guarded correctly.

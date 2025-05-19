@@ -1,25 +1,25 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     0: 5
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //       ...
 //       call @indirect(%17, %18, %19, %20, %21)
 //       ...
 //     --- End jit-pre-opt ---
 //     0: 4
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     0: 3
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     1: 3
 //     0: 2
 //     0: 1
 //     yk-warning: tracing-aborted: tracing continued into a JIT frame
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     exit
 
 // Test that we don't record a successful trace if we started tracing in an
