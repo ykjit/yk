@@ -15,6 +15,33 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+/// A job for the job queue.
+pub(crate) struct Job {
+    /// The function we expect to run for this job when it is ready.
+    main: Box<dyn FnOnce() + Send>,
+    /// If `Some`, wait until [TraceID] has compiled before running this job.
+    connector_tid: Option<TraceId>,
+    /// If `connector_tid` failed to compile, this function will be run.
+    connector_failed: Box<dyn FnOnce() + Send>,
+}
+
+impl Job {
+    /// Create a new job with a `main` method. If `connector_tid` is `Some`, `main` will only be
+    /// run when `connector_tid` has compiled. If `connector_tid` fails to compile, then
+    /// `connector_failed` will be run (and `main` will not be run).
+    pub(crate) fn new(
+        main: Box<dyn FnOnce() + Send>,
+        connector_tid: Option<TraceId>,
+        connector_failed: Box<dyn FnOnce() + Send>,
+    ) -> Self {
+        Self {
+            main,
+            connector_tid,
+            connector_failed,
+        }
+    }
+}
+
 pub(crate) struct JobQueue {
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
@@ -28,10 +55,7 @@ pub(crate) struct JobQueue {
     /// The ordered queue of compilation worker functions, each a pair `(Option<connector_tid>,
     /// job)`. Before `job` is run, `connector_tid`, if it is `Some`, must be present in
     /// [MT::compiled_traces].
-    queue: Arc<(
-        Condvar,
-        Mutex<VecDeque<(Option<TraceId>, Box<dyn FnOnce() + Send>)>>,
-    )>,
+    queue: Arc<(Condvar, Mutex<VecDeque<Job>>)>,
 }
 
 impl JobQueue {
@@ -61,27 +85,21 @@ impl JobQueue {
         }
     }
 
-    /// Queue `job` to be run on a worker thread. If `connector_tid` is `Some`, wait for the
-    /// relevant trace to be compiled before running `job`.
-    pub(crate) fn push(
-        self: &Arc<Self>,
-        mt: &Arc<MT>,
-        connector_tid: Option<TraceId>,
-        job: Box<dyn FnOnce() + Send>,
-    ) {
+    /// Queue `job` to be run on a worker thread.
+    pub(crate) fn push(self: &Arc<Self>, mt: &Arc<MT>, job: Job) {
         #[cfg(feature = "yk_testing")]
         if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
             // To ensure that we properly test that compilation can occur in another thread, we
             // spin up a new thread for each compilation. This is only acceptable because a)
             // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
             // checking correctness, not performance.
-            thread::spawn(job).join().unwrap();
+            thread::spawn(job.main).join().unwrap();
             return;
         }
 
         // Push the job onto the queue.
         let (cv, mtx) = &*self.queue;
-        mtx.lock().push_back((connector_tid, job));
+        mtx.lock().push_back(job);
         cv.notify_one();
 
         // Is there an idle worker thread that can take the job on?
@@ -107,16 +125,15 @@ impl JobQueue {
                         self_cl.idle_worker_threads.fetch_sub(1, Ordering::Relaxed);
                         let cnd = {
                             let ct_lk = mt_st.compiled_traces.lock();
-                            lk.iter()
-                                .position(|(connector_tid, _)| match connector_tid {
-                                    Some(x) => ct_lk.contains_key(x),
-                                    None => true,
-                                })
+                            lk.iter().position(|x| match &x.connector_tid {
+                                Some(x) => ct_lk.contains_key(x),
+                                None => true,
+                            })
                         };
                         match cnd {
                             Some(x) => {
-                                let (_, ctr) = lk.remove(x).unwrap();
-                                MutexGuard::unlocked(&mut lk, ctr);
+                                let job = lk.remove(x).unwrap();
+                                MutexGuard::unlocked(&mut lk, job.main);
                                 self_cl.idle_worker_threads.fetch_add(1, Ordering::Relaxed);
                             }
                             None => {
@@ -140,7 +157,7 @@ impl JobQueue {
         let cnt = {
             let lk = self.queue.1.lock();
             lk.iter()
-                .filter(|(ref connector_tid, _)| match connector_tid {
+                .filter(|job| match &job.connector_tid {
                     Some(x) => *x == trid,
                     None => false,
                 })
@@ -150,6 +167,25 @@ impl JobQueue {
             self.queue.0.notify_one();
         } else if cnt > 1 {
             self.queue.0.notify_all();
+        }
+    }
+
+    /// Notify the queue that `trid` has failed. If there are other jobs waiting on `trid`, this
+    /// function will inform them that they cannot run.
+    pub(crate) fn notify_failure(self: &Arc<Self>, _mt: &Arc<MT>, trid: TraceId) {
+        let mut removed = Vec::new();
+        let mut i = 0;
+        let mut lk = self.queue.1.lock();
+        while i < lk.len() {
+            if lk[i].connector_tid == Some(trid) {
+                removed.push(lk.remove(i).unwrap());
+            } else {
+                i += 1;
+            }
+        }
+        drop(lk);
+        for x in removed {
+            (x.connector_failed)();
         }
     }
 }
