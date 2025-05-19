@@ -1,12 +1,12 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     ...
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     p1==p2: 1, p2==p3: 0
 //     p1==p2: 1, p2==p3: 0
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     ...
 //
 

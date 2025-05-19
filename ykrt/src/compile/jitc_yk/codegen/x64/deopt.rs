@@ -58,7 +58,7 @@ pub(crate) extern "C" fn __yk_deopt(
     mt.deopt();
     mt.stats
         .timing_state(crate::log::stats::TimingState::Deopting);
-    mt.log.log(Verbosity::JITEvent, "deoptimise");
+    mt.log.log(Verbosity::Execution, "deoptimise");
 
     // Calculate space required for the new stack.
     // Add space for live register values which we'll be adding at the end.

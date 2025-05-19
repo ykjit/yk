@@ -1,9 +1,9 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt,jit-asm
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     1.100000 == 2.200000: 0
 //     1.100000 == 1.100000: 1
 //     1.100000 != 2.200000: 1
@@ -17,9 +17,9 @@
 //     nan == nan: 0
 //     nan != nan: 1
 //     0.000000 == -0.000000: 1
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     ...
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     1.100000 == 2.200000: 0
 //     1.100000 == 1.100000: 1
 //     1.100000 != 2.200000: 1
@@ -33,7 +33,7 @@
 //     nan == nan: 0
 //     nan != nan: 1
 //     0.000000 == -0.000000: 1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 
 // Check that double comparisons work.
 

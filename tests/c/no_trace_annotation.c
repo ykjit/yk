@@ -1,7 +1,7 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt,jit-post-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     ...
 //     --- Begin aot ---
@@ -17,11 +17,11 @@
 //     --- End jit-pre-opt ---
 //     ...
 //     Can't JIT this!
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     Can't JIT this!
 //     Can't JIT this!
 //     Can't JIT this!
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     ...
 
 // Check that the `yk_outline` annotation works.

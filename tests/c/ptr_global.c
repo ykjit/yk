@@ -1,12 +1,12 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     ...
 //     i=12
 //     i=13
 //     i=14
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     ...
 
 // Check that tracing mutation of a global pointer works.

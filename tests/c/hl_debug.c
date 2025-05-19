@@ -2,12 +2,12 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
-//     yk-jit-event: start-tracing: somefile.lua:1234: for i = 0, 10 do
+//     yk-tracing: start-tracing: somefile.lua:1234: for i = 0, 10 do
 //     4
 //     3
-//     yk-jit-event: stop-tracing: somefile.lua:1234: for i = 0, 10 do
+//     yk-tracing: stop-tracing: somefile.lua:1234: for i = 0, 10 do
 //     2
-//     yk-jit-event: start-tracing: someotherfile.lua:5678: while j < 1000
+//     yk-tracing: start-tracing: someotherfile.lua:5678: while j < 1000
 //     1
 //     exit
 

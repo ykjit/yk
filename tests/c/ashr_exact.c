@@ -3,21 +3,21 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     ashr 4
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{result}}: i64 = ashr %{{1}}, 2i64
 //     ...
 //     --- End jit-pre-opt ---
 //     ashr 3
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     ashr 2
 //     ashr 1
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     exit
 
 // Test ashr instructions with the exact keyword.

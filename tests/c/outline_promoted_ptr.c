@@ -1,15 +1,15 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     4: 0x...
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     3: 0x...
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     2: 0x...
 //     1: 0x...
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     exit
 
 // Check that outlining over a promoted pointer works.

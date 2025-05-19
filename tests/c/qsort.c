@@ -2,20 +2,20 @@
 // ignore-if: test true
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     i=2
 //     4 6 1 3 2 5 end
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     i=3
 //     1 4 6 3 2 5 end
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     i=4
 //     1 3 4 6 2 5 end
 //     i=5
 //     1 2 3 4 6 5 end
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 
 // Check that foreign code calling back to "native" code works.
 

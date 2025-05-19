@@ -4,7 +4,7 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     6
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     5
 //     yk-warning: tracing-aborted: tracing went outside of starting frame
 //     ...

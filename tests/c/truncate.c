@@ -1,23 +1,23 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     u64 18446744073709551615
 //     u32 4294967295
 //     u16 65535
 //     u8 255
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     u64 18446744073709551615
 //     u32 4294967295
 //     u16 65535
 //     u8 255
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     u64 18446744073709551615
 //     u32 4294967295
 //     u16 65535
 //     u8 255
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     exit
 
 // Test truncation.

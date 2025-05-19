@@ -5,9 +5,9 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     4: {{val}}
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     ...
 //     --- Begin aot ---
 //     ...

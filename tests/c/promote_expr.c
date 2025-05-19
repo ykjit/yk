@@ -1,11 +1,11 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   stderr:
-//     yk-jit-event: start-tracing
+//     yk-tracing: start-tracing
 //     y=50
-//     yk-jit-event: stop-tracing
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{16}}: i1 = eq %{{_}}, 50i64
@@ -13,11 +13,11 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     y=100
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     y=150
 //     y=200
 //     y=250
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 
 // Check that expression promotion works in traces.
 //

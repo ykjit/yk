@@ -412,7 +412,7 @@ impl MT {
             TransitionControlPoint::Execute(ctr) => {
                 yklog!(
                     self.log,
-                    Verbosity::JITEvent,
+                    Verbosity::Execution,
                     "enter-jit-code",
                     loc.hot_location()
                 );
@@ -444,7 +444,7 @@ impl MT {
                     .timing_state(crate::log::stats::TimingState::Tracing);
                 yklog!(
                     self.log,
-                    Verbosity::JITEvent,
+                    Verbosity::Tracing,
                     "start-tracing",
                     loc.hot_location()
                 );
@@ -522,7 +522,7 @@ impl MT {
                         self.stats.timing_state(TimingState::None);
                         yklog!(
                             self.log,
-                            Verbosity::JITEvent,
+                            Verbosity::Tracing,
                             "stop-tracing",
                             loc.hot_location()
                         );
@@ -577,7 +577,7 @@ impl MT {
                         self.stats.timing_state(TimingState::None);
                         yklog!(
                             self.log,
-                            Verbosity::JITEvent,
+                            Verbosity::Tracing,
                             "stop-tracing",
                             loc.hot_location()
                         );
@@ -1002,7 +1002,7 @@ impl MT {
                     .timing_state(crate::log::stats::TimingState::Tracing);
                 yklog!(
                     self.log,
-                    Verbosity::JITEvent,
+                    Verbosity::Tracing,
                     "start-side-tracing",
                     Some(&*hl)
                 );

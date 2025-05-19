@@ -2,12 +2,12 @@
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=5
 //   stderr:
 //     ...
-//     yk-jit-event: enter-jit-code
+//     yk-execution: enter-jit-code
 //     ...
-//     yk-jit-event: deoptimise
+//     yk-execution: deoptimise
 //     ...
 //   stdout:
 //     Hello World!

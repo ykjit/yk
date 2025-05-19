@@ -25,8 +25,10 @@ pub(crate) enum Verbosity {
     Warning,
     /// Log transitions of a [Location].
     LocationTransition,
-    /// Log JIT events (e.g. start/stop tracing).
-    JITEvent,
+    /// Log tracing events (start/stop tracing etc.).
+    Tracing,
+    /// Log execution events (execute trace / deopt etc.).
+    Execution,
 }
 
 pub(crate) struct Log {
@@ -95,8 +97,9 @@ impl Log {
                 Verbosity::Disabled => panic!(),
                 Verbosity::Error => "yk-error",
                 Verbosity::Warning => "yk-warning",
-                Verbosity::JITEvent => "yk-jit-event",
                 Verbosity::LocationTransition => "yk-location-transition",
+                Verbosity::Tracing => "yk-tracing",
+                Verbosity::Execution => "yk-execution",
             };
             match &self.path {
                 Some(p) => {

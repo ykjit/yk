@@ -2,16 +2,16 @@
 -- Run-time:
 --   env-var: YK_HOT_THRESHOLD=3
 --   env-var: YK_SIDETRACE_THRESHOLD=2
---   env-var: YKD_LOG=4
+--   env-var: YKD_LOG=5
 --   env-var: YKD_LOG_IR=debugstrs
 --   env-var: YKD_SERIALISE_COMPILATION=1
 --   stderr:
 --     <0
 --     <1
 --     <2
---     yk-jit-event: start-tracing: sidetrace.lua:60: LTI
+--     yk-tracing: start-tracing: sidetrace.lua:60: LTI
 --     <3
---     yk-jit-event: stop-tracing: ...
+--     yk-tracing: stop-tracing: ...
 --     --- Begin debugstrs: header: sidetrace.lua:60: LTI ---
 --       sidetrace.lua:61: GETTABUP
 --       sidetrace.lua:61: GETFIELD
@@ -27,14 +27,14 @@
 --       sidetrace.lua:60: LTI
 --     --- End debugstrs ---
 --     <4
---     yk-jit-event: enter-jit-code: sidetrace.lua:60: LTI
---     yk-jit-event: deoptimise
+--     yk-execution: enter-jit-code: sidetrace.lua:60: LTI
+--     yk-execution: deoptimise
 --     >=5
---     yk-jit-event: enter-jit-code: sidetrace.lua:60: LTI
---     yk-jit-event: deoptimise
---     yk-jit-event: start-side-tracing: sidetrace.lua:60: LTI
+--     yk-execution: enter-jit-code: sidetrace.lua:60: LTI
+--     yk-execution: deoptimise
+--     yk-tracing: start-side-tracing: sidetrace.lua:60: LTI
 --     >=6
---     yk-jit-event: stop-tracing: ...
+--     yk-tracing: stop-tracing: ...
 --     --- Begin debugstrs: side-trace: sidetrace.lua:60: LTI ---
 --       sidetrace.lua:63: GETTABUP
 --       sidetrace.lua:63: GETFIELD
@@ -49,11 +49,11 @@
 --       sidetrace.lua:60: LTI
 --     --- End debugstrs ---
 --     >=7
---     yk-jit-event: enter-jit-code: sidetrace.lua:60: LTI
+--     yk-execution: enter-jit-code: sidetrace.lua:60: LTI
 --     >=8
 --     >=9
 --     >=10
---     yk-jit-event: deoptimise
+--     yk-execution: deoptimise
 --     exit
 
 for i = 0, 10 do
