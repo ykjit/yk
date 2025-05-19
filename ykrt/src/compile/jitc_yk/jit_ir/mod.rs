@@ -251,7 +251,7 @@ impl Module {
 
     /// Returns the ID the module will have when it is compiled into a trace.
     pub(crate) fn ctrid(&self) -> TraceId {
-        self.ctr_id.clone()
+        self.ctr_id
     }
 
     #[cfg(test)]

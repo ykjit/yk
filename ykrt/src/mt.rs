@@ -238,19 +238,17 @@ impl MT {
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
-        let connector_tid_cl = connector_tid.clone();
         let do_compile = move || {
             let compiler = {
                 let lk = mt.compiler.lock();
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            let connector_ctr =
-                connector_tid_cl.map(|x| Arc::clone(&mt.compiled_traces.lock()[&x]));
+            let connector_ctr = connector_tid.map(|x| Arc::clone(&mt.compiled_traces.lock()[&x]));
             match compiler.root_compile(
                 Arc::clone(&mt),
                 trace_iter.0,
-                ctrid.clone(),
+                ctrid,
                 Arc::clone(&hl_arc),
                 trace_iter.1,
                 trace_iter.2,
@@ -328,14 +326,13 @@ impl MT {
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
-        let connector_tid_cl = connector_tid.clone();
         let do_compile = move || {
             let compiler = {
                 let lk = mt.compiler.lock();
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            let connect_ctr = connector_tid_cl.map(|x| Arc::clone(&mt.compiled_traces.lock()[&x]));
+            let connect_ctr = connector_tid.map(|x| Arc::clone(&mt.compiled_traces.lock()[&x]));
             let sti = parent_ctr.sidetraceinfo(Arc::clone(&root_ctr), guardid, connect_ctr.clone());
             // FIXME: Can we pass in the root trace address, root trace entry variable locations,
             // and the base stack-size from here, rather than spreading them out via
@@ -799,7 +796,7 @@ impl MT {
                     HotLocationKind::Compiled(_) | HotLocationKind::Compiling(_) => {
                         let compiled_ctrid = match lk.kind {
                             HotLocationKind::Compiled(ref ctr) => ctr.ctrid(),
-                            HotLocationKind::Compiling(ref ctrid) => ctrid.clone(),
+                            HotLocationKind::Compiling(ref ctrid) => *ctrid,
                             _ => unreachable!(),
                         };
                         drop(lk);
@@ -825,7 +822,7 @@ impl MT {
                             }
                         } else {
                             let ctrid = self.next_compiled_trace_id();
-                            lk.kind = HotLocationKind::Compiling(ctrid.clone());
+                            lk.kind = HotLocationKind::Compiling(ctrid);
                             TransitionControlPoint::StopTracing(ctrid, Some(compiled_ctrid))
                         }
                     }
@@ -839,7 +836,7 @@ impl MT {
                         } else {
                             // ...and it's this location...
                             let ctrid = self.next_compiled_trace_id();
-                            lk.kind = HotLocationKind::Compiling(ctrid.clone());
+                            lk.kind = HotLocationKind::Compiling(ctrid);
                             TransitionControlPoint::StopTracing(ctrid, None)
                         }
                     }
@@ -1362,7 +1359,7 @@ pub(crate) enum TransitionGuardFailure {
 }
 
 /// The unique identifier of a trace.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct TraceId(u64);
 
 impl TraceId {

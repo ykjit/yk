@@ -3421,7 +3421,7 @@ impl X64CompiledTrace {
 
 impl CompiledTrace for X64CompiledTrace {
     fn ctrid(&self) -> TraceId {
-        self.ctrid.clone()
+        self.ctrid
     }
 
     fn safepoint(&self) -> &Option<DeoptSafepoint> {
