@@ -141,8 +141,6 @@ pub(crate) type VarLocation = super::reg_alloc::VarLocation<Register>;
 
 /// The lock used when patching a side-trace into a parent trace.
 static LK_PATCH: Mutex<()> = Mutex::new(());
-/// x86 NOP opcode.
-const NOP_OPCODE: u8 = 0x90;
 
 /// Returns the offset of the given thread local in relation to the segment register `fs`. At JIT
 /// runtime we use this offset to calculate the absolute address of the thread local for each
@@ -464,10 +462,7 @@ impl<'a> Assemble<'a> {
                 if align.next_multiple_of(clsize) == align {
                     align += 8
                 }
-                let num_ops = align - off - 2;
-                for _ in 0..num_ops {
-                    self.asm.push(NOP_OPCODE);
-                }
+                self.push_nops(align - off - 2);
                 // Store the future patch offset for this guard.
                 let mov_off = self.asm.offset();
                 self.deoptinfo.get_mut(&deoptid).unwrap().1.fail_offset = mov_off;
@@ -591,6 +586,34 @@ impl<'a> Assemble<'a> {
             #[cfg(any(debug_assertions, test))]
             gdb_ctx,
         }))
+    }
+
+    /// Push `n` bytes of NOP-equivalent instructions. This may or may not be literal `NOP`s:
+    /// higher values will lead to different sequences. In all cases, the generated code will have
+    /// no runtime effect.
+    fn push_nops(&mut self, mut n: usize) {
+        // From https://en.wikipedia.org/wiki/NOP_(code)
+        while n > 0 {
+            match n {
+                1 => self.asm.push(0x90),
+                2 => self.asm.extend([0x66, 0x90]),
+                3 => self.asm.extend([0x0F, 0x1F, 0x00]),
+                4 => self.asm.extend([0x0F, 0x1F, 0x40, 0x00]),
+                5 => self.asm.extend([0x0F, 0x1F, 0x44, 0x00, 0x00]),
+                6 => self.asm.extend([0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00]),
+                7 => self.asm.extend([0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00]),
+                8 => self
+                    .asm
+                    .extend([0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00]),
+                _ => {
+                    self.asm
+                        .extend([0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00]);
+                    n -= 9;
+                    continue;
+                }
+            }
+            break;
+        }
     }
 
     /// Codegen an instruction.
@@ -2821,10 +2844,7 @@ impl<'a> Assemble<'a> {
         }
         // 16-byte align this jump target to improve performance.
         let off = self.asm.offset().0;
-        let align = off.next_multiple_of(16);
-        for _ in 0..(align - off) {
-            self.asm.push(NOP_OPCODE);
-        }
+        self.push_nops(off.next_multiple_of(16) - off);
         match self.m.tracekind() {
             TraceKind::HeaderOnly => {
                 dynasm!(self.asm; ->tloop_start:);
@@ -2934,10 +2954,7 @@ impl<'a> Assemble<'a> {
         }
         // 16-byte align this jump target to improve performance.
         let off = self.asm.offset().0;
-        let align = off.next_multiple_of(16);
-        for _ in 0..(align - off) {
-            self.asm.push(NOP_OPCODE);
-        }
+        self.push_nops(off.next_multiple_of(16) - off);
         dynasm!(self.asm; ->tloop_start:);
     }
 
@@ -5341,7 +5358,7 @@ mod tests {
                 jnb 0x...
                 ...
                 ; deopt id and patch point for guard 0
-                nop
+                nop ...
                 ...
                 push rsi
                 mov rsi, 0x00
@@ -5372,7 +5389,7 @@ mod tests {
                 jb 0x...
                 ...
                 ; deopt id and patch point for guard 0
-                nop
+                nop ...
                 ...
                 push rsi
                 mov rsi, 0x00
@@ -5407,7 +5424,7 @@ mod tests {
                 ...
                 ; deopt id and patch point for guard 0
                 and r.32._, 0x01
-                nop
+                nop ...
                 ...
                 push rsi
                 mov rsi, 0x00
