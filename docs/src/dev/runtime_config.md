@@ -38,9 +38,9 @@ The following environment variables are available (some only in certain configur
   0 turns off all yk logging; level 1 shows major errors only; and level 2
   warnings. Levels above 3 are used for internal yk debugging, and their
   precise output, and indeed the maximum level may change without warning.
-  Currently: level 3 logs transitions of a `Location` transition; and level 4
-  JIT events such as starting/stopping tracing. Note that some information, at
-  all levels, may or may not be displayed based on compile-time options.
-  Defaults to 1.
+  Currently: level 3 shows tracing events (e.g. starting/stopping tracing);
+  and level 4 shows trace execution and deoptimisation. Note that some
+  information, at all levels, may or may not be displayed based on compile-time
+  options. Defaults to 1.
 * [`YKD_LOG_IR`](understanding_traces.html#ykd_log_ir) [with the `ykd` feature]
 * [`YKD_LOG_STATS`](profiling.html#jit-statistics)

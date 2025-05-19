@@ -1,6 +1,6 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
+//   env-var: YKD_LOG=3
 //   stderr:
 //     yk-tracing: start-tracing: somefile.lua:1234: for i = 0, 10 do
 //     4
