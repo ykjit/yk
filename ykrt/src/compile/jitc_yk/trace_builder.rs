@@ -14,7 +14,7 @@ use crate::{
     compile::{CompilationError, CompiledTrace},
     log::stats::TimingState,
     mt::{TraceId, MT},
-    trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction},
+    trace::{AOTTraceIterator, TraceAction},
 };
 use std::{collections::HashMap, ffi::CString, marker::PhantomData, sync::Arc};
 
@@ -1279,14 +1279,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         // don't have to do this.
         mt.stats.timing_state(TimingState::TraceMapping);
         let tas = ta_iter
-            .map(|x| {
-                x.map_err(|e| match e {
-                    AOTTraceIteratorError::TraceTooLong => {
-                        CompilationError::LimitExceeded("Trace too long.".into())
-                    }
-                    x => CompilationError::General(x.to_string()),
-                })
-            })
+            .map(|x| x.map_err(|e| CompilationError::General(e.to_string())))
             .collect::<Result<Vec<_>, _>>()?;
 
         // Peek to the last block (needed for side-tracing).
