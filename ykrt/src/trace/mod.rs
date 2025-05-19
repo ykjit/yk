@@ -94,6 +94,10 @@ pub(crate) enum AOTTraceIteratorError {
     #[error("Trace overflowed recorder's storage")]
     #[allow(dead_code)]
     RecorderOverflow,
+    /// The trace exceeds yk's limit for IR instructions.
+    #[error("Trace would contain too many IR elements")]
+    #[allow(dead_code)]
+    TooManyIrElements,
     #[error("longjmp encountered")]
     #[allow(dead_code)]
     LongJmpEncountered,
