@@ -14,7 +14,7 @@ use crate::{
     compile::{CompilationError, CompiledTrace},
     log::stats::TimingState,
     mt::{TraceId, MT},
-    trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction},
+    trace::{AOTTraceIterator, TraceAction},
 };
 use std::{collections::HashMap, ffi::CString, marker::PhantomData, sync::Arc};
 
@@ -1276,18 +1276,10 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         // FIXME: This is a workaround so we can peek at the last block in a trace in order to
         // extract information from the control point when we are side-tracing. Ideally, we extract
         // this information at AOT compile time and serialise it into the module (or block), so we
-        // don't have to do this. Note, we also can't use `collect` here since that won't catch the
-        // `TraceTooLong` error early enough and we run out of memory.
+        // don't have to do this.
         mt.stats.timing_state(TimingState::TraceMapping);
         let tas = ta_iter
-            .map(|x| {
-                x.map_err(|e| match e {
-                    AOTTraceIteratorError::TraceTooLong => {
-                        CompilationError::LimitExceeded("Trace too long.".into())
-                    }
-                    x => CompilationError::General(x.to_string()),
-                })
-            })
+            .map(|x| x.map_err(|e| CompilationError::General(e.to_string())))
             .collect::<Result<Vec<_>, _>>()?;
 
         // Peek to the last block (needed for side-tracing).

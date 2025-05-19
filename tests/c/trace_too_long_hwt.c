@@ -6,7 +6,7 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     ...
-//     yk-warning: stop-tracing-aborted: Trace too long
+//     yk-warning: stop-tracing-aborted: Trace overflowed recorder's storage
 
 #include <assert.h>
 #include <stdio.h>

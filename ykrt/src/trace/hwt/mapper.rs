@@ -191,7 +191,7 @@ impl Iterator for HWTTraceIterator {
                 Some(Err(BlockIteratorError::HWTracerError(HWTracerError::Temporary(
                     TemporaryErrorKind::TraceBufferOverflow,
                 )))) => {
-                    return Some(Err(AOTTraceIteratorError::TraceTooLong));
+                    return Some(Err(AOTTraceIteratorError::RecorderOverflow));
                 }
                 Some(Err(e)) => return Some(Err(AOTTraceIteratorError::Other(e.to_string()))),
                 None => return Some(Err(AOTTraceIteratorError::PrematureEnd)),
@@ -215,7 +215,7 @@ impl Iterator for HWTTraceIterator {
                 Some(Err(BlockIteratorError::HWTracerError(HWTracerError::Temporary(
                     TemporaryErrorKind::TraceBufferOverflow,
                 )))) => {
-                    return Some(Err(AOTTraceIteratorError::TraceTooLong));
+                    return Some(Err(AOTTraceIteratorError::RecorderOverflow));
                 }
                 Some(Err(e)) => return Some(Err(AOTTraceIteratorError::Other(e.to_string()))),
                 None => {
@@ -237,7 +237,7 @@ impl Iterator for HWTTraceIterator {
         }
 
         if self.tas_generated > crate::mt::DEFAULT_TRACE_TOO_LONG {
-            return Some(Err(AOTTraceIteratorError::TraceTooLong));
+            return Some(Err(AOTTraceIteratorError::TooManyIrElements));
         }
 
         // The `remove` cannot panic because upcoming.len > 1 is guaranteed by the `while` loop

@@ -62,8 +62,8 @@ pub enum TraceRecorderError {
     #[error("Trace empty")]
     #[allow(dead_code)]
     TraceEmpty,
-    /// The trace being recorded was too long and tracing was aborted.
-    #[error("Trace too long")]
+    /// The trace being recorded was too long.
+    #[error("Trace overflowed recorder's storage")]
     #[allow(dead_code)]
     TraceTooLong,
 }
@@ -90,9 +90,14 @@ pub(crate) enum AOTTraceIteratorError {
     #[error("Trace ended prematurely")]
     #[allow(dead_code)]
     PrematureEnd,
-    #[error("Trace too long")]
+    /// The trace being recorded exceeded the tracing recorder's storage.
+    #[error("Trace overflowed recorder's storage")]
     #[allow(dead_code)]
-    TraceTooLong,
+    RecorderOverflow,
+    /// The trace exceeds yk's limit for IR instructions.
+    #[error("Trace would contain too many IR elements")]
+    #[allow(dead_code)]
+    TooManyIrElements,
     #[error("longjmp encountered")]
     #[allow(dead_code)]
     LongJmpEncountered,
