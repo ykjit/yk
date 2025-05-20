@@ -386,23 +386,43 @@ impl<'a> RevAnalyse<'a> {
     }
 
     fn an_call(&mut self, iidx: InstIdx, cinst: DirectCallInst) {
-        let mut gp_regs = ARG_GP_REGS.iter();
-        let mut fp_regs = ARG_FP_REGS.iter();
-        for aidx in cinst.iter_args_idx() {
-            match self.m.type_(self.m.arg(aidx).tyidx(self.m)) {
-                Ty::Void => unreachable!(),
-                Ty::Integer(_) | Ty::Ptr => {
-                    if let Some(reg) = gp_regs.next() {
-                        self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::GP(*reg));
+        let args = (0..(cinst.num_args()))
+            .map(|i| cinst.operand(self.m, i))
+            .collect::<Vec<_>>();
+        match self.m.func_decl(cinst.target()).name() {
+            "llvm.assume" => (),
+            "llvm.lifetime.start.p0" => (),
+            "llvm.lifetime.end.p0" => (),
+            x if x.starts_with("llvm.abs.") => self.push_reg_hint(iidx, args[0].clone()),
+            x if x.starts_with("llvm.ctpop.") => {
+                self.push_reg_hint_outputcanbesameasinput(iidx, args[0].clone())
+            }
+            x if x.starts_with("llvm.floor.") => (), // FP only for now
+            x if x.starts_with("llvm.fshl.i") => self.push_reg_hint(iidx, args[0].clone()),
+            x if x.starts_with("llvm.memcpy.") => (),
+            "llvm.memset.p0.i64" => (),
+            x if x.starts_with("llvm.smax") => self.push_reg_hint(iidx, args[0].clone()),
+            x if x.starts_with("llvm.smin") => self.push_reg_hint(iidx, args[0].clone()),
+            _ => {
+                let mut gp_regs = ARG_GP_REGS.iter();
+                let mut fp_regs = ARG_FP_REGS.iter();
+                for arg in args {
+                    match self.m.type_(arg.tyidx(self.m)) {
+                        Ty::Void => unreachable!(),
+                        Ty::Integer(_) | Ty::Ptr => {
+                            if let Some(reg) = gp_regs.next() {
+                                self.push_reg_hint_fixed(iidx, arg, Register::GP(*reg));
+                            }
+                        }
+                        Ty::Func(_) => todo!(),
+                        Ty::Float(_) => {
+                            if let Some(reg) = fp_regs.next() {
+                                self.push_reg_hint_fixed(iidx, arg, Register::FP(*reg));
+                            }
+                        }
+                        Ty::Unimplemented(_) => panic!(),
                     }
                 }
-                Ty::Func(_) => todo!(),
-                Ty::Float(_) => {
-                    if let Some(reg) = fp_regs.next() {
-                        self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::FP(*reg));
-                    }
-                }
-                Ty::Unimplemented(_) => panic!(),
             }
         }
     }

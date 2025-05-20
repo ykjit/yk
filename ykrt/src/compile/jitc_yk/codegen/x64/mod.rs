@@ -1737,12 +1737,12 @@ impl<'a> Assemble<'a> {
                 self.cg_abs(iidx, op, is_int_min);
                 Ok(())
             }
-            x if x.starts_with("llvm.ctpop") => {
+            x if x.starts_with("llvm.ctpop.") => {
                 let [op] = args.try_into().unwrap();
                 self.cg_ctpop(iidx, op);
                 Ok(())
             }
-            x if x.starts_with("llvm.floor") => {
+            x if x.starts_with("llvm.floor.") => {
                 let [op] = args.try_into().unwrap();
                 self.cg_floor(iidx, op);
                 Ok(())
@@ -1752,7 +1752,7 @@ impl<'a> Assemble<'a> {
                 self.cg_fshl(iidx, op_a, op_b, op_c);
                 Ok(())
             }
-            x if x.starts_with("llvm.memcpy") => {
+            x if x.starts_with("llvm.memcpy.") => {
                 let [dst, src, len, is_volatile] = args.try_into().unwrap();
                 self.cg_memcpy(iidx, dst, src, len, is_volatile);
                 Ok(())
@@ -1762,12 +1762,12 @@ impl<'a> Assemble<'a> {
                 self.cg_memset(iidx, dst, val, len, is_volatile);
                 Ok(())
             }
-            x if x.starts_with("llvm.smax") => {
+            x if x.starts_with("llvm.smax.") => {
                 let [lhs_op, rhs_op] = args.try_into().unwrap();
                 self.cg_smax(iidx, lhs_op, rhs_op);
                 Ok(())
             }
-            x if x.starts_with("llvm.smin") => {
+            x if x.starts_with("llvm.smin.") => {
                 let [lhs_op, rhs_op] = args.try_into().unwrap();
                 self.cg_smin(iidx, lhs_op, rhs_op);
                 Ok(())
