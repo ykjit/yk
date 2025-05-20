@@ -470,57 +470,7 @@ impl MT {
                 self.start_tracing(frameaddr, loc, hl, trid);
             }
             TransitionControlPoint::StopTracing(trid, connector_tid) => {
-                // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
-                // will have put a `Some` in the `Rc`.
-                let (hl, thread_tracer, promotions, debug_strs) =
-                    MTThread::with_borrow_mut(|mtt| match mtt.pop_tstate() {
-                        MTThreadState::Tracing {
-                            trid: _,
-                            hl,
-                            thread_tracer,
-                            promotions,
-                            debug_strs,
-                            frameaddr: tracing_frameaddr,
-                            seen_hls: _,
-                        } => {
-                            // If this assert fails then the code in `transition_control_point`,
-                            // which rejects traces that end in another frame, didn't work.
-                            assert_eq!(frameaddr, tracing_frameaddr);
-                            (hl, thread_tracer, promotions, debug_strs)
-                        }
-                        _ => unreachable!(),
-                    });
-                match thread_tracer.stop() {
-                    Ok(utrace) => {
-                        MTThread::set_not_tracing();
-                        self.stats.timing_state(TimingState::None);
-                        yklog!(
-                            self.log,
-                            Verbosity::Tracing,
-                            "stop-tracing",
-                            loc.hot_location()
-                        );
-                        self.queue_root_compile_job(
-                            (utrace, promotions.into_boxed_slice(), debug_strs),
-                            hl,
-                            trid,
-                            connector_tid,
-                        );
-                    }
-                    Err(e) => {
-                        MTThread::set_not_tracing();
-                        self.job_queue.notify_failure(self, trid);
-                        self.stats.timing_state(TimingState::None);
-                        self.stats.trace_recorded_err();
-                        yklog!(
-                            self.log,
-                            Verbosity::Warning,
-                            &format!("stop-tracing-aborted: {e}"),
-                            loc.hot_location()
-                        );
-                    }
-                }
-                self.stats.timing_state(TimingState::OutsideYk);
+                self.stop_tracing(frameaddr, loc, trid, connector_tid);
             }
             TransitionControlPoint::StopSideTracing {
                 trid,
@@ -651,6 +601,68 @@ impl MT {
                 }
             }
         });
+    }
+
+    /// Stop tracing of the trace with id `trid` at `loc`. If `connector_tid` is `Some`, the
+    /// resulting trace will be a connector trace.
+    fn stop_tracing(
+        self: &Arc<Self>,
+        frameaddr: *mut c_void,
+        _loc: &Location,
+        trid: TraceId,
+        connector_tid: Option<TraceId>,
+    ) {
+        // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
+        // will have put a `Some` in the `Rc`.
+        let (hl, thread_tracer, promotions, debug_strs) =
+            MTThread::with_borrow_mut(|mtt| match mtt.pop_tstate() {
+                MTThreadState::Tracing {
+                    trid: _,
+                    hl,
+                    thread_tracer,
+                    promotions,
+                    debug_strs,
+                    frameaddr: tracing_frameaddr,
+                    seen_hls: _,
+                } => {
+                    // If this assert fails then the code in `transition_control_point`,
+                    // which rejects traces that end in another frame, didn't work.
+                    assert_eq!(frameaddr, tracing_frameaddr);
+                    (hl, thread_tracer, promotions, debug_strs)
+                }
+                _ => unreachable!(),
+            });
+        match thread_tracer.stop() {
+            Ok(utrace) => {
+                MTThread::set_not_tracing();
+                self.stats.timing_state(TimingState::None);
+                yklog!(
+                    self.log,
+                    Verbosity::Tracing,
+                    "stop-tracing",
+                    _loc.hot_location()
+                );
+                self.queue_root_compile_job(
+                    (utrace, promotions.into_boxed_slice(), debug_strs),
+                    hl,
+                    trid,
+                    connector_tid,
+                );
+            }
+            Err(e) => {
+                MTThread::set_not_tracing();
+                self.job_queue.notify_failure(self, trid);
+                self.stats.timing_state(TimingState::None);
+                self.stats.trace_recorded_err();
+                yklog!(
+                    self.log,
+                    Verbosity::Warning,
+                    &format!("stop-tracing-aborted: {e}"),
+                    _loc.hot_location()
+                );
+            }
+        }
+        self.stats.timing_state(TimingState::OutsideYk);
     }
 
     /// Perform the next step to `loc` in the `Location` state-machine for a control point. If
