@@ -1545,6 +1545,7 @@ pub(crate) enum Inst {
     DebugStr(DebugStrInst),
     IntToPtr(IntToPtrInst),
     PtrToInt(PtrToIntInst),
+    UIToFP(UIToFPInst),
 }
 
 impl Inst {
@@ -1609,6 +1610,7 @@ impl Inst {
             Self::DebugStr(..) => m.void_tyidx(),
             Self::PtrToInt(i) => i.dest_tyidx(),
             Self::IntToPtr(_) => m.ptr_tyidx(),
+            Self::UIToFP(i) => i.dest_tyidx(),
         }
     }
 
@@ -1765,6 +1767,7 @@ impl Inst {
             Inst::DebugStr(..) => (),
             Inst::PtrToInt(PtrToIntInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::IntToPtr(IntToPtrInst { val }) => val.unpack(m).map_iidx(f),
+            Inst::UIToFP(UIToFPInst { val, .. }) => val.unpack(m).map_iidx(f),
         }
     }
 
@@ -1969,6 +1972,10 @@ impl Inst {
                 val: mapper(m, val),
             }),
             Inst::TraceHeaderStart => todo!(),
+            Inst::UIToFP(UIToFPInst { val, dest_tyidx }) => Inst::UIToFP(UIToFPInst {
+                val: mapper(m, val),
+                dest_tyidx: *dest_tyidx,
+            }),
         };
         Ok(inst)
     }
@@ -2052,6 +2059,7 @@ impl Inst {
             (Self::FNeg(x), Self::FNeg(y)) => x.decopy_eq(m, y),
             (Self::PtrToInt(x), Self::PtrToInt(y)) => x.decopy_eq(m, y),
             (Self::IntToPtr(x), Self::IntToPtr(y)) => x.decopy_eq(m, y),
+            (Self::UIToFP(x), Self::UIToFP(y)) => x.decopy_eq(m, y),
             (x, y) => todo!("{x:?} {y:?}"),
         }
     }
@@ -2274,6 +2282,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::IntToPtr(i) => {
                 write!(f, "int_to_ptr {}", i.val(self.m).display(self.m),)
             }
+            Inst::UIToFP(i) => write!(f, "ui_to_fp {}", i.val(self.m).display(self.m)),
         }
     }
 }
@@ -2313,6 +2322,7 @@ inst!(FNeg, FNegInst);
 inst!(DebugStr, DebugStrInst);
 inst!(PtrToInt, PtrToIntInst);
 inst!(IntToPtr, IntToPtrInst);
+inst!(UIToFP, UIToFPInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -2862,6 +2872,40 @@ impl IntToPtrInst {
 
     pub(crate) fn val(&self, m: &Module) -> Operand {
         self.val.unpack(m)
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m)
+    }
+}
+
+/// The operands for a [Inst::UIToFP].
+///
+/// # Semantics
+///
+/// Converts an unsigned integer to a floating point value to an unsigned integer.
+#[derive(Clone, Copy, Debug)]
+pub struct UIToFPInst {
+    /// The unsigned integer to convert from.
+    val: PackedOperand,
+    /// The type to convert to. Must be a floating point type.
+    dest_tyidx: TyIdx,
+}
+
+impl UIToFPInst {
+    pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
+        Self {
+            val: PackedOperand::new(val),
+            dest_tyidx,
+        }
+    }
+
+    pub(crate) fn val(&self, m: &Module) -> Operand {
+        self.val.unpack(m)
+    }
+
+    pub(crate) fn dest_tyidx(&self) -> TyIdx {
+        self.dest_tyidx
     }
 
     fn decopy_eq(&self, m: &Module, other: Self) -> bool {

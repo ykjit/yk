@@ -936,6 +936,11 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             aot_ir::CastKind::IntToPtr => {
                 jit_ir::IntToPtrInst::new(&self.handle_operand(val)?).into()
             }
+            aot_ir::CastKind::UIToFP => jit_ir::UIToFPInst::new(
+                &self.handle_operand(val)?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
+            )
+            .into(),
         };
         self.copy_inst(inst, bid, aot_inst_idx)
     }

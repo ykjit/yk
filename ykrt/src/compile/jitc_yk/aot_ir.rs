@@ -659,6 +659,7 @@ pub(crate) enum CastKind {
     BitCast = 6,
     PtrToInt = 7,
     IntToPtr = 8,
+    UIToFP = 9,
 }
 
 impl Display for CastKind {
@@ -673,6 +674,7 @@ impl Display for CastKind {
             Self::BitCast => "bitcast",
             Self::IntToPtr => "int_to_ptr",
             Self::PtrToInt => "ptr_to_int",
+            Self::UIToFP => "ui_to_fp",
         };
         write!(f, "{s}")
     }

@@ -732,6 +732,7 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::DebugStr(..) => (),
                 jit_ir::Inst::PtrToInt(i) => self.cg_ptrtoint(iidx, i),
                 jit_ir::Inst::IntToPtr(i) => self.cg_inttoptr(iidx, i),
+                jit_ir::Inst::UIToFP(i) => self.cg_uitofp(iidx, i),
             }
 
             next = iter.next();
@@ -3123,6 +3124,66 @@ impl<'a> Assemble<'a> {
             jit_ir::Ty::Float(jit_ir::FloatTy::Double) => match src_bitw {
                 32 => dynasm!(self.asm; cvtsi2sd Rx(tgt_reg.code()), Rd(src_reg.code())),
                 64 => dynasm!(self.asm; cvtsi2sd Rx(tgt_reg.code()), Rq(src_reg.code())),
+                _ => todo!(),
+            },
+            _ => panic!(),
+        }
+    }
+
+    fn cg_uitofp(&mut self, iidx: InstIdx, inst: &jit_ir::UIToFPInst) {
+        let ([src_reg], [tgt_reg, tmp_reg]) = self.ra.assign_regs(
+            &mut self.asm,
+            iidx,
+            [GPConstraint::Input {
+                op: inst.val(self.m),
+                // 64 bit values are already sign extended, and we read 32 bit values from 32 bit
+                // registers, thus we don't need to sign extend them to 64 bits.
+                in_ext: RegExtension::Undefined,
+                force_reg: None,
+                clobber_reg: false,
+            }],
+            [RegConstraint::Output, RegConstraint::Temporary],
+        );
+
+        let src_bitw = inst.val(self.m).bitw(self.m);
+        match self.m.type_(inst.dest_tyidx()) {
+            jit_ir::Ty::Float(jit_ir::FloatTy::Float) => todo!(),
+            jit_ir::Ty::Float(jit_ir::FloatTy::Double) => match src_bitw {
+                64 => {
+                    // This is a port of what clang does when you cast a `uint64_t` to a `double`.
+                    // It relies on loading magic constants from memory.
+                    //
+                    // FIXME: There's no need to repeatedly emit this data for every conversion.
+                    let const0: [u32; 4] = [1127219200, 1160773632, 0, 0];
+                    let const0_bytes: &[u8] = unsafe {
+                        std::slice::from_raw_parts(
+                            const0.as_ptr() as *const u8,
+                            const0.len() * std::mem::size_of::<u32>(),
+                        )
+                    };
+                    let const1: [u64; 2] = [0x4330000000000000, 0x4530000000000000];
+                    let const1_bytes: &[u8] = unsafe {
+                        std::slice::from_raw_parts(
+                            const1.as_ptr() as *const u8,
+                            const1.len() * std::mem::size_of::<u64>(),
+                        )
+                    };
+                    dynasm!(self.asm
+                        ; jmp >body
+                        ; .align 16
+                        ; lcpi0_0:
+                        ;  .bytes const0_bytes
+                        ; lcpi0_1:
+                        ;  .bytes const1_bytes
+                        ; body:
+                        ; movq Rx(tmp_reg.code()), Rq(src_reg.code())
+                        ; punpckldq Rx(tmp_reg.code()), [<lcpi0_0]
+                        ; subpd Rx(tmp_reg.code()), [<lcpi0_1]
+                        ; movapd  Rx(tgt_reg.code()), Rx(tmp_reg.code())
+                        ; unpckhpd Rx(tgt_reg.code()), Rx(tmp_reg.code())
+                        ; addsd Rx(tgt_reg.code()), Rx(tmp_reg.code())
+                    );
+                }
                 _ => todo!(),
             },
             _ => panic!(),
@@ -5854,6 +5915,31 @@ mod tests {
                 ...
                 ; %1: double = si_to_fp %0
                 cvtsi2sd fp.128.x, r.32.x
+                ...
+                ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_uitofp_double() {
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = param reg
+                %1: double = ui_to_fp %0
+                black_box %1
+            ",
+            "
+                ...
+                ; %1: double = ui_to_fp %0
+                ...
+                movq fp.128.x, r.64.x
+                punpckldq fp.128.x, [0x{{addr1}}]
+                subpd fp.128.x, [0x{{addr2}}]
+                movapd fp.128.y, fp.128.x
+                unpckhpd fp.128.y, fp.128.x
+                addsd fp.128.y, fp.128.x
                 ...
                 ",
             false,

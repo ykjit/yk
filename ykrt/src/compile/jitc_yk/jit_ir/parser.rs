@@ -21,7 +21,7 @@ use super::super::{
         FNegInst, FPExtInst, FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst,
         IndirectCallInst, Inst, InstIdx, IntToPtrInst, LoadInst, Module, Operand, PackedOperand,
         ParamIdx, ParamInst, PtrAddInst, PtrToIntInst, SExtInst, SIToFPInst, SelectInst, StoreInst,
-        TruncInst, Ty, TyIdx, ZExtInst,
+        TruncInst, Ty, TyIdx, UIToFPInst, ZExtInst,
     },
 };
 use fm::FMBuilder;
@@ -412,6 +412,11 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::SIToFP { assign, type_, val } => {
                         let inst =
                             SIToFPInst::new(&self.process_operand(val)?, self.process_type(type_)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::UIToFP { assign, type_, val } => {
+                        let inst =
+                            UIToFPInst::new(&self.process_operand(val)?, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::FPExt { assign, type_, val } => {
@@ -843,6 +848,11 @@ enum ASTInst {
         type_: ASTType,
         val: ASTOperand,
     },
+    UIToFP {
+        assign: Span,
+        type_: ASTType,
+        val: ASTOperand,
+    },
     FPExt {
         assign: Span,
         type_: ASTType,
@@ -1049,6 +1059,7 @@ mod tests {
               %61: i64 = icall<ft1> %9(%5, %7, %0)
               %62: float = bitcast %7
               %63: float = fneg %54
+              %64: double = ui_to_fp %43
               body_end [%43, %58]
         ",
         );
