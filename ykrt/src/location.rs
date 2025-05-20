@@ -322,10 +322,11 @@ pub(crate) enum HotLocationKind {
     /// traced again.
     DontTrace,
     /// This HotLocation started a trace which is ongoing.
-    Tracing,
+    Tracing(TraceId),
     /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
     /// side trace starting at this HotLocation.
     SideTracing {
+        trid: TraceId,
         /// The root [CompiledTrace]: while one thread is side tracing a (possibly many levels
         /// deep) side trace that ultimately relates to this [CompiledTrace], other threads can
         /// execute this compiled trace.
@@ -345,7 +346,7 @@ impl std::fmt::Debug for HotLocationKind {
             Self::Compiling(_) => write!(f, "Compiling"),
             Self::Counting(_) => write!(f, "Counting"),
             Self::DontTrace => write!(f, "DontTrace"),
-            Self::Tracing => write!(f, "Tracing"),
+            Self::Tracing(_) => write!(f, "Tracing"),
             Self::SideTracing { .. } => write!(f, "SideTracing"),
         }
     }

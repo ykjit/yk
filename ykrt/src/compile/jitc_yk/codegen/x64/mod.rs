@@ -3928,7 +3928,7 @@ mod tests {
         let m = Module::from_str(mod_str);
         let mt = MT::new().unwrap();
         let hl = HotLocation {
-            kind: HotLocationKind::Tracing,
+            kind: HotLocationKind::Tracing(mt.next_trace_id()),
             tracecompilation_errors: 0,
             #[cfg(feature = "ykd")]
             debug_str: None,
@@ -6565,7 +6565,7 @@ mod tests {
 
         let mt = MT::new().unwrap();
         let hl = HotLocation {
-            kind: HotLocationKind::Tracing,
+            kind: HotLocationKind::Tracing(mt.next_trace_id()),
             tracecompilation_errors: 0,
             #[cfg(feature = "ykd")]
             debug_str: None,
