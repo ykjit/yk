@@ -467,62 +467,7 @@ impl MT {
                 unsafe { __yk_exec_trace(frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl, trid) => {
-                self.stats
-                    .timing_state(crate::log::stats::TimingState::Tracing);
-                yklog!(
-                    self.log,
-                    Verbosity::Tracing,
-                    "start-tracing",
-                    loc.hot_location()
-                );
-                let tracer = {
-                    let lk = self.tracer.lock();
-                    Arc::clone(&*lk)
-                };
-                MTThread::set_tracing();
-                MTThread::with_borrow_mut(|mtt| {
-                    match Arc::clone(&tracer).start_recorder() {
-                        Ok(tt) => {
-                            mtt.push_tstate(MTThreadState::Tracing {
-                                hl,
-                                trid,
-                                thread_tracer: tt,
-                                promotions: Vec::new(),
-                                debug_strs: Vec::new(),
-                                frameaddr,
-                                seen_hls: HashSet::new(),
-                            });
-                        }
-                        Err(e) => {
-                            MTThread::set_not_tracing();
-                            // FIXME: start_recorder needs a way of signalling temporary errors.
-                            #[cfg(tracer_hwt)]
-                            match e.downcast::<hwtracer::HWTracerError>() {
-                                Ok(e) => {
-                                    if let hwtracer::HWTracerError::Temporary(_) = *e {
-                                        let mut lk = hl.lock();
-                                        debug_assert_matches!(lk.kind, HotLocationKind::Tracing(_));
-                                        lk.tracecompilation_error(self);
-                                        // FIXME: This is stupidly brutal.
-                                        lk.kind = HotLocationKind::DontTrace;
-                                        drop(lk);
-                                        yklog!(
-                                            self.log,
-                                            Verbosity::Warning,
-                                            "start-tracing-abort",
-                                            loc.hot_location()
-                                        );
-                                    } else {
-                                        todo!("{e:?}");
-                                    }
-                                }
-                                Err(e) => todo!("{e:?}"),
-                            }
-                            #[cfg(not(tracer_hwt))]
-                            todo!("{e:?}");
-                        }
-                    }
-                });
+                self.start_tracing(frameaddr, loc, hl, trid);
             }
             TransitionControlPoint::StopTracing(trid, connector_tid) => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -639,6 +584,73 @@ impl MT {
                 self.stats.timing_state(TimingState::OutsideYk);
             }
         }
+    }
+
+    /// Start tracing at `loc` / `hl` (i.e. `hl` must be the [HotLocation] for `loc`) for a trace
+    /// with ID `trid`.
+    fn start_tracing(
+        self: &Arc<Self>,
+        frameaddr: *mut c_void,
+        _loc: &Location,
+        hl: Arc<Mutex<HotLocation>>,
+        trid: TraceId,
+    ) {
+        self.stats
+            .timing_state(crate::log::stats::TimingState::Tracing);
+        yklog!(
+            self.log,
+            Verbosity::Tracing,
+            "start-tracing",
+            _loc.hot_location()
+        );
+        let tracer = {
+            let lk = self.tracer.lock();
+            Arc::clone(&*lk)
+        };
+        MTThread::set_tracing();
+        MTThread::with_borrow_mut(|mtt| {
+            match Arc::clone(&tracer).start_recorder() {
+                Ok(tt) => {
+                    mtt.push_tstate(MTThreadState::Tracing {
+                        hl,
+                        trid,
+                        thread_tracer: tt,
+                        promotions: Vec::new(),
+                        debug_strs: Vec::new(),
+                        frameaddr,
+                        seen_hls: HashSet::new(),
+                    });
+                }
+                Err(e) => {
+                    MTThread::set_not_tracing();
+                    // FIXME: start_recorder needs a way of signalling temporary errors.
+                    #[cfg(tracer_hwt)]
+                    match e.downcast::<hwtracer::HWTracerError>() {
+                        Ok(e) => {
+                            if let hwtracer::HWTracerError::Temporary(_) = *e {
+                                let mut lk = hl.lock();
+                                debug_assert_matches!(lk.kind, HotLocationKind::Tracing(_));
+                                lk.tracecompilation_error(self);
+                                // FIXME: This is stupidly brutal.
+                                lk.kind = HotLocationKind::DontTrace;
+                                drop(lk);
+                                yklog!(
+                                    self.log,
+                                    Verbosity::Warning,
+                                    "start-tracing-abort",
+                                    _loc.hot_location()
+                                );
+                            } else {
+                                todo!("{e:?}");
+                            }
+                        }
+                        Err(e) => todo!("{e:?}"),
+                    }
+                    #[cfg(not(tracer_hwt))]
+                    todo!("{e:?}");
+                }
+            }
+        });
     }
 
     /// Perform the next step to `loc` in the `Location` state-machine for a control point. If
@@ -1365,6 +1377,10 @@ enum TransitionControlPoint {
     NoAction,
     AbortTracing(AbortKind),
     Execute(Arc<dyn CompiledTrace>),
+    /// Start tracing: in a sense the `Arc<Mutex<HotLocation>>` could be seen as an optimisation
+    /// because it can always be derived from the [Location] that was encountered. However, we also
+    /// use the `Arc` to detect tracing issues in other threads, and we need to keep it alive for
+    /// the duration of the transition calls for that to work properly.
     StartTracing(Arc<Mutex<HotLocation>>, TraceId),
     /// Stop tracing. If `Option<TraceId>` is not-`None`, we have a connector trace.
     StopTracing(TraceId, Option<TraceId>),
