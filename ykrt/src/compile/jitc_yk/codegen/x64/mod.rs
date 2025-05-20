@@ -1747,6 +1747,11 @@ impl<'a> Assemble<'a> {
                 self.cg_floor(iidx, op);
                 Ok(())
             }
+            x if x.starts_with("llvm.fshl.i") => {
+                let [op_a, op_b, op_c] = args.try_into().unwrap();
+                self.cg_fshl(iidx, op_a, op_b, op_c);
+                Ok(())
+            }
             x if x.starts_with("llvm.memcpy") => {
                 let [dst, src, len, is_volatile] = args.try_into().unwrap();
                 self.cg_memcpy(iidx, dst, src, len, is_volatile);
@@ -2049,6 +2054,38 @@ impl<'a> Assemble<'a> {
                 }
             }
             Ty::Unimplemented(_) => todo!(),
+        }
+    }
+
+    fn cg_fshl(&mut self, iidx: InstIdx, op_a: Operand, op_b: Operand, op_c: Operand) {
+        let bitw = op_a.bitw(self.m);
+        match bitw {
+            64 => {
+                if let Some(c) = self.op_to_zero_ext_i8(&op_c) {
+                    let [a_reg, b_reg] = self.ra.assign_gp_regs(
+                        &mut self.asm,
+                        iidx,
+                        [
+                            GPConstraint::InputOutput {
+                                op: op_a,
+                                in_ext: RegExtension::SignExtended,
+                                out_ext: RegExtension::SignExtended,
+                                force_reg: None,
+                            },
+                            GPConstraint::Input {
+                                op: op_b,
+                                in_ext: RegExtension::SignExtended,
+                                force_reg: None,
+                                clobber_reg: false,
+                            },
+                        ],
+                    );
+                    dynasm!(self.asm; shld Rq(a_reg.code()), Rq(b_reg.code()), c);
+                } else {
+                    todo!();
+                }
+            }
+            x => todo!("{x}"),
         }
     }
 
@@ -5022,6 +5059,26 @@ mod tests {
                ...
                ; %1: double = call @llvm.floor.f64(%0)
                roundsd fp.128._, fp.128._, 0x01
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_call_fshl() {
+        codegen_and_test(
+            "
+             func_decl llvm.fshl.i64 (i64, i64, i64) -> i64
+             entry:
+               %0: i64 = param reg
+               %1: i64 = param reg
+               %2: i64 = call @llvm.fshl.i64(%0, %1, 17i64)
+               black_box %2
+            ",
+            "
+               ...
+               ; %2: i64 = call @llvm.fshl.i64(%0, %1, 17i64)
+               shld r.64.x, r.64.y, 0x11
             ",
             false,
         );
