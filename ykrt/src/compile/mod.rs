@@ -216,7 +216,7 @@ mod compiled_trace_testing {
 
     impl CompiledTrace for CompiledTraceTestingBasicTransitions {
         fn ctrid(&self) -> TraceId {
-            panic!();
+            TraceId::testing()
         }
 
         fn safepoint(&self) -> &Option<DeoptSafepoint> {
