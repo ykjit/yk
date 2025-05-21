@@ -781,6 +781,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         if inst.is_mappable_call(self.aot_mod)
             && !func.is_outline()
             && !func.is_idempotent()
+            && !func.contains_call_to(self.aot_mod, "llvm.va_start")
             && !is_recursive
         {
             // This is a mappable call that we want to inline.
