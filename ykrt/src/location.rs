@@ -326,7 +326,6 @@ pub(crate) enum HotLocationKind {
     /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
     /// side trace starting at this HotLocation.
     SideTracing {
-        trid: TraceId,
         /// The root [CompiledTrace]: while one thread is side tracing a (possibly many levels
         /// deep) side trace that ultimately relates to this [CompiledTrace], other threads can
         /// execute this compiled trace.

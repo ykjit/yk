@@ -93,7 +93,31 @@ impl JobQueue {
             // spin up a new thread for each compilation. This is only acceptable because a)
             // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
             // checking correctness, not performance.
+            if let Some(tid) = job.connector_tid
+                && !mt.compiled_traces.lock().contains_key(&tid)
+            {
+                self.queue.1.lock().push_back(job);
+                return;
+            }
             thread::spawn(job.main).join().unwrap();
+            loop {
+                let mut lk = self.queue.1.lock();
+                let cnd = {
+                    let ct_lk = mt.compiled_traces.lock();
+                    lk.iter().position(|x| match &x.connector_tid {
+                        Some(x) => ct_lk.contains_key(x),
+                        None => true,
+                    })
+                };
+                match cnd {
+                    Some(x) => {
+                        let job = lk.remove(x).unwrap();
+                        drop(lk);
+                        thread::spawn(job.main).join().unwrap();
+                    }
+                    None => break,
+                }
+            }
             return;
         }
 
@@ -151,6 +175,10 @@ impl JobQueue {
     /// Notify the queue that `trid` has successfully completed. If there are other jobs waiting on
     /// `trid`, this function will try to have them run.
     pub(crate) fn notify_success(&self, trid: TraceId) {
+        #[cfg(feature = "yk_testing")]
+        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
+            return;
+        }
         // Since waking worker threads up is quite disruptive for the system, only send a wake-up
         // to other threads if necessary. Note: the most common outcomes are that 0 or 1 jobs are
         // waiting on us.
