@@ -2030,7 +2030,13 @@ impl Inst {
     ///
     /// `%1`, `%2`, and `%3` are all "decopy equal" to each other, but `%4` is not "decopy equal"
     /// to any other instruction.
+    ///
+    /// # Panics
+    ///
+    /// If either `self` or `other` are `Inst::Copy`.
     pub(crate) fn decopy_eq(&self, m: &Module, other: Inst) -> bool {
+        assert!(!matches!(self, Inst::Copy(..)));
+        assert!(!matches!(other, Inst::Copy(..)));
         if std::mem::discriminant(self) != std::mem::discriminant(&other) {
             return false;
         }
