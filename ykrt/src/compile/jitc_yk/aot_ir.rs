@@ -39,7 +39,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
-use typed_index_collections::TiVec;
+use typed_index_collections::{TiSlice, TiVec};
 
 /// A magic number that all bytecode payloads begin with.
 const MAGIC: u32 = 0xedd5f00d;
@@ -1407,6 +1407,10 @@ impl BBlock {
             bbid,
         }
     }
+
+    pub(crate) fn insts(&self) -> &TiSlice<InstIdx, Inst> {
+        self.insts.as_slice()
+    }
 }
 
 pub(crate) struct DisplayableBBlock<'a> {
@@ -1500,6 +1504,20 @@ impl Func {
             m,
             funcidx,
         }
+    }
+
+    /// Determine if the function contains any calls to the named function.
+    pub(crate) fn contains_call_to(&self, m: &Module, func_name: &str) -> bool {
+        for bb in &self.bblocks {
+            for inst in bb.insts() {
+                if let Inst::Call { callee, .. } = inst
+                    && m.func(*callee).name() == func_name
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
