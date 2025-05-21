@@ -377,7 +377,9 @@ impl Module {
     /// If `iidx` points to a `Const`, `Copy`, or `Tombstone` instruction.
     pub(crate) fn inst(&self, iidx: InstIdx) -> Inst {
         match self.insts[usize::from(iidx)] {
-            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => todo!(),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => {
+                todo!("{:?}", self.insts[usize::from(iidx)])
+            }
             x => x,
         }
     }
@@ -1294,6 +1296,24 @@ impl Operand {
     {
         if let Operand::Var(iidx) = self {
             f(*iidx)
+        }
+    }
+
+    /// If self is [Operand::Var] and references a [Inst::Copy], recursively search until a
+    /// non-`Copy` instruction is found.
+    pub(crate) fn decopy(&self, m: &Module) -> Self {
+        let mut ret = self.clone();
+        loop {
+            match ret {
+                Self::Var(iidx) => {
+                    if let Inst::Copy(next_iidx) = m.inst_raw(iidx) {
+                        ret = Operand::Var(next_iidx);
+                    } else {
+                        return ret;
+                    }
+                }
+                Self::Const(_) => return ret,
+            }
         }
     }
 }
