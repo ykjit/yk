@@ -338,9 +338,9 @@ impl MT {
         trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>, Vec<String>),
         hl_arc: Arc<Mutex<HotLocation>>,
         trid: TraceId,
-        root_ctr: Arc<dyn CompiledTrace>,
         parent_ctr: Arc<dyn CompiledTrace>,
         guardid: GuardIdx,
+        target_ctr: Arc<dyn CompiledTrace>,
         connector_tid: Option<TraceId>,
     ) {
         self.stats.trace_recorded_ok();
@@ -353,7 +353,8 @@ impl MT {
             };
             mt.stats.timing_state(TimingState::Compiling);
             let connect_ctr = connector_tid.map(|x| Arc::clone(&mt.compiled_traces.lock()[&x]));
-            let sti = parent_ctr.sidetraceinfo(Arc::clone(&root_ctr), guardid, connect_ctr.clone());
+            let target_ctr = connect_ctr.unwrap_or(target_ctr);
+            let sti = parent_ctr.sidetraceinfo(guardid, Arc::clone(&target_ctr));
             // FIXME: Can we pass in the root trace address, root trace entry variable locations,
             // and the base stack-size from here, rather than spreading them out via
             // DeoptInfo/SideTraceInfo, and CompiledTrace?
@@ -365,7 +366,6 @@ impl MT {
                 Arc::clone(&hl_arc),
                 trace_iter.1,
                 trace_iter.2,
-                connect_ctr,
             ) {
                 Ok(ctr) => {
                     mt.compiled_traces
@@ -513,9 +513,9 @@ impl MT {
                             (utrace, promotions.into_boxed_slice(), debug_strs),
                             hl,
                             trid,
-                            root_ctr,
                             parent_ctr,
                             gidx,
+                            root_ctr,
                             connector_tid,
                         );
                     }
