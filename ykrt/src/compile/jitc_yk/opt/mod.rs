@@ -305,23 +305,30 @@ impl Opt {
                 (Operand::Const(op_cidx), Operand::Var(op_iidx))
                 | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
                     match self.m.const_(op_cidx) {
-                        Const::Int(_, x) if x.to_zero_ext_u64().unwrap() == 0 => {
-                            // Replace `x & 0` with `0`.
-                            self.m.replace(iidx, Inst::Const(op_cidx));
+                        Const::Int(_, v) => {
+                            if let Some(0) = v.to_zero_ext_u64() {
+                                // Replace `x & 0` with `0`.
+                                self.m.replace(iidx, Inst::Const(op_cidx));
+                                return Ok(());
+                            } else {
+                                let all_bits = ArbBitInt::all_bits_set(v.bitw());
+                                if v.to_zero_ext_u64() == all_bits.to_zero_ext_u64() {
+                                    // Replace `x & y` with `x` if `y` is a constant that has all
+                                    // the necessary bits set for this integer type. For an i1, for
+                                    // example, `x & 1` can be replaced with `x`.
+                                    self.m.replace(iidx, Inst::Copy(op_iidx));
+                                    return Ok(());
+                                }
+                            }
                         }
-                        _ => {
-                            // Canonicalise to (Var, Const).
-                            self.m.replace(
-                                iidx,
-                                BinOpInst::new(
-                                    Operand::Var(op_iidx),
-                                    BinOp::And,
-                                    Operand::Const(op_cidx),
-                                )
-                                .into(),
-                            );
-                        }
+                        _ => todo!(),
                     }
+                    // Canonicalise to (Var, Const).
+                    self.m.replace(
+                        iidx,
+                        BinOpInst::new(Operand::Var(op_iidx), BinOp::And, Operand::Const(op_cidx))
+                            .into(),
+                    );
                 }
                 (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
                     match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
@@ -335,7 +342,11 @@ impl Opt {
                         _ => panic!(),
                     }
                 }
-                (Operand::Var(_), Operand::Var(_)) => (),
+                (Operand::Var(lhs_iidx), Operand::Var(rhs_iidx)) => {
+                    if lhs_iidx == rhs_iidx {
+                        self.m.replace(iidx, Inst::Const(self.m.true_constidx()));
+                    }
+                }
             },
             BinOp::AShr | BinOp::LShr => match (
                 self.an.op_map(&self.m, inst.lhs(&self.m)),
@@ -446,23 +457,33 @@ impl Opt {
                 (Operand::Const(op_cidx), Operand::Var(op_iidx))
                 | (Operand::Var(op_iidx), Operand::Const(op_cidx)) => {
                     match self.m.const_(op_cidx) {
-                        Const::Int(_, y) if y.to_zero_ext_u64().unwrap() == 0 => {
-                            // Replace `x | 0` with `x`.
-                            self.m.replace(iidx, Inst::Copy(op_iidx));
+                        Const::Int(_, v) => {
+                            if let Some(0) = v.to_zero_ext_u64() {
+                                // Replace `x | 0` with `x`.
+                                self.m.replace(iidx, Inst::Copy(op_iidx));
+                                return Ok(());
+                            } else {
+                                let all_bits = ArbBitInt::all_bits_set(v.bitw());
+                                if v.to_zero_ext_u64() == all_bits.to_zero_ext_u64() {
+                                    // Replace `x | y` with `y` if `y` is a constant that has all
+                                    // the necessary bits set for this integer type. For an i1, for
+                                    // example, `x | 1` can be replaced with `1`.
+                                    let cidx = self
+                                        .m
+                                        .insert_const(Const::Int(inst.tyidx(&self.m), all_bits))?;
+                                    self.m.replace(iidx, Inst::Const(cidx));
+                                    return Ok(());
+                                }
+                            }
                         }
-                        _ => {
-                            // Canonicalise to (Var, Const).
-                            self.m.replace(
-                                iidx,
-                                BinOpInst::new(
-                                    Operand::Var(op_iidx),
-                                    BinOp::Or,
-                                    Operand::Const(op_cidx),
-                                )
-                                .into(),
-                            );
-                        }
+                        _ => todo!(),
                     }
+                    // Canonicalise to (Var, Const).
+                    self.m.replace(
+                        iidx,
+                        BinOpInst::new(Operand::Var(op_iidx), BinOp::Or, Operand::Const(op_cidx))
+                            .into(),
+                    );
                 }
                 (Operand::Const(lhs_cidx), Operand::Const(rhs_cidx)) => {
                     match (self.m.const_(lhs_cidx), self.m.const_(rhs_cidx)) {
@@ -477,7 +498,11 @@ impl Opt {
                         _ => panic!(),
                     }
                 }
-                (Operand::Var(_), Operand::Var(_)) => (),
+                (Operand::Var(lhs_iidx), Operand::Var(rhs_iidx)) => {
+                    if lhs_iidx == rhs_iidx {
+                        self.m.replace(iidx, Inst::Const(self.m.true_constidx()));
+                    }
+                }
             },
             BinOp::Shl => match (
                 self.an.op_map(&self.m, inst.lhs(&self.m)),
@@ -585,7 +610,11 @@ impl Opt {
                         _ => panic!(),
                     }
                 }
-                (Operand::Var(_), Operand::Var(_)) => (),
+                (Operand::Var(lhs_iidx), Operand::Var(rhs_iidx)) => {
+                    if lhs_iidx == rhs_iidx {
+                        self.m.replace(iidx, Inst::Const(self.m.false_constidx()));
+                    }
+                }
             },
             _ => {
                 if let (Operand::Const(_), Operand::Const(_)) = (
@@ -1275,6 +1304,25 @@ mod test {
     }
 
     #[test]
+    fn opt_and_self() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i8 = and %0, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
     fn opt_and_const() {
         Module::assert_ir_transform_eq(
             "
@@ -1289,6 +1337,47 @@ mod test {
           ...
           entry:
             black_box 2i8
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_and_all_bits_set() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i1 = param reg
+            %1: i1 = and %0, 0i1
+            %2: i1 = and %0, 1i1
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i1 = param ...
+            black_box 0i1
+            black_box %0
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i8 = and %0, 0i8
+            %2: i8 = and %0, 255i8
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 0i8
+            black_box %0
         ",
         );
     }
@@ -1514,6 +1603,66 @@ mod test {
     }
 
     #[test]
+    fn opt_or_self() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i8 = or %0, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_or_all_bits_set() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i1 = param reg
+            %1: i1 = or %0, 0i1
+            %2: i1 = or %0, 1i1
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i1 = param ...
+            black_box %0
+            black_box 1i1
+        ",
+        );
+
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i8 = or %0, 0i8
+            %2: i8 = or %0, 255i8
+            black_box %1
+            black_box %2
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box %0
+            black_box 255i8
+        ",
+        );
+    }
+
+    #[test]
     fn opt_or_const() {
         Module::assert_ir_transform_eq(
             "
@@ -1640,6 +1789,25 @@ mod test {
             %5: i64 = mul %0, 12i64
             black_box ...
             ...
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_xor_self() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i8 = xor %0, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 0i1
         ",
         );
     }
