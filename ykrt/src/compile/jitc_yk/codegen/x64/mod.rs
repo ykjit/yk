@@ -1646,7 +1646,7 @@ impl<'a> Assemble<'a> {
                         ],
                     );
                     match bitw {
-                        8 => {
+                        1 | 8 => {
                             dynasm!(self.asm ; mov BYTE [Rq(tgt_reg.code()) + off], Rb(val_reg.code()))
                         }
                         16 => {
