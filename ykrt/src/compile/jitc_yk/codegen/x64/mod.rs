@@ -3536,11 +3536,10 @@ impl CompiledTrace for X64CompiledTrace {
 
     fn sidetraceinfo(
         &self,
-        root_ctr: Arc<dyn CompiledTrace>,
         gidx: GuardIdx,
-        connect_ctr: Option<Arc<dyn CompiledTrace>>,
+        target_ctr: Arc<dyn CompiledTrace>,
     ) -> Arc<dyn SideTraceInfo> {
-        let root_ctr = root_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
+        let target_ctr = target_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
         // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
         // the `CompiledTrace` and `gidx` or better a reference to `DeoptInfo`?
         let deoptinfo = &self.deoptinfo[&usize::from(gidx)];
@@ -3555,9 +3554,9 @@ impl CompiledTrace for X64CompiledTrace {
             bid: deoptinfo.bid.clone(),
             lives,
             callframes,
-            entry_vars: root_ctr.entry_vars().to_vec(),
+            entry_vars: target_ctr.entry_vars().to_vec(),
             sp_offset: self.sp_offset,
-            target_ctr: connect_ctr.unwrap_or(root_ctr),
+            target_ctr,
         })
     }
 
@@ -3928,7 +3927,7 @@ mod tests {
         let m = Module::from_str(mod_str);
         let mt = MT::new().unwrap();
         let hl = HotLocation {
-            kind: HotLocationKind::Tracing,
+            kind: HotLocationKind::Tracing(mt.next_trace_id()),
             tracecompilation_errors: 0,
             #[cfg(feature = "ykd")]
             debug_str: None,
@@ -6565,7 +6564,7 @@ mod tests {
 
         let mt = MT::new().unwrap();
         let hl = HotLocation {
-            kind: HotLocationKind::Tracing,
+            kind: HotLocationKind::Tracing(mt.next_trace_id()),
             tracecompilation_errors: 0,
             #[cfg(feature = "ykd")]
             debug_str: None,

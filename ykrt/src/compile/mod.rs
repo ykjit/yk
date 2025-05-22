@@ -56,7 +56,7 @@ pub(crate) trait Compiler: Send + Sync {
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
-        connector_tid: Option<Arc<dyn CompiledTrace>>,
+        connector_ctr: Option<Arc<dyn CompiledTrace>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 
     /// Compile a mapped root trace into machine code.
@@ -69,7 +69,6 @@ pub(crate) trait Compiler: Send + Sync {
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
-        connector_tid: Option<Arc<dyn CompiledTrace>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
@@ -95,9 +94,8 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
 
     fn sidetraceinfo(
         &self,
-        root_ctr: Arc<dyn CompiledTrace>,
         gidx: GuardIdx,
-        connect_ctr: Option<Arc<dyn CompiledTrace>>,
+        target_ctr: Arc<dyn CompiledTrace>,
     ) -> Arc<dyn SideTraceInfo>;
 
     /// Return a reference to the guard `id`.
@@ -165,9 +163,8 @@ mod compiled_trace_testing {
 
         fn sidetraceinfo(
             &self,
-            _root_ctr: Arc<dyn CompiledTrace>,
             _gidx: GuardIdx,
-            _connect_ctr: Option<Arc<dyn CompiledTrace>>,
+            _target_ctr: Arc<dyn CompiledTrace>,
         ) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
@@ -216,7 +213,7 @@ mod compiled_trace_testing {
 
     impl CompiledTrace for CompiledTraceTestingBasicTransitions {
         fn ctrid(&self) -> TraceId {
-            panic!();
+            TraceId::testing()
         }
 
         fn safepoint(&self) -> &Option<DeoptSafepoint> {
@@ -229,9 +226,8 @@ mod compiled_trace_testing {
 
         fn sidetraceinfo(
             &self,
-            _root_ctr: Arc<dyn CompiledTrace>,
             _gidx: GuardIdx,
-            _connect_ctr: Option<Arc<dyn CompiledTrace>>,
+            _target_ctr: Arc<dyn CompiledTrace>,
         ) -> Arc<dyn SideTraceInfo> {
             panic!();
         }

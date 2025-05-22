@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    compile::{CompiledTrace, GuardIdx},
+    compile::CompiledTrace,
     mt::{HotThreshold, TraceCompilationErrorThreshold, TraceId, MT},
 };
 use parking_lot::Mutex;
@@ -46,38 +46,33 @@ pub struct Location {
     /// operate operate as follows (where Counting is the start state):
     ///
     /// ```text
+    ///                                           ★
     ///                                           │
     ///                                           │
     ///                                           ▼
-    ///                                         ┌─────────────────────────────────────────────────────────────────────────────────────┐   increment count
-    ///                                         │                                                                                     │ ──────────────────┐
-    ///                                         │                                      Counting                                       │                   │
-    ///                                         │                                                                                     │ ◀─────────────────┘
-    ///                                         └─────────────────────────────────────────────────────────────────────────────────────┘
-    ///                                           │                                ▲                          ▲
-    ///                                           │ start tracing                  │ failed below threshold   │ failed below threshold
-    ///                                           ▼                                │                          │
-    /// ┌───────────┐  failed above threshold   ┌───────────────────────────────┐  │                          │
-    /// │ DontTrace │ ◀──────────────────────── │            Tracing            │ ─┘                          │
-    /// └───────────┘                           └───────────────────────────────┘                             │
-    ///   ▲                                       │                                                           │
-    ///   │                                       │                                                           │
-    ///   │                                       ▼                                                           │
-    ///   │           failed above threshold    ┌───────────────────────────────┐                             │
-    ///   └──────────────────────────────────── │           Compiling           │ ────────────────────────────┘
-    ///                                         └───────────────────────────────┘
+    ///                                         ┌──────────────────────────────────────────────────────────────────────┐   increment count
+    ///                                         │                                                                      │ ──────────────────┐
+    ///                                         │                               Counting                               │                   │
+    ///                                         │                                                                      │ ◀─────────────────┘
+    ///                                         └──────────────────────────────────────────────────────────────────────┘
+    ///                                           │                 ▲                          ▲
+    ///                                           │ start tracing   │ failed below threshold   │ failed below threshold
+    ///                                           ▼                 │                          │
+    /// ┌───────────┐  failed above threshold   ┌────────────────┐  │                          │
+    /// │ DontTrace │ ◀──────────────────────── │    Tracing     │ ─┘                          │
+    /// └───────────┘                           └────────────────┘                             │
+    ///   ▲                                       │                                            │
+    ///   │                                       │                                            │
+    ///   │                                       ▼                                            │
+    ///   │           failed above threshold    ┌────────────────┐                             │
+    ///   └──────────────────────────────────── │   Compiling    │ ────────────────────────────┘
+    ///                                         └────────────────┘
     ///                                           │
     ///                                           │
     ///                                           ▼
-    ///                                         ┌───────────────────────────────┐
-    ///                                         │           Compiled            │ ◀┐
-    ///                                         └───────────────────────────────┘  │
-    ///                                           │                                │
-    ///                                           │ guard failed above threshold   │ sidetracing completed
-    ///                                           ▼                                │
-    ///                                         ┌───────────────────────────────┐  │
-    ///                                         │          SideTracing          │ ─┘
-    ///                                         └───────────────────────────────┘
+    ///                                         ┌────────────────┐
+    ///                                         │    Compiled    │
+    ///                                         └────────────────┘
     /// ```
     ///
     /// This diagram was created with [this tool](https://dot-to-ascii.ggerganov.com/) using this
@@ -95,8 +90,6 @@ pub struct Location {
     ///   Compiling -> Compiled;
     ///   Compiling -> Counting [label="failed below threshold"];
     ///   Compiling -> DontTrace [label="failed above threshold"];
-    ///   Compiled -> SideTracing [label="guard failed above threshold"];
-    ///   SideTracing -> Compiled [label="sidetracing completed"];
     /// }
     /// ```
     ///
@@ -322,20 +315,7 @@ pub(crate) enum HotLocationKind {
     /// traced again.
     DontTrace,
     /// This HotLocation started a trace which is ongoing.
-    Tracing,
-    /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
-    /// side trace starting at this HotLocation.
-    SideTracing {
-        /// The root [CompiledTrace]: while one thread is side tracing a (possibly many levels
-        /// deep) side trace that ultimately relates to this [CompiledTrace], other threads can
-        /// execute this compiled trace.
-        root_ctr: Arc<dyn CompiledTrace>,
-        /// The ID of the guard that failed (inside `parent`).
-        gidx: GuardIdx,
-        /// The [CompiledTrace] that the guard failed in. This will either be `root_ctr` or a
-        /// descendent of `root_ctr`.
-        parent_ctr: Arc<dyn CompiledTrace>,
-    },
+    Tracing(TraceId),
 }
 
 impl std::fmt::Debug for HotLocationKind {
@@ -345,8 +325,7 @@ impl std::fmt::Debug for HotLocationKind {
             Self::Compiling(_) => write!(f, "Compiling"),
             Self::Counting(_) => write!(f, "Counting"),
             Self::DontTrace => write!(f, "DontTrace"),
-            Self::Tracing => write!(f, "Tracing"),
-            Self::SideTracing { .. } => write!(f, "SideTracing"),
+            Self::Tracing(_) => write!(f, "Tracing"),
         }
     }
 }
