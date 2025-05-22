@@ -335,7 +335,11 @@ impl Opt {
                         _ => panic!(),
                     }
                 }
-                (Operand::Var(_), Operand::Var(_)) => (),
+                (Operand::Var(lhs_iidx), Operand::Var(rhs_iidx)) => {
+                    if lhs_iidx == rhs_iidx {
+                        self.m.replace(iidx, Inst::Const(self.m.true_constidx()));
+                    }
+                }
             },
             BinOp::AShr | BinOp::LShr => match (
                 self.an.op_map(&self.m, inst.lhs(&self.m)),
@@ -487,7 +491,11 @@ impl Opt {
                         _ => panic!(),
                     }
                 }
-                (Operand::Var(_), Operand::Var(_)) => (),
+                (Operand::Var(lhs_iidx), Operand::Var(rhs_iidx)) => {
+                    if lhs_iidx == rhs_iidx {
+                        self.m.replace(iidx, Inst::Const(self.m.true_constidx()));
+                    }
+                }
             },
             BinOp::Shl => match (
                 self.an.op_map(&self.m, inst.lhs(&self.m)),
@@ -595,7 +603,11 @@ impl Opt {
                         _ => panic!(),
                     }
                 }
-                (Operand::Var(_), Operand::Var(_)) => (),
+                (Operand::Var(lhs_iidx), Operand::Var(rhs_iidx)) => {
+                    if lhs_iidx == rhs_iidx {
+                        self.m.replace(iidx, Inst::Const(self.m.false_constidx()));
+                    }
+                }
             },
             _ => {
                 if let (Operand::Const(_), Operand::Const(_)) = (
@@ -1285,6 +1297,25 @@ mod test {
     }
 
     #[test]
+    fn opt_and_self() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i8 = and %0, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
     fn opt_and_const() {
         Module::assert_ir_transform_eq(
             "
@@ -1524,6 +1555,25 @@ mod test {
     }
 
     #[test]
+    fn opt_or_self() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i8 = or %0, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
     fn opt_or_all_bits_set() {
         Module::assert_ir_transform_eq(
             "
@@ -1691,6 +1741,25 @@ mod test {
             %5: i64 = mul %0, 12i64
             black_box ...
             ...
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_xor_self() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = param reg
+            %1: i8 = xor %0, %0
+            black_box %1
+        ",
+            |m| opt(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = param ...
+            black_box 0i1
         ",
         );
     }
