@@ -524,7 +524,13 @@ impl<'a> RevAnalyse<'a> {
     }
 
     fn an_select(&mut self, iidx: InstIdx, sinst: SelectInst) {
-        self.push_reg_hint(iidx, sinst.trueval(self.m));
+        if matches!(sinst.trueval(self.m), Operand::Const(_))
+            || matches!(sinst.falseval(self.m), Operand::Const(_))
+        {
+            self.push_reg_hint(iidx, sinst.cond(self.m));
+        } else {
+            self.push_reg_hint(iidx, sinst.trueval(self.m));
+        }
     }
 
     fn an_sitofp(&mut self, iidx: InstIdx, siinst: SIToFPInst) {
