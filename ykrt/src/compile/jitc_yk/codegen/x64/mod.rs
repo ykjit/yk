@@ -3272,40 +3272,99 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_select_int_ptr(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
-        let [true_reg, cond_reg, false_reg] = self.ra.assign_gp_regs(
-            &mut self.asm,
-            iidx,
-            [
-                GPConstraint::InputOutput {
-                    op: inst.trueval(self.m),
-                    in_ext: RegExtension::Undefined,
-                    out_ext: RegExtension::Undefined,
-                    force_reg: None,
-                },
-                GPConstraint::Input {
-                    op: inst.cond(self.m),
-                    in_ext: RegExtension::Undefined,
-                    force_reg: None,
-                    clobber_reg: false,
-                },
-                GPConstraint::Input {
-                    op: inst.falseval(self.m),
-                    in_ext: RegExtension::Undefined,
-                    force_reg: None,
-                    clobber_reg: false,
-                },
-            ],
-        );
-        debug_assert_eq!(
-            self.m
-                .type_(inst.cond(self.m).tyidx(self.m))
-                .bitw()
-                .unwrap(),
-            1
-        );
-
-        dynasm!(self.asm ; bt Rd(cond_reg.code()), 0);
-        dynasm!(self.asm ; cmovnc Rq(true_reg.code()), Rq(false_reg.code()));
+        let condval = inst.cond(self.m);
+        assert_eq!(condval.bitw(self.m), 1);
+        let trueval = inst.trueval(self.m);
+        let falseval = inst.falseval(self.m);
+        assert_eq!(trueval.bitw(self.m), falseval.bitw(self.m));
+        if trueval.bitw(self.m) == 1
+            && let Some(c) = self.op_to_zero_ext_i8(&trueval)
+        {
+            let [cond_reg, val_reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                iidx,
+                [
+                    GPConstraint::InputOutput {
+                        op: condval,
+                        in_ext: RegExtension::Undefined,
+                        out_ext: RegExtension::Undefined,
+                        force_reg: None,
+                    },
+                    GPConstraint::Input {
+                        op: falseval,
+                        in_ext: RegExtension::Undefined,
+                        force_reg: None,
+                        clobber_reg: false,
+                    },
+                ],
+            );
+            match c {
+                0 => dynasm!(self.asm
+                    ; not Rd(cond_reg.code())
+                    ; and Rd(cond_reg.code()), Rd(val_reg.code())
+                ),
+                1 => dynasm!(self.asm; or Rd(cond_reg.code()), Rd(val_reg.code())),
+                _ => unreachable!(),
+            }
+        } else if trueval.bitw(self.m) == 1
+            && let Some(c) = self.op_to_zero_ext_i8(&falseval)
+        {
+            let [cond_reg, val_reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                iidx,
+                [
+                    GPConstraint::InputOutput {
+                        op: condval,
+                        in_ext: RegExtension::Undefined,
+                        out_ext: RegExtension::Undefined,
+                        force_reg: None,
+                    },
+                    GPConstraint::Input {
+                        op: trueval,
+                        in_ext: RegExtension::Undefined,
+                        force_reg: None,
+                        clobber_reg: false,
+                    },
+                ],
+            );
+            match c {
+                0 => dynasm!(self.asm; and Rd(cond_reg.code()), Rd(val_reg.code())),
+                1 => dynasm!(self.asm
+                    ; not Rd(cond_reg.code())
+                    ; or Rd(cond_reg.code()), Rd(val_reg.code())
+                ),
+                _ => unreachable!(),
+            }
+        } else {
+            let [cond_reg, true_reg, false_reg] = self.ra.assign_gp_regs(
+                &mut self.asm,
+                iidx,
+                [
+                    GPConstraint::Input {
+                        op: condval,
+                        in_ext: RegExtension::Undefined,
+                        force_reg: None,
+                        clobber_reg: false,
+                    },
+                    GPConstraint::InputOutput {
+                        op: trueval,
+                        in_ext: RegExtension::Undefined,
+                        out_ext: RegExtension::Undefined,
+                        force_reg: None,
+                    },
+                    GPConstraint::Input {
+                        op: inst.falseval(self.m),
+                        in_ext: RegExtension::Undefined,
+                        force_reg: None,
+                        clobber_reg: false,
+                    },
+                ],
+            );
+            dynasm!(self.asm
+                ; bt Rd(cond_reg.code()), 0
+                ; cmovnc Rq(true_reg.code()), Rq(false_reg.code())
+            );
+        }
     }
 
     fn cg_select_float(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
@@ -5789,21 +5848,66 @@ mod tests {
     }
 
     #[test]
-    fn cg_select_int() {
+    fn cg_select_i1_consts() {
         codegen_and_test(
             "
               entry:
                 %0: i1 = param reg
-                %1: i32 = %0 ? 1i32 : 2i32
-                black_box %1
+                %1: i1 = param reg
+                %2: i1 = %0 ? %1 : 0i1
+                black_box %2
             ",
             "
                 ...
-                ; %1: i32 = %0 ? 1i32 : 2i32
-                mov r.32.x, 0x01
-                mov r.32.y, 0x02
-                bt r.32.z, 0x00
-                cmovnb r.64.x, r.64.y
+                ; %2: i1 = %0 ? %1 : 0i1
+                and eax, ecx
+            ",
+            false,
+        );
+        codegen_and_test(
+            "
+              entry:
+                %0: i1 = param reg
+                %1: i1 = param reg
+                %2: i1 = %0 ? %1 : 1i1
+                black_box %2
+            ",
+            "
+                ...
+                ; %2: i1 = %0 ? %1 : 1i1
+                not eax
+                or eax, ecx
+            ",
+            false,
+        );
+        codegen_and_test(
+            "
+              entry:
+                %0: i1 = param reg
+                %1: i1 = param reg
+                %2: i1 = %0 ? 0i1 : %1
+                black_box %2
+            ",
+            "
+                ...
+                ; %2: i1 = %0 ? 0i1 : %1
+                not eax
+                and eax, ecx
+            ",
+            false,
+        );
+        codegen_and_test(
+            "
+              entry:
+                %0: i1 = param reg
+                %1: i1 = param reg
+                %2: i1 = %0 ? 1i1 : %1
+                black_box %2
+            ",
+            "
+                ...
+                ; %2: i1 = %0 ? 1i1 : %1
+                or eax, ecx
             ",
             false,
         );
