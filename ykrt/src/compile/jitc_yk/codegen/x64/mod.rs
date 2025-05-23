@@ -652,7 +652,7 @@ impl<'a> Assemble<'a> {
                     //   *%1 = %2
                     if let Some((b_iidx, Inst::BinOp(b_inst))) = next
                         && b_inst.binop() == BinOp::Add
-                        && self.op_to_zero_ext_i32(&b_inst.rhs(self.m)).is_some()
+                        && self.op_to_sign_ext_i32(&b_inst.rhs(self.m)).is_some()
                         && let Some((s_iidx, Inst::Store(s_inst))) = iter.peek()
                     {
                         // Now we have to check that -- taking into account ptr offsets -- the two
@@ -948,7 +948,7 @@ impl<'a> Assemble<'a> {
             BinOp::And | BinOp::Or | BinOp::Xor => {
                 let bitw = lhs.bitw(self.m);
                 // We only optimise the canonicalised case.
-                if let Some(v) = self.op_to_zero_ext_i32(&rhs) {
+                if let Some(v) = self.op_to_imm64(&rhs) {
                     let [lhs_reg] = self.ra.assign_gp_regs(
                         &mut self.asm,
                         iidx,
@@ -966,6 +966,7 @@ impl<'a> Assemble<'a> {
                     match inst.binop() {
                         BinOp::And => match bitw {
                             1..=32 => dynasm!(self.asm; and Rd(lhs_reg.code()), v),
+                            // OPT: We could `and` with a 32 bit register.
                             64 => dynasm!(self.asm; and Rq(lhs_reg.code()), v),
                             _ => unreachable!(),
                         },
@@ -1613,7 +1614,7 @@ impl<'a> Assemble<'a> {
                     );
                     dynasm!(self.asm ; mov DWORD [Rq(tgt_reg.code()) + off], v);
                 } else if bitw == 64
-                    && let Some(v) = self.op_to_zero_ext_i32(&val)
+                    && let Some(v) = self.op_to_imm64(&val)
                 {
                     let [tgt_reg] = self.ra.assign_gp_regs(
                         &mut self.asm,
@@ -2256,6 +2257,26 @@ impl<'a> Assemble<'a> {
         None
     }
 
+    /// If an `Operand` refers to a constant integer that can be represented as a sign-extended
+    /// imm64, return an `i32`, otherwise return `None`.
+    fn op_to_imm64(&self, op: &Operand) -> Option<i32> {
+        if let Operand::Const(cidx) = op {
+            match self.m.const_(*cidx) {
+                Const::Float(_, _) => todo!(),
+                Const::Int(_, v) => v
+                    .to_zero_ext_u32()
+                    .filter(|x| *x <= i32::MAX.cast_unsigned())
+                    .map(|x| x.cast_signed()),
+                Const::Ptr(v) => ArbBitInt::from_u64(64, u64::try_from(*v).unwrap())
+                    .to_zero_ext_u32()
+                    .filter(|x| *x <= i32::MAX.cast_unsigned())
+                    .map(|x| x.cast_signed()),
+            }
+        } else {
+            None
+        }
+    }
+
     /// If an `Operand` refers to a constant integer that can be represented as an `i8`, return
     /// it zero-extended to 8 bits, otherwise return `None`.
     fn op_to_zero_ext_i8(&self, op: &Operand) -> Option<i8> {
@@ -2338,6 +2359,8 @@ impl<'a> Assemble<'a> {
         let bitw = self.m.type_(lhs.tyidx(self.m)).bitw().unwrap();
         let (imm, mut in_ext) = if pred.signed() {
             (self.op_to_sign_ext_i32(&rhs), RegExtension::SignExtended)
+        } else if bitw == 64 {
+            (self.op_to_imm64(&rhs), RegExtension::ZeroExtended)
         } else {
             (self.op_to_zero_ext_i32(&rhs), RegExtension::ZeroExtended)
         };
@@ -2419,6 +2442,8 @@ impl<'a> Assemble<'a> {
         let bitw = self.m.type_(lhs.tyidx(self.m)).bitw().unwrap();
         let (imm, mut in_ext) = if pred.signed() {
             (self.op_to_sign_ext_i32(&rhs), RegExtension::SignExtended)
+        } else if bitw == 64 {
+            (self.op_to_imm64(&rhs), RegExtension::ZeroExtended)
         } else {
             (self.op_to_zero_ext_i32(&rhs), RegExtension::ZeroExtended)
         };
@@ -4079,6 +4104,31 @@ mod tests {
                 ",
             false,
         );
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: ptr = param reg
+                %2: i64 = load %0
+                %3: i64 = add %2, 2147483647i64
+                *%0 = %3
+                %5: i64 = load %1
+                %6: i64 = add %5, 18446744073709551615i64
+                *%1 = %6
+            ",
+            "
+                ...
+                ; %2: i64 = load %0
+                ; %3: i64 = add %2, 2147483647i64
+                ; *%0 = %3
+                add qword ptr [r.64._], 0x7FFFFFFF
+                ; %5: i64 = load %1
+                ; %6: i64 = add %5, 18446744073709551615i64
+                ; *%1 = %6
+                add qword ptr [r.64._], 0xffffffffffffffff
+                ",
+            false,
+        );
 
         // Check it doesn't optimise when it shouldn't
         codegen_and_test(
@@ -4144,6 +4194,28 @@ mod tests {
                 ; *%0 = %3
                 and r.32.y, 0xff
                 mov [rax], r.8.y
+                ",
+            false,
+        );
+
+        codegen_and_test(
+            "
+              entry:
+                %0: ptr = param reg
+                %1: i64 = load %0
+                %2: i64 = add %1, 2147483648i64
+                *%0 = %2
+                black_box %2
+            ",
+            "
+                ...
+                ; %1: i64 = load %0
+                mov r.64.a, [r.64._]
+                ; %2: i64 = add %1, 2147483648i64
+                mov r.64.b, 0x80000000
+                add r.64.a, r.64.b
+                ; *%0 = %2
+                mov [rax], r.64.a
                 ",
             false,
         );
@@ -4647,23 +4719,34 @@ mod tests {
               entry:
                 %0: i8 = param reg
                 %1: i8 = param reg
-                %2: i1 = eq %0, 2i8
-                %3: i8 = and %1, 3i8
-                %4: i1 = eq %3, 4i8
-                black_box %2
-                black_box %4
+                %2: i64 = param reg
+                %3: i1 = eq %0, 2i8
+                %4: i8 = and %1, 3i8
+                %5: i1 = eq %4, 4i8
+                %6: i64 = and %2, 2147483647i64
+                %7: i64 = and %2, 2147483648i64
+                black_box %3
+                black_box %5
+                black_box %6
+                black_box %7
             ",
             "
                 ...
-                ; %2: i1 = eq %0, 2i8
+                ; %3: i1 = eq %0, 2i8
                 and r.32.a, 0xff
                 cmp r.32.a, 0x02
                 setz ...
-                ; %3: i8 = and %1, 3i8
+                ; %4: i8 = and %1, 3i8
                 and r.32.b, 0x03
-                ; %4: i1 = eq %3, 4i8
+                ; %5: i1 = eq %4, 4i8
                 cmp r.32.b, 0x04
                 setz ...
+                ; %6: i64 = and %2, 2147483647i64
+                mov r.64.x, r.64.y
+                and r.64.y, 0x7fffffff
+                ; %7: i64 = and %2, 2147483648i64
+                mov r.64.z, 0x80000000
+                and r.64.x, r.64.z
                 ",
             false,
         );
@@ -4811,6 +4894,45 @@ mod tests {
                 ",
             false,
         );
+
+        // Check that OR implicitly zero extends
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = param reg
+                %1: i8 = param reg
+                %2: i64 = param reg
+                %3: i1 = eq %0, 2i8
+                %4: i8 = or %1, 3i8
+                %5: i1 = eq %4, 4i8
+                %6: i64 = or %2, 2147483647i64
+                %7: i64 = or %2, 2147483648i64
+                black_box %3
+                black_box %5
+                black_box %6
+                black_box %7
+            ",
+            "
+                ...
+                ; %3: i1 = eq %0, 2i8
+                and r.32.a, 0xff
+                cmp r.32.a, 0x02
+                setz ...
+                ; %4: i8 = or %1, 3i8
+                or r.32.b, 0x03
+                ; %5: i1 = eq %4, 4i8
+                and r.32.b, 0xff
+                cmp r.32.b, 0x04
+                setz ...
+                ; %6: i64 = or %2, 2147483647i64
+                mov r.64.x, r.64.y
+                or r.64.y, 0x7fffffff
+                ; %7: i64 = or %2, 2147483648i64
+                mov r.64.z, 0x80000000
+                or r.64.x, r.64.z
+                ",
+            false,
+        );
     }
 
     #[test]
@@ -4937,6 +5059,45 @@ mod tests {
                 xor r.32.c, r.32.d
                 ; %7: i1 = xor %4, 1i1
                 xor r.32.e, 0x01
+                ",
+            false,
+        );
+
+        // Check that XOR implicitly zero extends
+        codegen_and_test(
+            "
+              entry:
+                %0: i8 = param reg
+                %1: i8 = param reg
+                %2: i64 = param reg
+                %3: i1 = eq %0, 2i8
+                %4: i8 = xor %1, 3i8
+                %5: i1 = eq %4, 4i8
+                %6: i64 = xor %2, 2147483647i64
+                %7: i64 = xor %2, 2147483648i64
+                black_box %3
+                black_box %5
+                black_box %6
+                black_box %7
+            ",
+            "
+                ...
+                ; %3: i1 = eq %0, 2i8
+                and r.32.a, 0xff
+                cmp r.32.a, 0x02
+                setz ...
+                ; %4: i8 = xor %1, 3i8
+                xor r.32.b, 0x03
+                ; %5: i1 = eq %4, 4i8
+                and r.32.b, 0xff
+                cmp r.32.b, 0x04
+                setz ...
+                ; %6: i64 = xor %2, 2147483647i64
+                mov r.64.x, r.64.y
+                xor r.64.y, 0x7fffffff
+                ; %7: i64 = xor %2, 2147483648i64
+                mov r.64.z, 0x80000000
+                xor r.64.x, r.64.z
                 ",
             false,
         );
@@ -5674,6 +5835,39 @@ mod tests {
                 cmp r.32.x, 0x03
                 setz r.8.x
                 ...
+            ",
+            false,
+        );
+
+        codegen_and_test(
+            "
+              entry:
+                %0: i64 = param reg
+                %1: i1 = eq %0, 2147483647i64
+                %2: i1 = eq %0, 2147483648i64
+                %3: i1 = slt %0, 4294967296i64
+                %4: i1 = slt %0, 18446744073709551615i64
+                black_box %1
+                black_box %2
+                black_box %3
+                black_box %4
+            ",
+            "
+                ...
+                ; %1: i1 = eq %0, 2147483647i64
+                cmp r.64.x, 0x7fffffff
+                setz r.8._
+                ; %2: i1 = eq %0, 2147483648i64
+                mov r.64.y, 0x80000000
+                cmp r.64.x, r.64.y
+                setz r.8._
+                ; %3: i1 = slt %0, 4294967296i64
+                mov r.64.z, 0x100000000
+                cmp r.64.x, r.64.z
+                setl r.8._
+                ; %4: i1 = slt %0, 18446744073709551615i64
+                cmp r.64.x, 0xffffffffffffffff
+                setl r.8._
             ",
             false,
         );
