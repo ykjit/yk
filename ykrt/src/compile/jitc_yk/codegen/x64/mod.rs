@@ -2021,7 +2021,11 @@ impl<'a> Assemble<'a> {
             [
                 GPConstraint::Input {
                     op: op.clone(),
-                    in_ext: RegExtension::ZeroExtended,
+                    in_ext: if bitw == 32 || bitw == 64 {
+                        RegExtension::Undefined
+                    } else {
+                        RegExtension::ZeroExtended
+                    },
                     force_reg: None,
                     clobber_reg: false,
                 },
@@ -2033,7 +2037,13 @@ impl<'a> Assemble<'a> {
             ],
         );
         assert!(bitw > 1 && bitw <= 64);
-        dynasm!(self.asm; popcnt Rq(out_reg.code()), Rq(in_reg.code()));
+        if bitw <= 32 {
+            dynasm!(self.asm; popcnt Rd(out_reg.code()), Rd(in_reg.code()));
+        } else if bitw == 64 {
+            dynasm!(self.asm; popcnt Rq(out_reg.code()), Rq(in_reg.code()));
+        } else {
+            todo!("{bitw}");
+        }
     }
 
     fn cg_floor(&mut self, iidx: InstIdx, op: Operand) {
@@ -5318,7 +5328,22 @@ mod tests {
             "
                ...
                ; %1: i32 = call @llvm.ctpop.i32(%0)
-               mov r.32.a, r.32.a
+               popcnt r.32._, r.32.a
+            ",
+            false,
+        );
+
+        codegen_and_test(
+            "
+             func_decl llvm.ctpop.i64 (i64) -> i64
+             entry:
+               %0: i64 = param reg
+               %1: i64 = call @llvm.ctpop.i64(%0)
+               black_box %1
+            ",
+            "
+               ...
+               ; %1: i64 = call @llvm.ctpop.i64(%0)
                popcnt r.64._, r.64.a
             ",
             false,
