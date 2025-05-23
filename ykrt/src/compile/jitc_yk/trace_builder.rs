@@ -17,6 +17,7 @@ use crate::{
     trace::{AOTTraceIterator, TraceAction},
 };
 use std::{collections::HashMap, ffi::CString, marker::PhantomData, sync::Arc};
+use ykaddr::addr::symbol_to_ptr;
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder<Register: Send + Sync> {
@@ -51,6 +52,8 @@ pub(crate) struct TraceBuilder<Register: Send + Sync> {
     debug_strs: Vec<String>,
     /// The trace's current position in the [Self::debug_strs] vector.
     debug_str_idx: usize,
+    /// Local variables that we have inferred to be constant.
+    inferred_consts: HashMap<jit_ir::InstIdx, jit_ir::ConstIdx>,
 }
 
 impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
@@ -89,6 +92,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             phantom: PhantomData,
             debug_strs,
             debug_str_idx: 0,
+            inferred_consts: HashMap::new(),
         })
     }
 
@@ -214,19 +218,26 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                     volatile,
                 } => self.handle_load(bid, iidx, ptr, tyidx, *volatile),
                 // FIXME: ignore remaining instructions after a call.
-                aot_ir::Inst::Call { callee, args, .. } => {
+                aot_ir::Inst::Call {
+                    callee,
+                    args,
+                    safepoint,
+                } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.insts.last().unwrap();
-                    self.handle_call(inst, bid, iidx, callee, args, nextinst)
+                    self.handle_call(inst, bid, iidx, callee, args, safepoint.as_ref(), nextinst)
                 }
                 aot_ir::Inst::IndirectCall {
                     ftyidx,
                     callop,
                     args,
+                    safepoint,
                 } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.insts.last().unwrap();
-                    self.handle_indirectcall(inst, bid, iidx, ftyidx, callop, args, nextinst)
+                    self.handle_indirectcall(
+                        inst, bid, iidx, ftyidx, callop, args, nextinst, safepoint,
+                    )
                 }
                 aot_ir::Inst::Store { tgt, val, volatile } => {
                     self.handle_store(bid, iidx, tgt, val, *volatile)
@@ -446,7 +457,9 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         op: &aot_ir::Operand,
     ) -> Result<jit_ir::Operand, CompilationError> {
         match op {
-            aot_ir::Operand::LocalVariable(iid) => Ok(self.local_map[iid].clone()),
+            aot_ir::Operand::LocalVariable(iid) => {
+                Ok(self.local_map[iid].decopy(&self.jit_mod).clone())
+            }
             aot_ir::Operand::Const(cidx) => {
                 let jit_const = self.handle_const(self.aot_mod.const_(*cidx))?;
                 Ok(jit_ir::Operand::Const(
@@ -457,7 +470,17 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                 let load = jit_ir::LookupGlobalInst::new(self.handle_global(*gd_idx)?)?;
                 self.jit_mod.push_and_make_operand(load.into())
             }
-            _ => todo!("{}", op.display(self.aot_mod)),
+            aot_ir::Operand::Func(fidx) => {
+                // We reduce a function operand to a constant pointer.
+                let aot_func = self.aot_mod.func(*fidx);
+                let fname = aot_func.name();
+                let vaddr = symbol_to_ptr(fname).unwrap();
+                let cidx = self
+                    .jit_mod
+                    .insert_const(jit_ir::Const::Ptr(vaddr as usize))
+                    .unwrap();
+                Ok(jit_ir::Operand::Const(cidx))
+            }
         }
     }
 
@@ -610,6 +633,28 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         let gi = jit_ir::GuardInfo::new(bid.clone(), live_vars, callframes, safepoint.id);
         let gi_idx = self.jit_mod.push_guardinfo(gi).unwrap();
 
+        // Can we infer a constant from this?
+        //
+        // If this is a `guard true` and the condition is a `eq` with a constant, then we have
+        // inferred a constant *after* the guard.
+        if expect {
+            match cond {
+                jit_ir::Operand::Var(iidx) => {
+                    // Using `inst_nocopy()` here because `Inst::Const` can arise.
+                    if let jit_ir::Inst::ICmp(icmp) = self.jit_mod.inst_nocopy(*iidx).unwrap()
+                        && let jit_ir::Operand::Const(const_rhs) = icmp.rhs(&self.jit_mod)
+                        && let jit_ir::Operand::Var(var_lhs) = icmp.lhs(&self.jit_mod)
+                        && icmp.predicate() == jit_ir::Predicate::Equal
+                    {
+                        // Check we store a canonical (de-copied) instruction index.
+                        assert!(self.jit_mod.inst_nocopy(var_lhs).is_some());
+                        self.inferred_consts.insert(var_lhs, const_rhs);
+                    }
+                }
+                jit_ir::Operand::Const(_) => todo!(),
+            };
+        }
+
         Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))
     }
 
@@ -708,8 +753,35 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         callop: &aot_ir::Operand,
         args: &[aot_ir::Operand],
         nextinst: &'static aot_ir::Inst,
+        safepoint: &'static aot_ir::DeoptSafepoint,
     ) -> Result<(), CompilationError> {
         debug_assert!(!inst.is_debug_call(self.aot_mod));
+
+        let jit_callop = self.handle_operand(callop)?;
+        if let jit_ir::Operand::Var(callee_iidx) = jit_callop {
+            // let callee = self.jit_mod.inst(callee_iidx);
+            if let Some(cidx) = self.inferred_consts.get(&callee_iidx) {
+                // The callee is constant. We can treat this *indirect* call as if it were a
+                // *direct* call, and maybe even inline it.
+                let Const::Ptr(vaddr) = self.jit_mod.const_(*cidx) else {
+                    panic!();
+                };
+                // Find the function the constant pointer is referring to.
+                let dli = ykaddr::addr::dladdr(*vaddr).unwrap();
+                assert_eq!(dli.dli_saddr(), *vaddr);
+                let callee = self
+                    .aot_mod
+                    .funcidx(dli.dli_sname().unwrap().to_str().unwrap());
+                return self.direct_call_impl(
+                    bid,
+                    aot_inst_idx,
+                    &callee,
+                    args,
+                    Some(safepoint),
+                    nextinst,
+                );
+            }
+        }
 
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
@@ -724,7 +796,6 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         // "yk_outline". Any mappable, indirect call is then guaranteed to be inline safe.
         self.outline_until_after_call(bid, nextinst);
 
-        let jit_callop = self.handle_operand(callop)?;
         let jit_tyidx = self.handle_type(self.aot_mod.type_(*ftyidx))?;
         let inst =
             jit_ir::IndirectCallInst::new(&mut self.jit_mod, jit_tyidx, jit_callop, jit_args)?;
@@ -732,6 +803,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         self.copy_inst(jit_ir::Inst::IndirectCall(idx), bid, aot_inst_idx)
     }
 
+    /// Handle a *direct* call instruction.
     fn handle_call(
         &mut self,
         inst: &'static aot_ir::Inst,
@@ -739,6 +811,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         aot_inst_idx: usize,
         callee: &aot_ir::FuncIdx,
         args: &[aot_ir::Operand],
+        safepoint: Option<&'static aot_ir::DeoptSafepoint>,
         nextinst: &'static aot_ir::Inst,
     ) -> Result<(), CompilationError> {
         // Ignore special functions that we neither want to inline nor copy.
@@ -757,6 +830,18 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             return Ok(());
         }
 
+        self.direct_call_impl(bid, aot_inst_idx, callee, args, safepoint, nextinst)
+    }
+
+    fn direct_call_impl(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        callee: &aot_ir::FuncIdx,
+        args: &[aot_ir::Operand],
+        safepoint: Option<&'static aot_ir::DeoptSafepoint>,
+        nextinst: &'static aot_ir::Inst,
+    ) -> Result<(), CompilationError> {
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
         for arg in args {
@@ -778,17 +863,17 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         let is_recursive = self.frames.iter().any(|f| f.funcidx == Some(*callee));
 
         let func = self.aot_mod.func(*callee);
-        if inst.is_mappable_call(self.aot_mod)
+        if !func.is_declaration()
             && !func.is_outline()
             && !func.is_idempotent()
             && !func.contains_call_to(self.aot_mod, "llvm.va_start")
             && !is_recursive
         {
             // This is a mappable call that we want to inline.
-            debug_assert!(inst.safepoint().is_some());
+            debug_assert!(safepoint.is_some());
             // Assign safepoint to the current frame.
             // Unwrap is safe as there's always at least one frame.
-            self.frames.last_mut().unwrap().safepoint = inst.safepoint();
+            self.frames.last_mut().unwrap().safepoint = safepoint;
             // Create a new frame for the inlined call and pass in the arguments of the caller.
             let aot_iid = aot_ir::InstID::new(
                 bid.funcidx(),

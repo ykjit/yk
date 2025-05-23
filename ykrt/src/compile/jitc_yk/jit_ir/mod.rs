@@ -377,7 +377,9 @@ impl Module {
     /// If `iidx` points to a `Const`, `Copy`, or `Tombstone` instruction.
     pub(crate) fn inst(&self, iidx: InstIdx) -> Inst {
         match self.insts[usize::from(iidx)] {
-            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => todo!(),
+            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => {
+                todo!("{:?}", self.insts[usize::from(iidx)])
+            }
             x => x,
         }
     }
@@ -1296,6 +1298,24 @@ impl Operand {
             f(*iidx)
         }
     }
+
+    /// If self is [Operand::Var] and references a [Inst::Copy], recursively search until a
+    /// non-`Copy` instruction is found.
+    pub(crate) fn decopy(&self, m: &Module) -> Self {
+        let mut ret = self.clone();
+        loop {
+            match ret {
+                Self::Var(iidx) => {
+                    if let Inst::Copy(next_iidx) = m.inst_raw(iidx) {
+                        ret = Operand::Var(next_iidx);
+                    } else {
+                        return ret;
+                    }
+                }
+                Self::Const(_) => return ret,
+            }
+        }
+    }
 }
 
 pub(crate) struct DisplayableOperand<'a> {
@@ -2030,7 +2050,13 @@ impl Inst {
     ///
     /// `%1`, `%2`, and `%3` are all "decopy equal" to each other, but `%4` is not "decopy equal"
     /// to any other instruction.
+    ///
+    /// # Panics
+    ///
+    /// If either `self` or `other` are `Inst::Copy`.
     pub(crate) fn decopy_eq(&self, m: &Module, other: Inst) -> bool {
+        assert!(!matches!(self, Inst::Copy(..)));
+        assert!(!matches!(other, Inst::Copy(..)));
         if std::mem::discriminant(self) != std::mem::discriminant(&other) {
             return false;
         }
