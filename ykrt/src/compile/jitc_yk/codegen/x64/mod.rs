@@ -2721,7 +2721,7 @@ impl<'a> Assemble<'a> {
             }
         };
 
-        // First of all we work out what to do with registers
+        // First of all we work out what to do with registers.
         let mut gp_regs = lsregalloc::GP_REGS
             .iter()
             .map(|_| GPConstraint::None)
@@ -2760,14 +2760,14 @@ impl<'a> Assemble<'a> {
             }
         }
 
-        // If we're lucky -- and we normally are! -- there will be a register which we don't need
-        // for the jump that we can use as the scratch register for moving spills around.
-        let spare_reg = self.ra.find_empty_gp_reg().unwrap();
+        // Second we handle moving spill locations around.
 
-        // Second we handle moving spill locations around
+        // We may need a temporary register to move values around, but obtaining this might force a
+        // spill. We thus put off obtaining a temporary register unless we know we really need it.
+        let mut tmp_reg = None;
         for (i, op) in src_ops.iter().enumerate() {
             let op = op.unpack(self.m);
-            let src = self.op_to_var_location(op.clone());
+            let mut src = self.op_to_var_location(op.clone());
             let dst = tgt_vars[i];
             if dst == src {
                 // The value is already in the correct place.
@@ -2779,9 +2779,9 @@ impl<'a> Assemble<'a> {
                     size: size_dst,
                 } => {
                     let off_dst = i32::try_from(off_dst).unwrap();
+                    // Deal with everything that doesn't need a temporary register first.
                     match src {
                         VarLocation::Register(Register::GP(reg)) => {
-                            assert_ne!(reg, spare_reg);
                             match size_dst {
                                 8 => dynasm!(self.asm;
                                     mov QWORD [rbp - off_dst], Rq(reg.code())
@@ -2791,18 +2791,45 @@ impl<'a> Assemble<'a> {
                                 ),
                                 _ => todo!(),
                             }
+                            continue;
                         }
+                        VarLocation::ConstInt { bits, v } => match bits {
+                            32 => {
+                                dynasm!(self.asm;
+                                    mov DWORD [rbp - off_dst], v as i32
+                                );
+                                continue;
+                            }
+                            8 => {
+                                dynasm!(self.asm;
+                                mov BYTE [rbp - off_dst], v as i8);
+                                continue;
+                            }
+                            _ => (),
+                        },
+                        VarLocation::ConstPtr(_) => (),
+                        VarLocation::Stack { .. } => (),
+                        e => todo!("{:?}", e),
+                    }
+
+                    // We really have to have a temporary register. Oh well.
+                    if tmp_reg.is_none() {
+                        tmp_reg = Some(self.ra.tmp_register_for_write_vars(&mut self.asm));
+                        // The temporary register could have caused a spill which causes `src` to
+                        // change its location, so recalculate.
+                        src = self.op_to_var_location(op.clone());
+                    }
+                    let spare_reg = tmp_reg.unwrap();
+                    match src {
+                        // Handled in the earlier `match`.
+                        VarLocation::Register(Register::GP(_)) => unreachable!(),
                         VarLocation::ConstInt { bits, v } => match bits {
                             64 => dynasm!(self.asm
                                 ; mov Rq(spare_reg.code()), QWORD v.cast_signed()
                                 ; mov QWORD [rbp - off_dst], Rq(spare_reg.code())
                             ),
-                            32 => dynasm!(self.asm;
-                                mov DWORD [rbp - off_dst], v as i32
-                            ),
-                            8 => dynasm!(self.asm;
-                                mov BYTE [rbp - off_dst], v as i8),
-                            x => todo!("{x}"),
+                            // Handled in the earlier `match`.
+                            _ => unreachable!(),
                         },
                         VarLocation::ConstPtr(v) => {
                             dynasm!(self.asm
