@@ -14,26 +14,21 @@
 //!   * When a value is in a register, we make no guarantees about what the upper bits are set to.
 //!     You must sign or zero extend at all points that these values are important.
 
-use super::{
-    super::{
-        aot_ir::DeoptSafepoint,
-        arbbitint::ArbBitInt,
-        jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, TraceKind, Ty},
-        CompilationError,
-    },
-    CodeGen,
-};
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::gdb::{self, GdbCtx};
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{
         jitc_yk::{
-            aot_ir,
-            jit_ir::{Const, IndirectCallIdx, InlinedFrame},
-            YkSideTraceInfo,
+            aot_ir::{self, DeoptSafepoint},
+            arbbitint::ArbBitInt,
+            jit_ir::{
+                self, BinOp, Const, FloatTy, IndirectCallIdx, InlinedFrame, Inst, InstIdx, Module,
+                Operand, TraceKind, Ty,
+            },
+            CodeGen, YkSideTraceInfo,
         },
-        CompiledTrace, Guard, GuardIdx, SideTraceInfo,
+        CompilationError, CompiledTrace, Guard, GuardIdx, SideTraceInfo,
     },
     location::HotLocation,
     mt::{TraceId, MT},
