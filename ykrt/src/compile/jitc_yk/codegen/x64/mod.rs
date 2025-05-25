@@ -51,7 +51,6 @@ use parking_lot::Mutex;
 use std::{
     assert_matches::debug_assert_matches,
     cell::Cell,
-    collections::HashMap,
     error::Error,
     slice,
     sync::{atomic::fence, Arc, Weak},
@@ -337,10 +336,10 @@ struct Assemble<'a> {
     body_start_locs: Vec<VarLocation>,
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
-    deoptinfo: HashMap<usize, (GuardSnapshot, DeoptInfo)>,
+    deoptinfo: Vec<(GuardSnapshot, DeoptInfo)>,
     /// An available register at the time of a guard failure. We need this register to patch 64-bit
     /// jumps when patching side-traces into their parents.
-    patch_reg: HashMap<usize, Rq>,
+    patch_reg: Vec<Rq>,
     ///
     /// Maps assembly offsets to comments.
     ///
@@ -409,8 +408,8 @@ impl<'a> Assemble<'a> {
             asm,
             header_start_locs: Vec::new(),
             body_start_locs: Vec::new(),
-            deoptinfo: HashMap::new(),
-            patch_reg: HashMap::new(),
+            deoptinfo: Vec::new(),
+            patch_reg: Vec::new(),
             comments: Cell::new(IndexMap::new()),
             sp_offset,
             prologue_offset: AssemblyOffset(0),
@@ -439,7 +438,8 @@ impl<'a> Assemble<'a> {
             let mut infos = self
                 .deoptinfo
                 .iter()
-                .map(|(id, (_regset, di))| (*id, di.fail_label))
+                .enumerate()
+                .map(|(id, (_regset, di))| (id, di.fail_label))
                 .collect::<Vec<_>>();
             // Debugging deopt asm is much easier if the stubs are in order.
             infos.sort_by(|a, b| a.0.cmp(&b.0));
@@ -449,7 +449,7 @@ impl<'a> Assemble<'a> {
             for (deoptid, fail_label) in infos {
                 self.comment(format!("Deopt ID and patch point for guard {deoptid:?}"));
                 self.ra
-                    .get_ready_for_deopt(&mut self.asm, &self.deoptinfo[&deoptid].0);
+                    .get_ready_for_deopt(&mut self.asm, &self.deoptinfo[deoptid].0);
                 // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
 
                 // Align this location in such a way that the operand of the below `mov`
@@ -465,9 +465,9 @@ impl<'a> Assemble<'a> {
                 self.push_nops(align - off - 2);
                 // Store the future patch offset for this guard.
                 let mov_off = self.asm.offset();
-                self.deoptinfo.get_mut(&deoptid).unwrap().1.fail_offset = mov_off;
+                self.deoptinfo.get_mut(deoptid).unwrap().1.fail_offset = mov_off;
                 // Emit the guard failure code.
-                let jumpreg = self.patch_reg[&deoptid];
+                let jumpreg = self.patch_reg[deoptid];
                 let deoptid = i32::try_from(deoptid).unwrap();
                 dynasm!(self.asm
                     ;=> fail_label
@@ -576,8 +576,8 @@ impl<'a> Assemble<'a> {
             deoptinfo: self
                 .deoptinfo
                 .into_iter()
-                .map(|(id, (_gsnap, di))| (id, di))
-                .collect::<HashMap<_, _>>(),
+                .map(|(_, di)| di)
+                .collect::<Vec<_>>(),
             sp_offset: self.ra.stack_size(),
             prologue_offset: self.prologue_offset.0,
             entry_vars: self.header_start_locs.clone(),
@@ -2414,7 +2414,7 @@ impl<'a> Assemble<'a> {
         // Codegen guard
         self.ra.expire_regs(g_iidx);
         let patch_reg = self.ra.tmp_register_for_icmp_guard(&mut self.asm, g_iidx);
-        self.patch_reg.insert(g_inst.gidx.into(), patch_reg);
+        self.patch_reg.push(patch_reg);
         let fail_label = self.guard_to_deopt(&g_inst);
         self.comment(Inst::Guard(g_inst).display(self.m, g_iidx).to_string());
 
@@ -3503,7 +3503,7 @@ impl<'a> Assemble<'a> {
             guard: Guard::new(),
         };
         self.deoptinfo
-            .insert(inst.gidx.into(), (self.ra.guard_snapshot(inst), deoptinfo));
+            .push((self.ra.guard_snapshot(inst), deoptinfo));
         fail_label
     }
 
@@ -3546,7 +3546,7 @@ impl<'a> Assemble<'a> {
         let cond = inst.cond(self.m);
         let (reg, patch_reg) = self.ra.tmp_registers_for_guard(&mut self.asm, iidx, cond);
         let fail_label = self.guard_to_deopt(inst);
-        self.patch_reg.insert(inst.gidx.into(), patch_reg);
+        self.patch_reg.push(patch_reg);
         dynasm!(self.asm ; bt Rd(reg.code()), 0);
         if inst.expect() {
             dynasm!(self.asm ; jnb =>fail_label);
@@ -3581,7 +3581,7 @@ pub(crate) struct X64CompiledTrace {
     /// The executable code itself.
     buf: ExecutableBuffer,
     /// Deoptimisation info: maps a [GuardIdx] to [DeoptInfo].
-    deoptinfo: HashMap<usize, DeoptInfo>,
+    deoptinfo: Vec<DeoptInfo>,
     /// Stack pointer offset from the base pointer of interpreter frame as defined in
     /// [YkSideTraceInfo::sp_offset].
     sp_offset: usize,
@@ -3636,7 +3636,7 @@ impl CompiledTrace for X64CompiledTrace {
         let target_ctr = target_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
         // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
         // the `CompiledTrace` and `gidx` or better a reference to `DeoptInfo`?
-        let deoptinfo = &self.deoptinfo[&usize::from(gidx)];
+        let deoptinfo = &self.deoptinfo[usize::from(gidx)];
         let lives = deoptinfo
             .live_vars
             .iter()
@@ -3655,7 +3655,7 @@ impl CompiledTrace for X64CompiledTrace {
     }
 
     fn guard(&self, gidx: GuardIdx) -> &crate::compile::Guard {
-        &self.deoptinfo[&usize::from(gidx)].guard
+        &self.deoptinfo[usize::from(gidx)].guard
     }
 
     /// Patch the address of a side-trace directly into the parent trace.
@@ -3667,7 +3667,7 @@ impl CompiledTrace for X64CompiledTrace {
         let _lock = LK_PATCH.lock();
 
         // Calculate a pointer to the address we want to patch.
-        let patch_offset = self.deoptinfo[&usize::from(gidx)].fail_offset;
+        let patch_offset = self.deoptinfo[usize::from(gidx)].fail_offset;
         // Add 2 bytes to get to the address operand of the mov instruction.
         let patch_addr = unsafe { self.buf.ptr(patch_offset).offset(2) };
         // FIXME: Is it better/faster to protect the entire buffer in one go and then patch each

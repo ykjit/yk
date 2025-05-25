@@ -52,7 +52,7 @@ pub(crate) extern "C" fn __yk_deopt(
         .unwrap();
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-    let info = &ctr.deoptinfo[&usize::from(gidx)];
+    let info = &ctr.deoptinfo[usize::from(gidx)];
     let mt = Arc::clone(&ctr.mt);
 
     mt.deopt();
