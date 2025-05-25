@@ -336,7 +336,7 @@ struct Assemble<'a> {
     body_start_locs: Vec<VarLocation>,
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
-    deoptinfo: Vec<(GuardSnapshot, DeoptInfo)>,
+    guards: Vec<(GuardSnapshot, CompilingGuard)>,
     /// An available register at the time of a guard failure. We need this register to patch 64-bit
     /// jumps when patching side-traces into their parents.
     patch_reg: Vec<Rq>,
@@ -408,7 +408,7 @@ impl<'a> Assemble<'a> {
             asm,
             header_start_locs: Vec::new(),
             body_start_locs: Vec::new(),
-            deoptinfo: Vec::new(),
+            guards: Vec::new(),
             patch_reg: Vec::new(),
             comments: Cell::new(IndexMap::new()),
             sp_offset,
@@ -427,7 +427,7 @@ impl<'a> Assemble<'a> {
 
         let mut patch_deopts = Vec::new();
 
-        if !self.deoptinfo.is_empty() {
+        if !self.guards.is_empty() {
             // We now have to construct the "full" deopt points. Inside the trace itself, are just
             // a pair of instructions: a `cmp` followed by a `jnz` to a `fail_label` that has not
             // yet been defined. We now have to construct a full call to `__yk_deopt` for each of
@@ -436,7 +436,7 @@ impl<'a> Assemble<'a> {
             // which does the full call to __yk_deopt.
             #[allow(unused_mut)] // `mut` required in debug builds. See below.
             let mut infos = self
-                .deoptinfo
+                .guards
                 .iter()
                 .enumerate()
                 .map(|(id, (_regset, di))| (id, di.fail_label))
@@ -449,7 +449,7 @@ impl<'a> Assemble<'a> {
             for (deoptid, fail_label) in infos {
                 self.comment(format!("Deopt ID and patch point for guard {deoptid:?}"));
                 self.ra
-                    .get_ready_for_deopt(&mut self.asm, &self.deoptinfo[deoptid].0);
+                    .get_ready_for_deopt(&mut self.asm, &self.guards[deoptid].0);
                 // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
 
                 // Align this location in such a way that the operand of the below `mov`
@@ -465,7 +465,7 @@ impl<'a> Assemble<'a> {
                 self.push_nops(align - off - 2);
                 // Store the future patch offset for this guard.
                 let mov_off = self.asm.offset();
-                self.deoptinfo.get_mut(deoptid).unwrap().1.fail_offset = mov_off;
+                self.guards.get_mut(deoptid).unwrap().1.fail_offset = mov_off;
                 // Emit the guard failure code.
                 let jumpreg = self.patch_reg[deoptid];
                 let deoptid = i32::try_from(deoptid).unwrap();
@@ -573,10 +573,10 @@ impl<'a> Assemble<'a> {
             safepoint: self.m.safepoint.as_ref().cloned(),
             mt,
             buf,
-            deoptinfo: self
-                .deoptinfo
+            compiled_guards: self
+                .guards
                 .into_iter()
-                .map(|(_, di)| di)
+                .map(|(_, gd)| CompiledGuard::from(gd))
                 .collect::<Vec<_>>(),
             sp_offset: self.ra.stack_size(),
             prologue_offset: self.prologue_offset.0,
@@ -3493,17 +3493,15 @@ impl<'a> Assemble<'a> {
 
         let fail_label = self.asm.new_dynamic_label();
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
-        let deoptinfo = DeoptInfo {
+        let gd = CompilingGuard {
             bid: gi.bid().clone(),
             fail_label,
             // We don't know the offset yet but will fill this in later.
             fail_offset: AssemblyOffset(0),
             live_vars: lives,
             inlined_frames: gi.inlined_frames().to_vec(),
-            guard: Guard::new(),
         };
-        self.deoptinfo
-            .push((self.ra.guard_snapshot(inst), deoptinfo));
+        self.guards.push((self.ra.guard_snapshot(inst), gd));
         fail_label
     }
 
@@ -3556,9 +3554,9 @@ impl<'a> Assemble<'a> {
     }
 }
 
-/// Information required by deoptimisation.
+/// Information required by guards while we're compiling them.
 #[derive(Debug)]
-struct DeoptInfo {
+struct CompilingGuard {
     /// The AOT block that the failing guard originated from.
     bid: aot_ir::BBlockId,
     fail_label: DynamicLabel,
@@ -3566,8 +3564,31 @@ struct DeoptInfo {
     /// Live variables, mapping AOT vars to JIT vars.
     live_vars: Vec<(aot_ir::InstID, VarLocation)>,
     inlined_frames: Vec<InlinedFrame>,
+}
+
+/// A compiled guard: contains information required by deoptimisation.
+#[derive(Debug)]
+struct CompiledGuard {
+    /// The AOT block that the failing guard originated from.
+    bid: aot_ir::BBlockId,
+    fail_offset: AssemblyOffset,
+    /// Live variables, mapping AOT vars to JIT vars.
+    live_vars: Vec<(aot_ir::InstID, VarLocation)>,
+    inlined_frames: Vec<InlinedFrame>,
     /// Keeps track of deopt amount and compiled side-trace.
     guard: Guard,
+}
+
+impl From<CompilingGuard> for CompiledGuard {
+    fn from(gd: CompilingGuard) -> Self {
+        Self {
+            bid: gd.bid,
+            fail_offset: gd.fail_offset,
+            live_vars: gd.live_vars,
+            inlined_frames: gd.inlined_frames,
+            guard: Guard::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -3580,8 +3601,8 @@ pub(crate) struct X64CompiledTrace {
     safepoint: Option<DeoptSafepoint>,
     /// The executable code itself.
     buf: ExecutableBuffer,
-    /// Deoptimisation info: maps a [GuardIdx] to [DeoptInfo].
-    deoptinfo: Vec<DeoptInfo>,
+    /// Information about compiled guards; mostly used for deoptimisation.
+    compiled_guards: Vec<CompiledGuard>,
     /// Stack pointer offset from the base pointer of interpreter frame as defined in
     /// [YkSideTraceInfo::sp_offset].
     sp_offset: usize,
@@ -3608,6 +3629,11 @@ impl X64CompiledTrace {
     /// Return the locations of the live variables this trace expects as input.
     fn entry_vars(&self) -> &[VarLocation] {
         &self.entry_vars
+    }
+
+    /// Return the [CompiledGuard] at `gidx`.
+    fn compiled_guard(&self, gidx: GuardIdx) -> &CompiledGuard {
+        &self.compiled_guards[usize::from(gidx)]
     }
 }
 
@@ -3636,16 +3662,16 @@ impl CompiledTrace for X64CompiledTrace {
         let target_ctr = target_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
         // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
         // the `CompiledTrace` and `gidx` or better a reference to `DeoptInfo`?
-        let deoptinfo = &self.deoptinfo[usize::from(gidx)];
-        let lives = deoptinfo
+        let gd = &self.compiled_guards[usize::from(gidx)];
+        let lives = gd
             .live_vars
             .iter()
             .map(|(a, l)| (a.clone(), l.into()))
             .collect();
-        let callframes = deoptinfo.inlined_frames.clone();
+        let callframes = gd.inlined_frames.clone();
 
         Arc::new(YkSideTraceInfo {
-            bid: deoptinfo.bid.clone(),
+            bid: gd.bid.clone(),
             lives,
             callframes,
             entry_vars: target_ctr.entry_vars().to_vec(),
@@ -3655,7 +3681,7 @@ impl CompiledTrace for X64CompiledTrace {
     }
 
     fn guard(&self, gidx: GuardIdx) -> &crate::compile::Guard {
-        &self.deoptinfo[usize::from(gidx)].guard
+        &self.compiled_guards[usize::from(gidx)].guard
     }
 
     /// Patch the address of a side-trace directly into the parent trace.
@@ -3667,7 +3693,7 @@ impl CompiledTrace for X64CompiledTrace {
         let _lock = LK_PATCH.lock();
 
         // Calculate a pointer to the address we want to patch.
-        let patch_offset = self.deoptinfo[usize::from(gidx)].fail_offset;
+        let patch_offset = self.compiled_guards[usize::from(gidx)].fail_offset;
         // Add 2 bytes to get to the address operand of the mov instruction.
         let patch_addr = unsafe { self.buf.ptr(patch_offset).offset(2) };
         // FIXME: Is it better/faster to protect the entire buffer in one go and then patch each
