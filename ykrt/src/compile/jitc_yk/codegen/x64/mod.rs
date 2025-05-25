@@ -336,7 +336,7 @@ struct Assemble<'a> {
     body_start_locs: Vec<VarLocation>,
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
-    guards: Vec<(GuardSnapshot, CompilingGuard)>,
+    guards: Vec<CompilingGuard>,
     /// An available register at the time of a guard failure. We need this register to patch 64-bit
     /// jumps when patching side-traces into their parents.
     patch_reg: Vec<Rq>,
@@ -434,22 +434,12 @@ impl<'a> Assemble<'a> {
             // those labels. Since, in general, we'll have multiple guards, we construct a simple
             // stub which puts an ID in a register then JMPs to (shared amongst all guards) code
             // which does the full call to __yk_deopt.
-            #[allow(unused_mut)] // `mut` required in debug builds. See below.
-            let mut infos = self
-                .guards
-                .iter()
-                .enumerate()
-                .map(|(id, (_regset, di))| (id, di.fail_label))
-                .collect::<Vec<_>>();
-            // Debugging deopt asm is much easier if the stubs are in order.
-            infos.sort_by(|a, b| a.0.cmp(&b.0));
-
             let deopt_label = self.asm.new_dynamic_label();
             let guardcheck_label = self.asm.new_dynamic_label();
-            for (deoptid, fail_label) in infos {
-                self.comment(format!("Deopt ID and patch point for guard {deoptid:?}"));
+            for i in 0..self.guards.len() {
+                self.comment(format!("Deopt ID and patch point for guard {i:?}"));
                 self.ra
-                    .get_ready_for_deopt(&mut self.asm, &self.guards[deoptid].0);
+                    .get_ready_for_deopt(&mut self.asm, &self.guards[i].guard_snapshot);
                 // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
 
                 // Align this location in such a way that the operand of the below `mov`
@@ -465,10 +455,11 @@ impl<'a> Assemble<'a> {
                 self.push_nops(align - off - 2);
                 // Store the future patch offset for this guard.
                 let mov_off = self.asm.offset();
-                self.guards.get_mut(deoptid).unwrap().1.fail_offset = mov_off;
+                self.guards.get_mut(i).unwrap().fail_offset = mov_off;
                 // Emit the guard failure code.
-                let jumpreg = self.patch_reg[deoptid];
-                let deoptid = i32::try_from(deoptid).unwrap();
+                let jumpreg = self.patch_reg[i];
+                let deoptid = i32::try_from(i).unwrap();
+                let fail_label = self.guards[i].fail_label;
                 dynasm!(self.asm
                     ;=> fail_label
                     // After compiling a side-trace for this location, we want to patch in a jump
@@ -576,7 +567,7 @@ impl<'a> Assemble<'a> {
             compiled_guards: self
                 .guards
                 .into_iter()
-                .map(|(_, gd)| CompiledGuard::from(gd))
+                .map(CompiledGuard::from)
                 .collect::<Vec<_>>(),
             sp_offset: self.ra.stack_size(),
             prologue_offset: self.prologue_offset.0,
@@ -3494,6 +3485,7 @@ impl<'a> Assemble<'a> {
         let fail_label = self.asm.new_dynamic_label();
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let gd = CompilingGuard {
+            guard_snapshot: self.ra.guard_snapshot(inst),
             bid: gi.bid().clone(),
             fail_label,
             // We don't know the offset yet but will fill this in later.
@@ -3501,7 +3493,7 @@ impl<'a> Assemble<'a> {
             live_vars: lives,
             inlined_frames: gi.inlined_frames().to_vec(),
         };
-        self.guards.push((self.ra.guard_snapshot(inst), gd));
+        self.guards.push(gd);
         fail_label
     }
 
@@ -3557,6 +3549,7 @@ impl<'a> Assemble<'a> {
 /// Information required by guards while we're compiling them.
 #[derive(Debug)]
 struct CompilingGuard {
+    guard_snapshot: GuardSnapshot,
     /// The AOT block that the failing guard originated from.
     bid: aot_ir::BBlockId,
     fail_label: DynamicLabel,
