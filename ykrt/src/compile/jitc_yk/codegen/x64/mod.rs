@@ -337,10 +337,6 @@ struct Assemble<'a> {
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
     guards: Vec<CompilingGuard>,
-    /// An available register at the time of a guard failure. We need this register to patch 64-bit
-    /// jumps when patching side-traces into their parents.
-    patch_reg: Vec<Rq>,
-    ///
     /// Maps assembly offsets to comments.
     ///
     /// Comments used by the trace printer for debugging and testing only.
@@ -409,7 +405,6 @@ impl<'a> Assemble<'a> {
             header_start_locs: Vec::new(),
             body_start_locs: Vec::new(),
             guards: Vec::new(),
-            patch_reg: Vec::new(),
             comments: Cell::new(IndexMap::new()),
             sp_offset,
             prologue_offset: AssemblyOffset(0),
@@ -457,7 +452,7 @@ impl<'a> Assemble<'a> {
                 let mov_off = self.asm.offset();
                 self.guards.get_mut(i).unwrap().fail_offset = mov_off;
                 // Emit the guard failure code.
-                let jumpreg = self.patch_reg[i];
+                let jumpreg = self.guards[i].patch_reg;
                 let deoptid = i32::try_from(i).unwrap();
                 let fail_label = self.guards[i].fail_label;
                 dynasm!(self.asm
@@ -2405,8 +2400,7 @@ impl<'a> Assemble<'a> {
         // Codegen guard
         self.ra.expire_regs(g_iidx);
         let patch_reg = self.ra.tmp_register_for_icmp_guard(&mut self.asm, g_iidx);
-        self.patch_reg.push(patch_reg);
-        let fail_label = self.guard_to_deopt(&g_inst);
+        let fail_label = self.guard_to_deopt(&g_inst, patch_reg);
         self.comment(Inst::Guard(g_inst).display(self.m, g_iidx).to_string());
 
         if g_inst.expect() {
@@ -3448,7 +3442,7 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn guard_to_deopt(&mut self, inst: &jit_ir::GuardInst) -> DynamicLabel {
+    fn guard_to_deopt(&mut self, inst: &jit_ir::GuardInst, patch_reg: Rq) -> DynamicLabel {
         // Convert the guard info into deopt info and store it on the heap.
         let mut lives = Vec::new();
         let gi = inst.guard_info(self.m);
@@ -3485,6 +3479,7 @@ impl<'a> Assemble<'a> {
         let fail_label = self.asm.new_dynamic_label();
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let gd = CompilingGuard {
+            patch_reg,
             guard_snapshot: self.ra.guard_snapshot(inst),
             bid: gi.bid().clone(),
             fail_label,
@@ -3535,8 +3530,7 @@ impl<'a> Assemble<'a> {
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
         let cond = inst.cond(self.m);
         let (reg, patch_reg) = self.ra.tmp_registers_for_guard(&mut self.asm, iidx, cond);
-        let fail_label = self.guard_to_deopt(inst);
-        self.patch_reg.push(patch_reg);
+        let fail_label = self.guard_to_deopt(inst, patch_reg);
         dynasm!(self.asm ; bt Rd(reg.code()), 0);
         if inst.expect() {
             dynasm!(self.asm ; jnb =>fail_label);
@@ -3549,6 +3543,9 @@ impl<'a> Assemble<'a> {
 /// Information required by guards while we're compiling them.
 #[derive(Debug)]
 struct CompilingGuard {
+    /// An available register at the time of a guard failure. We need this register to patch 64-bit
+    /// jumps when patching side-traces into their parents.
+    patch_reg: Rq,
     guard_snapshot: GuardSnapshot,
     /// The AOT block that the failing guard originated from.
     bid: aot_ir::BBlockId,
