@@ -2187,6 +2187,7 @@ impl<R: dynasmrt::Register> RegConstraint<R> {
 
 /// The information the register allocator records at the point of a guard's code generation that
 /// it later needs to get a failing guard ready for deopt.
+#[derive(Debug)]
 pub(super) struct GuardSnapshot {
     /// The registers we need to zero extend: the `u32` is the `from_bitw` that is passed to
     /// `force_zero_extend_to_reg64`.

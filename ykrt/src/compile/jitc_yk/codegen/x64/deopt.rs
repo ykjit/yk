@@ -52,7 +52,7 @@ pub(crate) extern "C" fn __yk_deopt(
         .unwrap();
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-    let info = &ctr.deoptinfo[&usize::from(gidx)];
+    let cgd = &ctr.compiled_guard(gidx);
     let mt = Arc::clone(&ctr.mt);
 
     mt.deopt();
@@ -64,7 +64,7 @@ pub(crate) extern "C" fn __yk_deopt(
     // Add space for live register values which we'll be adding at the end.
     let mut memsize = RECOVER_REG.len() * REG64_BYTESIZE;
     // Calculate amount of space we need to allocate for each stack frame.
-    for (i, iframe) in info.inlined_frames.iter().enumerate() {
+    for (i, iframe) in cgd.inlined_frames.iter().enumerate() {
         let (rec, _) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
         debug_assert!(rec.size != u64::MAX);
         // The controlpoint frame (i == 0) doesn't need to be recreated.
@@ -90,7 +90,7 @@ pub(crate) extern "C" fn __yk_deopt(
     // Live register values that we need to write back into AOT registers.
     let mut registers = [0; REGISTER_NUM];
     let mut varidx = 0;
-    for (i, iframe) in info.inlined_frames.iter().enumerate() {
+    for (i, iframe) in cgd.inlined_frames.iter().enumerate() {
         let (rec, pinfo) = aot_smaps.get(usize::try_from(iframe.safepoint.id).unwrap());
 
         // WRITE RBP
@@ -160,7 +160,7 @@ pub(crate) extern "C" fn __yk_deopt(
         // stackmap.
         for aotvar in rec.live_vars.iter() {
             // Read live JIT values from the trace's stack frame.
-            let jitval = match info.live_vars[varidx].1 {
+            let jitval = match cgd.live_vars[varidx].1 {
                 VarLocation::Stack { frame_off, size } => {
                     // rbp-0 can't contain a variable.
                     // [rbp-0] points to either the return address or the previous frame's rbp
@@ -305,7 +305,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
     // Compute the address to which we want to write the new stack. This is immediately after the
     // frame containing the control point.
-    let (rec, pinfo) = aot_smaps.get(usize::try_from(info.inlined_frames[0].safepoint.id).unwrap());
+    let (rec, pinfo) = aot_smaps.get(usize::try_from(cgd.inlined_frames[0].safepoint.id).unwrap());
     let mut newframedst = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
     if pinfo.hasfp {
         // `frameaddr` is the RBP value of the bottom frame after pushing the previous frame's RBP.
