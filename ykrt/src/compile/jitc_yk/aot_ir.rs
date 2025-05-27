@@ -961,6 +961,7 @@ pub(crate) enum Inst {
         num_args: u32,
         #[deku(count = "num_args")]
         args: Vec<Operand>,
+        safepoint: DeoptSafepoint,
     },
     #[deku(id = "16")]
     Select {
@@ -1084,13 +1085,6 @@ impl Inst {
             Self::FNeg { val } => Some(val.type_(m)),
             Self::DebugStr { .. } => None,
             Self::IdempotentPromote { tyidx, .. } => Some(m.type_(*tyidx)),
-        }
-    }
-
-    pub(crate) fn is_mappable_call(&self, m: &Module) -> bool {
-        match self {
-            Self::Call { callee, .. } => !m.func(*callee).is_declaration(),
-            _ => false,
         }
     }
 
@@ -1332,13 +1326,20 @@ impl fmt::Display for DisplayableInst<'_> {
                 ftyidx: _,
                 callop,
                 args,
+                safepoint,
             } => {
                 let args_s = args
                     .iter()
                     .map(|a| a.display(self.m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "icall {}({})", callop.display(self.m), args_s)
+                write!(
+                    f,
+                    "icall {}({}) {}",
+                    callop.display(self.m),
+                    args_s,
+                    safepoint.display(self.m)
+                )
             }
             Inst::Select {
                 cond,

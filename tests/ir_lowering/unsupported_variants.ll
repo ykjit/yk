@@ -17,13 +17,13 @@
 ;         %{{_}}: ?ty<<4 x i32>> = unimplemented <<  %{{15}} = add <4 x i32> %{{44}}, %{{44}}>>
 ;         br bb3
 ;      bb3:
-;         %{{_}}: i32 = unimplemented <<  %{{17}} = call i32 @f(i32 swiftself 5)>>
-;         %{{_}}: i32 = unimplemented <<  %{{18}} = call inreg i32 @f(i32 5)>>
-;         %{{_}}: i32 = unimplemented <<  %{{19}} = call i32 @f(i32 5) #{{0}}>>
-;         %{{_}}: float = unimplemented <<  %{{20}} = call nnan float @g()>>
-;         %{{_}}: i32 = unimplemented <<  %{{21}} = call ghccc i32 @f(i32 5)>>
-;         %{{_}}: i32 = unimplemented <<  %{{22}} = call i32 @f(i32 5) [ "kcfi"(i32 1234) ]>>
-;         %{{_}}: ptr = unimplemented <<  %{{23}} = call addrspace(6) ptr @p()>>
+;         %{{_}}: i32 = unimplemented <<  %{{17}} = call i32 @f(i32 swiftself 5) <note: swiftself param attr>>>
+;         %{{_}}: i32 = unimplemented <<  %{{18}} = call inreg i32 @f(i32 5) <note: inreg ret attr>>>
+;         %{{_}}: i32 = unimplemented <<  %{{19}} = call i32 @f(i32 5) #{{0}} <note: alignstack(8) fn attr>>>
+;         %{{_}}: float = unimplemented <<  %{{20}} = call nnan float @g() <note: fastmath>>>
+;         %{{_}}: i32 = unimplemented <<  %{{21}} = call ghccc i32 @f(i32 5) <note: cconv>>>
+;         %{{_}}: i32 = unimplemented <<  %{{22}} = call i32 @f(i32 5) [ "kcfi"(i32 1234) ] <note: bundles>>>
+;         %{{_}}: ptr = unimplemented <<  %{{23}} = call addrspace(6) ptr @p() <note: addrspace>>>
 ;         br bb4
 ;      bb4:
 ;         %{{_}}: ?ty<<8 x i8>> = unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>>>
@@ -36,7 +36,7 @@
 ;         br bb6
 ;     bb6:
 ;         %{{_}}: i32 = unimplemented <<  %{{_}} = load atomic i32, ptr %{{_}} acquire, align 4>>
-;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4>>
+;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4 <note: addrspace>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr %{{_}}, align 2>>
 ;         br ...
 ;         ...
@@ -45,7 +45,7 @@
 ;       br bb11
 ;     bb11:
 ;       unimplemented <<  store atomic i32 0, ptr %0 release, align 4>>
-;       unimplemented <<  store i32 0, ptr addrspace(10) %5, align 4>>
+;       unimplemented <<  store i32 0, ptr addrspace(10) %5, align 4 <note: addrspace>>>
 ;       unimplemented <<  store i32 0, ptr %0, align 2>>
 ;       ret
 ;     }
