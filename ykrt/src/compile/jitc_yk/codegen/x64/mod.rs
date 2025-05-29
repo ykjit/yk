@@ -23,8 +23,8 @@ use crate::{
             aot_ir::{self, DeoptSafepoint},
             arbbitint::ArbBitInt,
             jit_ir::{
-                self, BinOp, Const, FloatTy, IndirectCallIdx, InlinedFrame, Inst, InstIdx, Module,
-                Operand, TraceKind, Ty,
+                self, BinOp, Const, FloatTy, GuardInst, IndirectCallIdx, InlinedFrame, Inst,
+                InstIdx, Module, Operand, TraceKind, Ty,
             },
             CodeGen, YkSideTraceInfo,
         },
@@ -715,9 +715,15 @@ impl<'a> Assemble<'a> {
         let deopt_label = self.asm.new_dynamic_label();
         let guardcheck_label = self.asm.new_dynamic_label();
         for (i, mut gd) in std::mem::take(&mut self.guards).into_iter().enumerate() {
+            let off = self.asm.offset().0;
+            let align = off.next_multiple_of(16);
+            self.push_nops(align - off);
+            let fail_label = gd.fail_label;
             self.comment(format!("Deopt ID and patch point for guard {i:?}"));
-            self.ra
-                .get_ready_for_deopt(&mut self.asm, &gd.guard_snapshot);
+            dynasm!(self.asm;=> fail_label);
+            let (jumpreg, live_vars) =
+                self.ra
+                    .get_ready_for_deopt(&mut self.asm, gd.ginst, gd.guard_snapshot);
             // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
 
             // Align this location in such a way that the operand of the below `mov`
@@ -735,11 +741,8 @@ impl<'a> Assemble<'a> {
             let mov_off = self.asm.offset();
             gd.fail_offset = mov_off;
             // Emit the guard failure code.
-            let jumpreg = gd.patch_reg;
             let deoptid = i32::try_from(i).unwrap();
-            let fail_label = gd.fail_label;
             dynasm!(self.asm
-                ;=> fail_label
                 // After compiling a side-trace for this location, we want to patch in a jump
                 // to its address here later, so we can jump to side-traces directly. We use an
                 // available register that the register allocator has reserved for us to store
@@ -765,7 +768,13 @@ impl<'a> Assemble<'a> {
                 ; mov rsi, deoptid
                 ; jmp => guardcheck_label
             );
-            compiled_guards.push(CompiledGuard::from(gd));
+            compiled_guards.push(CompiledGuard {
+                bid: gd.bid,
+                fail_offset: gd.fail_offset,
+                live_vars,
+                inlined_frames: gd.inlined_frames,
+                guard: Guard::new(),
+            });
         }
 
         self.comment("Call __yk_deopt".to_string());
@@ -2399,8 +2408,7 @@ impl<'a> Assemble<'a> {
 
         // Codegen guard
         self.ra.expire_regs(g_iidx);
-        let patch_reg = self.ra.tmp_register_for_icmp_guard(&mut self.asm, g_iidx);
-        let fail_label = self.guard_to_deopt(&g_inst, patch_reg);
+        let fail_label = self.guard_to_deopt(g_inst);
         self.comment(Inst::Guard(g_inst).display(self.m, g_iidx).to_string());
 
         if g_inst.expect() {
@@ -3469,51 +3477,18 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn guard_to_deopt(&mut self, inst: &jit_ir::GuardInst, patch_reg: Rq) -> DynamicLabel {
-        // Convert the guard info into deopt info and store it on the heap.
-        let mut lives = Vec::new();
-        let gi = inst.guard_info(self.m);
-        for (iid, pop) in gi.live_vars() {
-            match pop.unpack(self.m) {
-                Operand::Var(x) => {
-                    lives.push((iid.clone(), self.ra.var_location(x)));
-                }
-                Operand::Const(x) => {
-                    // The live variable is a constant (e.g. this can happen during inlining), so
-                    // it doesn't have an allocation. We can just push the actual value instead
-                    // which will be written as is during deoptimisation.
-                    match self.m.const_(x) {
-                        Const::Int(_, y) => lives.push((
-                            iid.clone(),
-                            VarLocation::ConstInt {
-                                bits: y.bitw(),
-                                v: y.to_zero_ext_u64().unwrap(),
-                            },
-                        )),
-                        Const::Ptr(p) => lives.push((
-                            iid.clone(),
-                            VarLocation::ConstInt {
-                                bits: 64,
-                                v: u64::try_from(*p).unwrap(),
-                            },
-                        )),
-                        e => todo!("{:?}", e),
-                    }
-                }
-            }
-        }
-
+    fn guard_to_deopt(&mut self, ginst: jit_ir::GuardInst) -> DynamicLabel {
         let fail_label = self.asm.new_dynamic_label();
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
+        let ginfo = ginst.guard_info(self.m);
         let gd = CompilingGuard {
-            patch_reg,
-            guard_snapshot: self.ra.guard_snapshot(inst),
-            bid: gi.bid().clone(),
+            ginst,
+            guard_snapshot: self.ra.guard_snapshot(),
+            bid: ginfo.bid().clone(),
             fail_label,
             // We don't know the offset yet but will fill this in later.
             fail_offset: AssemblyOffset(0),
-            live_vars: lives,
-            inlined_frames: gi.inlined_frames().to_vec(),
+            inlined_frames: ginfo.inlined_frames().to_vec(),
         };
         self.guards.push(gd);
         fail_label
@@ -3556,8 +3531,8 @@ impl<'a> Assemble<'a> {
 
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
         let cond = inst.cond(self.m);
-        let (reg, patch_reg) = self.ra.tmp_registers_for_guard(&mut self.asm, iidx, cond);
-        let fail_label = self.guard_to_deopt(inst, patch_reg);
+        let reg = self.ra.tmp_register_for_guard(&mut self.asm, iidx, cond);
+        let fail_label = self.guard_to_deopt(*inst);
         dynasm!(self.asm ; bt Rd(reg.code()), 0);
         if inst.expect() {
             dynasm!(self.asm ; jnb =>fail_label);
@@ -3570,16 +3545,12 @@ impl<'a> Assemble<'a> {
 /// Information required by guards while we're compiling them.
 #[derive(Debug)]
 struct CompilingGuard {
-    /// An available register at the time of a guard failure. We need this register to patch 64-bit
-    /// jumps when patching side-traces into their parents.
-    patch_reg: Rq,
+    ginst: GuardInst,
     guard_snapshot: GuardSnapshot,
     /// The AOT block that the failing guard originated from.
     bid: aot_ir::BBlockId,
     fail_label: DynamicLabel,
     fail_offset: AssemblyOffset,
-    /// Live variables, mapping AOT vars to JIT vars.
-    live_vars: Vec<(aot_ir::InstID, VarLocation)>,
     inlined_frames: Vec<InlinedFrame>,
 }
 
@@ -3594,18 +3565,6 @@ struct CompiledGuard {
     inlined_frames: Vec<InlinedFrame>,
     /// Keeps track of deopt amount and compiled side-trace.
     guard: Guard,
-}
-
-impl From<CompilingGuard> for CompiledGuard {
-    fn from(gd: CompilingGuard) -> Self {
-        Self {
-            bid: gd.bid,
-            fail_offset: gd.fail_offset,
-            live_vars: gd.live_vars,
-            inlined_frames: gd.inlined_frames,
-            guard: Guard::new(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -5840,6 +5799,44 @@ mod tests {
                 mov r8, 0x...
                 mov rax, 0x...
                 call rax
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_guard_spill() {
+        // Check that spilling a live register in a guard spills in the deopt, not the "main",
+        // branch.
+        codegen_and_test(
+            "
+              entry:
+                %0: i1 = param reg
+                %1: i1 = param reg
+                %2: i1 = param reg
+                %3: i1 = param reg
+                %4: i1 = param reg
+                %5: i1 = param reg
+                %6: i1 = param reg
+                %7: i1 = param reg
+                %8: i1 = param reg
+                %9: i1 = param reg
+                %10: i1 = param reg
+                %11: i1 = param reg
+                %12: i1 = param reg
+                %13: i1 = param reg
+                guard false, %0, [%1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13]
+            ",
+            "
+                ...
+                ; guard false, %0, ...
+                bt r.32._, 0x00
+                jb ...
+                ...
+                ; deopt id and patch point for guard 0
+                and r.32.x, 0x01
+                mov [rbp-0x01], r.8.x
+                ...
             ",
             false,
         );

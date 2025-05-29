@@ -6,7 +6,7 @@
 ///
 /// The implementation is platform agnostic: as the abstract stack gets bigger, the abstract stack
 /// pointer grows upwards, even on architectures where the stack grows downwards.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct AbstractStack(usize);
 
 impl AbstractStack {
