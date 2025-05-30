@@ -248,9 +248,7 @@ for tracer in $TRACERS; do
             -e 's/executable: yklua/executable: lua/' \
             rebench.conf > rebench2.conf
         # Initialise extra benchmarks.
-        cd suites/realworld/Lua/
-        sh setup.sh
-        cd ../../../
+        sh setup.sh yklua/src/lua
         ~/.local/bin/rebench --quick --no-denoise -c rebench2.conf
         cd ..
     fi
