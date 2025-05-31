@@ -7,43 +7,42 @@
 --   env-var: YKD_SERIALISE_COMPILATION=1
 --   stderr:
 --     h1
---     yk-tracing: start-tracing: sidetrace_to_loop.lua:50: GTI
---     yk-tracing: stop-tracing: sidetrace_to_loop.lua:50: GTI
---     --- Begin debugstrs: header: sidetrace_to_loop.lua:50: GTI ---
---       sidetrace_to_loop.lua:51: TEST
---       sidetrace_to_loop.lua:51: JMP
---       sidetrace_to_loop.lua:60: ADDI
---       sidetrace_to_loop.lua:60: JMP
---       sidetrace_to_loop.lua:50: GTI
+--     yk-tracing: start-tracing: sidetrace_to_loop.lua:49: GTI
+--     yk-tracing: stop-tracing: sidetrace_to_loop.lua:49: GTI
+--     --- Begin debugstrs: header: sidetrace_to_loop.lua:49: GTI ---
+--       sidetrace_to_loop.lua:49: GTI
+--       sidetrace_to_loop.lua:50: TEST
+--       sidetrace_to_loop.lua:50: JMP
+--       sidetrace_to_loop.lua:59: ADDI
+--       sidetrace_to_loop.lua:59: JMP
 --     --- End debugstrs ---
 --     h2
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:50: GTI
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:49: GTI
 --     yk-execution: deoptimise
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:50: GTI
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:49: GTI
 --     yk-execution: deoptimise
 --     h3
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:50: GTI
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:49: GTI
 --     yk-execution: deoptimise
---     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:50: GTI
---     yk-tracing: stop-tracing: sidetrace_to_loop.lua:55: FORLOOP
---     yk-tracing: start-tracing: sidetrace_to_loop.lua:55: FORLOOP
---     yk-tracing: stop-tracing: sidetrace_to_loop.lua:55: FORLOOP
---     --- Begin debugstrs: header: sidetrace_to_loop.lua:55: FORLOOP ---
---       sidetrace_to_loop.lua:55: FORLOOP
+--     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:49: GTI
+--     yk-tracing: stop-tracing: sidetrace_to_loop.lua:54: FORLOOP
+--     yk-tracing: start-tracing: sidetrace_to_loop.lua:54: FORLOOP
+--     yk-tracing: stop-tracing: sidetrace_to_loop.lua:54: FORLOOP
+--     --- Begin debugstrs: header: sidetrace_to_loop.lua:54: FORLOOP ---
+--       sidetrace_to_loop.lua:54: FORLOOP
 --     --- End debugstrs ---
---     --- Begin debugstrs: side-trace: sidetrace_to_loop.lua:50: GTI ---
---       sidetrace_to_loop.lua:54: TEST
---       sidetrace_to_loop.lua:55: LOADI
---       sidetrace_to_loop.lua:55: LOADI
---       sidetrace_to_loop.lua:55: LOADI
---       sidetrace_to_loop.lua:55: FORPREP
---       sidetrace_to_loop.lua:55: FORLOOP
+--     --- Begin debugstrs: side-trace: sidetrace_to_loop.lua:49: GTI ---
+--       sidetrace_to_loop.lua:53: TEST
+--       sidetrace_to_loop.lua:54: LOADI
+--       sidetrace_to_loop.lua:54: LOADI
+--       sidetrace_to_loop.lua:54: LOADI
+--       sidetrace_to_loop.lua:54: FORPREP
 --     --- End debugstrs ---
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:55: FORLOOP
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:54: FORLOOP
 --     yk-execution: deoptimise
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:50: GTI
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:49: GTI
 --     yk-execution: deoptimise
---     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:50: GTI
+--     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:49: GTI
 --     exit
 
 function h(i, b1, b2)

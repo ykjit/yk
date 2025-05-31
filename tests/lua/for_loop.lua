@@ -10,8 +10,9 @@
 --     2
 --     yk-tracing: start-tracing: for_loop.lua:35: GETTABUP
 --     3
---     yk-tracing: stop-tracing: ...
+--     yk-tracing: stop-tracing: for_loop.lua:35: GETTABUP
 --     --- Begin debugstrs: header: for_loop.lua:35: GETTABUP ---
+--       for_loop.lua:35: GETTABUP
 --       for_loop.lua:35: GETFIELD
 --       for_loop.lua:35: SELF
 --       for_loop.lua:35: GETTABUP
@@ -21,7 +22,6 @@
 --       for_loop.lua:35: CALL
 --       for_loop.lua:36: ADDI
 --       for_loop.lua:34: FORLOOP
---       for_loop.lua:35: GETTABUP
 --     --- End debugstrs ---
 --     4
 --     yk-execution: enter-jit-code: for_loop.lua:35: GETTABUP

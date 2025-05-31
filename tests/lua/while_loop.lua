@@ -12,6 +12,7 @@
 --     3
 --     yk-tracing: stop-tracing: ...
 --     --- Begin debugstrs: header: while_loop.lua:35: LEI ---
+--       while_loop.lua:35: LEI
 --       while_loop.lua:36: GETTABUP
 --       while_loop.lua:36: GETFIELD
 --       while_loop.lua:36: SELF
@@ -22,7 +23,6 @@
 --       while_loop.lua:36: CALL
 --       while_loop.lua:37: ADDI
 --       while_loop.lua:37: JMP
---       while_loop.lua:35: LEI
 --     --- End debugstrs ---
 --     4
 --     yk-execution: enter-jit-code: while_loop.lua:35: LEI
