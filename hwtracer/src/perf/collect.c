@@ -38,6 +38,8 @@
 // The bit in the IA32_RTIT_CTL MSR that disables compressed returns.
 #define IA32_RTIT_CTL_DISRETC 1 << 11
 
+void get_tracing_extent(char **, size_t *, size_t *);
+
 enum hwt_cerror_kind {
   hwt_cerror_unused = 0,
   hwt_cerror_unknown = 1,
@@ -95,6 +97,7 @@ struct hwt_perf_collector_config {
   size_t data_bufsize;      // Data buf size (in pages).
   size_t aux_bufsize;       // AUX buf size (in pages).
   size_t trace_result_size; // Size of the `malloc`ed return block (in bytes).
+  bool use_pt_filtering;    // When true use PT IP filtering.
 };
 
 /*
@@ -158,7 +161,7 @@ static bool read_aux(void *, struct perf_event_mmap_page *,
 static bool poll_loop(int, int, struct perf_event_mmap_page *, void *,
                       struct hwt_perf_trace *, struct hwt_cerror *);
 static void *collector_thread(void *);
-static int open_perf(size_t, struct hwt_cerror *);
+static int open_perf(size_t, bool, struct hwt_cerror *);
 void hwt_set_cerr(struct hwt_cerror *, int, int);
 
 // Exposed Prototypes.
@@ -403,7 +406,7 @@ done:
  *
  * Returns a file descriptor, or -1 on error.
  */
-static int open_perf(size_t aux_bufsize, struct hwt_cerror *err) {
+static int open_perf(size_t aux_bufsize, bool filter, struct hwt_cerror *err) {
   struct perf_event_attr attr;
   memset(&attr, 0, sizeof(attr));
   attr.size = sizeof(attr);
@@ -455,7 +458,35 @@ static int open_perf(size_t aux_bufsize, struct hwt_cerror *err) {
   ret = syscall(SYS_perf_event_open, &attr, target_tid, -1, -1, 0);
   if (ret == -1) {
     hwt_set_cerr(err, hwt_cerror_errno, errno);
-    return ret;
+    goto clean;
+  }
+
+  // `ret` now holds an open perf fd.
+  //
+  // If requested, now configure the address range to trace. We do this so that
+  // we don't trace (and later, map) externally compiled code that we could
+  // never build traces for anyway.
+  if (filter) {
+    char *fltr_obj = NULL;
+    size_t fltr_base_off = 0, fltr_size = 0;
+    get_tracing_extent(&fltr_obj, &fltr_base_off, &fltr_size);
+
+    char f_str[512];
+    if ((size_t) snprintf(f_str, sizeof(f_str), "filter 0x%zu/%zu@%s",
+          fltr_base_off, fltr_size, fltr_obj) >= sizeof(f_str))
+    {
+      hwt_set_cerr(err, hwt_cerror_unknown, 0);
+      close(ret);
+      ret = -1;
+      goto clean;
+    }
+
+    if (ioctl(ret, PERF_EVENT_IOC_SET_FILTER, f_str) == -1) {
+      hwt_set_cerr(err, hwt_cerror_errno, errno);
+      close(ret);
+      ret = -1;
+      goto clean;
+    }
   }
 
 clean:
@@ -538,7 +569,7 @@ hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf,
 
   // Obtain a file descriptor through which to speak to perf.
   if (thread_cached.perf_fd == -1) {
-    tr_ctx->perf_fd = open_perf(tr_conf->aux_bufsize, err);
+    tr_ctx->perf_fd = open_perf(tr_conf->aux_bufsize, tr_conf->use_pt_filtering, err);
     if (tr_ctx->perf_fd == -1) {
       hwt_set_cerr(err, hwt_cerror_errno, errno);
       failing = true;

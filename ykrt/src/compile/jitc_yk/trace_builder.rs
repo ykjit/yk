@@ -1382,8 +1382,14 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
 
         mt.stats.timing_state(TimingState::Compiling);
 
-        // The previous processed block.
+        // The previously processed block.
+        // `None` when either:
+        //  - this is the first block in the trace.
+        //  - the previous block was unmappable.
         let mut prev_bid = None;
+        // The previously processed *mappable* block.
+        // Only `None` if this is the first block in the trace
+        let mut prev_mappable_bid: Option<BBlockId> = None;
 
         if let TraceKind::Sidetrace(sti) = self.jit_mod.tracekind() {
             let sti = Arc::clone(sti)
@@ -1508,6 +1514,28 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
             match self.lookup_aot_block(&b) {
                 Some(bid) => {
                     // MappedAOTBBlock block
+                    if let Some(prev_mbid) = &prev_mappable_bid {
+                        // Due to the way HWT works, when you return from a call, you see the same
+                        // basic block again. We skip it.
+                        // FIXME: trace builder should be tracer agnostic.
+                        #[cfg(tracer_hwt)]
+                        if *prev_mbid == bid {
+                            continue;
+                        }
+                        // Check the control flow is regular, bailing out if we detect e.g.
+                        // longjmp().
+                        //
+                        // FIXME: we are unable to detect signal handlers.
+                        // See tests/c/signal_handler_interrupts_trace.c
+                        if !bid.static_intraprocedural_successor_of(prev_mbid, self.aot_mod)
+                            && !bid.is_entry()
+                            && !self.aot_mod.bblock(prev_mbid).is_return()
+                        {
+                            return Err(CompilationError::General(
+                                "irregular control flow detected".into(),
+                            ));
+                        }
+                    }
                     if let Some(ref tgtbid) = self.outline_target_blk {
                         // We are currently outlining.
                         if bid.funcidx() == tgtbid.funcidx() {
@@ -1521,7 +1549,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                                 // We are returning from the function that started
                                 // outlining. This may be one of multiple inlined calls, so
                                 // we may not be done outlining just yet.
-                                self.recursion_count -= 1;
+                                self.recursion_count = self.recursion_count.checked_sub(1).unwrap();
                             }
                         }
                         if self.recursion_count == 0 && bid == *tgtbid {
@@ -1533,27 +1561,9 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                             // We are outlining so just skip this block. However, we still need to
                             // process promoted values to make sure we've processed all promotion
                             // data and haven't messed up the mapping.
-                            #[cfg(tracer_hwt)]
-                            {
-                                // Due to hardware tracing we see the same block twice whenever
-                                // there is a call. We only need to process one of them. We can
-                                // skip the block if:
-                                //  a) The previous block had a return.
-                                //  b) The previous block is unmappable and the current block isn't
-                                //  an entry block.
-                                if last_blk_is_return {
-                                    last_blk_is_return = self.aot_mod.bblock(&bid).is_return();
-                                    prev_bid = Some(bid);
-                                    continue;
-                                }
-                                last_blk_is_return = self.aot_mod.bblock(&bid).is_return();
-                                if prev_bid.is_none() && !bid.is_entry() {
-                                    prev_bid = Some(bid);
-                                    continue;
-                                }
-                            }
                             self.process_promotions_and_debug_strs_only(&bid)?;
-                            prev_bid = Some(bid);
+                            prev_bid = Some(bid.clone());
+                            prev_mappable_bid = Some(bid);
                             continue;
                         }
                     } else {
@@ -1566,7 +1576,8 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                             // FIXME: This only applies to the HWT as the SWT doesn't
                             // record these extra blocks.
                             last_blk_is_return = false;
-                            prev_bid = Some(bid);
+                            prev_bid = Some(bid.clone());
+                            prev_mappable_bid = Some(bid);
                             continue;
                         }
                         #[cfg(tracer_hwt)]
@@ -1597,7 +1608,8 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
                             _ => panic!(),
                         }
                     }
-                    prev_bid = Some(bid);
+                    prev_bid = Some(bid.clone());
+                    prev_mappable_bid = Some(bid);
                 }
                 None => {
                     // Unmappable block
