@@ -29,6 +29,7 @@
 
 use super::{rev_analyse::RevAnalyse, Register, VarLocation};
 use crate::compile::jitc_yk::{
+    aot_ir,
     codegen::abs_stack::AbstractStack,
     jit_ir::{Const, ConstIdx, FloatTy, GuardInst, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
 };
@@ -280,31 +281,89 @@ impl<'a> LSRegAlloc<'a> {
     /// for a guard: it returns the information the register allocator will later need to perform
     /// its part in generating correct code for this guard's failure in
     /// [Self::get_ready_for_deopt].
-    pub(super) fn guard_snapshot(&self, ginst: &GuardInst) -> GuardSnapshot {
-        let gi = ginst.guard_info(self.m);
-        let mut regs_to_zero_ext = Vec::new();
-        for op in gi.live_vars().iter().map(|(_, pop)| pop.unpack(self.m)) {
-            if let Operand::Var(op_iidx) = op
-                && let Some(reg) = self.find_op_in_gp_reg(&op)
-            {
-                let RegState::FromInst(_, ext) = self.gp_reg_states[usize::from(reg.code())] else {
-                    panic!()
-                };
-                if ext != RegExtension::ZeroExtended {
-                    regs_to_zero_ext.push((reg, self.m.inst(op_iidx).def_bitw(self.m)));
-                }
-            }
+    pub(super) fn guard_snapshot(&self) -> GuardSnapshot {
+        GuardSnapshot {
+            gp_regset: self.gp_regset,
+            gp_reg_states: self.gp_reg_states.clone(),
+            fp_regset: self.fp_regset,
+            fp_reg_states: self.fp_reg_states.clone(),
+            spills: self.spills.clone(),
+            stack: self.stack.clone(),
         }
-        GuardSnapshot { regs_to_zero_ext }
     }
 
     /// When generating the code for a guard failure, do the necessary work from the register
     /// allocator's perspective (e.g. ensuring registers have an appropriate [RegExtension]) for
     /// deopt to occur.
-    pub(super) fn get_ready_for_deopt(&self, asm: &mut Assembler, gsnap: &GuardSnapshot) {
-        for (reg, bitw) in &gsnap.regs_to_zero_ext {
-            self.force_zero_extend_to_reg64(asm, *reg, *bitw);
+    pub(super) fn get_ready_for_deopt(
+        &mut self,
+        asm: &mut Assembler,
+        ginst: GuardInst,
+        gsnap: GuardSnapshot,
+    ) -> (Rq, Vec<(aot_ir::InstID, VarLocation)>) {
+        self.gp_regset = gsnap.gp_regset;
+        self.gp_reg_states = gsnap.gp_reg_states;
+        self.fp_regset = gsnap.fp_regset;
+        self.fp_reg_states = gsnap.fp_reg_states;
+        self.spills = gsnap.spills;
+        self.stack = gsnap.stack;
+
+        let patch_reg = self.tmp_register_for_write_vars(asm);
+
+        let gi = ginst.guard_info(self.m);
+        // `seen_gp_regs` allows us to zero extend a register at most once.
+        let mut seen_gp_regs = RegSet::with_gp_reserved();
+        let mut lives = Vec::with_capacity(gi.live_vars().len());
+        for (iid, pop) in gi.live_vars() {
+            let op = pop.unpack(self.m);
+            match op {
+                Operand::Var(x) => {
+                    if let Some(reg) = self.find_op_in_gp_reg(&op)
+                        && !seen_gp_regs.is_set(reg)
+                    {
+                        let RegState::FromInst(ref insts, ext) =
+                            self.gp_reg_states[usize::from(reg.code())]
+                        else {
+                            panic!()
+                        };
+                        let bitw = insts
+                            .iter()
+                            .map(|x| self.m.inst_nocopy(*x).unwrap().def_bitw(self.m))
+                            .max()
+                            .unwrap();
+                        if ext != RegExtension::ZeroExtended {
+                            self.force_zero_extend_to_reg64(asm, reg, bitw);
+                            seen_gp_regs.set(reg);
+                        }
+                    }
+                    lives.push((iid.clone(), self.var_location(x)));
+                }
+                Operand::Const(x) => {
+                    // The live variable is a constant (e.g. this can happen during inlining), so
+                    // it doesn't have an allocation. We can just push the actual value instead
+                    // which will be written as is during deoptimisation.
+                    match self.m.const_(x) {
+                        Const::Int(_, y) => lives.push((
+                            iid.clone(),
+                            VarLocation::ConstInt {
+                                bits: y.bitw(),
+                                v: y.to_zero_ext_u64().unwrap(),
+                            },
+                        )),
+                        Const::Ptr(p) => lives.push((
+                            iid.clone(),
+                            VarLocation::ConstInt {
+                                bits: 64,
+                                v: u64::try_from(*p).unwrap(),
+                            },
+                        )),
+                        e => todo!("{:?}", e),
+                    }
+                }
+            }
         }
+
+        (patch_reg, lives)
     }
 }
 
@@ -460,27 +519,22 @@ impl LSRegAlloc<'_> {
         reg
     }
 
-    /// Return the `(condition register, patch register)` a normal guard instruction needs. This
-    /// function guarantees not to set CPU flags. It is not suitable for use outside `cg_guard`.
-    pub(super) fn tmp_registers_for_guard(
+    /// Return the register a normal guard instruction needs. This function guarantees not to set
+    /// CPU flags. It is not suitable for use outside `cg_guard`.
+    pub(super) fn tmp_register_for_guard(
         &mut self,
         asm: &mut Assembler,
         _iidx: InstIdx,
         cond: Operand,
-    ) -> (Rq, Rq) {
-        let cond_reg = match self.find_op_in_gp_reg(&cond) {
+    ) -> Rq {
+        match self.find_op_in_gp_reg(&cond) {
             Some(x) => x,
             None => {
                 let reg = self.force_tmp_register(asm, RegSet::with_gp_reserved());
                 self.put_input_in_gp_reg(asm, &cond, reg, RegExtension::Undefined);
                 reg
             }
-        };
-        let mut avoid = RegSet::with_gp_reserved();
-        avoid.set(cond_reg);
-        let patch_reg = self.force_tmp_register(asm, avoid);
-        assert_ne!(cond_reg, patch_reg);
-        (cond_reg, patch_reg)
+        }
     }
 
     /// Return the `patch register` a combined icmp/guard instruction needs. This function
@@ -2189,9 +2243,12 @@ impl<R: dynasmrt::Register> RegConstraint<R> {
 /// it later needs to get a failing guard ready for deopt.
 #[derive(Debug)]
 pub(super) struct GuardSnapshot {
-    /// The registers we need to zero extend: the `u32` is the `from_bitw` that is passed to
-    /// `force_zero_extend_to_reg64`.
-    regs_to_zero_ext: Vec<(Rq, u32)>,
+    gp_regset: RegSet<Rq>,
+    gp_reg_states: [RegState; GP_REGS_LEN],
+    fp_regset: RegSet<Rx>,
+    fp_reg_states: [RegState; FP_REGS_LEN],
+    spills: Vec<SpillState>,
+    stack: AbstractStack,
 }
 
 #[derive(Clone, Debug, PartialEq)]
