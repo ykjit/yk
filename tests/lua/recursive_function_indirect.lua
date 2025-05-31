@@ -10,8 +10,9 @@
 --     6
 --     yk-tracing: start-tracing: recursive_function_indirect.lua:48: GETTABUP
 --     5
---     yk-tracing: stop-tracing: ...
+--     yk-tracing: stop-tracing: recursive_function_indirect.lua:48: GETTABUP
 --     --- Begin debugstrs: header: recursive_function_indirect.lua:48: GETTABUP ---
+--       recursive_function_indirect.lua:48: GETTABUP
 --       recursive_function_indirect.lua:48: GETFIELD
 --       recursive_function_indirect.lua:48: SELF
 --       recursive_function_indirect.lua:48: GETTABUP
@@ -26,15 +27,14 @@
 --       recursive_function_indirect.lua:55: GETTABUP
 --       recursive_function_indirect.lua:55: MOVE
 --       recursive_function_indirect.lua:55: TAILCALL
---       recursive_function_indirect.lua:48: GETTABUP
 --     --- End debugstrs ---
 --     4
 --     yk-tracing: start-tracing: recursive_function_indirect.lua:55: GETTABUP
 --     yk-tracing: stop-tracing: recursive_function_indirect.lua:48: GETTABUP
 --     --- Begin debugstrs: connector: recursive_function_indirect.lua:55: GETTABUP ---
+--       recursive_function_indirect.lua:55: GETTABUP
 --       recursive_function_indirect.lua:55: MOVE
 --       recursive_function_indirect.lua:55: TAILCALL
---       recursive_function_indirect.lua:48: GETTABUP
 --     --- End debugstrs ---
 --     3
 --     yk-execution: enter-jit-code: recursive_function_indirect.lua:55: GETTABUP

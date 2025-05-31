@@ -4,38 +4,37 @@
 --   env-var: YKD_LOG_IR=debugstrs
 --   env-var: YKD_SERIALISE_COMPILATION=1
 --   stderr:
---     yk-tracing: start-tracing: nested_loops.lua:46: ADDI
---     yk-tracing: stop-tracing: nested_loops.lua:46: ADDI
---     --- Begin debugstrs: header: nested_loops.lua:46: ADDI ---
---       nested_loops.lua:45: FORLOOP
---       nested_loops.lua:46: ADDI
+--     yk-tracing: start-tracing: nested_loops.lua:45: ADDI
+--     yk-tracing: stop-tracing: nested_loops.lua:45: ADDI
+--     --- Begin debugstrs: header: nested_loops.lua:45: ADDI ---
+--       nested_loops.lua:45: ADDI
+--       nested_loops.lua:44: FORLOOP
 --     --- End debugstrs ---
---     yk-execution: enter-jit-code: nested_loops.lua:46: ADDI
+--     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
 --     yk-execution: deoptimise
---     yk-execution: enter-jit-code: nested_loops.lua:46: ADDI
+--     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
 --     yk-execution: deoptimise
---     yk-execution: enter-jit-code: nested_loops.lua:46: ADDI
+--     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
 --     yk-execution: deoptimise
---     yk-execution: enter-jit-code: nested_loops.lua:46: ADDI
+--     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
 --     yk-execution: deoptimise
---     yk-execution: enter-jit-code: nested_loops.lua:46: ADDI
+--     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
 --     yk-execution: deoptimise
---     yk-tracing: start-side-tracing: nested_loops.lua:46: ADDI
---     yk-tracing: stop-tracing: nested_loops.lua:44: ADDI
---     yk-tracing: start-tracing: nested_loops.lua:44: ADDI
---     yk-tracing: stop-tracing: nested_loops.lua:46: ADDI
---     --- Begin debugstrs: connector: nested_loops.lua:44: ADDI ---
---       nested_loops.lua:45: LOADI
---       nested_loops.lua:45: LOADI
---       nested_loops.lua:45: LOADI
---       nested_loops.lua:45: FORPREP
---       nested_loops.lua:46: ADDI
+--     yk-tracing: start-side-tracing: nested_loops.lua:45: ADDI
+--     yk-tracing: stop-tracing: nested_loops.lua:43: ADDI
+--     yk-tracing: start-tracing: nested_loops.lua:43: ADDI
+--     yk-tracing: stop-tracing: nested_loops.lua:45: ADDI
+--     --- Begin debugstrs: connector: nested_loops.lua:43: ADDI ---
+--       nested_loops.lua:43: ADDI
+--       nested_loops.lua:44: LOADI
+--       nested_loops.lua:44: LOADI
+--       nested_loops.lua:44: LOADI
+--       nested_loops.lua:44: FORPREP
 --     --- End debugstrs ---
---     --- Begin debugstrs: side-trace: nested_loops.lua:46: ADDI ---
---       nested_loops.lua:43: FORLOOP
---       nested_loops.lua:44: ADDI
+--     --- Begin debugstrs: side-trace: nested_loops.lua:45: ADDI ---
+--       nested_loops.lua:42: FORLOOP
 --     --- End debugstrs ---
---     yk-execution: enter-jit-code: nested_loops.lua:46: ADDI
+--     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
 --     yk-execution: deoptimise
 --     251502
 

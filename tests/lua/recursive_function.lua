@@ -10,8 +10,9 @@
 --     4
 --     yk-tracing: start-tracing: recursive_function.lua:36: GETTABUP
 --     3
---     yk-tracing: stop-tracing: ...
+--     yk-tracing: stop-tracing: recursive_function.lua:36: GETTABUP
 --     --- Begin debugstrs: header: recursive_function.lua:36: GETTABUP ---
+--       recursive_function.lua:36: GETTABUP
 --       recursive_function.lua:36: GETFIELD
 --       recursive_function.lua:36: SELF
 --       recursive_function.lua:36: GETTABUP
@@ -23,7 +24,6 @@
 --       recursive_function.lua:38: GETTABUP
 --       recursive_function.lua:38: ADDI
 --       recursive_function.lua:38: CALL
---       recursive_function.lua:36: GETTABUP
 --     --- End debugstrs ---
 --     2
 --     yk-execution: enter-jit-code: recursive_function.lua:36: GETTABUP
