@@ -50,14 +50,14 @@ pub(crate) extern "C" fn __yk_deopt(
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
+    let mt = Arc::clone(&ctr.mt);
+    mt.stats
+        .timing_state(crate::log::stats::TimingState::Deopting);
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
     let cgd = &ctr.compiled_guard(gidx);
-    let mt = Arc::clone(&ctr.mt);
 
     mt.deopt();
-    mt.stats
-        .timing_state(crate::log::stats::TimingState::Deopting);
     mt.log.log(Verbosity::Execution, "deoptimise");
 
     // Calculate space required for the new stack.

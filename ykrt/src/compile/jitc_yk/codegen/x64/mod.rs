@@ -23,8 +23,8 @@ use crate::{
             aot_ir::{self, DeoptSafepoint},
             arbbitint::ArbBitInt,
             jit_ir::{
-                self, BinOp, Const, FloatTy, IndirectCallIdx, InlinedFrame, Inst, InstIdx, Module,
-                Operand, TraceKind, Ty,
+                self, BinOp, Const, FloatTy, GuardInst, IndirectCallIdx, InlinedFrame, Inst,
+                InstIdx, Module, Operand, TraceKind, Ty,
             },
             CodeGen, YkSideTraceInfo,
         },
@@ -412,113 +412,8 @@ impl<'a> Assemble<'a> {
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
-
         self.cg_insts()?;
-
-        let mut patch_deopts = Vec::new();
-
-        if !self.guards.is_empty() {
-            // We now have to construct the "full" deopt points. Inside the trace itself, are just
-            // a pair of instructions: a `cmp` followed by a `jnz` to a `fail_label` that has not
-            // yet been defined. We now have to construct a full call to `__yk_deopt` for each of
-            // those labels. Since, in general, we'll have multiple guards, we construct a simple
-            // stub which puts an ID in a register then JMPs to (shared amongst all guards) code
-            // which does the full call to __yk_deopt.
-            let deopt_label = self.asm.new_dynamic_label();
-            let guardcheck_label = self.asm.new_dynamic_label();
-            for i in 0..self.guards.len() {
-                self.comment(format!("Deopt ID and patch point for guard {i:?}"));
-                self.ra
-                    .get_ready_for_deopt(&mut self.asm, &self.guards[i].guard_snapshot);
-                // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
-
-                // Align this location in such a way that the operand of the below `mov`
-                // instruction is aligned to 8 bytes, and the entirety of the `mov` instruction (10
-                // bytes) fits into the cache-line.
-                let clsize =
-                    cache_size::cache_line_size(1, cache_size::CacheType::Instruction).unwrap();
-                let off = self.asm.offset().0;
-                let mut align = (off + 2).next_multiple_of(8);
-                if align.next_multiple_of(clsize) == align {
-                    align += 8
-                }
-                self.push_nops(align - off - 2);
-                // Store the future patch offset for this guard.
-                let mov_off = self.asm.offset();
-                self.guards.get_mut(i).unwrap().fail_offset = mov_off;
-                // Emit the guard failure code.
-                let jumpreg = self.guards[i].patch_reg;
-                let deoptid = i32::try_from(i).unwrap();
-                let fail_label = self.guards[i].fail_label;
-                dynasm!(self.asm
-                    ;=> fail_label
-                    // After compiling a side-trace for this location, we want to patch in a jump
-                    // to its address here later, so we can jump to side-traces directly. We use an
-                    // available register that the register allocator has reserved for us to store
-                    // the jump location. After finalizing this trace we patch the `mov`
-                    // instruction below with the absolute address of the deopt routine. Once a
-                    // side-trace is compiled, we patch the same `mov` with a side-trace address to
-                    // allow us to directly jump to the side-trace.
-                    // FIXME: If the side-trace offset to its parent-trace is < 32-bit we can emit
-                    // a relative jump here that doesn't require a register and is likely faster.
-                    // FIXME: Ideally, instead of patching this place, we could patch the guards
-                    // directly which gets rid of an extra jump. But since `cg_icmp_guard` makes
-                    // use of various types of jumps (e.g. jne, jl, etc), this is an optimisation
-                    // for another time.
-                    ; mov Rq(jumpreg.code()), QWORD 0x0
-                    ; jmp Rq(jumpreg.code())
-                );
-                let deopt_off = self.asm.offset();
-                patch_deopts.push((mov_off, deopt_off));
-                dynasm!(self.asm
-                    ; push rsi // FIXME: We push RSI now so we can fish it back out in
-                               // `deopt_label`. This misaligns the stack which we align
-                               // below.
-                    ; mov rsi, deoptid
-                    ; jmp => guardcheck_label
-                );
-            }
-
-            self.comment("Call __yk_deopt".to_string());
-            // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire module
-            // is x86 only, we don't need to worry about portability.
-            #[allow(clippy::fn_to_numeric_cast)]
-            {
-                dynasm!(self.asm; => guardcheck_label);
-                // Push all the general purpose registers to the stack.
-                for (i, reg) in lsregalloc::GP_REGS.iter().rev().enumerate() {
-                    if *reg == Rq::RSI {
-                        // RSI is handled differently in `fail_label`: RSI now contains the deopt
-                        // ID, so we have to fish the actual value out of the stack. See the FIXME
-                        // in `fail_label`.
-                        let off = i32::try_from(i * 8).unwrap();
-                        dynasm!(self.asm; push QWORD [rsp + off]);
-                    } else {
-                        dynasm!(self.asm; push Rq(reg.code()));
-                    }
-                }
-                dynasm!(self.asm; mov rdx, rsp);
-                for reg in lsregalloc::FP_REGS.iter().rev() {
-                    dynasm!(self.asm
-                        ; movq rcx, Rx(reg.code())
-                        ; push rcx
-                    );
-                }
-                dynasm!(self.asm; mov rcx, rsp);
-                // Correct the alignment for the `push rsi` above so the stack is on a 16 byte
-                // boundary.
-                dynasm!(self.asm; sub rsp, 8);
-
-                // Deoptimise.
-                dynasm!(self.asm; => deopt_label);
-                dynasm!(self.asm
-                    ; mov rdi, rbp
-                    ; mov r8, QWORD self.m.ctrid().as_u64().cast_signed()
-                    ; mov rax, QWORD __yk_deopt as i64
-                    ; call rax
-                );
-            }
-        }
+        let (compiled_guards, patch_deopts) = self.codegen_guard_bodies();
 
         // Now we know the size of the stack frame (i.e. self.asp), patch the allocation with the
         // correct amount.
@@ -528,11 +423,10 @@ impl<'a> Assemble<'a> {
         self.asm
             .commit()
             .map_err(|e| CompilationError::InternalError(format!("When committing: {e}")))?;
-
         // This unwrap cannot fail if `commit` (above) succeeded.
         let buf = self.asm.finalize().unwrap();
 
-        // Patch deopt addresses into the mov preceeding mov instruction.
+        // Patch deopt addresses into the mov instruction.
         patch_addresses(
             patch_deopts
                 .into_iter()
@@ -554,11 +448,7 @@ impl<'a> Assemble<'a> {
             safepoint: self.m.safepoint.as_ref().cloned(),
             mt,
             buf,
-            compiled_guards: self
-                .guards
-                .into_iter()
-                .map(CompiledGuard::from)
-                .collect::<Vec<_>>(),
+            compiled_guards,
             sp_offset: self.ra.stack_size(),
             prologue_offset: self.prologue_offset.0,
             entry_vars: self.header_start_locs.clone(),
@@ -803,6 +693,130 @@ impl<'a> Assemble<'a> {
         }
 
         alloc_off
+    }
+
+    /// Generate code for all guard bodies in this trace. Note: this will set
+    /// `self.compiling_guards` to the empty list.
+    fn codegen_guard_bodies(
+        &mut self,
+    ) -> (Vec<CompiledGuard>, Vec<(AssemblyOffset, AssemblyOffset)>) {
+        let mut compiled_guards = Vec::with_capacity(self.guards.len());
+        let mut patch_deopts = Vec::new();
+
+        if self.guards.is_empty() {
+            return (compiled_guards, patch_deopts);
+        }
+        // We now have to construct the "full" deopt points. Inside the trace itself, are just
+        // a pair of instructions: a `cmp` followed by a `jnz` to a `fail_label` that has not
+        // yet been defined. We now have to construct a full call to `__yk_deopt` for each of
+        // those labels. Since, in general, we'll have multiple guards, we construct a simple
+        // stub which puts an ID in a register then JMPs to (shared amongst all guards) code
+        // which does the full call to __yk_deopt.
+        let deopt_label = self.asm.new_dynamic_label();
+        let guardcheck_label = self.asm.new_dynamic_label();
+        for (i, mut gd) in std::mem::take(&mut self.guards).into_iter().enumerate() {
+            let off = self.asm.offset().0;
+            let align = off.next_multiple_of(16);
+            self.push_nops(align - off);
+            let fail_label = gd.fail_label;
+            self.comment(format!("Deopt ID and patch point for guard {i:?}"));
+            dynasm!(self.asm;=> fail_label);
+            let (jumpreg, live_vars) =
+                self.ra
+                    .get_ready_for_deopt(&mut self.asm, gd.ginst, gd.guard_snapshot);
+            // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
+
+            // Align this location in such a way that the operand of the below `mov`
+            // instruction is aligned to 8 bytes, and the entirety of the `mov` instruction (10
+            // bytes) fits into the cache-line.
+            let clsize =
+                cache_size::cache_line_size(1, cache_size::CacheType::Instruction).unwrap();
+            let off = self.asm.offset().0;
+            let mut align = (off + 2).next_multiple_of(8);
+            if align.next_multiple_of(clsize) == align {
+                align += 8
+            }
+            self.push_nops(align - off - 2);
+            // Store the future patch offset for this guard.
+            let mov_off = self.asm.offset();
+            gd.fail_offset = mov_off;
+            // Emit the guard failure code.
+            let deoptid = i32::try_from(i).unwrap();
+            dynasm!(self.asm
+                // After compiling a side-trace for this location, we want to patch in a jump
+                // to its address here later, so we can jump to side-traces directly. We use an
+                // available register that the register allocator has reserved for us to store
+                // the jump location. After finalizing this trace we patch the `mov`
+                // instruction below with the absolute address of the deopt routine. Once a
+                // side-trace is compiled, we patch the same `mov` with a side-trace address to
+                // allow us to directly jump to the side-trace.
+                // FIXME: If the side-trace offset to its parent-trace is < 32-bit we can emit
+                // a relative jump here that doesn't require a register and is likely faster.
+                // FIXME: Ideally, instead of patching this place, we could patch the guards
+                // directly which gets rid of an extra jump. But since `cg_icmp_guard` makes
+                // use of various types of jumps (e.g. jne, jl, etc), this is an optimisation
+                // for another time.
+                ; mov Rq(jumpreg.code()), QWORD 0x0
+                ; jmp Rq(jumpreg.code())
+            );
+            let deopt_off = self.asm.offset();
+            patch_deopts.push((mov_off, deopt_off));
+            dynasm!(self.asm
+                ; push rsi // FIXME: We push RSI now so we can fish it back out in
+                           // `deopt_label`. This misaligns the stack which we align
+                           // below.
+                ; mov rsi, deoptid
+                ; jmp => guardcheck_label
+            );
+            compiled_guards.push(CompiledGuard {
+                bid: gd.bid,
+                fail_offset: gd.fail_offset,
+                live_vars,
+                inlined_frames: gd.inlined_frames,
+                guard: Guard::new(),
+            });
+        }
+
+        self.comment("Call __yk_deopt".to_string());
+        // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire module
+        // is x86 only, we don't need to worry about portability.
+        #[allow(clippy::fn_to_numeric_cast)]
+        {
+            dynasm!(self.asm; => guardcheck_label);
+            // Push all the general purpose registers to the stack.
+            for (i, reg) in lsregalloc::GP_REGS.iter().rev().enumerate() {
+                if *reg == Rq::RSI {
+                    // RSI is handled differently in `fail_label`: RSI now contains the deopt
+                    // ID, so we have to fish the actual value out of the stack. See the FIXME
+                    // in `fail_label`.
+                    let off = i32::try_from(i * 8).unwrap();
+                    dynasm!(self.asm; push QWORD [rsp + off]);
+                } else {
+                    dynasm!(self.asm; push Rq(reg.code()));
+                }
+            }
+            dynasm!(self.asm; mov rdx, rsp);
+            for reg in lsregalloc::FP_REGS.iter().rev() {
+                dynasm!(self.asm
+                    ; movq rcx, Rx(reg.code())
+                    ; push rcx
+                );
+            }
+            dynasm!(self.asm; mov rcx, rsp);
+            // Correct the alignment for the `push rsi` above so the stack is on a 16 byte
+            // boundary.
+            dynasm!(self.asm; sub rsp, 8);
+
+            // Deoptimise.
+            dynasm!(self.asm; => deopt_label);
+            dynasm!(self.asm
+                ; mov rdi, rbp
+                ; mov r8, QWORD self.m.ctrid().as_u64().cast_signed()
+                ; mov rax, QWORD __yk_deopt as i64
+                ; call rax
+            );
+        }
+        (compiled_guards, patch_deopts)
     }
 
     fn patch_frame_allocation(&mut self, asm_off: AssemblyOffset) {
@@ -2394,8 +2408,7 @@ impl<'a> Assemble<'a> {
 
         // Codegen guard
         self.ra.expire_regs(g_iidx);
-        let patch_reg = self.ra.tmp_register_for_icmp_guard(&mut self.asm, g_iidx);
-        let fail_label = self.guard_to_deopt(&g_inst, patch_reg);
+        let fail_label = self.guard_to_deopt(g_inst);
         self.comment(Inst::Guard(g_inst).display(self.m, g_iidx).to_string());
 
         if g_inst.expect() {
@@ -3464,51 +3477,18 @@ impl<'a> Assemble<'a> {
         }
     }
 
-    fn guard_to_deopt(&mut self, inst: &jit_ir::GuardInst, patch_reg: Rq) -> DynamicLabel {
-        // Convert the guard info into deopt info and store it on the heap.
-        let mut lives = Vec::new();
-        let gi = inst.guard_info(self.m);
-        for (iid, pop) in gi.live_vars() {
-            match pop.unpack(self.m) {
-                Operand::Var(x) => {
-                    lives.push((iid.clone(), self.ra.var_location(x)));
-                }
-                Operand::Const(x) => {
-                    // The live variable is a constant (e.g. this can happen during inlining), so
-                    // it doesn't have an allocation. We can just push the actual value instead
-                    // which will be written as is during deoptimisation.
-                    match self.m.const_(x) {
-                        Const::Int(_, y) => lives.push((
-                            iid.clone(),
-                            VarLocation::ConstInt {
-                                bits: y.bitw(),
-                                v: y.to_zero_ext_u64().unwrap(),
-                            },
-                        )),
-                        Const::Ptr(p) => lives.push((
-                            iid.clone(),
-                            VarLocation::ConstInt {
-                                bits: 64,
-                                v: u64::try_from(*p).unwrap(),
-                            },
-                        )),
-                        e => todo!("{:?}", e),
-                    }
-                }
-            }
-        }
-
+    fn guard_to_deopt(&mut self, ginst: jit_ir::GuardInst) -> DynamicLabel {
         let fail_label = self.asm.new_dynamic_label();
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
+        let ginfo = ginst.guard_info(self.m);
         let gd = CompilingGuard {
-            patch_reg,
-            guard_snapshot: self.ra.guard_snapshot(inst),
-            bid: gi.bid().clone(),
+            ginst,
+            guard_snapshot: self.ra.guard_snapshot(),
+            bid: ginfo.bid().clone(),
             fail_label,
             // We don't know the offset yet but will fill this in later.
             fail_offset: AssemblyOffset(0),
-            live_vars: lives,
-            inlined_frames: gi.inlined_frames().to_vec(),
+            inlined_frames: ginfo.inlined_frames().to_vec(),
         };
         self.guards.push(gd);
         fail_label
@@ -3551,8 +3531,8 @@ impl<'a> Assemble<'a> {
 
     fn cg_guard(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::GuardInst) {
         let cond = inst.cond(self.m);
-        let (reg, patch_reg) = self.ra.tmp_registers_for_guard(&mut self.asm, iidx, cond);
-        let fail_label = self.guard_to_deopt(inst, patch_reg);
+        let reg = self.ra.tmp_register_for_guard(&mut self.asm, iidx, cond);
+        let fail_label = self.guard_to_deopt(*inst);
         dynasm!(self.asm ; bt Rd(reg.code()), 0);
         if inst.expect() {
             dynasm!(self.asm ; jnb =>fail_label);
@@ -3565,16 +3545,12 @@ impl<'a> Assemble<'a> {
 /// Information required by guards while we're compiling them.
 #[derive(Debug)]
 struct CompilingGuard {
-    /// An available register at the time of a guard failure. We need this register to patch 64-bit
-    /// jumps when patching side-traces into their parents.
-    patch_reg: Rq,
+    ginst: GuardInst,
     guard_snapshot: GuardSnapshot,
     /// The AOT block that the failing guard originated from.
     bid: aot_ir::BBlockId,
     fail_label: DynamicLabel,
     fail_offset: AssemblyOffset,
-    /// Live variables, mapping AOT vars to JIT vars.
-    live_vars: Vec<(aot_ir::InstID, VarLocation)>,
     inlined_frames: Vec<InlinedFrame>,
 }
 
@@ -3589,18 +3565,6 @@ struct CompiledGuard {
     inlined_frames: Vec<InlinedFrame>,
     /// Keeps track of deopt amount and compiled side-trace.
     guard: Guard,
-}
-
-impl From<CompilingGuard> for CompiledGuard {
-    fn from(gd: CompilingGuard) -> Self {
-        Self {
-            bid: gd.bid,
-            fail_offset: gd.fail_offset,
-            live_vars: gd.live_vars,
-            inlined_frames: gd.inlined_frames,
-            guard: Guard::new(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -5835,6 +5799,44 @@ mod tests {
                 mov r8, 0x...
                 mov rax, 0x...
                 call rax
+            ",
+            false,
+        );
+    }
+
+    #[test]
+    fn cg_guard_spill() {
+        // Check that spilling a live register in a guard spills in the deopt, not the "main",
+        // branch.
+        codegen_and_test(
+            "
+              entry:
+                %0: i1 = param reg
+                %1: i1 = param reg
+                %2: i1 = param reg
+                %3: i1 = param reg
+                %4: i1 = param reg
+                %5: i1 = param reg
+                %6: i1 = param reg
+                %7: i1 = param reg
+                %8: i1 = param reg
+                %9: i1 = param reg
+                %10: i1 = param reg
+                %11: i1 = param reg
+                %12: i1 = param reg
+                %13: i1 = param reg
+                guard false, %0, [%1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13]
+            ",
+            "
+                ...
+                ; guard false, %0, ...
+                bt r.32._, 0x00
+                jb ...
+                ...
+                ; deopt id and patch point for guard 0
+                and r.32.x, 0x01
+                mov [rbp-0x01], r.8.x
+                ...
             ",
             false,
         );
