@@ -59,13 +59,15 @@ pub(crate) trait Compiler: Send + Sync {
         connector_ctr: Option<Arc<dyn CompiledTrace>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 
-    /// Compile a mapped root trace into machine code.
+    /// Compile a guard trace into machine code.
     fn sidetrace_compile(
         &self,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,
-        sti: Arc<dyn SideTraceInfo>,
+        parent_ctr: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
+        target_ctr: Arc<dyn CompiledTrace>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,

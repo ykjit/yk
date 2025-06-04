@@ -2,7 +2,7 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, SideTraceInfo},
+    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, GuardIdx, SideTraceInfo},
     location::HotLocation,
     log::{log_ir, should_log_ir, IRPhase},
     mt::{TraceId, MT},
@@ -229,11 +229,14 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,
-        sti: Arc<dyn SideTraceInfo>,
+        parent_ctr: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
+        target_ctr: Arc<dyn CompiledTrace>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        let sti = parent_ctr.sidetraceinfo(gidx, Arc::clone(&target_ctr));
         self.compile(
             mt,
             aottrace_iter,
