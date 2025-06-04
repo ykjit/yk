@@ -669,13 +669,28 @@ impl LSRegAlloc<'_> {
                     } else {
                         self.put_input_in_gp_reg(asm, op, reg, *out_ext);
                     }
-                    let RegState::FromInst(ref mut iidxs, ext) =
-                        &mut self.gp_reg_states[usize::from(reg.code())]
-                    else {
-                        panic!()
-                    };
-                    assert_eq!(out_ext, ext);
-                    iidxs.push(iidx);
+                    match op {
+                        Operand::Const(cidx) => {
+                            let ss = match self.m.const_(*cidx) {
+                                Const::Float(_ty_idx, _) => todo!(),
+                                Const::Int(_ty_idx, arb_bit_int) => SpillState::ConstInt {
+                                    bits: arb_bit_int.bitw(),
+                                    v: arb_bit_int.to_zero_ext_u64().unwrap(),
+                                },
+                                Const::Ptr(_) => todo!(),
+                            };
+                            self.spills[usize::from(iidx)] = ss;
+                        }
+                        Operand::Var(_) => {
+                            let RegState::FromInst(ref mut iidxs, ext) =
+                                &mut self.gp_reg_states[usize::from(reg.code())]
+                            else {
+                                panic!()
+                            };
+                            assert_eq!(out_ext, ext);
+                            iidxs.push(iidx);
+                        }
+                    }
                 }
                 GPConstraint::Output { .. }
                 | GPConstraint::Clobber { force_reg: _ }
@@ -1462,7 +1477,7 @@ impl LSRegAlloc<'_> {
                 64 => {
                     dynasm!(asm; mov Rq(reg.code()), QWORD v as i64)
                 }
-                32 | 16 | 8 => {
+                32 | 16 | 8 | 1 => {
                     dynasm!(asm; mov Rd(reg.code()), v as i32)
                 }
                 _ => todo!("{bits}"),
