@@ -59,11 +59,6 @@ type AtomicHotThreshold = AtomicU32;
 pub type TraceCompilationErrorThreshold = u16;
 pub type AtomicTraceCompilationErrorThreshold = AtomicU16;
 
-/// How many basic blocks long can a trace be before we give up trying to compile it? Note that the
-/// slower our compiler, the lower this will have to be in order to give the perception of
-/// reasonable performance.
-/// FIXME: needs to be configurable.
-pub(crate) const DEFAULT_TRACE_TOO_LONG: usize = 20000;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 131;
 const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 /// How often can a [HotLocation] or [Guard] lead to an error in tracing or compilation before we
