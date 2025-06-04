@@ -4,11 +4,13 @@
 
 use super::YkSideTraceInfo;
 use super::aot_ir::{self, BBlockId, BinOp, Module};
+use super::jit_ir::TraceEndFrame;
 use super::{
     AOT_MOD,
     arbbitint::ArbBitInt,
     jit_ir::{self, Const, Operand, PackedOperand, ParamIdx, TraceKind},
 };
+use crate::compile::jitc_yk::aot_ir::DeoptSafepoint;
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{CompilationError, CompiledTrace},
@@ -18,6 +20,14 @@ use crate::{
 };
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
+
+/// The mode for processing blocks.
+enum ProcessMode {
+    /// Process blocks normally.
+    Normal,
+    /// Don't process any remaining blocks (except in order to count promotions/debugstrs etc).
+    Skip,
+}
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {
@@ -53,6 +63,12 @@ pub(crate) struct TraceBuilder {
     debug_str_idx: usize,
     /// Local variables that we have inferred to be constant.
     inferred_consts: HashMap<jit_ir::InstIdx, jit_ir::ConstIdx>,
+    /// Did this trace end in another frame?
+    endframe: TraceEndFrame,
+    /// Current mode for processing blocks.
+    process_mode: ProcessMode,
+    /// Info regarding the most recently seen recursive call to the interpreter.
+    last_interp_call: Option<(BBlockId, &'static DeoptSafepoint)>,
 }
 
 impl TraceBuilder {
@@ -70,6 +86,7 @@ impl TraceBuilder {
         ctrid: TraceId,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
+        endframe: TraceEndFrame,
     ) -> Result<Self, CompilationError> {
         Ok(Self {
             aot_mod,
@@ -91,6 +108,9 @@ impl TraceBuilder {
             debug_strs,
             debug_str_idx: 0,
             inferred_consts: HashMap::new(),
+            endframe,
+            process_mode: ProcessMode::Normal,
+            last_interp_call: None,
         })
     }
 
@@ -119,7 +139,7 @@ impl TraceBuilder {
     ) -> Result<(), CompilationError> {
         // Find the control point call to retrieve the live variables from its safepoint.
         let safepoint = match self.jit_mod.tracekind() {
-            TraceKind::HeaderOnly | TraceKind::HeaderAndBody => {
+            TraceKind::HeaderOnly | TraceKind::HeaderAndBody | TraceKind::DifferentFrames => {
                 let mut inst_iter = blk.insts.iter().enumerate().rev();
                 let mut safepoint = None;
                 for (_, inst) in inst_iter.by_ref() {
@@ -340,7 +360,9 @@ impl TraceBuilder {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_idempotent_promote(bid, iidx, val, nextinst)
                 }
-                _ => todo!("{:?}", inst),
+                _ => Err(CompilationError::General(format!(
+                    "unimplemented: {inst:?}"
+                ))),
             }?;
         }
         Ok(())
@@ -545,10 +567,10 @@ impl TraceBuilder {
     fn create_guard(
         &mut self,
         bid: &aot_ir::BBlockId,
-        cond: &jit_ir::Operand,
+        cond: Option<&jit_ir::Operand>,
         expect: bool,
         safepoint: &'static aot_ir::DeoptSafepoint,
-    ) -> Result<jit_ir::GuardInst, CompilationError> {
+    ) -> Result<jit_ir::Inst, CompilationError> {
         // Assign this branch's stackmap to the current frame.
         self.frames.last_mut().unwrap().safepoint = Some(safepoint);
 
@@ -597,7 +619,7 @@ impl TraceBuilder {
                                 // simpler, because it means it doesn't have to be clever when
                                 // analysing a guard's live variables.
                                 match cond {
-                                    Operand::Var(cond_idx) if *cond_idx == liidx => {
+                                    Some(Operand::Var(cond_idx)) if *cond_idx == liidx => {
                                         let cidx = if expect {
                                             self.jit_mod.false_constidx()
                                         } else {
@@ -632,12 +654,17 @@ impl TraceBuilder {
         let gi = jit_ir::GuardInfo::new(bid.clone(), live_vars, callframes, safepoint.id);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
 
+        if cond.is_none() {
+            // This is a deopt instruction which always fails and thus doesn't have a condition.
+            return Ok(jit_ir::Inst::Deopt(gi_idx));
+        }
+
         // Can we infer a constant from this?
         //
         // If this is a `guard true` and the condition is a `eq` with a constant, then we have
         // inferred a constant *after* the guard.
         if expect {
-            match cond {
+            match cond.unwrap() {
                 jit_ir::Operand::Var(iidx) => {
                     // Using `inst_nocopy()` here because `Inst::Const` can arise.
                     if let jit_ir::Inst::ICmp(icmp) = self.jit_mod.inst_nocopy(*iidx).unwrap()
@@ -650,11 +677,11 @@ impl TraceBuilder {
                         self.inferred_consts.insert(var_lhs, const_rhs);
                     }
                 }
-                jit_ir::Operand::Const(_) => todo!(),
+                jit_ir::Operand::Const(_) => (),
             };
         }
 
-        Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))
+        Ok(jit_ir::GuardInst::new(cond.unwrap().clone(), expect, gi_idx).into())
     }
 
     /// Translate a conditional `Br` instruction.
@@ -667,8 +694,9 @@ impl TraceBuilder {
         true_bb: &aot_ir::BBlockIdx,
     ) -> Result<(), CompilationError> {
         let jit_cond = self.handle_operand(cond)?;
-        let guard = self.create_guard(bid, &jit_cond, *true_bb == next_bb.bbidx(), safepoint)?;
-        self.jit_mod.push(guard.into())?;
+        let guard =
+            self.create_guard(bid, Some(&jit_cond), *true_bb == next_bb.bbidx(), safepoint)?;
+        self.jit_mod.push(guard)?;
         Ok(())
     }
 
@@ -688,10 +716,25 @@ impl TraceBuilder {
             }
             Ok(())
         } else {
-            // We've returned out of the function that started tracing, which isn't allowed.
-            Err(CompilationError::General(
-                "returned from function that started tracing".into(),
-            ))
+            if let TraceKind::Sidetrace(_) = self.jit_mod.tracekind() {
+                // Even though we currently catch side-traces that leave the main interpreter loop
+                // in `mt.rs`, it can happen that a trace re-enters the main interpreter loop after
+                // leaving it briefly without encountering a non-null location. As we only check
+                // the frame addresses at non-null locations, this special case slips through and
+                // we have to handle it here.
+                // FIXME: Abort side-traces the same way we do normal traces by emitting a return
+                // instruction.
+                return Err(CompilationError::General(
+                    "Returning out of sidetrace currently unsupported.".into(),
+                ));
+            }
+            // We've returned out of the function that started tracing. Stop processing any
+            // remaining blocks and emit a return instruction that naturally returns from a
+            // compiled trace into the interpreter.
+            let safepoint = frame.safepoint.unwrap();
+            self.jit_mod.push(jit_ir::Inst::Return(safepoint.id))?;
+            self.process_mode = ProcessMode::Skip;
+            Ok(())
         }
     }
 
@@ -860,7 +903,6 @@ impl TraceBuilder {
 
         // Check if this is a recursive call by scanning the call stack for the callee.
         let is_recursive = self.frames.iter().any(|f| f.funcidx == Some(*callee));
-
         let func = self.aot_mod.func(*callee);
         if !func.is_declaration()
             && !func.is_outline()
@@ -898,6 +940,11 @@ impl TraceBuilder {
                 None, // Note: the `idem_const` field may be populated later.
             )?
             .into();
+            if self.frames.first().unwrap().funcidx == Some(*callee) {
+                // Store the block id and safepoint for the most recently seen recursive
+                // interpreter call.
+                self.last_interp_call = Some((bid.clone(), safepoint.unwrap()));
+            }
             self.copy_inst(inst, bid, aot_inst_idx)
         }
     }
@@ -1068,7 +1115,7 @@ impl TraceBuilder {
                 let jit_cond = self.jit_mod.push_and_make_operand(cmp_inst.into())?;
 
                 // Guard the result of the comparison.
-                self.create_guard(bid, &jit_cond, bb == next_bb.bbidx(), safepoint)?
+                self.create_guard(bid, Some(&jit_cond), bb == next_bb.bbidx(), safepoint)?
             }
             None => {
                 // If this assertion fails then the basic block that was executed next wasn't an
@@ -1123,10 +1170,10 @@ impl TraceBuilder {
                 // Guard the result of ORing all the comparisons together.
                 // unwrap can't fail: we already disregarded degenerate switches with no
                 // non-default cases.
-                self.create_guard(bid, &jit_cond.unwrap(), false, safepoint)?
+                self.create_guard(bid, Some(&jit_cond.unwrap()), false, safepoint)?
             }
         };
-        self.copy_inst(guard.into(), bid, aot_inst_idx)
+        self.copy_inst(guard, bid, aot_inst_idx)
     }
 
     fn handle_phi(
@@ -1272,8 +1319,8 @@ impl TraceBuilder {
                     jit_ir::Operand::Const(cidx),
                 );
                 let jit_cond = self.jit_mod.push_and_make_operand(cmp_instr.into())?;
-                let guard = self.create_guard(bid, &jit_cond, true, safepoint)?;
-                self.copy_inst(guard.into(), bid, aot_inst_idx)
+                let guard = self.create_guard(bid, Some(&jit_cond), true, safepoint)?;
+                self.copy_inst(guard, bid, aot_inst_idx)
             }
             jit_ir::Operand::Const(_cidx) => todo!(),
         }
@@ -1377,6 +1424,7 @@ impl TraceBuilder {
             Some(b) => self.lookup_aot_block(b),
             _ => todo!(),
         };
+
         let mut trace_iter = tas.into_iter().peekable();
 
         mt.stats.timing_state(TimingState::Compiling);
@@ -1476,7 +1524,10 @@ impl TraceBuilder {
         }
 
         match self.jit_mod.tracekind() {
-            TraceKind::HeaderOnly | TraceKind::HeaderAndBody | TraceKind::Connector(_) => {
+            TraceKind::HeaderOnly
+            | TraceKind::HeaderAndBody
+            | TraceKind::Connector(_)
+            | TraceKind::DifferentFrames => {
                 // Find the block containing the control point call. This is the (sole) predecessor of the
                 // first (guaranteed mappable) block in the trace. Note that empty traces are handled in
                 // the tracing phase so the `unwrap` is safe.
@@ -1553,6 +1604,9 @@ impl TraceBuilder {
                             // started outlining. We are done and can continue processing
                             // blocks normally.
                             self.outline_target_blk = None;
+                            // We've returned from the recursive interpreter call so this info is
+                            // no longer needed.
+                            self.last_interp_call = None;
                         } else {
                             // We are outlining so just skip this block. However, we still need to
                             // process promoted values to make sure we've processed all promotion
@@ -1585,7 +1639,11 @@ impl TraceBuilder {
                     // In order to emit guards for conditional branches we need to peek at the next
                     // block.
                     let nextbb = trace_iter.peek().and_then(|x| self.lookup_aot_block(x));
-                    self.process_block(&bid, &prev_bid, nextbb)?;
+                    if let ProcessMode::Skip = self.process_mode {
+                        self.process_promotions_and_debug_strs_only(&bid)?;
+                    } else {
+                        self.process_block(&bid, &prev_bid, nextbb)?;
+                    }
                     if self.cp_block.as_ref() == Some(&bid) {
                         // When using the hardware tracer we will see two control point
                         // blocks here. We must only process one of them. The simplest way
@@ -1616,7 +1674,8 @@ impl TraceBuilder {
 
         assert_eq!(self.promote_idx, self.promotions.len());
         assert_eq!(self.debug_str_idx, self.debug_strs.len());
-        let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
+        let bid = self.cp_block.as_ref().unwrap();
+        let blk = self.aot_mod.bblock(bid);
         let cpcall = blk.insts.iter().rev().nth(1).unwrap();
         debug_assert!(cpcall.is_control_point(self.aot_mod));
         let safepoint = cpcall.safepoint().unwrap();
@@ -1625,17 +1684,38 @@ impl TraceBuilder {
             let jit_op = &self.local_map[&aot_op.to_inst_id()];
             self.jit_mod.push_header_end_var(jit_op.clone());
         }
-        match self.jit_mod.tracekind() {
+
+        let tracekind = self.jit_mod.tracekind();
+        match tracekind {
             TraceKind::HeaderOnly | TraceKind::HeaderAndBody => {
+                assert!(matches!(self.endframe, TraceEndFrame::Same));
                 self.jit_mod.push(jit_ir::Inst::TraceHeaderEnd(false))?;
             }
             TraceKind::Connector(_) => {
+                assert!(matches!(self.endframe, TraceEndFrame::Same));
                 self.jit_mod.push(jit_ir::Inst::TraceHeaderEnd(true))?;
             }
             TraceKind::Sidetrace(_) => {
+                assert!(matches!(self.endframe, TraceEndFrame::Same));
                 self.jit_mod.push(jit_ir::Inst::SidetraceEnd)?;
             }
-        }
+            TraceKind::DifferentFrames => {
+                if let TraceEndFrame::Entered = self.endframe {
+                    if let Some((bid, safepoint)) = &self.last_interp_call.take() {
+                        let deopt = self.create_guard(bid, None, false, safepoint)?;
+                        self.jit_mod.push(deopt)?;
+                    } else {
+                        // We traced a recursive call to the interpreter inside of another
+                        // outlined/unmappable function. Since these functions don't have
+                        // safepoints attached to them we currently can't emit the deopt. Thus, at
+                        // least for the time being, abort the trace.
+                        return Err(CompilationError::General(
+                            "Recursive interpreter call inside outlined function.".to_string(),
+                        ));
+                    }
+                }
+            }
+        };
 
         Ok(self.jit_mod)
     }
@@ -1661,13 +1741,22 @@ pub(super) fn build(
     promotions: Box<[u8]>,
     debug_strs: Vec<String>,
     connector_tid: Option<Arc<dyn CompiledTrace>>,
+    endframe: TraceEndFrame,
 ) -> Result<jit_ir::Module, CompilationError> {
-    let tracekind = if let Some(x) = sti {
-        TraceKind::Sidetrace(x)
-    } else if let Some(connector_tid) = connector_tid {
-        TraceKind::Connector(connector_tid)
-    } else {
-        TraceKind::HeaderOnly
+    let tracekind = match endframe {
+        TraceEndFrame::Same => {
+            if let Some(x) = sti {
+                TraceKind::Sidetrace(x)
+            } else if let Some(connector_tid) = connector_tid {
+                TraceKind::Connector(connector_tid)
+            } else {
+                TraceKind::HeaderOnly
+            }
+        }
+        TraceEndFrame::Entered | TraceEndFrame::Left => TraceKind::DifferentFrames,
     };
-    TraceBuilder::new(mt, tracekind, aot_mod, ctrid, promotions, debug_strs)?.build(mt, ta_iter)
+    TraceBuilder::new(
+        mt, tracekind, aot_mod, ctrid, promotions, debug_strs, endframe,
+    )?
+    .build(mt, ta_iter)
 }

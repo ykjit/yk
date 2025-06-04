@@ -7,13 +7,19 @@
 //     yk-tracing: start-tracing
 //     6
 //     enter
-//     yk-warning: tracing-aborted: tracing went outside of starting frame
+//     yk-tracing: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ...
+//     call @f...
+//     deopt...
+//     --- End jit-pre-opt ---
 //     5
 //     yk-tracing: start-tracing
 //     4
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
+//     header_end...
 //     --- End jit-pre-opt ---
 //     3
 //     yk-execution: enter-jit-code
@@ -21,19 +27,20 @@
 //     1
 //     yk-execution: deoptimise ...
 //     return
-//     yk-tracing: start-tracing
+//     yk-execution: enter-jit-code
 //     5
 //     enter
-//     yk-warning: tracing-aborted: tracing went outside of starting frame
-//     4
 //     yk-execution: enter-jit-code
+//     4
 //     3
 //     2
 //     1
 //     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     return
-//     yk-warning: tracing-aborted: tracing went outside of starting frame
+//     yk-warning: tracing-aborted: tracing continued into a JIT frame
+//     yk-execution: deoptimise ...
+//     yk-execution: enter-jit-code
 //     4
 //     enter
 //     yk-execution: enter-jit-code
@@ -42,24 +49,29 @@
 //     1
 //     yk-execution: deoptimise ...
 //     return
-//     yk-tracing: start-tracing
+//     yk-execution: deoptimise ...
+//     yk-tracing: start-side-tracing
+//     yk-tracing: stop-tracing
+//     ...
 //     c
 //     3
 //     enter
-//     yk-warning: tracing-aborted: tracing went outside of starting frame
+//     yk-execution: enter-jit-code
 //     2
+//     1
+//     yk-execution: deoptimise ...
+//     yk-tracing: start-side-tracing
+//     return
+//     yk-warning: tracing-aborted: tracing went outside of starting frame
+//     b
+//     2
+//     enter
 //     yk-execution: enter-jit-code
 //     1
 //     yk-execution: deoptimise ...
 //     return
-//     yk-tracing: start-tracing
-//     b
-//     2
-//     enter
-//     yk-warning: tracing-aborted: tracing went outside of starting frame
-//     1
-//     return
-//     yk-tracing: start-tracing
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise ...
 //     a
 //     1
 //     enter
