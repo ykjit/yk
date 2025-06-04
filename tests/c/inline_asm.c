@@ -2,10 +2,15 @@
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
-//   status: error
+//   stderr:
+//     ...
+//     yk-warning: trace-compilation-aborted: unimplemented: Unimplemented...
+//     ...
+//     yk-warning: trace-compilation-aborted: unimplemented: Unimplemented...
+//     ...
 
-// Check that we can handle inline asm properly (currently expectely fails
-// until we can deal with calls inside inline asm).
+// Check that we can handle inline asm properly (currently expectely aborts the
+// trace until we can deal with calls inside inline asm).
 
 #include <assert.h>
 #include <stdlib.h>

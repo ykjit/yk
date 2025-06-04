@@ -137,12 +137,19 @@ impl<'a> RevAnalyse<'a> {
                     }
                 }
             }
+            TraceKind::DifferentFrames => {
+                // We don't care where the register allocator ends since we will always either
+                // deopt or jump into a side-trace at the end of the trace.
+            }
         }
 
         // ...and then we perform the rest of the reverse analysis.
         let mut iter = self.m.iter_skipping_insts().rev();
         match self.m.tracekind() {
-            TraceKind::HeaderOnly | TraceKind::Sidetrace(_) | TraceKind::Connector(_) => {
+            TraceKind::HeaderOnly
+            | TraceKind::Sidetrace(_)
+            | TraceKind::Connector(_)
+            | TraceKind::DifferentFrames => {
                 for (iidx, inst) in self.m.iter_skipping_insts().rev() {
                     self.analyse(iidx, inst);
                 }

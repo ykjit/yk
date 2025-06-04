@@ -41,6 +41,7 @@ impl Module {
                 }
             }
             super::TraceKind::Sidetrace(_) | super::TraceKind::Connector(_) => (),
+            super::TraceKind::DifferentFrames => (),
         }
 
         let mut last_inst = None;

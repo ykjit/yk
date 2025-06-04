@@ -8,11 +8,12 @@
 //     exit
 //     enter
 //     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: returned from function that started tracing
-//     ...
+//     1
+//     exit
 
 // Check that returning from the function that started tracing, then
-// re-entering it and stopping tracing, causes the trace to be aborted.
+// re-entering it and stopping tracing, stops the trace before the return and
+// emits a return itself.
 //
 // This is an interesting case because the frame address of the place we start
 // and stop tracing is the same, so mt.rs cannot catch this.

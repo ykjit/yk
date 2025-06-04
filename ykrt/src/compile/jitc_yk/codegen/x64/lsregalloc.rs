@@ -31,7 +31,9 @@ use super::{Register, VarLocation, rev_analyse::RevAnalyse};
 use crate::compile::jitc_yk::{
     aot_ir,
     codegen::abs_stack::AbstractStack,
-    jit_ir::{Const, ConstIdx, FloatTy, GuardInst, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
+    jit_ir::{
+        Const, ConstIdx, FloatTy, HasGuardInfo, Inst, InstIdx, Module, Operand, PtrAddInst, Ty,
+    },
 };
 use dynasmrt::{
     DynasmApi, Register as dynasmrtRegister, dynasm,
@@ -306,7 +308,7 @@ impl<'a> LSRegAlloc<'a> {
     pub(super) fn get_ready_for_deopt(
         &mut self,
         asm: &mut Assembler,
-        ginst: GuardInst,
+        ginst: HasGuardInfo,
     ) -> (Rq, Vec<(aot_ir::InstId, VarLocation)>) {
         let patch_reg = self.force_tmp_register(asm, RegSet::with_gp_reserved());
 
