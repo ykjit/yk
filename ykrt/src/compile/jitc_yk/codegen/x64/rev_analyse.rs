@@ -21,7 +21,6 @@ use crate::compile::jitc_yk::{
         PtrToIntInst, SExtInst, SIToFPInst, SelectInst, StoreInst, TraceKind, TruncInst, Ty,
         ZExtInst,
     },
-    YkSideTraceInfo,
 };
 use dynasmrt::x64::Rq;
 use std::{assert_matches::assert_matches, sync::Arc};
@@ -123,10 +122,6 @@ impl<'a> RevAnalyse<'a> {
                 }
             }
             TraceKind::Sidetrace(sti) => {
-                let sti = Arc::clone(sti)
-                    .as_any()
-                    .downcast::<YkSideTraceInfo<Register>>()
-                    .unwrap();
                 let vlocs = &sti.entry_vars;
                 // Side-traces don't have a trace body since we don't apply loop peeling and thus use
                 // `trace_header_end` to store the jump variables.

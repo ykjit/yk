@@ -94,12 +94,6 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// upcasting in Rust is incomplete.
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
 
-    fn sidetraceinfo(
-        &self,
-        gidx: GuardIdx,
-        target_ctr: Arc<dyn CompiledTrace>,
-    ) -> Arc<dyn SideTraceInfo>;
-
     /// Return a reference to the guard `id`.
     fn guard(&self, gidx: GuardIdx) -> &Guard;
 
@@ -118,18 +112,6 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
 
     /// Disassemble the JITted code into a string, for testing and deubgging.
     fn disassemble(&self, with_addrs: bool) -> Result<String, Box<dyn Error>>;
-}
-
-/// Stores information required for compiling a side-trace. Passed down from a (parent) trace
-/// during deoptimisation.
-pub(crate) trait SideTraceInfo: fmt::Debug {
-    /// Upcast this [SideTraceInfo] to `Any`. This method is a hack that's only needed since trait
-    /// upcasting in Rust is incomplete.
-    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
-
-    /// Return the [CompiledTrace] this side-trace should jump to at its end. Note: this may be the
-    /// "root" trace of a trace tree, or a completely different trace altogether.
-    fn target_ctr(&self) -> Arc<dyn CompiledTrace>;
 }
 
 #[cfg(test)]
@@ -160,14 +142,6 @@ mod compiled_trace_testing {
         }
 
         fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
-            panic!();
-        }
-
-        fn sidetraceinfo(
-            &self,
-            _gidx: GuardIdx,
-            _target_ctr: Arc<dyn CompiledTrace>,
-        ) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
 
@@ -223,14 +197,6 @@ mod compiled_trace_testing {
         }
 
         fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
-            panic!();
-        }
-
-        fn sidetraceinfo(
-            &self,
-            _gidx: GuardIdx,
-            _target_ctr: Arc<dyn CompiledTrace>,
-        ) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
 
