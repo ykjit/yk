@@ -3,7 +3,7 @@
 use super::{
     AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorder, TraceRecorderError, Tracer,
 };
-use crate::mt::{MTThread, DEFAULT_TRACE_TOO_LONG};
+use crate::mt::MTThread;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -83,9 +83,7 @@ struct SWTTraceRecorder {}
 impl TraceRecorder for SWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError> {
         let bbs = BASIC_BLOCKS.with(|tb| tb.replace(Vec::new()));
-        if bbs.len() > DEFAULT_TRACE_TOO_LONG {
-            Err(TraceRecorderError::TraceTooLong)
-        } else if bbs.is_empty() {
+        if bbs.is_empty() {
             // FIXME: who should handle an empty trace?
             panic!();
         } else {

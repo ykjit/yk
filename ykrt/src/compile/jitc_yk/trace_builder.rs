@@ -631,7 +631,7 @@ impl<Register: Send + Sync + 'static> TraceBuilder<Register> {
         }
 
         let gi = jit_ir::GuardInfo::new(bid.clone(), live_vars, callframes, safepoint.id);
-        let gi_idx = self.jit_mod.push_guardinfo(gi).unwrap();
+        let gi_idx = self.jit_mod.push_guardinfo(gi)?;
 
         // Can we infer a constant from this?
         //

@@ -236,10 +236,6 @@ impl Iterator for HWTTraceIterator {
             }
         }
 
-        if self.tas_generated > crate::mt::DEFAULT_TRACE_TOO_LONG {
-            return Some(Err(AOTTraceIteratorError::TooManyIrElements));
-        }
-
         // The `remove` cannot panic because upcoming.len > 1 is guaranteed by the `while` loop
         // above.
         Some(Ok(self.upcoming.remove(0)))
