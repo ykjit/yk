@@ -28,7 +28,7 @@ use crate::{
             },
             CodeGen, YkSideTraceInfo,
         },
-        CompilationError, CompiledTrace, Guard, GuardIdx, SideTraceInfo,
+        CompilationError, CompiledTrace, Guard, GuardIdx,
     },
     location::HotLocation,
     mt::{TraceId, MT},
@@ -385,10 +385,6 @@ impl<'a> Assemble<'a> {
             TraceKind::Sidetrace(sti) => {
                 // This is a side-trace. Use the passed in stack size to initialise the register
                 // allocator.
-                let sti = Arc::clone(sti)
-                    .as_any()
-                    .downcast::<YkSideTraceInfo<Register>>()
-                    .unwrap();
                 sti.sp_offset
             }
         };
@@ -2705,10 +2701,6 @@ impl<'a> Assemble<'a> {
                 (ctr.entry_vars().to_vec(), self.m.trace_header_end())
             }
             TraceKind::Sidetrace(sti) => {
-                let sti = Arc::clone(sti)
-                    .as_any()
-                    .downcast::<YkSideTraceInfo<Register>>()
-                    .unwrap();
                 assert_eq!(sti.sp_offset, self.sp_offset);
                 (sti.entry_vars.clone(), self.m.trace_header_end())
             }
@@ -2901,20 +2893,15 @@ impl<'a> Assemble<'a> {
     fn cg_sidetrace_end(&mut self, iidx: InstIdx) {
         match self.m.tracekind() {
             TraceKind::Sidetrace(sti) => {
-                let sti = Arc::clone(sti)
-                    .as_any()
-                    .downcast::<YkSideTraceInfo<Register>>()
-                    .unwrap();
                 // The end of a side-trace. Map live variables of this side-trace to the entry variables of
                 // the root parent trace, then jump to it.
                 self.write_jump_vars(iidx);
                 self.ra.align_stack(SYSV_CALL_STACK_ALIGN);
-                let target_ctr = sti.target_ctr();
                 dynasm!(self.asm
                     // Reset rsp to the root trace's frame.
                     ; mov rsp, rbp
-                    ; sub rsp, i32::try_from(target_ctr.entry_sp_off()).unwrap()
-                    ; mov rdi, QWORD target_ctr.entry() as i64
+                    ; sub rsp, i32::try_from(sti.target_ctr.entry_sp_off()).unwrap()
+                    ; mov rdi, QWORD sti.target_ctr.entry() as i64
                     // We can safely use RDI here, since the root trace won't expect live variables in this
                     // register since it's being used as an argument to the control point.
                     ; jmp rdi);
@@ -3611,30 +3598,12 @@ impl X64CompiledTrace {
     fn compiled_guard(&self, gidx: GuardIdx) -> &CompiledGuard {
         &self.compiled_guards[usize::from(gidx)]
     }
-}
 
-impl CompiledTrace for X64CompiledTrace {
-    fn ctrid(&self) -> TraceId {
-        self.ctrid
-    }
-
-    fn safepoint(&self) -> &Option<DeoptSafepoint> {
-        &self.safepoint
-    }
-
-    fn entry(&self) -> *const libc::c_void {
-        self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
-    }
-
-    fn entry_sp_off(&self) -> usize {
-        self.sp_offset
-    }
-
-    fn sidetraceinfo(
+    pub(crate) fn sidetraceinfo(
         &self,
         gidx: GuardIdx,
         target_ctr: Arc<dyn CompiledTrace>,
-    ) -> Arc<dyn SideTraceInfo> {
+    ) -> Arc<YkSideTraceInfo<Register>> {
         let target_ctr = target_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
         // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
         // the `CompiledTrace` and `gidx` or better a reference to `DeoptInfo`?
@@ -3654,6 +3623,24 @@ impl CompiledTrace for X64CompiledTrace {
             sp_offset: self.sp_offset,
             target_ctr,
         })
+    }
+}
+
+impl CompiledTrace for X64CompiledTrace {
+    fn ctrid(&self) -> TraceId {
+        self.ctrid
+    }
+
+    fn safepoint(&self) -> &Option<DeoptSafepoint> {
+        &self.safepoint
+    }
+
+    fn entry(&self) -> *const libc::c_void {
+        self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
+    }
+
+    fn entry_sp_off(&self) -> usize {
+        self.sp_offset
     }
 
     fn guard(&self, gidx: GuardIdx) -> &crate::compile::Guard {

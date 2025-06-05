@@ -2,7 +2,7 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, SideTraceInfo},
+    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, GuardIdx},
     location::HotLocation,
     log::{log_ir, should_log_ir, IRPhase},
     mt::{TraceId, MT},
@@ -45,7 +45,7 @@ pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
 });
 
 /// Contains information required for side-tracing.
-struct YkSideTraceInfo<Register: Send + Sync> {
+pub(crate) struct YkSideTraceInfo<Register: Send + Sync> {
     /// The AOT IR block the failing guard originated from.
     bid: aot_ir::BBlockId,
     /// Inlined calls tracked by [trace_builder] during processing of a trace. Required for
@@ -63,16 +63,6 @@ struct YkSideTraceInfo<Register: Send + Sync> {
     sp_offset: usize,
     /// The trace to jump to at the end of this sidetrace.
     target_ctr: Arc<dyn CompiledTrace>,
-}
-
-impl<Register: Send + Sync + 'static> SideTraceInfo for YkSideTraceInfo<Register> {
-    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
-        self
-    }
-
-    fn target_ctr(&self) -> Arc<dyn CompiledTrace> {
-        Arc::clone(&self.target_ctr)
-    }
 }
 
 impl<Register: Send + Sync> YkSideTraceInfo<Register> {
@@ -115,7 +105,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,
-        sti: Option<Arc<dyn SideTraceInfo>>,
+        sti: Option<Arc<YkSideTraceInfo<codegen::x64::Register>>>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
@@ -127,8 +117,6 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         if should_log_ir(IRPhase::AOT) {
             log_ir(&format!("--- Begin aot ---\n{aot_mod}\n--- End aot ---\n"));
         }
-
-        let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo<Register>>().unwrap());
 
         let mut jit_mod = trace_builder::build(
             &mt,
@@ -229,11 +217,18 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,
-        sti: Arc<dyn SideTraceInfo>,
+        parent_ctr: Arc<dyn CompiledTrace>,
+        gidx: GuardIdx,
+        target_ctr: Arc<dyn CompiledTrace>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        let parent_ctr = parent_ctr
+            .as_any()
+            .downcast::<codegen::x64::X64CompiledTrace>()
+            .unwrap();
+        let sti = parent_ctr.sidetraceinfo(gidx, Arc::clone(&target_ctr));
         self.compile(
             mt,
             aottrace_iter,
