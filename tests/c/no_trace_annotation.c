@@ -21,7 +21,7 @@
 //     Can't JIT this!
 //     Can't JIT this!
 //     Can't JIT this!
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 
 // Check that the `yk_outline` annotation works.

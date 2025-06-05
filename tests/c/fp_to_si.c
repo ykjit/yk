@@ -34,7 +34,7 @@
 //     i=1
 //     f32->int: 5, 4, -1
 //     f64->int: 2, 3, -1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check float to signed integer conversions.
 

@@ -9,7 +9,7 @@
 //     yk-execution: enter-jit-code
 //     i=2
 //     i=1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that basic trace compilation in a thread works.
 

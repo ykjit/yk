@@ -20,19 +20,19 @@
 //     8
 //     9
 //     10
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     12
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     14
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     16
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     18
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     20
 //     yk-tracing: stop-tracing
@@ -45,7 +45,7 @@
 //     26
 //     28
 //     30
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     {
 //         ...
 //         "trace_executions": 6,

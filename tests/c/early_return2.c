@@ -13,7 +13,7 @@
 //     b1
 //     7
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     b1
 //     ret1
@@ -22,7 +22,7 @@
 //     b3
 //     8
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     b3
 //     7
@@ -33,7 +33,7 @@
 //     b3
 //     6
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     b2
 //     5
@@ -52,7 +52,7 @@
 //     1
 //     b2
 //     0
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     ret2
 //     exit

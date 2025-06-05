@@ -7,7 +7,7 @@
 //     yk-execution: enter-jit-code
 //     inside f
 //     inside f
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 
 // Check inlining a function into the trace that has a void return type.

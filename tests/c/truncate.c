@@ -17,7 +17,7 @@
 //     u32 4294967295
 //     u16 65535
 //     u8 255
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Test truncation.

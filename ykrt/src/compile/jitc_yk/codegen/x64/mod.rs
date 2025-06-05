@@ -409,11 +409,15 @@ impl<'a> Assemble<'a> {
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
         self.cg_insts()?;
-        let (compiled_guards, patch_deopts) = self.codegen_guard_bodies();
+        let body_stack_size = self.ra.stack_size();
+        let (compiled_guards, patch_deopts, max_guard_body_stack_size) =
+            self.codegen_guard_bodies()?;
+        let max_stack_size = std::cmp::max(max_guard_body_stack_size, body_stack_size)
+            .next_multiple_of(SYSV_CALL_STACK_ALIGN);
 
         // Now we know the size of the stack frame (i.e. self.asp), patch the allocation with the
         // correct amount.
-        self.patch_frame_allocation(alloc_off);
+        self.patch_frame_allocation(alloc_off, max_stack_size);
 
         // If an error happens here, we've made a mistake in the assembly we generate.
         self.asm
@@ -445,7 +449,7 @@ impl<'a> Assemble<'a> {
             mt,
             buf,
             compiled_guards,
-            sp_offset: self.ra.stack_size(),
+            sp_offset: max_stack_size,
             prologue_offset: self.prologue_offset.0,
             entry_vars: self.header_start_locs.clone(),
             hl: Arc::downgrade(&hl),
@@ -490,6 +494,15 @@ impl<'a> Assemble<'a> {
         let mut in_header = true;
         while let Some((iidx, inst)) = next {
             if self.ra.rev_an.is_inst_tombstone(iidx) {
+                next = iter.next();
+                continue;
+            }
+            if !inst.is_internal_inst()
+                && !inst.has_load_effect(self.m)
+                && !inst.has_store_effect(self.m)
+                && !inst.is_guard()
+                && self.ra.rev_an.used_only_by_guards(iidx)
+            {
                 next = iter.next();
                 continue;
             }
@@ -622,6 +635,31 @@ impl<'a> Assemble<'a> {
     /// non-generic optimisations / modifications.
     fn comment_inst(&mut self, iidx: InstIdx, inst: Inst) {
         match inst {
+            Inst::Guard(x) => {
+                let gi = x.guard_info(self.m);
+                let live_vars = gi
+                    .live_vars()
+                    .iter()
+                    .map(|(x, y)| {
+                        format!(
+                            "{}:%{}_{}: {}",
+                            usize::from(x.funcidx()),
+                            usize::from(x.bbidx()),
+                            usize::from(x.iidx()),
+                            y.unpack(self.m).display(self.m),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.comment(format!(
+                    "guard {}, {}, [{live_vars}] ; trace_gidx {} safepoint_id {}",
+                    if x.expect() { "true" } else { "false" },
+                    x.cond(self.m).display(self.m),
+                    self.guards.len(),
+                    gi.safepoint_id()
+                ));
+                return;
+            }
             Inst::Load(_) => {
                 if let Some(painst) = self.ra.ptradd(iidx) {
                     self.comment(format!(
@@ -695,12 +733,20 @@ impl<'a> Assemble<'a> {
     /// `self.compiling_guards` to the empty list.
     fn codegen_guard_bodies(
         &mut self,
-    ) -> (Vec<CompiledGuard>, Vec<(AssemblyOffset, AssemblyOffset)>) {
+    ) -> Result<
+        (
+            Vec<CompiledGuard>,
+            Vec<(AssemblyOffset, AssemblyOffset)>,
+            usize,
+        ),
+        CompilationError,
+    > {
         let mut compiled_guards = Vec::with_capacity(self.guards.len());
         let mut patch_deopts = Vec::new();
+        let mut max_stack_size = 0;
 
         if self.guards.is_empty() {
-            return (compiled_guards, patch_deopts);
+            return Ok((compiled_guards, patch_deopts, max_stack_size));
         }
         // We now have to construct the "full" deopt points. Inside the trace itself, are just
         // a pair of instructions: a `cmp` followed by a `jnz` to a `fail_label` that has not
@@ -717,9 +763,46 @@ impl<'a> Assemble<'a> {
             let fail_label = gd.fail_label;
             self.comment(format!("Deopt ID and patch point for guard {i:?}"));
             dynasm!(self.asm;=> fail_label);
-            let (jumpreg, live_vars) =
-                self.ra
-                    .get_ready_for_deopt(&mut self.asm, gd.ginst, gd.guard_snapshot);
+
+            self.ra.restore_guard_snapshot(gd.guard_snapshot);
+            let ginfo = gd.ginst.guard_info(self.m);
+            let mut def_iidxs = ginfo
+                .live_vars()
+                .iter()
+                .map(|(_, pop)| pop.unpack(self.m))
+                .filter_map(|x| {
+                    if let Operand::Var(y) = x {
+                        Some(y)
+                    } else {
+                        None
+                    }
+                })
+                .filter(|x| self.ra.rev_an.used_only_by_guards(*x))
+                .collect::<Vec<_>>();
+            def_iidxs.sort();
+            for def_iidx in def_iidxs {
+                let inst = self.m.inst(def_iidx);
+                if inst.is_internal_inst()
+                    || inst.has_load_effect(self.m)
+                    || inst.has_store_effect(self.m)
+                {
+                    continue;
+                }
+                self.comment_inst(def_iidx, inst);
+                match inst {
+                    Inst::BinOp(x) => self.cg_binop(def_iidx, &x),
+                    Inst::ICmp(x) => self.cg_icmp(def_iidx, &x),
+                    Inst::LookupGlobal(x) => self.cg_lookupglobal(def_iidx, &x),
+                    Inst::PtrAdd(x) => self.cg_ptradd(def_iidx, &x),
+                    Inst::Trunc(x) => self.cg_trunc(def_iidx, &x),
+                    Inst::Select(x) => self.cg_select(def_iidx, &x),
+                    Inst::SExt(x) => self.cg_sext(def_iidx, &x),
+                    Inst::ZExt(x) => self.cg_zext(def_iidx, &x),
+                    x => todo!("{x:?}"),
+                }
+            }
+
+            let (jumpreg, live_vars) = self.ra.get_ready_for_deopt(&mut self.asm, gd.ginst);
             // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
 
             // Align this location in such a way that the operand of the below `mov`
@@ -771,6 +854,8 @@ impl<'a> Assemble<'a> {
                 inlined_frames: gd.inlined_frames,
                 guard: Guard::new(),
             });
+
+            max_stack_size = max_stack_size.max(self.ra.stack_size());
         }
 
         self.comment("Call __yk_deopt".to_string());
@@ -812,18 +897,18 @@ impl<'a> Assemble<'a> {
                 ; call rax
             );
         }
-        (compiled_guards, patch_deopts)
+        Ok((compiled_guards, patch_deopts, max_stack_size))
     }
 
-    fn patch_frame_allocation(&mut self, asm_off: AssemblyOffset) {
+    /// Patch the frame for a stack size -- which must be aligned to `SYSV_CALL_STACK_ALIGN` by the
+    /// caller of this function!
+    fn patch_frame_allocation(&mut self, asm_off: AssemblyOffset, stack_size: usize) {
         // The stack should be 16-byte aligned after allocation. This ensures that calls in the
         // trace also get a 16-byte aligned stack, as per the SysV ABI.
         // Since we initialise the register allocator with interpreter frame and parent trace
         // frames, the actual size we need to substract from RSP is the difference between the
         // current stack size and the base size we inherited.
-        let stack_size = self.ra.align_stack(SYSV_CALL_STACK_ALIGN) - self.sp_offset;
-
-        match i32::try_from(stack_size) {
+        match i32::try_from(stack_size - self.sp_offset) {
             Ok(asp) => {
                 let mut patchup = self.asm.alter_uncommitted();
                 patchup.goto(asm_off);
@@ -2404,8 +2489,8 @@ impl<'a> Assemble<'a> {
 
         // Codegen guard
         self.ra.expire_regs(g_iidx);
+        self.comment_inst(g_iidx, g_inst.into());
         let fail_label = self.guard_to_deopt(g_inst);
-        self.comment(Inst::Guard(g_inst).display(self.m, g_iidx).to_string());
 
         if g_inst.expect() {
             match pred {
@@ -3466,7 +3551,6 @@ impl<'a> Assemble<'a> {
 
     fn guard_to_deopt(&mut self, ginst: jit_ir::GuardInst) -> DynamicLabel {
         let fail_label = self.asm.new_dynamic_label();
-        // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let ginfo = ginst.guard_info(self.m);
         let gd = CompilingGuard {
             ginst,
@@ -5830,6 +5914,38 @@ mod tests {
     }
 
     #[test]
+    fn cg_guard_otherwise_unused_in_deopt() {
+        // Check that spilling a live register in a guard spills in the deopt, not the "main",
+        // branch.
+        codegen_and_test(
+            "
+              entry:
+                %0: i1 = param reg
+                %1: i8 = param reg
+                %2: i8 = add %1, 7i8
+                %3: i8 = add %1, 8i8
+                guard false, %0, [%2, %3]
+                black_box %3
+            ",
+            "
+                ...
+                ; %0: i1 = param register(0, 1, [])
+                ; %1: i8 = param register(2, 1, [])
+                ; %3: i8 = add %1, 8i8
+                ...
+                ; guard false, %0, ...
+                ...
+                ; black_box %3
+                ...
+                ; deopt id and patch point for guard 0
+                ; %2: i8 = add %1, 7i8
+                ...
+            ",
+            false,
+        );
+    }
+
+    #[test]
     fn cg_deopt_reg_exts() {
         codegen_and_test(
             "
@@ -5841,11 +5957,12 @@ mod tests {
             ",
             "
                 ...
-                ; %2: i8 = shl %0, 1i8
-                shl r.64.x, 0x01
                 ; guard true, %1, ...
                 ...
                 ; deopt id and patch point for guard 0
+                ; %2: i8 = shl %0, 1i8
+                mov ...
+                shl r.64.x, 0x01
                 and r.32.x, 0xff
                 ...
             ",

@@ -22,7 +22,7 @@
 //     i=2
 //     yk-execution: enter-jit-code
 //     i=1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 
 // Check that tracing the default arm of a switch works correctly.

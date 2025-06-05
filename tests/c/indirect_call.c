@@ -15,7 +15,7 @@
 //     yk-execution: enter-jit-code
 //     foo 5
 //     foo 4
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Check that indirect calls work.

@@ -47,7 +47,7 @@
 //     xor2 -2
 //     shl 2
 //     ---
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Test some binary operations.

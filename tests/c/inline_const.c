@@ -17,7 +17,7 @@
 //     yk-execution: enter-jit-code
 //     foo 3
 //     foo 3
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Check that constant return values of functions inlined into a trace are

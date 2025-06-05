@@ -95,7 +95,7 @@
 //     nan != 1.000000: 1
 //     nan != nan: 1
 //     ---
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check unordered comparisons are JITted correctly.
 

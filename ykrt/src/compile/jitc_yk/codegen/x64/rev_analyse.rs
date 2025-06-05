@@ -41,6 +41,7 @@ pub(crate) struct RevAnalyse<'a> {
     /// cause JIT IR instructions to be removed, but it allows a code generator to avoid generating
     /// code for some of them.
     used_insts: Vob,
+    used_only_by_guards: Vob,
     /// For each instruction, record the instructions which use its value. Note: the inner `Vec`
     /// *must* be sorted in reverse order (see [Self::next_use]) e.g. a valid `def_use` is
     /// `[[2, 1], [], [4, 3]]` but `[[1, 2], ..]` is invalid.
@@ -59,6 +60,7 @@ impl<'a> RevAnalyse<'a> {
             inst_vals_alive_until: vec![InstIdx::try_from(0).unwrap(); m.insts_len()],
             ptradds: vec![None; m.insts_len()],
             used_insts: Vob::from_elem(false, usize::from(m.last_inst_idx()) + 1),
+            used_only_by_guards: Vob::from_elem(true, usize::from(m.last_inst_idx()) + 1),
             def_use: vec![vec![]; m.insts_len()],
             reg_hints: vec![vec![]; m.insts_len()],
         }
@@ -162,6 +164,8 @@ impl<'a> RevAnalyse<'a> {
                 }
             }
         }
+
+        self.analyse_not_used_in_guards();
     }
 
     /// Analyse a trace body. This must be called iff both of the following are true:
@@ -182,6 +186,7 @@ impl<'a> RevAnalyse<'a> {
             }
             self.analyse(iidx, inst);
         }
+        self.analyse_not_used_in_guards();
     }
 
     fn analyse(&mut self, iidx: InstIdx, inst: Inst) {
@@ -230,6 +235,11 @@ impl<'a> RevAnalyse<'a> {
             }
 
             // Calculate inst_vals_alive_until
+            if let Inst::Guard(ginst) = inst
+                && let Operand::Var(def_iidx) = ginst.cond(self.m)
+            {
+                self.used_only_by_guards.set(usize::from(def_iidx), false);
+            }
             inst.map_operand_vars(self.m, &mut |x| {
                 self.used_insts.set(usize::from(x), true);
                 if self.inst_vals_alive_until[usize::from(x)] < iidx {
@@ -237,7 +247,44 @@ impl<'a> RevAnalyse<'a> {
                 }
                 match inst {
                     Inst::TraceHeaderStart | Inst::TraceBodyStart => (),
-                    _ => self.push_def_use(x, iidx),
+                    Inst::Guard(_) => (),
+                    _ => {
+                        self.used_only_by_guards.set(usize::from(x), false);
+                        self.push_def_use(x, iidx);
+                    }
+                }
+            });
+        }
+    }
+
+    fn analyse_not_used_in_guards(&mut self) {
+        for iidx in self
+            .used_only_by_guards
+            .clone()
+            .iter_set_bits(..)
+            .map(InstIdx::unchecked_from)
+        {
+            let inst = match self.m.inst_nocopy(iidx) {
+                None => continue,
+                Some(x) => {
+                    if matches!(x, Inst::Tombstone)
+                        || x.is_internal_inst()
+                        || x.has_load_effect(self.m)
+                        || x.has_store_effect(self.m)
+                        || x.is_guard()
+                        || matches!(x, Inst::Const(_))
+                    {
+                        continue;
+                    }
+                    x
+                }
+            };
+
+            let alive_until = self.inst_vals_alive_until[usize::from(iidx)];
+            inst.map_operand_vars(self.m, &mut |x| {
+                if self.inst_vals_alive_until[usize::from(x)] < alive_until {
+                    self.push_def_use(x, alive_until);
+                    self.inst_vals_alive_until[usize::from(x)] = alive_until;
                 }
             });
         }
@@ -247,6 +294,10 @@ impl<'a> RevAnalyse<'a> {
     /// a tombstone)?
     pub(crate) fn is_inst_tombstone(&self, iidx: InstIdx) -> bool {
         !self.used_insts[usize::from(iidx)]
+    }
+
+    pub(crate) fn used_only_by_guards(&self, iidx: InstIdx) -> bool {
+        self.used_only_by_guards[usize::from(iidx)]
     }
 
     /// Is the value produced by instruction `query_iidx` used after (but not including!)
@@ -277,10 +328,11 @@ impl<'a> RevAnalyse<'a> {
             .map(|(_, y)| *y)
     }
 
-    /// Record that `use_iidx` is used at instruction `def_iidx`.
+    /// Record that `def_iidx` is used at instruction `used_iidx`.
     fn push_def_use(&mut self, def_iidx: InstIdx, use_iidx: InstIdx) {
         assert!(def_iidx < use_iidx);
         self.def_use[usize::from(def_iidx)].push(use_iidx);
+        self.def_use[usize::from(def_iidx)].sort_by(|a, b| b.cmp(a));
     }
 
     /// When processing the instruction `cur_iidx`, return at which instruction `query_iidx` is
@@ -474,9 +526,16 @@ impl<'a> RevAnalyse<'a> {
                 }
                 self.used_insts.set(usize::from(y), true);
                 self.push_def_use(y, iidx);
+                self.used_only_by_guards.set(usize::from(y), false);
             }
             return true;
         }
+
+        if let Operand::Var(op_iidx) = inst.ptr(self.m) {
+            self.used_only_by_guards.set(usize::from(op_iidx), false);
+            self.push_def_use(op_iidx, iidx);
+        }
+
         false
     }
 
@@ -493,6 +552,7 @@ impl<'a> RevAnalyse<'a> {
                 }
                 self.used_insts.set(usize::from(y), true);
                 self.push_def_use(y, iidx);
+                self.used_only_by_guards.set(usize::from(y), false);
             }
             if let Operand::Var(y) = inst.val(self.m) {
                 if self.inst_vals_alive_until[usize::from(y)] < iidx {
@@ -500,8 +560,16 @@ impl<'a> RevAnalyse<'a> {
                 }
                 self.used_insts.set(usize::from(y), true);
                 self.push_def_use(y, iidx);
+                self.used_only_by_guards.set(usize::from(y), false);
             }
             return true;
+        }
+
+        if let Operand::Var(op_iidx) = inst.ptr(self.m) {
+            self.used_only_by_guards.set(usize::from(op_iidx), false);
+        }
+        if let Operand::Var(op_iidx) = inst.val(self.m) {
+            self.used_only_by_guards.set(usize::from(op_iidx), false);
         }
         false
     }

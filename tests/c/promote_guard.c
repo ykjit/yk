@@ -10,13 +10,13 @@
 //     y=300
 //     y=400
 //     y=500
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     y=700
 //     yk-execution: enter-jit-code
 //     y=800
 //     y=900
 //     y=1000
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     y=1999
 
 // Check that promotions are guarded correctly.

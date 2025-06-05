@@ -42,7 +42,7 @@
 //     2 -> 1.666700 1.160000
 //     1 -> 1.333300 1.840000
 //     1 -> 0.666700 0.160000
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check floating point addition works.
 

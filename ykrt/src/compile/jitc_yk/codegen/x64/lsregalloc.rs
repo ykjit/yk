@@ -292,6 +292,15 @@ impl<'a> LSRegAlloc<'a> {
         }
     }
 
+    pub(super) fn restore_guard_snapshot(&mut self, gsnap: GuardSnapshot) {
+        self.gp_regset = gsnap.gp_regset;
+        self.gp_reg_states = gsnap.gp_reg_states;
+        self.fp_regset = gsnap.fp_regset;
+        self.fp_reg_states = gsnap.fp_reg_states;
+        self.spills = gsnap.spills;
+        self.stack = gsnap.stack;
+    }
+
     /// When generating the code for a guard failure, do the necessary work from the register
     /// allocator's perspective (e.g. ensuring registers have an appropriate [RegExtension]) for
     /// deopt to occur.
@@ -299,16 +308,8 @@ impl<'a> LSRegAlloc<'a> {
         &mut self,
         asm: &mut Assembler,
         ginst: GuardInst,
-        gsnap: GuardSnapshot,
     ) -> (Rq, Vec<(aot_ir::InstID, VarLocation)>) {
-        self.gp_regset = gsnap.gp_regset;
-        self.gp_reg_states = gsnap.gp_reg_states;
-        self.fp_regset = gsnap.fp_regset;
-        self.fp_reg_states = gsnap.fp_reg_states;
-        self.spills = gsnap.spills;
-        self.stack = gsnap.stack;
-
-        let patch_reg = self.tmp_register_for_write_vars(asm);
+        let patch_reg = self.force_tmp_register(asm, RegSet::with_gp_reserved());
 
         let gi = ginst.guard_info(self.m);
         // `seen_gp_regs` allows us to zero extend a register at most once.
@@ -321,6 +322,7 @@ impl<'a> LSRegAlloc<'a> {
                     if let Some(reg) = self.find_op_in_gp_reg(&op)
                         && !seen_gp_regs.is_set(reg)
                     {
+                        assert_ne!(patch_reg, reg);
                         let RegState::FromInst(ref insts, ext) =
                             self.gp_reg_states[usize::from(reg.code())]
                         else {
@@ -1459,7 +1461,7 @@ impl LSRegAlloc<'_> {
         assert!(!matches!(inst, Inst::Const(_)));
 
         match self.spills[usize::from(iidx)] {
-            SpillState::Empty => unreachable!(),
+            SpillState::Empty => unreachable!("{iidx}"),
             SpillState::Stack(off) => match size {
                 1 => dynasm!(asm ; movzx Rq(reg.code()), BYTE [rbp - off]),
                 2 => dynasm!(asm ; movzx Rq(reg.code()), WORD [rbp - off]),

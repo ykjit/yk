@@ -33,7 +33,7 @@
 //     srem2 0
 //     srem3 0
 //     srem4 0
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Test signed division.

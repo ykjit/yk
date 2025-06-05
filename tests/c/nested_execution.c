@@ -19,7 +19,7 @@
 //     yk-execution: enter-jit-code
 //     2
 //     1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     return
 //     yk-tracing: start-tracing
 //     5
@@ -30,7 +30,7 @@
 //     3
 //     2
 //     1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     return
 //     yk-warning: tracing-aborted: tracing went outside of starting frame
@@ -40,7 +40,7 @@
 //     3
 //     2
 //     1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     return
 //     yk-tracing: start-tracing
 //     c
@@ -50,7 +50,7 @@
 //     2
 //     yk-execution: enter-jit-code
 //     1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     return
 //     yk-tracing: start-tracing
 //     b

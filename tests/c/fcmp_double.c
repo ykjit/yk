@@ -33,7 +33,7 @@
 //     nan == nan: 0
 //     nan != nan: 1
 //     0.000000 == -0.000000: 1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that double comparisons work.
 

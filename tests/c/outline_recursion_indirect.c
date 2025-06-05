@@ -30,7 +30,7 @@
 //     2
 //     0
 //     1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     0
 //     exit
 

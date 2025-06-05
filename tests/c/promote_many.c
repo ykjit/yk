@@ -32,7 +32,7 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that promotion works in traces.
 

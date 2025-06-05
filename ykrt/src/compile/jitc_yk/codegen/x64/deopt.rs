@@ -1,7 +1,7 @@
 use super::{Register, VarLocation};
 use crate::{
     aotsmp::AOT_STACKMAPS,
-    compile::GuardIdx,
+    compile::{CompiledTrace, GuardIdx},
     log::Verbosity,
     mt::{MTThread, TraceId},
 };
@@ -58,7 +58,10 @@ pub(crate) extern "C" fn __yk_deopt(
     let cgd = &ctr.compiled_guard(gidx);
 
     mt.deopt();
-    mt.log.log(Verbosity::Execution, "deoptimise");
+    mt.log.log(
+        Verbosity::Execution,
+        &format!("deoptimise {:?} {gidx:?}", ctr.ctrid()),
+    );
 
     // Calculate space required for the new stack.
     // Add space for live register values which we'll be adding at the end.
