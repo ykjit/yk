@@ -28,7 +28,7 @@
 //     foo
 //     1
 //     bar
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     0
 //     exit
 

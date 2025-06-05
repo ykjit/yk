@@ -40,7 +40,7 @@
 //     1 -> 0.813008
 //     1 -> 0.813008
 //     1 -> 0.813008
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check basic 32-bit float support.
 

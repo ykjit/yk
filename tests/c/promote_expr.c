@@ -17,7 +17,7 @@
 //     y=150
 //     y=200
 //     y=250
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that expression promotion works in traces.
 //

@@ -28,7 +28,7 @@
 //     yk-execution: enter-jit-code
 //     i=2, val=3
 //     i=1, val=3
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that PHI nodes JIT properly.
 

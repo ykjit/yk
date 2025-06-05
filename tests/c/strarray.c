@@ -17,7 +17,7 @@
 //     yk-execution: enter-jit-code
 //     tomato
 //     banana
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //   stdout:
 //     exit
 

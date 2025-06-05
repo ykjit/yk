@@ -32,7 +32,7 @@
 //     yk-execution: enter-jit-code
 //     i=2, val=3, p=12
 //     i=1, val=3, p=16
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that ptr addition in C input leads to the expected AOT and JIT IR.
 

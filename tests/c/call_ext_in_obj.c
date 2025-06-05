@@ -12,7 +12,7 @@
 //     3
 //     yk-execution: enter-jit-code
 //     2
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 
 // Check that we can call a function without IR from another object (.o) file.

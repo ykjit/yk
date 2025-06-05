@@ -29,7 +29,7 @@
 --     yk-execution: enter-jit-code: recursive_function.lua:36: GETTABUP
 --     1
 --     0
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     exit
 
 function f(x)

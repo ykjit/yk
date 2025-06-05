@@ -18,7 +18,7 @@
 //     yk-execution: enter-jit-code
 //     2
 //     1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Check that basic trace compilation works.

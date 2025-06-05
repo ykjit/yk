@@ -15,7 +15,7 @@
 //     yk-execution: enter-jit-code
 //     i=2
 //     i=1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 
 // Check that using a global constant works.

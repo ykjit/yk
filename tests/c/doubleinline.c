@@ -30,7 +30,7 @@
 //     foo-if
 //     bar
 //     1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     foo-else
 //     bar
 //     0

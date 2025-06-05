@@ -20,7 +20,7 @@
 //     yk-execution: enter-jit-code
 //     pos=3
 //     pos=4
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that sign extending with a positive value works.
 

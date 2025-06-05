@@ -20,7 +20,7 @@
 //     yk-execution: enter-jit-code
 //     i=2, elem=12
 //     i=1, elem=11
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check dynamic ptradd instructions work.
 

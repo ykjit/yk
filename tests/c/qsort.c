@@ -15,7 +15,7 @@
 //     1 3 4 6 2 5 end
 //     i=5
 //     1 2 3 4 6 5 end
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that foreign code calling back to "native" code works.
 

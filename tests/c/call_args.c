@@ -14,7 +14,7 @@
 //     2: 5
 //     yk-execution: enter-jit-code
 //     1: 5
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 
 // Check that function calls with arguments do the right thing

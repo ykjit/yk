@@ -14,7 +14,7 @@
 //     2: 47
 //     yk-execution: enter-jit-code
 //     1: 47
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 
 // Check that tracing a cascading "if...else if...else" works.

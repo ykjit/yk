@@ -67,7 +67,7 @@
 //     1: 39 39
 //     1: 41 41
 //     1: 43 43
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that idempotent functions work.
 

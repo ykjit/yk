@@ -18,7 +18,7 @@
 //     2
 //     yk-execution: enter-jit-code
 //     1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     return
 //     exit
 

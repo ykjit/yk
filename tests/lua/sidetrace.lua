@@ -28,10 +28,10 @@
 --     --- End debugstrs ---
 --     <4
 --     yk-execution: enter-jit-code: sidetrace.lua:59: LTI
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     >=5
 --     yk-execution: enter-jit-code: sidetrace.lua:59: LTI
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     yk-tracing: start-side-tracing: sidetrace.lua:59: LTI
 --     >=6
 --     yk-tracing: stop-tracing: sidetrace.lua:59: LTI
@@ -52,7 +52,7 @@
 --     >=8
 --     >=9
 --     >=10
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     exit
 
 for i = 0, 10 do

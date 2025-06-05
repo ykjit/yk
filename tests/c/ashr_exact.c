@@ -17,7 +17,7 @@
 //     yk-execution: enter-jit-code
 //     ashr 2
 //     ashr 1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Test ashr instructions with the exact keyword.

@@ -19,7 +19,7 @@
 //     0: 2
 //     0: 1
 //     yk-warning: tracing-aborted: tracing continued into a JIT frame
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Test that we don't record a successful trace if we started tracing in an

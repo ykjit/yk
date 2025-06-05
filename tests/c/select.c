@@ -15,7 +15,7 @@
 //     yk-execution: enter-jit-code
 //     2 1 4
 //     1 2 6
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Check that select instructions work.

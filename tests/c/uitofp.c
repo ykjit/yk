@@ -29,7 +29,7 @@
 //     u64_top_bit: 9223372036854775808 == {{double_u64_top_bit}}
 //     u64_top_bit_minus_one: 9223372036854775807 == {{double_u64_top_bit}}
 //     u64_max: 18446744073709551615 == {{double_u64_max}}
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     exit
 
 // Check uitofp instructions have correct runtime semantics.

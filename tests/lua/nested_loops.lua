@@ -11,15 +11,15 @@
 --       nested_loops.lua:44: FORLOOP
 --     --- End debugstrs ---
 --     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     yk-tracing: start-side-tracing: nested_loops.lua:45: ADDI
 --     yk-tracing: stop-tracing: nested_loops.lua:43: ADDI
 --     yk-tracing: start-tracing: nested_loops.lua:43: ADDI
@@ -35,7 +35,7 @@
 --       nested_loops.lua:42: FORLOOP
 --     --- End debugstrs ---
 --     yk-execution: enter-jit-code: nested_loops.lua:45: ADDI
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     251502
 
 local x = 0

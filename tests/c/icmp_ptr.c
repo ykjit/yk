@@ -6,7 +6,7 @@
 //     yk-execution: enter-jit-code
 //     p1==p2: 1, p2==p3: 0
 //     p1==p2: 1, p2==p3: 0
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 //
 

@@ -19,22 +19,22 @@
 //     8
 //     9
 //     10
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     12
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     14
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     16
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     18
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     20
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     22
 //     yk-tracing: stop-tracing
@@ -49,11 +49,11 @@
 //     ...
 //     36
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 //     42
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     45
 //     yk-tracing: stop-tracing
@@ -66,7 +66,7 @@
 //     54
 //     57
 //     60
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //   stdout:
 //     exit
 

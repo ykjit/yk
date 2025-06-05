@@ -30,7 +30,7 @@
 //     yk-execution: enter-jit-code
 //     2 -> 2.000000
 //     1 -> 1.000000
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check basic 32-bit float support.
 

@@ -31,10 +31,10 @@
 //     --- End jit-post-opt ---
 //     3: 24
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     2: 20
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     1: 16
 
 // Check that idempotent functions work when they call functions that

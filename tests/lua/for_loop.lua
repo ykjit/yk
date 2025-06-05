@@ -27,7 +27,7 @@
 --     yk-execution: enter-jit-code: for_loop.lua:35: GETTABUP
 --     5
 --     6
---     yk-execution: deoptimise
+--     yk-execution: deoptimise ...
 --     exit
 
 local x = 0

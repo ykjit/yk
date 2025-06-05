@@ -1476,6 +1476,10 @@ impl GuardInfo {
     pub(crate) fn inlined_frames(&self) -> &[InlinedFrame] {
         &self.inlined_frames
     }
+
+    pub(crate) fn safepoint_id(&self) -> u64 {
+        self.safepoint_id
+    }
 }
 
 /// An abstract call frame for functions inlined in a trace. This contains enough information for a

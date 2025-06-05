@@ -13,7 +13,7 @@
 //     yk-execution: enter-jit-code
 //     2:21
 //     1:21
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     ...
 
 #include <stdio.h>

@@ -14,7 +14,7 @@
 //     0: 4
 //     yk-execution: enter-jit-code
 //     0: 3
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-tracing
 //     1: 3
 //     yk-warning: tracing-aborted: tracing went outside of starting frame

@@ -19,7 +19,7 @@
 //     yk-execution: enter-jit-code
 //     i=1
 //     i=1
-//     yk-execution: deoptimise
+//     yk-execution: deoptimise ...
 
 // Check that inlining works when the function is vararg.
 
