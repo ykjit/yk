@@ -249,7 +249,19 @@ impl<'a> RevAnalyse<'a> {
                     Inst::TraceHeaderStart | Inst::TraceBodyStart => (),
                     Inst::Guard(_) => (),
                     _ => {
-                        self.used_only_by_guards.set(usize::from(x), false);
+                        if inst.is_internal_inst()
+                            || inst.is_guard()
+                            || inst.has_load_effect(self.m)
+                            || inst.has_store_effect(self.m)
+                            || !self.used_only_by_guards[usize::from(iidx)]
+                        {
+                            self.used_only_by_guards.set(usize::from(x), false);
+                        } else {
+                            let cnd = self.inst_vals_alive_until[usize::from(iidx)];
+                            if self.inst_vals_alive_until[usize::from(x)] < cnd {
+                                self.inst_vals_alive_until[usize::from(x)] = cnd;
+                            }
+                        }
                         self.push_def_use(x, iidx);
                     }
                 }

@@ -766,7 +766,8 @@ impl<'a> Assemble<'a> {
 
             self.ra.restore_guard_snapshot(gd.guard_snapshot);
             let ginfo = gd.ginst.guard_info(self.m);
-            let mut def_iidxs = ginfo
+            let mut body_iidxs = Vec::new();
+            let mut todos = ginfo
                 .live_vars()
                 .iter()
                 .map(|(_, pop)| pop.unpack(self.m))
@@ -779,25 +780,40 @@ impl<'a> Assemble<'a> {
                 })
                 .filter(|x| self.ra.rev_an.used_only_by_guards(*x))
                 .collect::<Vec<_>>();
-            def_iidxs.sort();
-            for def_iidx in def_iidxs {
-                let inst = self.m.inst(def_iidx);
+            while let Some(todo_iidx) = todos.pop() {
+                let todo_inst = self.m.inst(todo_iidx);
+                if !todo_inst.is_internal_inst()
+                    && !todo_inst.has_load_effect(self.m)
+                    && !todo_inst.has_store_effect(self.m)
+                    && self.ra.rev_an.used_only_by_guards(todo_iidx)
+                {
+                    body_iidxs.push(todo_iidx);
+                    self.m
+                        .inst(todo_iidx)
+                        .map_operand_vars(self.m, &mut |x| todos.push(x));
+                }
+            }
+            body_iidxs.sort();
+            body_iidxs.dedup();
+            for body_iidx in body_iidxs {
+                let inst = self.m.inst(body_iidx);
                 if inst.is_internal_inst()
                     || inst.has_load_effect(self.m)
                     || inst.has_store_effect(self.m)
                 {
                     continue;
                 }
-                self.comment_inst(def_iidx, inst);
+                self.comment_inst(body_iidx, inst);
                 match inst {
-                    Inst::BinOp(x) => self.cg_binop(def_iidx, &x),
-                    Inst::ICmp(x) => self.cg_icmp(def_iidx, &x),
-                    Inst::LookupGlobal(x) => self.cg_lookupglobal(def_iidx, &x),
-                    Inst::PtrAdd(x) => self.cg_ptradd(def_iidx, &x),
-                    Inst::Trunc(x) => self.cg_trunc(def_iidx, &x),
-                    Inst::Select(x) => self.cg_select(def_iidx, &x),
-                    Inst::SExt(x) => self.cg_sext(def_iidx, &x),
-                    Inst::ZExt(x) => self.cg_zext(def_iidx, &x),
+                    Inst::BinOp(x) => self.cg_binop(body_iidx, &x),
+                    Inst::ICmp(x) => self.cg_icmp(body_iidx, &x),
+                    Inst::LookupGlobal(x) => self.cg_lookupglobal(body_iidx, &x),
+                    Inst::PtrAdd(x) => self.cg_ptradd(body_iidx, &x),
+                    Inst::PtrToInt(x) => self.cg_ptrtoint(body_iidx, &x),
+                    Inst::Trunc(x) => self.cg_trunc(body_iidx, &x),
+                    Inst::Select(x) => self.cg_select(body_iidx, &x),
+                    Inst::SExt(x) => self.cg_sext(body_iidx, &x),
+                    Inst::ZExt(x) => self.cg_zext(body_iidx, &x),
                     x => todo!("{x:?}"),
                 }
             }
