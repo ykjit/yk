@@ -472,7 +472,7 @@ static int open_perf(size_t aux_bufsize, bool filter, struct hwt_cerror *err) {
     get_tracing_extent(&fltr_obj, &fltr_base_off, &fltr_size);
 
     char f_str[512];
-    if ((size_t) snprintf(f_str, sizeof(f_str), "filter 0x%zu/%zu@%s",
+    if ((size_t) snprintf(f_str, sizeof(f_str), "filter 0x%zx/%zu@%s",
           fltr_base_off, fltr_size, fltr_obj) >= sizeof(f_str))
     {
       hwt_set_cerr(err, hwt_cerror_unknown, 0);
