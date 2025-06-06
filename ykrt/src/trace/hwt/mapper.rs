@@ -87,7 +87,7 @@ impl HWTTraceIterator {
         }
         let (block_vaddr, block_last_inst) = b_rng.unwrap();
 
-        let (obj_name, block_off) = vaddr_to_obj_and_off(block_vaddr as usize).unwrap();
+        let (obj_name, _block_off) = vaddr_to_obj_and_off(block_vaddr).unwrap();
 
         // Currently we only read in a block map and IR for the currently running binary (and not
         // for dynamically linked shared objects). Thus, if we see code from another object, we
@@ -103,7 +103,7 @@ impl HWTTraceIterator {
 
         let block_len = block_last_inst - block_vaddr;
         let mut ents = LLVM_BLOCK_MAP
-            .query(block_off, block_off + block_len)
+            .query(block_vaddr, block_vaddr + block_len)
             .collect::<Vec<_>>();
 
         // In the case that an hwtracer block maps to multiple machine basic blocks, it may be
@@ -121,8 +121,7 @@ impl HWTTraceIterator {
                 // same function, and a block X has a start address between basic blocks A and B,
                 // then X must also belong to the same function and there's no need to query the
                 // linker.
-                // FIXME: Is this `unwrap` safe?
-                let sio = vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
+                let sio = vaddr_to_sym_and_obj(block_vaddr).unwrap();
                 debug_assert_eq!(
                     obj_name.to_str().unwrap(),
                     sio.dli_fname().unwrap().to_str().unwrap()
