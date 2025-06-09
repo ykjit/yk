@@ -126,6 +126,9 @@ int main(void) {
 
   interp(INPUT_PROG, &INPUT_PROG[prog_len], cells, cells_end, mt, yklocs);
 
+  for (size_t i = 0; i < prog_len; i++) {
+    yk_location_drop(yklocs[i]);
+  }
+  yk_mt_shutdown(mt);
   free(cells);
-  free(yklocs);
 }
