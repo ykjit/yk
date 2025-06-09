@@ -28,7 +28,7 @@ pub struct Record {
     /// The absolute offset in bytes of this record in the binary.
     pub offset: u64,
     /// The list of live values recorded at this point.
-    pub live_vals: Vec<LiveVal>,
+    pub live_vals: Vec<Vec<Location>>,
     /// The stack size of the function this record is contained in.
     pub size: u64,
 }
@@ -101,29 +101,6 @@ pub enum Location {
     /// The live variable is a large constant and was stored in a vector as part of a record. This
     /// variant describes the index where the constant is stored.
     LargeConstant(u64),
-}
-
-/// A live variable.
-#[derive(Debug)]
-pub struct LiveVal {
-    /// The location where this variable is stored (or needs to be written to during
-    /// deoptimsation). Typically, this vector only has a single entry, though it is possible for
-    /// variables to be stored across multiple locations (e.g. 128bit values).
-    locs: Vec<Location>,
-}
-
-impl LiveVal {
-    pub fn len(&self) -> usize {
-        self.locs.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.locs.is_empty()
-    }
-
-    pub fn get(&self, idx: usize) -> Option<&Location> {
-        self.locs.get(idx)
-    }
 }
 
 /// Information about a functions's prologue.
@@ -237,7 +214,7 @@ impl StackMapParser<'_> {
             let offset = u64::from(self.read_u32());
             self.read_u16();
             let num_live_vars = self.read_u16();
-            let live_vars = self.read_live_vars(num_live_vars, consts);
+            let live_vars = self.read_live_vals(num_live_vars, consts);
             // Padding
             self.align_8();
             self.read_u16();
@@ -254,13 +231,11 @@ impl StackMapParser<'_> {
         v
     }
 
-    fn read_live_vars(&mut self, num: u16, consts: &[u64]) -> Vec<LiveVal> {
-        let mut v = Vec::new();
+    fn read_live_vals(&mut self, num: u16, consts: &[u64]) -> Vec<Vec<Location>> {
+        let mut v = Vec::with_capacity(usize::from(num));
         for _ in 0..num {
             let num_locs = self.read_u8();
-            v.push(LiveVal {
-                locs: self.read_locations(num_locs, consts),
-            });
+            v.push(self.read_locations(num_locs, consts));
         }
         v
     }
