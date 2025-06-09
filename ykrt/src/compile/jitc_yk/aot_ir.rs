@@ -716,9 +716,8 @@ impl Display for CastKind {
 pub(crate) enum Operand {
     #[deku(id = "0")]
     Const(ConstIdx),
-    // FIXME: rename this to `Local` for consistency with ykllvm's serialiser.
     #[deku(id = "1")]
-    LocalVariable(InstID),
+    Local(InstID),
     #[deku(id = "2")]
     Global(GlobalDeclIdx),
     #[deku(id = "3")]
@@ -726,22 +725,20 @@ pub(crate) enum Operand {
 }
 
 impl Operand {
-    /// For a [Self::LocalVariable] operand return the instruction that defines the variable.
+    /// For a [Self::Variable] operand return the instruction that defines the variable.
     ///
     /// Panics for other kinds of operand.
     ///
     /// OPT: This is expensive.
     pub(crate) fn to_inst<'a>(&self, aotmod: &'a Module) -> &'a Inst {
-        let Self::LocalVariable(iid) = self else {
-            panic!()
-        };
+        let Self::Local(iid) = self else { panic!() };
         &aotmod.funcs[iid.funcidx].bblocks[iid.bbidx].insts[iid.iidx]
     }
 
     /// Returns the [Ty] of the operand.
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         match self {
-            Self::LocalVariable(_) => {
+            Self::Local(_) => {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_inst(m).def_type(m).unwrap()
             }
@@ -757,9 +754,7 @@ impl Operand {
     /// Return the `InstID` of a local variable operand. Panics if called on other kinds of
     /// operands.
     pub(crate) fn to_inst_id(&self) -> InstID {
-        let Self::LocalVariable(iid) = self else {
-            panic!()
-        };
+        let Self::Local(iid) = self else { panic!() };
         iid.clone()
     }
 
@@ -779,7 +774,7 @@ impl fmt::Display for DisplayableOperand<'_> {
             Operand::Const(cidx) => {
                 write!(f, "{}", self.m.consts[*cidx].display(self.m))
             }
-            Operand::LocalVariable(iid) => {
+            Operand::Local(iid) => {
                 write!(f, "%{}_{}", usize::from(iid.bbidx), usize::from(iid.iidx))
             }
             Operand::Global(gidx) => write!(f, "@{}", self.m.global_decls[*gidx].name()),
