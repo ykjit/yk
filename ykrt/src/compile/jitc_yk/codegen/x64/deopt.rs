@@ -7,12 +7,28 @@ use crate::{
 };
 use dynasmrt::Register as _;
 use libc::c_void;
+use page_size;
 #[cfg(debug_assertions)]
 use std::collections::HashMap;
-use std::{ptr, sync::Arc};
+use std::{
+    alloc::{alloc, realloc, Layout},
+    ptr,
+    sync::{
+        atomic::{AtomicPtr, AtomicUsize, Ordering},
+        Arc,
+    },
+};
 use yksmp::Location as SMLocation;
 
 use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_BYTESIZE};
+
+thread_local! {
+    // This caches the memory we use to generate the "new stack" that deopt has to create.
+    static BUF: (AtomicPtr<u8>, AtomicUsize) = (
+        AtomicPtr::new(unsafe { alloc(Layout::from_size_align(page_size::get(), page_size::get()).unwrap()) }),
+        AtomicUsize::new(page_size::get())
+    );
+}
 
 /// Registers (in DWARF notation) that we want to restore during deopt. Excludes `rsp` (7) and
 /// `return register` (16), which we do not care about.
@@ -79,11 +95,21 @@ pub(crate) extern "C" fn __yk_deopt(
         memsize += REG64_BYTESIZE;
     }
 
-    // Allocate space on the heap for the new stack. We will later memcpy this new stack over the
-    // old stack just after the frame containing the control point. Since the stack grows downwards
-    // we need to assemble it in the same way. For convenience we will be keeping pointers into
-    // the newstack which we aptly call `rsp` and `rbp`.
-    let newstack = unsafe { libc::malloc(memsize) };
+    // Ensure we've got enough space to copy the new stack over. For convenience we will be keeping
+    // pointers into the newstack which we aptly call `rsp` and `rbp`.
+    let newstack = BUF.with(|(ptr, sz)| {
+        if memsize < sz.load(Ordering::Relaxed) {
+            ptr.load(Ordering::Relaxed)
+        } else {
+            let ol = Layout::from_size_align(sz.load(Ordering::Relaxed), page_size::get()).unwrap();
+            let newsize = memsize.next_multiple_of(page_size::get());
+            let n = unsafe { realloc(ptr.load(Ordering::Relaxed), ol, newsize) };
+            assert!(!n.is_null());
+            ptr.store(n, Ordering::Relaxed);
+            sz.store(newsize, Ordering::Relaxed);
+            n
+        }
+    }) as *mut c_void;
     let mut rsp = unsafe { newstack.byte_add(memsize) };
     let mut rbp = rsp;
     // Keep track of the real address of the current frame so we can write pushed RBP values.
@@ -334,15 +360,9 @@ unsafe extern "C" fn replace_stack(dst: *mut c_void, src: *const c_void, size: u
         "mov rsp, rdi",
         // Move rsp to the end of the new stack.
         "sub rsp, rdx",
-        // Save src ptr into a callee-save reg so we can free it later.
-        "mov r12, rsi",
         // Copy the new stack over the old stack.
         "mov rdi, rsp",
         "call memcpy",
-        // Restore src ptr.
-        "mov rdi, r12",
-        // Free the source which is no longer needed.
-        "call free",
         // Recover live registers.
         "movsd xmm15, [rsp]",
         "add rsp, 8",
