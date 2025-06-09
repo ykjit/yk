@@ -9,6 +9,7 @@
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("The stackmap parser currently only supports x64.");
 
+use smallvec::SmallVec;
 use std::error;
 
 struct Function {
@@ -28,7 +29,7 @@ pub struct Record {
     /// The absolute offset in bytes of this record in the binary.
     pub offset: u64,
     /// The list of live values recorded at this point.
-    pub live_vals: Vec<Vec<Location>>,
+    pub live_vals: Vec<SmallVec<[Location; 1]>>,
     /// The stack size of the function this record is contained in.
     pub size: u64,
 }
@@ -231,7 +232,7 @@ impl StackMapParser<'_> {
         v
     }
 
-    fn read_live_vals(&mut self, num: u16, consts: &[u64]) -> Vec<Vec<Location>> {
+    fn read_live_vals(&mut self, num: u16, consts: &[u64]) -> Vec<SmallVec<[Location; 1]>> {
         let mut v = Vec::with_capacity(usize::from(num));
         for _ in 0..num {
             let num_locs = self.read_u8();
@@ -240,8 +241,8 @@ impl StackMapParser<'_> {
         v
     }
 
-    fn read_locations(&mut self, num: u8, consts: &[u64]) -> Vec<Location> {
-        let mut v = Vec::new();
+    fn read_locations(&mut self, num: u8, consts: &[u64]) -> SmallVec<[Location; 1]> {
+        let mut v = SmallVec::new();
         for _ in 0..num {
             let kind = self.read_u8();
             self.read_u8();

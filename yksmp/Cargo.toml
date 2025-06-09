@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2021"
 authors = ["The Yk Developers"]
 license = "Apache-2.0 OR MIT"
+
+[dependencies]
+smallvec = { version="1.15.1", features=["union"] }
