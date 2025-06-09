@@ -187,7 +187,7 @@ pub(crate) extern "C" fn __yk_deopt(
 
         // Now write all live variables to the new stack in the order they are listed in the AOT
         // stackmap.
-        for aotvar in rec.live_vars.iter() {
+        for aotvar in rec.live_vals.iter() {
             // Read live JIT values from the trace's stack frame.
             let jitval = match cgd.live_vars[varidx].1 {
                 VarLocation::Stack { frame_off, size } => {

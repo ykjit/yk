@@ -27,8 +27,8 @@ pub struct Record {
     pub id: u64,
     /// The absolute offset in bytes of this record in the binary.
     pub offset: u64,
-    /// The list of live variables recorded at this point.
-    pub live_vars: Vec<LiveVar>,
+    /// The list of live values recorded at this point.
+    pub live_vals: Vec<LiveVal>,
     /// The stack size of the function this record is contained in.
     pub size: u64,
 }
@@ -38,7 +38,7 @@ impl Record {
         Record {
             id: 0,
             offset: 0,
-            live_vars: Vec::new(),
+            live_vals: Vec::new(),
             size: 0,
         }
     }
@@ -105,14 +105,14 @@ pub enum Location {
 
 /// A live variable.
 #[derive(Debug)]
-pub struct LiveVar {
+pub struct LiveVal {
     /// The location where this variable is stored (or needs to be written to during
     /// deoptimsation). Typically, this vector only has a single entry, though it is possible for
     /// variables to be stored across multiple locations (e.g. 128bit values).
     locs: Vec<Location>,
 }
 
-impl LiveVar {
+impl LiveVal {
     pub fn len(&self) -> usize {
         self.locs.len()
     }
@@ -247,18 +247,18 @@ impl StackMapParser<'_> {
             v.push(Record {
                 id,
                 offset,
-                live_vars,
+                live_vals: live_vars,
                 size: 0,
             });
         }
         v
     }
 
-    fn read_live_vars(&mut self, num: u16, consts: &[u64]) -> Vec<LiveVar> {
+    fn read_live_vars(&mut self, num: u16, consts: &[u64]) -> Vec<LiveVal> {
         let mut v = Vec::new();
         for _ in 0..num {
             let num_locs = self.read_u8();
-            v.push(LiveVar {
+            v.push(LiveVal {
                 locs: self.read_locations(num_locs, consts),
             });
         }

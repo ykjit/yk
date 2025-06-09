@@ -143,13 +143,13 @@ impl TraceBuilder {
             .unwrap()
             .get(usize::try_from(safepoint.id).unwrap());
 
-        debug_assert!(safepoint.lives.len() == rec.live_vars.len());
+        debug_assert!(safepoint.lives.len() == rec.live_vals.len());
         for idx in 0..safepoint.lives.len() {
             let aot_op = &safepoint.lives[idx];
             let input_tyidx = self.handle_type(aot_op.type_(self.aot_mod))?;
 
             // Get the location for this input variable.
-            let var = &rec.live_vars[idx];
+            let var = &rec.live_vals[idx];
             if var.len() > 1 {
                 todo!("Deal with multi register locations");
             }
