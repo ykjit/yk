@@ -455,9 +455,7 @@ impl TraceBuilder {
         op: &aot_ir::Operand,
     ) -> Result<jit_ir::Operand, CompilationError> {
         match op {
-            aot_ir::Operand::LocalVariable(iid) => {
-                Ok(self.local_map[iid].decopy(&self.jit_mod).clone())
-            }
+            aot_ir::Operand::Local(iid) => Ok(self.local_map[iid].decopy(&self.jit_mod).clone()),
             aot_ir::Operand::Const(cidx) => {
                 let jit_const = self.handle_const(self.aot_mod.const_(*cidx))?;
                 Ok(jit_ir::Operand::Const(
@@ -572,7 +570,7 @@ impl TraceBuilder {
             // Collect live variables.
             for op in safepoint.lives.iter() {
                 match op {
-                    aot_ir::Operand::LocalVariable(iid) => {
+                    aot_ir::Operand::Local(iid) => {
                         match self.local_map[iid] {
                             jit_ir::Operand::Var(liidx) => {
                                 // If, as often happens, a guard has in its live set the boolean
@@ -1286,7 +1284,7 @@ impl TraceBuilder {
         nextinst: &'static aot_ir::Inst,
     ) -> Result<(), CompilationError> {
         // Sanity check: the callee whose return value was recorded must have been idempotent.
-        let aot_ir::Operand::LocalVariable(iid) = val else {
+        let aot_ir::Operand::Local(iid) = val else {
             panic!();
         };
         let aot_ir::Inst::Call { callee, .. } = self.aot_mod.inst(iid) else {
