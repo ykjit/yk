@@ -155,7 +155,7 @@ impl TraceBuilder {
             }
             let param_inst = jit_ir::ParamInst::new(ParamIdx::try_from(idx)?, input_tyidx).into();
             self.jit_mod.push(param_inst)?;
-            self.jit_mod.push_param(var.get(0).unwrap().clone());
+            self.jit_mod.push_param(var[0].clone());
             self.local_map.insert(
                 aot_op.to_inst_id(),
                 jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),

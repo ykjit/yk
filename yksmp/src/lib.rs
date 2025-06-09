@@ -59,7 +59,7 @@ pub enum Location {
     ///
     /// FIXME: We may need more additional locations in the future, which however will require
     /// rewriting the stackmap format (until now we managed to get by with two extra locations).
-    Register(u16, u16, Vec<i16>),
+    Register(u16, u16, SmallVec<[i16; 1]>),
     /// The live variable lives on the stack, because it was either put there directly via an
     /// `alloca` or it was spilled. The location is encoded as an offset relative to the base
     /// pointer. To get the value, we first need to compute the pointer via `rbp - offset` and then
@@ -249,7 +249,7 @@ impl StackMapParser<'_> {
             let size = self.read_u16();
             let dwreg = self.read_u16();
             self.read_u16();
-            let mut extras = Vec::new();
+            let mut extras = SmallVec::new();
             for _ in 0..self.read_u16() {
                 extras.push(self.read_i16());
             }

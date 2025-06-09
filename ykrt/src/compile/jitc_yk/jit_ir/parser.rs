@@ -28,6 +28,7 @@ use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
 use lrpar::{lrpar_mod, NonStreamingLexer, Span};
 use regex::Regex;
+use smallvec::smallvec;
 use std::{collections::HashMap, convert::TryFrom, error::Error, sync::OnceLock};
 use yksmp;
 
@@ -335,13 +336,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 self.m.push_param(yksmp::Location::Register(
                                     dwarf_reg,
                                     u16::try_from(size).unwrap(),
-                                    vec![],
+                                    smallvec![],
                                 ))
                             }
                             Ty::Float(_) => self.m.push_param(yksmp::Location::Register(
                                 fp_reg_iter.next().expect("Out of FP registers"),
                                 u16::try_from(size).unwrap(),
-                                vec![],
+                                smallvec![],
                             )),
                             Ty::Unimplemented(_) => todo!(),
                         };
@@ -944,8 +945,8 @@ mod tests {
         let mut m = Module::new_testing();
         let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
 
-        m.push_param(yksmp::Location::Register(3, 1, vec![]));
-        m.push_param(yksmp::Location::Register(3, 1, vec![]));
+        m.push_param(yksmp::Location::Register(3, 1, smallvec![]));
+        m.push_param(yksmp::Location::Register(3, 1, smallvec![]));
         let op1 = m
             .push_and_make_operand(ParamInst::new(ParamIdx::try_from(0).unwrap(), i16_tyidx).into())
             .unwrap();

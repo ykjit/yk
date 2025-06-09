@@ -214,7 +214,7 @@ pub(crate) extern "C" fn __yk_deopt(
                 VarLocation::Direct { frame_off, size } => {
                     // See comment below: this case never needs to do anything.
                     debug_assert_eq!(
-                        *aotvar.get(0).unwrap(),
+                        aotvar[0],
                         SMLocation::Direct(6, frame_off, u16::try_from(size).unwrap())
                     );
                     varidx += 1;
@@ -224,7 +224,7 @@ pub(crate) extern "C" fn __yk_deopt(
             varidx += 1;
 
             let aotloc = if aotvar.len() == 1 {
-                aotvar.get(0).unwrap()
+                &aotvar[0]
             } else {
                 todo!("Deal with multi register locations");
             };

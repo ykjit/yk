@@ -43,6 +43,7 @@ use dynasmrt::{
 use indexmap::IndexMap;
 use page_size;
 use parking_lot::Mutex;
+use smallvec::SmallVec;
 use std::{
     assert_matches::debug_assert_matches,
     cell::Cell,
@@ -284,7 +285,7 @@ impl From<&VarLocation> for yksmp::Location {
                 };
                 // We currently only use 8 byte registers, so the size is constant. Since these are
                 // JIT values there are no extra locations we need to worry about.
-                yksmp::Location::Register(dwarf, 8, Vec::new())
+                yksmp::Location::Register(dwarf, 8, SmallVec::new())
             }
             VarLocation::ConstInt { bits, v } => {
                 if *bits <= 32 {
@@ -3924,6 +3925,7 @@ mod tests {
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
     use regex::{Regex, RegexBuilder};
+    use smallvec::smallvec;
     use std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -7030,7 +7032,7 @@ mod tests {
         let mut m = jit_ir::Module::new(TraceKind::HeaderOnly, TraceId::testing(), 0).unwrap();
 
         // Create two trace paramaters whose locations alias.
-        let loc = yksmp::Location::Register(13, 1, [].into());
+        let loc = yksmp::Location::Register(13, 1, smallvec![]);
         m.push_param(loc.clone());
         let pinst1: Inst =
             jit_ir::ParamInst::new(ParamIdx::try_from(0).unwrap(), m.int8_tyidx()).into();
