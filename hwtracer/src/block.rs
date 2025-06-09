@@ -1,7 +1,6 @@
 use std::fmt;
 
-#[cfg(target_arch = "x86_64")]
-type BlockAddr = u64;
+type BlockAddr = usize;
 
 /// Information about a trace decoder's notion of a basic block.
 ///

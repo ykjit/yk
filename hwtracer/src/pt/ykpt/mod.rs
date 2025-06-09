@@ -56,7 +56,10 @@ use std::{
     sync::LazyLock,
 };
 use thiserror::Error;
-use ykaddr::obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH};
+use ykaddr::{
+    addr::off_to_vaddr,
+    obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH},
+};
 
 use packets::{Bitness, Packet, PacketKind};
 use parser::PacketParser;
@@ -152,13 +155,14 @@ impl Debug for ObjLoc {
 enum CompRetAddr {
     /// A regular return address (as a virtual address).
     VAddr(usize),
-    /// Return to directly after the callsite at the given offset in the main object binary.
+    /// Return to directly after the callsite at the given virtual address in the main object
+    /// binary.
     ///
     /// This exists because when we do compiler-assisted decoding, we don't disassemble the
     /// instruction stream, and thus we don't know how long the call instruction is, and hence nor
     /// the address of the instruction to return to. That's actually OK, because compiler-assisted
     /// decoding needs only to know after which call to continue decoding after.
-    AfterCall(u64),
+    AfterCall(usize),
 }
 
 /// The compressed return stack (required for the compressed returns optimisation implemented by
@@ -240,12 +244,12 @@ impl YkPTBlockIterator<'_> {
         ykaddr::addr::vaddr_to_obj_and_off(vaddr).ok_or(IteratorError::NoSuchVAddr)
     }
 
-    /// Looks up the blockmap entry for the given offset in the "main object binary".
+    /// Looks up the blockmap entry for the given virtual address.
     fn lookup_blockmap_entry(
         &self,
-        off: u64,
-    ) -> Option<&'static intervaltree::Element<u64, BlockMapEntry>> {
-        let mut ents = LLVM_BLOCK_MAP.query(off, off + 1);
+        vaddr: usize,
+    ) -> Option<&'static intervaltree::Element<usize, BlockMapEntry>> {
+        let mut ents = LLVM_BLOCK_MAP.query(vaddr, vaddr + 1);
         if let Some(ent) = ents.next() {
             // A single-address range cannot span multiple blocks.
             debug_assert!(ents.next().is_none());
@@ -255,13 +259,10 @@ impl YkPTBlockIterator<'_> {
         }
     }
 
-    // Lookup a block from an offset in the "main binary" (i.e. not from a shared object).
-    fn lookup_block_from_main_bin_offset(&mut self, off: u64) -> Result<Block, IteratorError> {
-        if let Some(ent) = self.lookup_blockmap_entry(off) {
-            Ok(Block::from_vaddr_range(
-                u64::try_from(self.off_to_vaddr(&PHDR_MAIN_OBJ, ent.range.start)?).unwrap(),
-                u64::try_from(self.off_to_vaddr(&PHDR_MAIN_OBJ, ent.range.end)?).unwrap(),
-            ))
+    // Lookup a block from the "main executable object" by it's virtual address.
+    fn lookup_block_by_vaddr(&mut self, vaddr: usize) -> Result<Block, IteratorError> {
+        if let Some(ent) = self.lookup_blockmap_entry(vaddr) {
+            Ok(Block::from_vaddr_range(ent.range.start, ent.range.end))
         } else {
             Ok(Block::Unknown)
         }
@@ -278,29 +279,38 @@ impl YkPTBlockIterator<'_> {
         b_off: u64,
         ent: &BlockMapEntry,
     ) -> Result<Option<Block>, IteratorError> {
-        if let Some(call_info) = ent.call_offs().iter().find(|c| c.callsite_off() >= b_off) {
-            let target = call_info.target_off();
+        let b_vaddr = self.off_to_vaddr(&PHDR_MAIN_OBJ, b_off).unwrap();
+        if let Some(call_info) = ent
+            .call_vaddrs()
+            .iter()
+            .find(|c| c.callsite_vaddr() >= b_vaddr)
+        {
+            let target = call_info.target_vaddr();
 
-            if let Some(target_off) = target {
+            if let Some(target_vaddr) = target {
                 // The address of the callee is known.
                 //
                 // PT won't compress returns from direct calls if the call target is the
                 // instruction address immediately after the call.
                 //
                 // See the Intel Manual, Section 33.4.2.2 for details.
-                if !call_info.is_direct() || target_off != call_info.return_off() {
+                if !call_info.is_direct() || target_vaddr != call_info.return_vaddr() {
                     self.comprets
-                        .push(CompRetAddr::AfterCall(call_info.callsite_off()));
+                        .push(CompRetAddr::AfterCall(call_info.callsite_vaddr()));
                 }
-                self.cur_loc = ObjLoc::MainObj(target_off);
-                return Ok(Some(self.lookup_block_from_main_bin_offset(target_off)?));
+                let target_off = self.vaddr_to_off(target_vaddr).unwrap();
+                self.cur_loc = ObjLoc::MainObj(target_off.1);
+                return Ok(Some(self.lookup_block_by_vaddr(target_vaddr)?));
             } else {
                 // The address of the callee isn't known.
                 self.comprets
-                    .push(CompRetAddr::AfterCall(call_info.callsite_off()));
+                    .push(CompRetAddr::AfterCall(call_info.callsite_vaddr()));
                 self.seek_tip()?;
                 return match self.cur_loc {
-                    ObjLoc::MainObj(off) => Ok(Some(self.lookup_block_from_main_bin_offset(off)?)),
+                    ObjLoc::MainObj(off) => {
+                        let vaddr = self.off_to_vaddr(&PHDR_MAIN_OBJ, off).unwrap();
+                        Ok(Some(self.lookup_block_by_vaddr(vaddr)?))
+                    }
                     ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::Unknown)),
                 };
             }
@@ -313,9 +323,9 @@ impl YkPTBlockIterator<'_> {
     fn follow_conditional_successor(
         &mut self,
         num_cond_brs: u8,
-        taken_target: u64,
-        not_taken_target: Option<u64>,
-    ) -> Result<u64, IteratorError> {
+        taken_target: usize,
+        not_taken_target: Option<usize>,
+    ) -> Result<usize, IteratorError> {
         assert_ne!(num_cond_brs, 0);
         // Blocks with more than 2 terminating conditional branch instructions aren't an issue, but
         // it would be informative to know if/when that happens.
@@ -346,9 +356,10 @@ impl YkPTBlockIterator<'_> {
     fn follow_blockmap_successor(&mut self, ent: &BlockMapEntry) -> Result<Block, IteratorError> {
         match ent.successor() {
             SuccessorKind::Unconditional { target } => {
-                if let Some(target_off) = target {
-                    self.cur_loc = ObjLoc::MainObj(*target_off);
-                    self.lookup_block_from_main_bin_offset(*target_off)
+                if let Some(target_vaddr) = target {
+                    let target_off = self.vaddr_to_off(*target_vaddr).unwrap().1;
+                    self.cur_loc = ObjLoc::MainObj(target_off);
+                    self.lookup_block_by_vaddr(*target_vaddr)
                 } else {
                     // Divergent control flow.
                     todo!();
@@ -359,31 +370,34 @@ impl YkPTBlockIterator<'_> {
                 taken_target,
                 not_taken_target,
             } => {
-                let target_off = self.follow_conditional_successor(
+                let target_vaddr = self.follow_conditional_successor(
                     *num_cond_brs,
                     *taken_target,
                     *not_taken_target,
                 )?;
+                let target_off = self.vaddr_to_off(target_vaddr).unwrap().1;
                 self.cur_loc = ObjLoc::MainObj(target_off);
-                self.lookup_block_from_main_bin_offset(target_off)
+                self.lookup_block_by_vaddr(target_vaddr)
             }
             SuccessorKind::Return => {
                 if self.is_return_compressed()? {
                     // This unwrap cannot fail if the CPU has implemented compressed
                     // returns correctly.
                     self.cur_loc = match self.comprets.pop().unwrap() {
-                        CompRetAddr::AfterCall(off) => ObjLoc::MainObj(off + 1),
+                        CompRetAddr::AfterCall(vaddr) => {
+                            let (obj, off) = self.vaddr_to_off(vaddr).unwrap();
+                            assert_eq!(obj, *SELF_BIN_PATH);
+                            ObjLoc::MainObj(off + 1)
+                        }
                         CompRetAddr::VAddr(vaddr) => {
                             let (obj, off) = self.vaddr_to_off(vaddr)?;
-                            if obj == *SELF_BIN_PATH {
-                                ObjLoc::MainObj(off)
-                            } else {
-                                ObjLoc::OtherObjOrUnknown(Some(vaddr))
-                            }
+                            assert_eq!(obj, *SELF_BIN_PATH);
+                            ObjLoc::MainObj(off)
                         }
                     };
                     if let ObjLoc::MainObj(off) = self.cur_loc {
-                        self.lookup_block_from_main_bin_offset(off + 1)
+                        let vaddr = self.off_to_vaddr(&PHDR_MAIN_OBJ, off).unwrap();
+                        self.lookup_block_by_vaddr(vaddr + 1)
                     } else {
                         Ok(Block::Unknown)
                     }
@@ -393,7 +407,10 @@ impl YkPTBlockIterator<'_> {
                     // Note that `is_return_compressed()` has already updated
                     // `self.cur_loc()`.
                     match self.cur_loc {
-                        ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
+                        ObjLoc::MainObj(off) => {
+                            let vaddr = self.off_to_vaddr(&PHDR_MAIN_OBJ, off).unwrap();
+                            Ok(self.lookup_block_by_vaddr(vaddr)?)
+                        }
                         _ => Ok(Block::Unknown),
                     }
                 }
@@ -402,7 +419,10 @@ impl YkPTBlockIterator<'_> {
                 // We can only know the successor via a TIP update in a packet.
                 self.seek_tip()?;
                 match self.cur_loc {
-                    ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
+                    ObjLoc::MainObj(off) => {
+                        let vaddr = self.off_to_vaddr(&PHDR_MAIN_OBJ, off).unwrap();
+                        Ok(self.lookup_block_by_vaddr(vaddr)?)
+                    }
                     _ => Ok(Block::Unknown),
                 }
             }
@@ -416,7 +436,8 @@ impl YkPTBlockIterator<'_> {
                 // We know where we are in the main object binary, so there's a chance that there's
                 // a blockmap entry for this location (not all code from the main object binary
                 // necessarily has blockmap info. e.g. PLT resolution routines).
-                if let Some(ent) = self.lookup_blockmap_entry(b_off.to_owned()) {
+                let vaddr = off_to_vaddr(&PHDR_MAIN_OBJ, b_off).unwrap();
+                if let Some(ent) = self.lookup_blockmap_entry(vaddr) {
                     // If there are calls in the block that come *after* the current position in the
                     // block, then we will need to follow those before we look at the successor info.
                     if let Some(blk) = self.maybe_follow_blockmap_call(b_off, &ent.value)? {
@@ -486,7 +507,7 @@ impl YkPTBlockIterator<'_> {
             let (obj, off) = self.vaddr_to_off(vaddr)?;
 
             if obj == *SELF_BIN_PATH {
-                let block = self.lookup_block_from_main_bin_offset(off)?;
+                let block = self.lookup_block_by_vaddr(vaddr)?;
                 if !block.is_unknown() {
                     // We are back to "native code" and can resume compiler-assisted decoding.
                     self.cur_loc = ObjLoc::MainObj(off);
@@ -521,9 +542,7 @@ impl YkPTBlockIterator<'_> {
                         // returns.
                         match self.comprets.pop().unwrap() {
                             CompRetAddr::VAddr(vaddr) => vaddr,
-                            CompRetAddr::AfterCall(off) => {
-                                self.off_to_vaddr(&PHDR_MAIN_OBJ, off + 1)?
-                            }
+                            CompRetAddr::AfterCall(vaddr) => vaddr + 1,
                         }
                     } else {
                         match self.cur_loc {
@@ -644,12 +663,13 @@ impl YkPTBlockIterator<'_> {
                         // It's possible that the above `self.seek_tip()` has already landed us
                         // back into mappable code (e.g. it skiped over a TIP.PGD and landed on a
                         // TIP.PGE at a mappable block).
-                        let block = self.lookup_block_from_main_bin_offset(off)?;
+                        let vaddr = self.off_to_vaddr(&PHDR_MAIN_OBJ, off)?;
+                        let block = self.lookup_block_by_vaddr(vaddr)?;
                         if !block.is_unknown() {
                             return Ok(block);
                         }
                         // Otherwise we really do have to resort to disassembly.
-                        self.off_to_vaddr(&PHDR_MAIN_OBJ, off)?
+                        vaddr
                     }
                 }
             }
@@ -678,7 +698,7 @@ impl YkPTBlockIterator<'_> {
         loop {
             let pkt = self.packet()?;
             if pkt.kind().encodes_target_ip() && pkt.kind() != PacketKind::TIPPGD {
-                // Note that self.packet() will have update `self.cur_loc`.
+                // Note that self.packet() will have updated `self.cur_loc`.
                 return Ok(());
             }
         }
