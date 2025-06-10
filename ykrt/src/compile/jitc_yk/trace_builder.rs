@@ -1485,7 +1485,7 @@ impl TraceBuilder {
                         debug_assert!(*bb > 0);
                         // It's `- 1` due to the way the ykllvm block splitting pass works.
                         TraceAction::MappedAOTBBlock {
-                            func_name: func_name.clone(),
+                            func_name,
                             bb: bb - 1,
                         }
                     }

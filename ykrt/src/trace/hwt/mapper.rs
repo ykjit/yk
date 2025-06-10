@@ -129,7 +129,7 @@ impl HWTTraceIterator {
                 if let Some(sym_name) = sio.dli_sname() {
                     for bb in ent.value.corr_bbs() {
                         self.push_upcoming(TraceAction::new_mapped_aot_block(
-                            sym_name.to_owned(),
+                            sym_name,
                             usize::try_from(*bb).unwrap(),
                         ));
                     }
