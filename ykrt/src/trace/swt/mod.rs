@@ -112,7 +112,7 @@ impl Iterator for SWTraceIterator {
             .next()
             .map(|tb| match FUNC_NAMES.get(&tb.function_index) {
                 Some(name) => Ok(TraceAction::MappedAOTBBlock {
-                    func_name: name.to_owned(),
+                    func_name: name.as_c_str(),
                     bb: tb.block_index,
                 }),
                 _ => panic!(
