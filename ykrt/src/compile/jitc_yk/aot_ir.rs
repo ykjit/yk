@@ -323,8 +323,8 @@ index!(BBlockIdx);
 /// An index into [BBlock::insts].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct InstIdx(usize);
-index!(InstIdx);
+pub(crate) struct BBlockInstIdx(usize);
+index!(BBlockInstIdx);
 
 /// An index into [Module::consts].
 #[deku_derive(DekuRead)]
@@ -460,11 +460,11 @@ pub(crate) struct InstId {
     /// The index of the parent function.
     funcidx: FuncIdx,
     bbidx: BBlockIdx,
-    iidx: InstIdx,
+    iidx: BBlockInstIdx,
 }
 
 impl InstId {
-    pub(crate) fn new(funcidx: FuncIdx, bbidx: BBlockIdx, iidx: InstIdx) -> Self {
+    pub(crate) fn new(funcidx: FuncIdx, bbidx: BBlockIdx, iidx: BBlockInstIdx) -> Self {
         Self {
             funcidx,
             bbidx,
@@ -480,7 +480,7 @@ impl InstId {
         self.bbidx
     }
 
-    pub(crate) fn iidx(&self) -> InstIdx {
+    pub(crate) fn iidx(&self) -> BBlockInstIdx {
         self.iidx
     }
 }
@@ -1413,7 +1413,7 @@ pub(crate) struct BBlock {
     #[deku(temp)]
     num_insts: usize,
     #[deku(count = "num_insts", map = "map_to_tivec")]
-    pub(crate) insts: TiVec<InstIdx, Inst>,
+    pub(crate) insts: TiVec<BBlockInstIdx, Inst>,
 }
 
 impl BBlock {
@@ -1434,7 +1434,7 @@ impl BBlock {
         }
     }
 
-    pub(crate) fn insts(&self) -> &TiSlice<InstIdx, Inst> {
+    pub(crate) fn insts(&self) -> &TiSlice<BBlockInstIdx, Inst> {
         self.insts.as_slice()
     }
 }

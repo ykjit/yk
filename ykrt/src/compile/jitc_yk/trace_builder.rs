@@ -311,8 +311,11 @@ impl TraceBuilder {
                 aot_ir::Inst::LoadArg { arg_idx, .. } => {
                     // Map passed in arguments to their respective LoadArg instructions.
                     let jitop = &self.frames.last().unwrap().args[*arg_idx];
-                    let aot_iid =
-                        aot_ir::InstId::new(bid.funcidx(), bid.bbidx(), aot_ir::InstIdx::new(iidx));
+                    let aot_iid = aot_ir::InstId::new(
+                        bid.funcidx(),
+                        bid.bbidx(),
+                        aot_ir::BBlockInstIdx::new(iidx),
+                    );
                     self.local_map.insert(aot_iid, jitop.unpack(&self.jit_mod));
                     Ok(())
                 }
@@ -350,7 +353,7 @@ impl TraceBuilder {
         let aot_iid = aot_ir::InstId::new(
             bid.funcidx(),
             bid.bbidx(),
-            aot_ir::InstIdx::new(aot_inst_idx),
+            aot_ir::BBlockInstIdx::new(aot_inst_idx),
         );
         // The unwrap is safe because we've already inserted an element at this index and proven
         // that the index is in bounds.
@@ -874,7 +877,7 @@ impl TraceBuilder {
             let aot_iid = aot_ir::InstId::new(
                 bid.funcidx(),
                 bid.bbidx(),
-                aot_ir::InstIdx::new(aot_inst_idx),
+                aot_ir::BBlockInstIdx::new(aot_inst_idx),
             );
             self.frames.push(InlinedFrame {
                 funcidx: Some(*callee),
@@ -1139,7 +1142,7 @@ impl TraceBuilder {
         let aot_iit = aot_ir::InstId::new(
             bid.funcidx(),
             bid.bbidx(),
-            aot_ir::InstIdx::new(aot_inst_idx),
+            aot_ir::BBlockInstIdx::new(aot_inst_idx),
         );
         let op = match self.handle_operand(chosen_val)? {
             jit_ir::Operand::Const(c) => {
