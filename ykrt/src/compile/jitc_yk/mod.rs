@@ -53,7 +53,7 @@ pub(crate) struct YkSideTraceInfo<Register: Send + Sync> {
     callframes: Vec<jit_ir::InlinedFrame>,
     /// Mapping of AOT variables to their current location. Used to pass variables from a parent
     /// trace into a side-trace.
-    lives: Vec<(aot_ir::InstID, Location)>,
+    lives: Vec<(aot_ir::InstId, Location)>,
     /// The live variables at the entry point of the root trace.
     entry_vars: Vec<codegen::reg_alloc::VarLocation<Register>>,
     /// Stack pointer offset from the base pointer of the interpreter frame including the
@@ -73,7 +73,7 @@ impl<Register: Send + Sync> YkSideTraceInfo<Register> {
     }
 
     /// Return the live AOT variables for this guard. Used to write live values to during deopt.
-    fn lives(&self) -> &[(aot_ir::InstID, Location)] {
+    fn lives(&self) -> &[(aot_ir::InstId, Location)] {
         &self.lives
     }
 }

@@ -308,7 +308,7 @@ impl<'a> LSRegAlloc<'a> {
         &mut self,
         asm: &mut Assembler,
         ginst: GuardInst,
-    ) -> (Rq, Vec<(aot_ir::InstID, VarLocation)>) {
+    ) -> (Rq, Vec<(aot_ir::InstId, VarLocation)>) {
         let patch_reg = self.force_tmp_register(asm, RegSet::with_gp_reserved());
 
         let gi = ginst.guard_info(self.m);

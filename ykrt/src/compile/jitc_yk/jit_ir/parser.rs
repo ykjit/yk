@@ -14,7 +14,7 @@
 use crate::compile::jitc_yk::aot_ir;
 
 use super::super::{
-    aot_ir::{BinOp, FloatPredicate, InstID, Predicate},
+    aot_ir::{BinOp, FloatPredicate, InstId, Predicate},
     arbbitint::ArbBitInt,
     jit_ir::{
         BinOpInst, BitCastInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst,
@@ -208,7 +208,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let mut live_vars = Vec::with_capacity(operands.len());
                         for op in operands {
                             live_vars.push((
-                                InstID::new(0.into(), 0.into(), inst_off.into()),
+                                InstId::new(0.into(), 0.into(), inst_off.into()),
                                 PackedOperand::new(&self.process_operand(op)?),
                             ));
                             inst_off += 1;

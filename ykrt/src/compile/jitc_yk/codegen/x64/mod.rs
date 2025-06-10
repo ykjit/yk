@@ -3649,7 +3649,7 @@ struct CompiledGuard {
     bid: aot_ir::BBlockId,
     fail_offset: AssemblyOffset,
     /// Live variables, mapping AOT vars to JIT vars.
-    live_vars: Vec<(aot_ir::InstID, VarLocation)>,
+    live_vars: Vec<(aot_ir::InstId, VarLocation)>,
     inlined_frames: Vec<InlinedFrame>,
     /// Keeps track of deopt amount and compiled side-trace.
     guard: Guard,
