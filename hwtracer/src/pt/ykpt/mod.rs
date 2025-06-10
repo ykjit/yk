@@ -132,6 +132,20 @@ enum ObjLoc {
     OtherObjOrUnknown(Option<usize>),
 }
 
+impl ObjLoc {
+    /// Return the virtual address of a location.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the virtual address is not known.
+    fn vaddr(&self) -> usize {
+        match self {
+            Self::MainObj(v) => *v,
+            Self::OtherObjOrUnknown(v) => v.unwrap(),
+        }
+    }
+}
+
 impl Debug for ObjLoc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -513,27 +527,14 @@ impl YkPTBlockIterator<'_> {
                             CompRetAddr::AfterCall(vaddr) => vaddr + 1,
                         }
                     } else {
-                        match self.cur_loc {
-                            ObjLoc::MainObj(vaddr) => vaddr,
-                            ObjLoc::OtherObjOrUnknown(opt_vaddr) => match opt_vaddr {
-                                Some(vaddr) => vaddr,
-                                None => unreachable!(),
-                            },
-                        }
+                        self.cur_loc.vaddr()
                     };
                     dis.set_ip(u64::try_from(ret_vaddr).unwrap());
                     reposition = true;
                 }
                 iced_x86::FlowControl::IndirectBranch | iced_x86::FlowControl::IndirectCall => {
                     self.seek_tip()?;
-                    let vaddr = match self.cur_loc {
-                        ObjLoc::MainObj(vaddr) => vaddr,
-                        ObjLoc::OtherObjOrUnknown(opt_vaddr) => match opt_vaddr {
-                            Some(vaddr) => vaddr,
-                            None => unreachable!(),
-                        },
-                    };
-
+                    let vaddr = self.cur_loc.vaddr();
                     if inst.flow_control() == iced_x86::FlowControl::IndirectCall {
                         debug_assert!(!inst.is_call_far());
                         // Indirect calls, even zero-length ones, are always compressed. See
