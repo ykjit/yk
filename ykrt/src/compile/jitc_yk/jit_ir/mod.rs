@@ -3401,6 +3401,7 @@ impl FPExtInst {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smallvec::smallvec;
 
     #[test]
     fn use_case_update_inst() {
@@ -3599,7 +3600,7 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push_param(yksmp::Location::Register(3, 1, vec![]));
+        m.push_param(yksmp::Location::Register(3, 1, smallvec![]));
         m.push(ParamInst::new(ParamIdx::try_from(0).unwrap(), m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(

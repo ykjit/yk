@@ -9,6 +9,7 @@
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("The stackmap parser currently only supports x64.");
 
+use smallvec::SmallVec;
 use std::error;
 
 struct Function {
@@ -27,8 +28,8 @@ pub struct Record {
     pub id: u64,
     /// The absolute offset in bytes of this record in the binary.
     pub offset: u64,
-    /// The list of live variables recorded at this point.
-    pub live_vars: Vec<LiveVar>,
+    /// The list of live values recorded at this point.
+    pub live_vals: Vec<SmallVec<[Location; 1]>>,
     /// The stack size of the function this record is contained in.
     pub size: u64,
 }
@@ -38,7 +39,7 @@ impl Record {
         Record {
             id: 0,
             offset: 0,
-            live_vars: Vec::new(),
+            live_vals: Vec::new(),
             size: 0,
         }
     }
@@ -58,7 +59,7 @@ pub enum Location {
     ///
     /// FIXME: We may need more additional locations in the future, which however will require
     /// rewriting the stackmap format (until now we managed to get by with two extra locations).
-    Register(u16, u16, Vec<i16>),
+    Register(u16, u16, SmallVec<[i16; 1]>),
     /// The live variable lives on the stack, because it was either put there directly via an
     /// `alloca` or it was spilled. The location is encoded as an offset relative to the base
     /// pointer. To get the value, we first need to compute the pointer via `rbp - offset` and then
@@ -101,29 +102,6 @@ pub enum Location {
     /// The live variable is a large constant and was stored in a vector as part of a record. This
     /// variant describes the index where the constant is stored.
     LargeConstant(u64),
-}
-
-/// A live variable.
-#[derive(Debug)]
-pub struct LiveVar {
-    /// The location where this variable is stored (or needs to be written to during
-    /// deoptimsation). Typically, this vector only has a single entry, though it is possible for
-    /// variables to be stored across multiple locations (e.g. 128bit values).
-    locs: Vec<Location>,
-}
-
-impl LiveVar {
-    pub fn len(&self) -> usize {
-        self.locs.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.locs.is_empty()
-    }
-
-    pub fn get(&self, idx: usize) -> Option<&Location> {
-        self.locs.get(idx)
-    }
 }
 
 /// Information about a functions's prologue.
@@ -237,7 +215,7 @@ impl StackMapParser<'_> {
             let offset = u64::from(self.read_u32());
             self.read_u16();
             let num_live_vars = self.read_u16();
-            let live_vars = self.read_live_vars(num_live_vars, consts);
+            let live_vars = self.read_live_vals(num_live_vars, consts);
             // Padding
             self.align_8();
             self.read_u16();
@@ -247,33 +225,31 @@ impl StackMapParser<'_> {
             v.push(Record {
                 id,
                 offset,
-                live_vars,
+                live_vals: live_vars,
                 size: 0,
             });
         }
         v
     }
 
-    fn read_live_vars(&mut self, num: u16, consts: &[u64]) -> Vec<LiveVar> {
-        let mut v = Vec::new();
+    fn read_live_vals(&mut self, num: u16, consts: &[u64]) -> Vec<SmallVec<[Location; 1]>> {
+        let mut v = Vec::with_capacity(usize::from(num));
         for _ in 0..num {
             let num_locs = self.read_u8();
-            v.push(LiveVar {
-                locs: self.read_locations(num_locs, consts),
-            });
+            v.push(self.read_locations(num_locs, consts));
         }
         v
     }
 
-    fn read_locations(&mut self, num: u8, consts: &[u64]) -> Vec<Location> {
-        let mut v = Vec::new();
+    fn read_locations(&mut self, num: u8, consts: &[u64]) -> SmallVec<[Location; 1]> {
+        let mut v = SmallVec::new();
         for _ in 0..num {
             let kind = self.read_u8();
             self.read_u8();
             let size = self.read_u16();
             let dwreg = self.read_u16();
             self.read_u16();
-            let mut extras = Vec::new();
+            let mut extras = SmallVec::new();
             for _ in 0..self.read_u16() {
                 extras.push(self.read_i16());
             }
