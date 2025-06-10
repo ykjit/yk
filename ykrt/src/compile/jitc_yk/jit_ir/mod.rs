@@ -1438,7 +1438,7 @@ pub(crate) struct GuardInfo {
     /// The id of the AOT block that created this guard.
     bid: aot_ir::BBlockId,
     /// Live variables, mapping AOT vars to JIT [Operand]s.
-    live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
+    live_vars: Vec<(aot_ir::InstId, PackedOperand)>,
     /// Inlined frames info.
     /// FIXME With this field, the aotlives field is redundant.
     inlined_frames: Vec<InlinedFrame>,
@@ -1450,7 +1450,7 @@ pub(crate) struct GuardInfo {
 impl GuardInfo {
     pub(crate) fn new(
         bid: aot_ir::BBlockId,
-        live_vars: Vec<(aot_ir::InstID, PackedOperand)>,
+        live_vars: Vec<(aot_ir::InstId, PackedOperand)>,
         inlined_frames: Vec<InlinedFrame>,
         safepoint_id: u64,
     ) -> Self {
@@ -1468,7 +1468,7 @@ impl GuardInfo {
     }
 
     /// Return the `AOT instruction -> PackedOperand` mapping for this guard.
-    pub(crate) fn live_vars(&self) -> &[(aot_ir::InstID, PackedOperand)] {
+    pub(crate) fn live_vars(&self) -> &[(aot_ir::InstId, PackedOperand)] {
         &self.live_vars
     }
 
@@ -1487,7 +1487,7 @@ impl GuardInfo {
 #[derive(Debug, Clone)]
 pub(crate) struct InlinedFrame {
     // The call instruction that led to [funcidx] being inlined.
-    pub(crate) callinst: Option<aot_ir::InstID>,
+    pub(crate) callinst: Option<aot_ir::InstId>,
     // The function that was inlined to create this abstract frame. Will be `None` for the top-most
     // function.
     pub(crate) funcidx: aot_ir::FuncIdx,
@@ -1499,7 +1499,7 @@ pub(crate) struct InlinedFrame {
 
 impl InlinedFrame {
     pub(crate) fn new(
-        callinst: Option<aot_ir::InstID>,
+        callinst: Option<aot_ir::InstId>,
         funcidx: aot_ir::FuncIdx,
         safepoint: &'static aot_ir::DeoptSafepoint,
         args: Vec<Operand>,

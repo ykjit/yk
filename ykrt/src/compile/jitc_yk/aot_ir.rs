@@ -65,7 +65,7 @@ struct LineInfoLoc {
 #[deku_derive(DekuRead)]
 struct RawLineInfoRec {
     /// The instruction record is for.
-    inst_id: InstID,
+    inst_id: InstId,
     /// The location in the source file.
     line: LineInfoLoc,
 }
@@ -111,7 +111,7 @@ pub(crate) struct Module {
     #[deku(temp)]
     num_lineinfos: usize,
     #[deku(count = "num_lineinfos", map = "map_to_lineinfo")]
-    line_infos: HashMap<InstID, LineInfoLoc>,
+    line_infos: HashMap<InstId, LineInfoLoc>,
     #[deku(skip)]
     source_files: Arc<Mutex<HashMap<PathBuf, Option<BufReader<fs::File>>>>>,
 }
@@ -137,7 +137,7 @@ impl Module {
     }
 
     /// Return the AOT instruction for the given instruction id.
-    pub(crate) fn inst(&self, instid: &InstID) -> &Inst {
+    pub(crate) fn inst(&self, instid: &InstId) -> &Inst {
         let f = self.func(instid.funcidx);
         let b = f.bblock(instid.bbidx);
         &b.insts[instid.iidx]
@@ -323,8 +323,8 @@ index!(BBlockIdx);
 /// An index into [BBlock::insts].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct InstIdx(usize);
-index!(InstIdx);
+pub(crate) struct BBlockInstIdx(usize);
+index!(BBlockInstIdx);
 
 /// An index into [Module::consts].
 #[deku_derive(DekuRead)]
@@ -394,7 +394,7 @@ fn map_to_tivec_of_pathbuf(v: Vec<RawPath>) -> Result<TiVec<PathIdx, PathBuf>, D
 }
 
 /// Maps a flat vector of line-level debug info records into hashmap for easy lookups.
-fn map_to_lineinfo(v: Vec<RawLineInfoRec>) -> Result<HashMap<InstID, LineInfoLoc>, DekuError> {
+fn map_to_lineinfo(v: Vec<RawLineInfoRec>) -> Result<HashMap<InstId, LineInfoLoc>, DekuError> {
     Ok(v.into_iter()
         .map(|r| (r.inst_id, r.line))
         .collect::<HashMap<_, _>>())
@@ -456,15 +456,15 @@ impl Display for BinOp {
 /// Uniquely identifies an instruction within a [Module].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
-pub(crate) struct InstID {
+pub(crate) struct InstId {
     /// The index of the parent function.
     funcidx: FuncIdx,
     bbidx: BBlockIdx,
-    iidx: InstIdx,
+    iidx: BBlockInstIdx,
 }
 
-impl InstID {
-    pub(crate) fn new(funcidx: FuncIdx, bbidx: BBlockIdx, iidx: InstIdx) -> Self {
+impl InstId {
+    pub(crate) fn new(funcidx: FuncIdx, bbidx: BBlockIdx, iidx: BBlockInstIdx) -> Self {
         Self {
             funcidx,
             bbidx,
@@ -480,7 +480,7 @@ impl InstID {
         self.bbidx
     }
 
-    pub(crate) fn iidx(&self) -> InstIdx {
+    pub(crate) fn iidx(&self) -> BBlockInstIdx {
         self.iidx
     }
 }
@@ -717,7 +717,7 @@ pub(crate) enum Operand {
     #[deku(id = "0")]
     Const(ConstIdx),
     #[deku(id = "1")]
-    Local(InstID),
+    Local(InstId),
     #[deku(id = "2")]
     Global(GlobalDeclIdx),
     #[deku(id = "3")]
@@ -751,9 +751,9 @@ impl Operand {
         }
     }
 
-    /// Return the `InstID` of a local variable operand. Panics if called on other kinds of
+    /// Return the `InstId` of a local variable operand. Panics if called on other kinds of
     /// operands.
-    pub(crate) fn to_inst_id(&self) -> InstID {
+    pub(crate) fn to_inst_id(&self) -> InstId {
         let Self::Local(iid) = self else { panic!() };
         iid.clone()
     }
@@ -824,10 +824,10 @@ impl fmt::Display for DisplayableDeoptSafepoint<'_> {
 ///
 /// Insts that compute a value define a new local variable in the parent [Func]. In such a
 /// case the newly defined variable can be referenced in the operands of later instructions by the
-/// [InstID] of the [Inst] that defined the variable.
+/// [InstId] of the [Inst] that defined the variable.
 ///
 /// In other words, an instruction and the variable it defines are both identified by the same
-/// [InstID].
+/// [InstId].
 ///
 /// The type of the variable defined by an instruction (if any) can be determined by
 /// [Inst::def_type()].
@@ -1144,7 +1144,7 @@ impl Inst {
     pub(crate) fn display<'a>(
         &'a self,
         m: &'a Module,
-        instid: Option<InstID>,
+        instid: Option<InstId>,
     ) -> DisplayableInst<'a> {
         DisplayableInst {
             instruction: self,
@@ -1159,7 +1159,7 @@ pub(crate) struct DisplayableInst<'a> {
     /// The ID of the instruction.
     ///
     /// Required to find line-level debugging info for the instruction.
-    instid: Option<InstID>,
+    instid: Option<InstId>,
     m: &'a Module,
 }
 
@@ -1413,7 +1413,7 @@ pub(crate) struct BBlock {
     #[deku(temp)]
     num_insts: usize,
     #[deku(count = "num_insts", map = "map_to_tivec")]
-    pub(crate) insts: TiVec<InstIdx, Inst>,
+    pub(crate) insts: TiVec<BBlockInstIdx, Inst>,
 }
 
 impl BBlock {
@@ -1434,7 +1434,7 @@ impl BBlock {
         }
     }
 
-    pub(crate) fn insts(&self) -> &TiSlice<InstIdx, Inst> {
+    pub(crate) fn insts(&self) -> &TiSlice<BBlockInstIdx, Inst> {
         self.insts.as_slice()
     }
 }
@@ -1454,7 +1454,7 @@ impl fmt::Display for DisplayableBBlock<'_> {
             let instid = self
                 .bbid
                 .as_ref()
-                .map(|bbid| InstID::new(bbid.funcidx, bbid.bbidx, instidx));
+                .map(|bbid| InstId::new(bbid.funcidx, bbid.bbidx, instidx));
             writeln!(f, "    {}", inst.display(self.m, instid))?;
         }
         Ok(())
