@@ -11,6 +11,7 @@ use std::{
     fmt,
     sync::{Arc, Weak},
 };
+use thiserror::Error;
 
 pub(crate) mod guard;
 pub(crate) use guard::{Guard, GuardIdx};
@@ -18,31 +19,24 @@ pub(crate) use guard::{Guard, GuardIdx};
 pub mod jitc_yk;
 
 /// A failure to compile a trace.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub(crate) enum CompilationError {
+    #[error("General error: {0}")]
     /// Compilation failed for reasons that might be of interest to a programmer augmenting an
     /// interpreter with yk but not to the end user running a program on the interpreter.
     General(String),
+    #[error("Internal error: {0}")]
     /// Something went wrong when compiling that is probably the result of a bug in yk.
     InternalError(String),
+    #[error("Internal error: {0}")]
     /// A limit was exceeded (e.g. a pointer add that went beyond a struct). We try and check for
     /// as many of these as possible at compile time, but some can only be detected at JIT time.
     /// Most, perhaps all, of these suggest bugs in the interpreter.
     LimitExceeded(String),
+    #[error("Internal error: {0:}")]
     /// Compilation failed because an external resource was exhausted: the end user running the
     /// interpreter probably wants to be informed of this.
     ResourceExhausted(Box<dyn Error>),
-}
-
-impl fmt::Display for CompilationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CompilationError::General(s) => write!(f, "General error: {s}"),
-            CompilationError::InternalError(s) => write!(f, "Internal error: {s}"),
-            CompilationError::LimitExceeded(s) => write!(f, "Limit exceeded: {s}"),
-            CompilationError::ResourceExhausted(e) => write!(f, "Resource exhausted: {e:}"),
-        }
-    }
 }
 
 /// The trait that every JIT compiler backend must implement.
