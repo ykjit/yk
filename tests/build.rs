@@ -1,5 +1,3 @@
-#![feature(exit_status_error)]
-
 use rerun_except::rerun_except;
 use std::env;
 
