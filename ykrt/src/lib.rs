@@ -2,7 +2,6 @@
 
 #![cfg_attr(test, feature(test))]
 #![feature(assert_matches)]
-#![feature(int_roundings)]
 #![feature(let_chains)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
