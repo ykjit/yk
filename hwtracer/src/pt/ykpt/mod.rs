@@ -722,7 +722,9 @@ impl YkPTBlockIterator<'_> {
 
             if pkt.kind() == PacketKind::OVF {
                 return Err(IteratorError::HWTracerError(HWTracerError::Temporary(
-                    TemporaryErrorKind::TraceBufferOverflow,
+                    TemporaryErrorKind::TraceBufferOverflow(
+                        "Encountered PT overflow packet".into(),
+                    ),
                 )));
             }
 
