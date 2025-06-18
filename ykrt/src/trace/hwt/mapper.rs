@@ -188,9 +188,9 @@ impl Iterator for HWTTraceIterator {
                     self.upcoming.pop();
                 }
                 Some(Err(BlockIteratorError::HWTracerError(HWTracerError::Temporary(
-                    TemporaryErrorKind::TraceBufferOverflow,
+                    TemporaryErrorKind::TraceBufferOverflow(s),
                 )))) => {
-                    return Some(Err(AOTTraceIteratorError::RecorderOverflow));
+                    return Some(Err(AOTTraceIteratorError::RecorderOverflow(s)));
                 }
                 Some(Err(e)) => return Some(Err(AOTTraceIteratorError::Other(e.to_string()))),
                 None => return Some(Err(AOTTraceIteratorError::PrematureEnd)),
@@ -212,9 +212,9 @@ impl Iterator for HWTTraceIterator {
                     return Some(Err(AOTTraceIteratorError::LongJmpEncountered));
                 }
                 Some(Err(BlockIteratorError::HWTracerError(HWTracerError::Temporary(
-                    TemporaryErrorKind::TraceBufferOverflow,
+                    TemporaryErrorKind::TraceBufferOverflow(s),
                 )))) => {
-                    return Some(Err(AOTTraceIteratorError::RecorderOverflow));
+                    return Some(Err(AOTTraceIteratorError::RecorderOverflow(s)));
                 }
                 Some(Err(e)) => return Some(Err(AOTTraceIteratorError::Other(e.to_string()))),
                 None => {

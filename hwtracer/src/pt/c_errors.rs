@@ -2,6 +2,7 @@
 
 use crate::{HWTracerError, TemporaryErrorKind};
 use libc::c_int;
+use thiserror::Error;
 
 #[repr(C)]
 #[allow(dead_code)] // Only C constructs these.
@@ -16,8 +17,29 @@ enum PerfPTCErrorKind {
 
 #[cfg(pt)]
 #[repr(C)]
+#[derive(Error, Debug)]
 enum PTErrorCode {
-    Overflow = 0,
+    /// We couldn't take AUX data out of the buffer quick enough: the head pointer
+    /// caught up with the tail pointer.
+    #[error("AUX buffer overflow")]
+    AuxOverflow = 0,
+    /// The final trace storage buffer was exhausted.
+    #[error("Trace buffer capacity too small")]
+    TraceCapacity = 1,
+    // Perf reported that data buffer samples were lost.
+    #[error("Perf event lost")]
+    EventLost = 2,
+}
+
+impl From<i32> for PTErrorCode {
+    fn from(v: i32) -> Self {
+        match v {
+            v if v == Self::AuxOverflow as i32 => Self::AuxOverflow,
+            v if v == Self::TraceCapacity as i32 => Self::TraceCapacity,
+            v if v == Self::EventLost as i32 => Self::EventLost,
+            _ => unreachable!(),
+        }
+    }
 }
 
 /// Represents an error occurring in C code.
@@ -60,15 +82,9 @@ impl From<PerfPTCError> for HWTracerError {
                 HWTracerError::Unrecoverable(format!("c set errno {}", err.code))
             }
             #[cfg(pt)]
-            PerfPTCErrorKind::PT => {
-                // Overflow is a special case with its own error type.
-                match err.code {
-                    v if v == PTErrorCode::Overflow as c_int => {
-                        HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow)
-                    }
-                    _ => unreachable!(),
-                }
-            }
+            PerfPTCErrorKind::PT => HWTracerError::Temporary(
+                TemporaryErrorKind::TraceBufferOverflow(PTErrorCode::from(err.code).to_string()),
+            ),
         }
     }
 }

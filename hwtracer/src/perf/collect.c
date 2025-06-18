@@ -50,7 +50,14 @@ enum hwt_cerror_kind {
 };
 
 #if defined(__x86_64__)
-enum hwt_pt_kind { hwt_pt_overflow = 0 };
+/// A mirror of PTErrorCode in the Rust code.
+///
+/// See the Rust code for descriptions of these error kinds.
+enum hwt_pt_kind {
+  hwt_pt_aux_overflow = 0,
+  hwt_pt_trace_capacity = 1,
+  hwt_pt_event_lost = 2
+};
 #endif
 
 struct hwt_cerror {
@@ -246,7 +253,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
       // truncated. If it was, then we didn't read out of the data buffer
       // quickly/frequently enough.
       if (rec_aux_sample->flags & PERF_AUX_FLAG_TRUNCATED) {
-        hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_overflow);
+        hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_aux_overflow);
         return false;
       }
       if (read_aux(aux_buf, hdr, trace, err) == false) {
@@ -254,7 +261,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
       }
       break;
     case PERF_RECORD_LOST:
-      hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_overflow);
+      hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_event_lost);
       return false;
       break;
     case PERF_RECORD_LOST_SAMPLES:
@@ -311,7 +318,7 @@ bool read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
     // FIXME: Reallocate the trace storage buffer if more space is required.
     // Note that this requires careful synchronisation between the collection
     // thread, the main thread, and Rust code.
-    hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_overflow);
+    hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_trace_capacity);
     return false;
   }
 
