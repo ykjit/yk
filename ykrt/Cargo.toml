@@ -35,7 +35,7 @@ zydis = "4.1.0"
 hwtracer = { path = "../hwtracer" }
 
 [dependencies.object]
-version = "0.36.7"
+version = "0.37.1"
 default-features = false
 features = ["read_core", "elf"]
 
@@ -45,7 +45,7 @@ lrlex = "0.13"
 lrpar = "0.13"
 regex = "1.9"
 ykbuild = { path = "../ykbuild" }
-which = "7.0"
+which = "8.0.0"
 
 [features]
 # When set, the `ykd` feature enables a number of features that are helpful for

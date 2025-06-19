@@ -15,4 +15,4 @@ tempfile = "3.8"
 [build-dependencies]
 fs4 = { version="0.13.1", features=["sync"] }
 rerun_except = "1.0.0"
-which = "7.0.3"
+which = "8.0.0"

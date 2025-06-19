@@ -37,7 +37,7 @@ ykrt = { path = "../ykrt", features = ["yk_testing", "ykd"] }
 ykcapi = { path = "../ykcapi", features = ["yk_testing", "ykd"] }
 
 [dev-dependencies]
-criterion = { version = "0.5.1", features = ["html_reports"] }
+criterion = { version = "0.6.0", features = ["html_reports"] }
 lang_tester = "0.9"
 
 [build-dependencies]
