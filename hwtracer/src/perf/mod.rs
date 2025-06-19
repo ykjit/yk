@@ -6,10 +6,10 @@ pub(crate) mod collect;
 /// The default perf data buffer size, measured in pages. Must be a power of 2.
 const PERF_DFLT_DATA_BUFSIZE: size_t = 16; // 64KiB (w/4096 byte pages).
 /// The default perf aux buffer size, measured in pages. Must be a power of 2.
-const PERF_DFLT_AUX_BUFSIZE: size_t = 1024; // 4MiB (w/4096 byte pages)
+const PERF_DFLT_AUX_BUFSIZE: size_t = 8192; // 32MiB (w/4096 byte pages)
 /// The size of the final memory returned, measured in bytes. There are no constraints on size or
-/// alignment but it needs to big enough to contain the AUX buffers.
-const TRACE_RESULT_SIZE: size_t = 4 * 1024 * 1024; // 4MiB
+/// alignment.
+const TRACE_RESULT_SIZE: size_t = 32 * 1024 * 1024; // 32MiB
 
 /// Configures the Perf collector.
 ///
