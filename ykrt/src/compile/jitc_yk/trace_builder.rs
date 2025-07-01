@@ -1613,8 +1613,25 @@ impl TraceBuilder {
                 }
             }
         }
-
-        assert_eq!(self.promote_idx, self.promotions.len());
+        match self.jit_mod.tracekind() {
+            TraceKind::Sidetrace(_) => {
+                // Sidetraces can consume less promotion data if they take shorter paths
+                assert!(
+                    self.promote_idx <= self.promotions.len(),
+                    "Sidetrace consumed more promotion data than available: {} > {}",
+                    self.promote_idx,
+                    self.promotions.len()
+                );
+            }
+            _ => {
+                // Other trace types must consume exactly all promotion data
+                assert_eq!(
+                    self.promote_idx,
+                    self.promotions.len(),
+                    "Non-sidetrace must consume exactly all promotion data"
+                );
+            }
+        }
         assert_eq!(self.debug_str_idx, self.debug_strs.len());
         let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
         let cpcall = blk.insts.iter().rev().nth(1).unwrap();
