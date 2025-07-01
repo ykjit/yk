@@ -3824,7 +3824,7 @@ fn patch_addresses(patches: &[(*const u8, u64)]) {
     for (tgt, val) in patches {
         // The target address must be 8-byte aligned so that we do a single write. By definition,
         // this means that we also cannot span a cache-line.
-        assert!((*tgt as usize) % 8 == 0);
+        assert!((*tgt as usize).is_multiple_of(8));
         unsafe { *(*tgt as *mut u64) = *val };
     }
     // This `fence` serves two purposes:
