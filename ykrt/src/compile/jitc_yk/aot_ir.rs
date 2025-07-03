@@ -1053,11 +1053,7 @@ impl Inst {
                 // The type of the newly-defined local is the return type of the callee.
                 if let Ty::Func(ft) = m.type_(m.func(*callee).tyidx) {
                     let ty = m.type_(ft.ret_ty);
-                    if ty != &Ty::Void {
-                        Some(ty)
-                    } else {
-                        None
-                    }
+                    if ty != &Ty::Void { Some(ty) } else { None }
                 } else {
                     panic!(); // IR malformed.
                 }
@@ -1083,11 +1079,7 @@ impl Inst {
                 // The type of the newly-defined local is the return type of the callee.
                 if let Ty::Func(ft) = m.type_(*ftyidx) {
                     let ty = m.type_(ft.ret_ty);
-                    if ty != &Ty::Void {
-                        Some(ty)
-                    } else {
-                        None
-                    }
+                    if ty != &Ty::Void { Some(ty) } else { None }
                 } else {
                     panic!(); // IR malformed.
                 }
@@ -1098,11 +1090,7 @@ impl Inst {
             Self::LoadArg { arg_idx: _, ty_idx } => Some(m.type_(*ty_idx)),
             Self::Unimplemented { tyidx, .. } => {
                 let ty = m.type_(*tyidx);
-                if ty != &Ty::Void {
-                    Some(ty)
-                } else {
-                    None
-                }
+                if ty != &Ty::Void { Some(ty) } else { None }
             }
             Self::Nop => None,
             Self::FCmp { tyidx, .. } => Some(m.type_(*tyidx)),
@@ -1129,7 +1117,7 @@ impl Inst {
     pub(crate) fn safepoint(&'static self) -> Option<&'static DeoptSafepoint> {
         match self {
             Self::Call { safepoint, .. } => safepoint.as_ref(),
-            Self::CondBr { ref safepoint, .. } => Some(safepoint),
+            Self::CondBr { safepoint, .. } => Some(safepoint),
             _ => None,
         }
     }

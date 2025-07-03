@@ -293,7 +293,7 @@ mod yk_testing {
         trace_executions: u64,
     }
 
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "C" fn __ykstats_wait_until(
         mt: *const MT,
         test: unsafe extern "C" fn(YkCStats) -> bool,

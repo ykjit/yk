@@ -3,7 +3,7 @@
 use clap::Parser;
 use std::{env, path::PathBuf, process::Command};
 use tempfile::TempDir;
-use tests::{mk_compiler, EXTRA_LINK};
+use tests::{EXTRA_LINK, mk_compiler};
 use ykbuild::ykllvm_bin;
 
 /// Run a C test under gdb.

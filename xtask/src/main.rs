@@ -1,5 +1,5 @@
 use std::env;
-use std::process::{exit, Command};
+use std::process::{Command, exit};
 use walkdir::WalkDir;
 use ykbuild::ykllvm_bin;
 

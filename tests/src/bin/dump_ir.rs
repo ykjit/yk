@@ -2,7 +2,7 @@ use std::{
     env,
     error::Error,
     path::PathBuf,
-    process::{exit, Command},
+    process::{Command, exit},
 };
 use tempfile::TempDir;
 use ykrt::compile::jitc_yk::aot_ir;

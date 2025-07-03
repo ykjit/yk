@@ -9,8 +9,8 @@ use std::{
     ffi::c_void,
     marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering},
     },
 };
 
@@ -20,15 +20,15 @@ use parking_lot::Mutex;
 use parking_lot_core::SpinWait;
 
 use crate::{
-    aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
-    compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardIdx},
+    aotsmp::{AOT_STACKMAPS, load_aot_stackmaps},
+    compile::{CompilationError, CompiledTrace, Compiler, GuardIdx, default_compiler},
     job_queue::{Job, JobQueue},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     log::{
-        stats::{Stats, TimingState},
         Log, Verbosity,
+        stats::{Stats, TimingState},
     },
-    trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
+    trace::{AOTTraceIterator, TraceRecorder, Tracer, default_tracer},
 };
 
 // Emit a log entry with hot location debug information if present and support is compiled in.
@@ -1159,7 +1159,7 @@ impl MT {
 
 #[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn __yk_exec_trace(
     frameaddr: *const c_void,
     rsp: *const c_void,
@@ -1355,10 +1355,7 @@ impl MTThread {
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_i32(&mut self, val: i32) -> bool {
-        if let MTThreadState::Tracing {
-            ref mut promotions, ..
-        } = self.peek_mut_tstate()
-        {
+        if let MTThreadState::Tracing { promotions, .. } = self.peek_mut_tstate() {
             promotions.extend_from_slice(&val.to_ne_bytes());
         }
         true
@@ -1376,10 +1373,7 @@ impl MTThread {
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_u32(&mut self, val: u32) -> bool {
-        if let MTThreadState::Tracing {
-            ref mut promotions, ..
-        } = self.peek_mut_tstate()
-        {
+        if let MTThreadState::Tracing { promotions, .. } = self.peek_mut_tstate() {
             promotions.extend_from_slice(&val.to_ne_bytes());
         }
         true
@@ -1397,10 +1391,7 @@ impl MTThread {
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_i64(&mut self, val: i64) -> bool {
-        if let MTThreadState::Tracing {
-            ref mut promotions, ..
-        } = self.peek_mut_tstate()
-        {
+        if let MTThreadState::Tracing { promotions, .. } = self.peek_mut_tstate() {
             promotions.extend_from_slice(&val.to_ne_bytes());
         }
         true
@@ -1418,10 +1409,7 @@ impl MTThread {
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_usize(&mut self, val: usize) -> bool {
-        if let MTThreadState::Tracing {
-            ref mut promotions, ..
-        } = self.peek_mut_tstate()
-        {
+        if let MTThreadState::Tracing { promotions, .. } = self.peek_mut_tstate() {
             promotions.extend_from_slice(&val.to_ne_bytes());
         }
         true
@@ -1434,10 +1422,7 @@ impl MTThread {
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn insert_debug_str(&mut self, msg: String) -> bool {
-        if let MTThreadState::Tracing {
-            ref mut debug_strs, ..
-        } = self.peek_mut_tstate()
-        {
+        if let MTThreadState::Tracing { debug_strs, .. } = self.peek_mut_tstate() {
             debug_strs.push(msg);
         }
         true

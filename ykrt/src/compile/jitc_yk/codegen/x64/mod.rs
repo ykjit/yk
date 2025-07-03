@@ -19,26 +19,26 @@ use crate::compile::jitc_yk::gdb::{self, GdbCtx};
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{
+        CompilationError, CompiledTrace, Guard, GuardIdx,
         jitc_yk::{
+            CodeGen, YkSideTraceInfo,
             aot_ir::{self, DeoptSafepoint},
             arbbitint::ArbBitInt,
             jit_ir::{
                 self, BinOp, Const, FloatTy, GuardInst, IndirectCallIdx, InlinedFrame, Inst,
                 InstIdx, Module, Operand, TraceKind, Ty,
             },
-            CodeGen, YkSideTraceInfo,
         },
-        CompilationError, CompiledTrace, Guard, GuardIdx,
     },
     location::HotLocation,
-    mt::{TraceId, MT},
+    mt::{MT, TraceId},
 };
 use dynasmrt::{
+    AssemblyOffset, DynamicLabel, DynasmApi, DynasmError, DynasmLabelApi, ExecutableBuffer,
+    Register as dynasmrtRegister,
     components::StaticLabel,
     dynasm,
     x64::{Rq, Rx},
-    AssemblyOffset, DynamicLabel, DynasmApi, DynasmError, DynasmLabelApi, ExecutableBuffer,
-    Register as dynasmrtRegister,
 };
 use indexmap::IndexMap;
 use page_size;
@@ -49,7 +49,7 @@ use std::{
     cell::Cell,
     error::Error,
     slice,
-    sync::{atomic::fence, Arc, Weak},
+    sync::{Arc, Weak, atomic::fence},
 };
 use ykaddr::addr::symbol_to_ptr;
 
@@ -165,7 +165,7 @@ fn get_tls_offset(name: &std::ffi::CString) -> i32 {
 /// A function that we can put a debugger breakpoint on.
 /// FIXME: gross hack.
 #[cfg(debug_assertions)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[inline(never)]
 pub extern "C" fn __yk_break() {}
 
@@ -3915,11 +3915,11 @@ mod tests {
     use super::{Assemble, X64CompiledTrace};
     use crate::{
         compile::{
-            jitc_yk::jit_ir::{self, Inst, Module, ParamIdx, TraceKind},
             CompiledTrace,
+            jitc_yk::jit_ir::{self, Inst, Module, ParamIdx, TraceKind},
         },
         location::{HotLocation, HotLocationKind},
-        mt::{TraceId, MT},
+        mt::{MT, TraceId},
     };
     use fm::{FMBuilder, FMatcher};
     use lazy_static::lazy_static;

@@ -2,7 +2,7 @@
 name = "ykbuild"
 version = "0.1.0"
 authors = ["The Yk Developers"]
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0 OR MIT"
 # The following makes ykbuild's cargo metadata available to any crate which
 # depends on it, providing depedents with the location of the ykllvm install dir.

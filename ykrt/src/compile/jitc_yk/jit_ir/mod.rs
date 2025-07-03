@@ -97,14 +97,14 @@ mod parser;
 #[cfg(any(debug_assertions, test))]
 mod well_formed;
 
-use super::{aot_ir, codegen::x64::Register, YkSideTraceInfo};
+use super::{YkSideTraceInfo, aot_ir, codegen::x64::Register};
 use crate::{
-    compile::{jitc_yk::arbbitint::ArbBitInt, CompilationError, CompiledTrace},
+    compile::{CompilationError, CompiledTrace, jitc_yk::arbbitint::ArbBitInt},
     mt::TraceId,
 };
 use indexmap::IndexSet;
 use std::{
-    ffi::{c_void, CString},
+    ffi::{CString, c_void},
     fmt,
     hash::Hash,
     mem,

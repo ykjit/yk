@@ -18,9 +18,9 @@ mod inner {
     use regex::Regex;
     use std::{
         env,
-        fs::{canonicalize, create_dir_all, read_to_string, write, File},
+        fs::{File, canonicalize, create_dir_all, read_to_string, write},
         path::Path,
-        process::{exit, Command},
+        process::{Command, exit},
     };
     use ykbuild::{target_dir, ykllvm_bin_dir};
 
@@ -35,8 +35,8 @@ mod inner {
 
         if !Path::new(&format!("{}/Makefile", YKLUA_SUBMODULE_PATH)).is_file() {
             panic!(
-            "yklua submodule not found. To checkout:\n  git submodule update --init --recursive"
-        );
+                "yklua submodule not found. To checkout:\n  git submodule update --init --recursive"
+            );
         }
 
         // Set variables for tests `ignore-if`s.
@@ -156,12 +156,18 @@ mod inner {
 
         // Set variables for tests `ignore-if`s.
         #[cfg(cargo_profile = "debug")]
-        env::set_var("YK_CARGO_PROFILE", "debug");
+        unsafe {
+            env::set_var("YK_CARGO_PROFILE", "debug")
+        };
         #[cfg(cargo_profile = "release")]
-        env::set_var("YK_CARGO_PROFILE", "release");
+        unsafe {
+            env::set_var("YK_CARGO_PROFILE", "release")
+        };
 
         #[cfg(target_arch = "x86_64")]
-        env::set_var("YK_ARCH", "x86_64");
+        unsafe {
+            env::set_var("YK_ARCH", "x86_64")
+        };
         #[cfg(not(target_arch = "x86_64"))]
         panic!("Unknown target_arch");
 

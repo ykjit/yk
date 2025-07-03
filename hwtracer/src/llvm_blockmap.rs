@@ -4,7 +4,7 @@ use byteorder::{NativeEndian, ReadBytesExt};
 use intervaltree::IntervalTree;
 use object::{Object, ObjectSection};
 use std::{
-    io::{prelude::*, Cursor, SeekFrom},
+    io::{Cursor, SeekFrom, prelude::*},
     sync::LazyLock,
 };
 use ykaddr::obj::SELF_BIN_MMAP;

@@ -2,10 +2,10 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler, GuardIdx},
+    compile::{CompiledTrace, Compiler, GuardIdx, jitc_yk::codegen::CodeGen},
     location::HotLocation,
-    log::{log_ir, should_log_ir, IRPhase},
-    mt::{TraceId, MT},
+    log::{IRPhase, log_ir, should_log_ir},
+    mt::{MT, TraceId},
     trace::AOTTraceIterator,
 };
 use parking_lot::Mutex;

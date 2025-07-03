@@ -2,8 +2,8 @@
 
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorderError};
 use hwtracer::{
-    llvm_blockmap::LLVM_BLOCK_MAP, Block, BlockIteratorError, HWTracerError, TemporaryErrorKind,
-    Trace,
+    Block, BlockIteratorError, HWTracerError, TemporaryErrorKind, Trace,
+    llvm_blockmap::LLVM_BLOCK_MAP,
 };
 use ykaddr::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},

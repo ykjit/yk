@@ -120,10 +120,12 @@ impl Module {
                         .enumerate()
                     {
                         if *par_ty != arg_ty {
-                            panic!("Instruction at position {iidx} passing argument {j} of wrong type ({}, but should be {})\n  {}",
+                            panic!(
+                                "Instruction at position {iidx} passing argument {j} of wrong type ({}, but should be {})\n  {}",
                                 self.type_(arg_ty).display(self),
                                 self.type_(*par_ty).display(self),
-                                inst.display(self, iidx));
+                                inst.display(self, iidx)
+                            );
                         }
                     }
                 }
@@ -149,9 +151,9 @@ impl Module {
                         && x.predicate().signed()
                     {
                         panic!(
-                                "Instruction at position {iidx} compares pointers using a signed predicate\n  {}",
-                                self.inst(iidx).display(self, iidx)
-                            );
+                            "Instruction at position {iidx} compares pointers using a signed predicate\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                 }
                 Inst::Select(x) => {
@@ -239,12 +241,16 @@ impl Module {
                 }
                 Inst::Trunc(x) => {
                     let Ty::Integer(val_bitsize) = self.type_(x.val(self).tyidx(self)) else {
-                        panic!("Instruction at position {iidx} trying to convert from a non-integer type\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to convert from a non-integer type\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     };
                     let Ty::Integer(dest_bitsize) = self.type_(x.dest_tyidx()) else {
-                        panic!("Instruction at position {iidx} trying to convert to a non-integer type\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to convert to a non-integer type\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     };
                     if dest_bitsize >= val_bitsize {
                         panic!(
@@ -258,32 +264,44 @@ impl Module {
                     let to_type = self.type_(x.dest_tyidx());
 
                     if !matches!(from_type, Ty::Integer(_)) {
-                        panic!("Instruction at position {iidx} trying to convert a non-integer type\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to convert a non-integer type\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                     if !matches!(to_type, Ty::Float(_)) {
-                        panic!("Instruction at position {iidx} trying to convert to a non-float type\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to convert to a non-float type\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                     if to_type.byte_size() < from_type.byte_size() {
-                        panic!("Instruction at position {iidx} trying to convert to a smaller-sized float\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to convert to a smaller-sized float\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                 }
                 Inst::FPExt(x) => {
                     let from_type = self.type_(x.val(self).tyidx(self));
                     let to_type = self.type_(x.dest_tyidx());
                     if !matches!(from_type, Ty::Float(_)) {
-                        panic!("Instruction at position {iidx} trying to extend from a non-float type\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to extend from a non-float type\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                     if !matches!(to_type, Ty::Float(_)) {
-                        panic!("Instruction at position {iidx} trying to extend to a non-float type\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to extend to a non-float type\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                     if to_type.byte_size() <= from_type.byte_size() {
-                        panic!("Instruction at position {iidx} trying to extend to a smaller-sized float\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to extend to a smaller-sized float\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                 }
                 Inst::FPToSI(x) => {
@@ -291,20 +309,26 @@ impl Module {
                     let to_type = self.type_(x.dest_tyidx());
 
                     if !matches!(from_type, Ty::Float(_)) {
-                        panic!("Instruction at position {iidx} trying to convert a non-float type\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to convert a non-float type\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                     if !matches!(to_type, Ty::Integer(_)) {
-                        panic!("Instruction at position {iidx} trying to convert to a non-integer type\n  {}",
-                            self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Instruction at position {iidx} trying to convert to a non-integer type\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                 }
                 Inst::Param(_) => {
                     if let Some(i) = last_inst
                         && !matches!(i, Inst::Param(_) | Inst::TraceHeaderEnd(_))
                     {
-                        panic!("Param instruction may only appear at the beginning of a trace or after another Param instruction, or after the trace header jump\n  {}",
-                                self.inst(iidx).display(self, iidx));
+                        panic!(
+                            "Param instruction may only appear at the beginning of a trace or after another Param instruction, or after the trace header jump\n  {}",
+                            self.inst(iidx).display(self, iidx)
+                        );
                     }
                 }
                 _ => (),

@@ -16,7 +16,7 @@
 use hwtracer::{BlockIteratorError, ThreadTracer, Trace, TracerBuilder};
 use std::ffi::c_void;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 /// The value returned by this function *must* be passed to [__hwykpt_stop_collector] or memory
 /// will leak.
 pub extern "C" fn __hwykpt_start_collector() -> *mut Box<dyn ThreadTracer> {
@@ -26,7 +26,7 @@ pub extern "C" fn __hwykpt_start_collector() -> *mut Box<dyn ThreadTracer> {
     Box::into_raw(Box::new(tt))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 /// The value passed to this function *must* have come from [ __hwykpt_start_collector]; doing
 /// otherwise leads to undefined behaviour.
 pub extern "C" fn __hwykpt_stop_collector(tc: *mut Box<dyn ThreadTracer>) -> *mut c_void {
@@ -46,7 +46,7 @@ use hwtracer::errors::HWTracerError;
 /// Panics on fatal errors.
 ///
 /// Used for benchmarks.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __hwykpt_decode_trace(trace: *mut Box<dyn Trace>) -> bool {
     let trace: Box<Box<dyn Trace>> = unsafe { Box::from_raw(trace) };
     for b in trace.iter_blocks() {

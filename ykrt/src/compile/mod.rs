@@ -1,7 +1,7 @@
 use crate::{
     compile::jitc_yk::aot_ir::DeoptSafepoint,
     location::HotLocation,
-    mt::{TraceId, MT},
+    mt::{MT, TraceId},
     trace::AOTTraceIterator,
 };
 use libc::c_void;

@@ -6,10 +6,10 @@ use crate::pt::c_errors::PerfPTCError;
 #[cfg(ykpt)]
 use crate::pt::ykpt::YkPTBlockIterator;
 use crate::{
-    errors::{HWTracerError, TemporaryErrorKind},
     Block, BlockIteratorError, ThreadTracer, Trace, Tracer,
+    errors::{HWTracerError, TemporaryErrorKind},
 };
-use libc::{c_void, free, geteuid, malloc, size_t, PF_R, PF_X, PT_LOAD};
+use libc::{PF_R, PF_X, PT_LOAD, c_void, free, geteuid, malloc, size_t};
 use std::{
     ffi::CString,
     fs::read_to_string,
@@ -18,7 +18,7 @@ use std::{
 use ykaddr::obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE};
 
 #[cfg(pt)]
-extern "C" {
+unsafe extern "C" {
     fn hwt_perf_init_collector(
         conf: *const PerfCollectorConfig,
         err: *mut PerfPTCError,
@@ -45,7 +45,7 @@ pub static SELF_BIN_PATH_CSTRING: LazyLock<CString> =
 ///    tracing to.
 ///
 /// It is assumed that there is one contiguous range of executable code that we wish to trace.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn get_tracing_extent(obj: *mut *const i8, base_off: *mut usize, len: *mut usize) {
     let mut found = None;
     // Find the main object.
@@ -109,7 +109,9 @@ impl PerfTracer {
             match read_to_string(PERF_PERMS_PATH) {
                 Ok(x) if x.trim() == "-1" => (),
                 _ => {
-                    return Err(HWTracerError::ConfigError(format!("Tracing not permitted: you must be root or {PERF_PERMS_PATH} must contain -1")));
+                    return Err(HWTracerError::ConfigError(format!(
+                        "Tracing not permitted: you must be root or {PERF_PERMS_PATH} must contain -1"
+                    )));
                 }
             }
         }
