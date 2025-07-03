@@ -9,7 +9,7 @@ use crate::mt::TraceId;
 use deku::prelude::*;
 use indexmap::IndexMap;
 use std::{
-    ffi::{c_char, c_int, CString},
+    ffi::{CString, c_char, c_int},
     io::Write,
     ptr,
     sync::Mutex,
@@ -79,7 +79,7 @@ pub struct JitDescriptor {
 ///
 /// Only [JitDescriptorAccessor] should directly access this.
 #[allow(non_upper_case_globals)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut __jit_debug_descriptor: JitDescriptor = JitDescriptor {
     version: 1,
     action_flag: 0,
@@ -118,7 +118,7 @@ static JIT_DESCRIPTOR_ACCESSOR: JitDescriptorAccessor = JitDescriptorAccessor {
 ///
 /// GDB regognises calls to this function to detect when JITted code is being loaded.
 #[inline(never)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __jit_debug_register_code() {}
 
 /// Describes the mapping from a line in the source file to a virtual address.

@@ -27,18 +27,17 @@
 //! where it has spilled an instruction's value: it guarantees to spill an instruction to at most
 //! one place on the stack.
 
-use super::{rev_analyse::RevAnalyse, Register, VarLocation};
+use super::{Register, VarLocation, rev_analyse::RevAnalyse};
 use crate::compile::jitc_yk::{
     aot_ir,
     codegen::abs_stack::AbstractStack,
     jit_ir::{Const, ConstIdx, FloatTy, GuardInst, Inst, InstIdx, Module, Operand, PtrAddInst, Ty},
 };
 use dynasmrt::{
-    dynasm,
+    DynasmApi, Register as dynasmrtRegister, dynasm,
     x64::{
         Assembler, {Rq, Rx},
     },
-    DynasmApi, Register as dynasmrtRegister,
 };
 use std::{assert_matches::assert_matches, cmp::Ordering, marker::PhantomData, mem};
 
@@ -383,7 +382,7 @@ impl LSRegAlloc<'_> {
             match &mut self.gp_reg_states[usize::from(reg.code())] {
                 RegState::Reserved | RegState::Empty => unreachable!(),
                 RegState::FromConst(_, _) => todo!(),
-                RegState::FromInst(ref mut iidxs, _) => {
+                RegState::FromInst(iidxs, _) => {
                     // We have to assume that if LLVM told us that multiple instructions can live
                     // in a single register that they can do safely.
                     iidxs.push(iidx);
@@ -684,7 +683,7 @@ impl LSRegAlloc<'_> {
                             self.spills[usize::from(iidx)] = ss;
                         }
                         Operand::Var(_) => {
-                            let RegState::FromInst(ref mut iidxs, ext) =
+                            let RegState::FromInst(iidxs, ext) =
                                 &mut self.gp_reg_states[usize::from(reg.code())]
                             else {
                                 panic!()
@@ -1742,11 +1741,11 @@ impl LSRegAlloc<'_> {
         for (cnstr, new_reg) in constraints.iter().zip(asgn.into_iter()) {
             let new_reg = new_reg.unwrap();
             match cnstr {
-                RegConstraint::Input(ref op)
-                | RegConstraint::InputIntoReg(ref op, _)
-                | RegConstraint::InputOutput(ref op)
-                | RegConstraint::InputOutputIntoReg(ref op, _)
-                | RegConstraint::InputIntoRegAndClobber(ref op, _) => {
+                RegConstraint::Input(op)
+                | RegConstraint::InputIntoReg(op, _)
+                | RegConstraint::InputOutput(op)
+                | RegConstraint::InputOutputIntoReg(op, _)
+                | RegConstraint::InputIntoRegAndClobber(op, _) => {
                     if let Some(old_reg) = self.find_op_in_fp_reg(op)
                         && old_reg != new_reg
                     {
@@ -2489,7 +2488,12 @@ mod test {
             .position(|x| x == reg_name)
             .unwrap();
             let actual = &reg_states[usize::from(iidx)][reg_i];
-            assert_eq!(actual, expected, "at InstIdx({iidx}), {reg_name} (reg offset {reg_i}) is {actual:?}, not {expected:?}, in {:?}", reg_states[usize::from(iidx)]);
+            assert_eq!(
+                actual,
+                expected,
+                "at InstIdx({iidx}), {reg_name} (reg offset {reg_i}) is {actual:?}, not {expected:?}, in {:?}",
+                reg_states[usize::from(iidx)]
+            );
         }
     }
 
@@ -2697,9 +2701,11 @@ mod test {
 
         #[allow(clippy::needless_range_loop)]
         for i in 1..14 {
-            assert!(spill_states[i]
-                .iter()
-                .all(|x| matches!(x, SpillState::Empty)));
+            assert!(
+                spill_states[i]
+                    .iter()
+                    .all(|x| matches!(x, SpillState::Empty))
+            );
             check_reg_states(
                 &reg_states,
                 InstIdx::unchecked_from(i),
@@ -2722,11 +2728,13 @@ mod test {
             );
         }
 
-        assert!(spill_states[14]
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != 1)
-            .all(|(_, x)| matches!(*x, SpillState::Empty)));
+        assert!(
+            spill_states[14]
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != 1)
+                .all(|(_, x)| matches!(*x, SpillState::Empty))
+        );
         check_reg_states(
             &reg_states,
             InstIdx::unchecked_from(14),
@@ -3122,9 +3130,11 @@ mod test {
 
         #[allow(clippy::needless_range_loop)]
         for i in 7..19 {
-            assert!(spill_states[i]
-                .iter()
-                .all(|x| matches!(x, SpillState::Empty)));
+            assert!(
+                spill_states[i]
+                    .iter()
+                    .all(|x| matches!(x, SpillState::Empty))
+            );
         }
 
         assert_matches!(spill_states[20][3], SpillState::Stack(_));

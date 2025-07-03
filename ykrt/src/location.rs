@@ -3,14 +3,14 @@
 use std::{
     mem,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 
 use crate::{
     compile::CompiledTrace,
-    mt::{HotThreshold, TraceCompilationErrorThreshold, TraceId, MT},
+    mt::{HotThreshold, MT, TraceCompilationErrorThreshold, TraceId},
 };
 use parking_lot::Mutex;
 
@@ -149,9 +149,11 @@ impl Location {
             let old = (x >> STATE_NUM_BITS) as HotThreshold;
             // The particular value of `new` must fit in the bits we have available.
             let new = old + 1;
-            debug_assert!((new as usize)
-                .checked_shl(u32::try_from(STATE_NUM_BITS).unwrap())
-                .is_some());
+            debug_assert!(
+                (new as usize)
+                    .checked_shl(u32::try_from(STATE_NUM_BITS).unwrap())
+                    .is_some()
+            );
 
             self.inner
                 .compare_exchange_weak(

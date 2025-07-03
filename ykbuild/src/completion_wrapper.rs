@@ -4,7 +4,7 @@ use crate::target_dir;
 use glob::glob;
 use std::{
     env,
-    fs::{create_dir_all, File},
+    fs::{File, create_dir_all},
     io::{Read, Write},
     path::{Path, PathBuf},
 };

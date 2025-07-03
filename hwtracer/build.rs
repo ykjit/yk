@@ -36,7 +36,7 @@ mod inner {
         // Generate a `compile_commands.json` database for clangd.
         let ccg = CompletionWrapper::new(ykllvm_bin("clang"), "hwtracer");
         for (k, v) in ccg.build_env() {
-            env::set_var(k, v);
+            unsafe { env::set_var(k, v) };
         }
         c_build.compiler(ccg.wrapper_path());
 

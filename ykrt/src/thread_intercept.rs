@@ -33,7 +33,7 @@ extern "C" fn wrap_thread_routine(tgt: *mut c_void) -> *mut c_void {
     ret
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __wrap_pthread_create(
     thread: *mut libc::pthread_t,
     attr: *const libc::pthread_attr_t,
@@ -54,7 +54,7 @@ pub extern "C" fn __wrap_pthread_create(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __wrap_pthread_exit(_retval: *mut c_void) {
     // FIXME: Using `pthread_exit` doesn't return to `wrap_thread_routine` and thus doesn't free
     // the newly created shadowstack.

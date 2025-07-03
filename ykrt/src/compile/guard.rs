@@ -5,7 +5,7 @@ use crate::{
     mt::{AtomicTraceCompilationErrorThreshold, HotThreshold, MT},
 };
 use parking_lot::Mutex;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{Arc, atomic::Ordering};
 
 /// Responsible for tracking how often a guard in a `CompiledTrace` fails. A hotness counter is
 /// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores

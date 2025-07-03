@@ -5,7 +5,7 @@ use which::which;
 use {
     std::env,
     std::io::{self, Write},
-    std::process::{exit, Command},
+    std::process::{Command, exit},
 };
 
 pub fn main() {

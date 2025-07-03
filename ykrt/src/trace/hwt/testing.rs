@@ -3,7 +3,7 @@
 
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __yktrace_hwt_mapper_blockmap_len() -> usize {
     LLVM_BLOCK_MAP.len()
 }

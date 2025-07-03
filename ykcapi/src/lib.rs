@@ -17,14 +17,14 @@
 #[cfg(feature = "ykd")]
 use std::ffi::CStr;
 use std::{
-    ffi::{c_char, c_void, CString},
+    ffi::{CString, c_char, c_void},
     mem::forget,
     ptr,
     sync::Arc,
 };
 use ykrt::{HotThreshold, Location, MT};
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
     match MT::new() {
         Ok(mt) => Arc::into_raw(mt),
@@ -45,14 +45,14 @@ pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
 }
 
 /// Shutdown this MT instance. Will panic if an error is detected when doing so.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn yk_mt_shutdown(mt: *const MT) {
     unsafe { Arc::from_raw(mt) }.shutdown();
 }
 
 // The "dummy control point" that is replaced in an LLVM pass.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
     // Intentionally empty.
 }
@@ -60,7 +60,7 @@ pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
 // The new control point called after the interpreter has been patched by ykllvm.
 #[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __ykrt_control_point(
     mt: *const MT,
     loc: *mut Location,
@@ -117,7 +117,7 @@ pub extern "C" fn __ykrt_control_point(
 }
 
 // The actual control point, after we have pushed the callee-saved registers.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn __ykrt_control_point_real(
     mt: *const MT,
@@ -136,27 +136,27 @@ pub extern "C" fn __ykrt_control_point_real(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn yk_mt_hot_threshold_set(mt: *const MT, hot_threshold: HotThreshold) {
     let arc = unsafe { Arc::from_raw(mt) };
     arc.set_hot_threshold(hot_threshold);
     forget(arc);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn yk_mt_sidetrace_threshold_set(mt: *const MT, hot_threshold: HotThreshold) {
     let arc = unsafe { Arc::from_raw(mt) };
     arc.set_sidetrace_threshold(hot_threshold);
     forget(arc);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn yk_location_new() -> Location {
     Location::new()
 }
 
 #[cfg(feature = "ykd")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn yk_location_set_debug_str(loc: *mut Location, s: *const c_char) {
     let s = unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned();
     let loc = unsafe { &*loc };
@@ -164,12 +164,12 @@ pub unsafe extern "C" fn yk_location_set_debug_str(loc: *mut Location, s: *const
     loc.set_hl_debug_str(s);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn yk_location_null() -> Location {
     Location::null()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
 }

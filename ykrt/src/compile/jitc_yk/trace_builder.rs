@@ -2,18 +2,18 @@
 //!
 //! This takes in an (AOT IR, execution trace) pair and constructs a JIT IR trace from it.
 
-use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::YkSideTraceInfo;
+use super::aot_ir::{self, BBlockId, BinOp, Module};
 use super::{
+    AOT_MOD,
     arbbitint::ArbBitInt,
     jit_ir::{self, Const, Operand, PackedOperand, ParamIdx, TraceKind},
-    AOT_MOD,
 };
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{CompilationError, CompiledTrace},
     log::stats::TimingState,
-    mt::{TraceId, MT},
+    mt::{MT, TraceId},
     trace::{AOTTraceIterator, TraceAction},
 };
 use std::{collections::HashMap, ffi::CString, sync::Arc};

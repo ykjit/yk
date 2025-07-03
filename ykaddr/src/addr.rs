@@ -2,7 +2,7 @@
 
 use crate::obj::{PHDR_OBJECT_CACHE, SELF_BIN_PATH};
 use cached::proc_macro::cached;
-use libc::{c_void, dlsym, Dl_info, RTLD_DEFAULT};
+use libc::{Dl_info, RTLD_DEFAULT, c_void, dlsym};
 use std::{
     error::Error,
     ffi::{CStr, CString},
@@ -165,9 +165,9 @@ pub fn symbol_to_ptr(name: &str) -> Result<*const (), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj, MaybeUninit};
+    use super::{MaybeUninit, off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj};
     use crate::obj::PHDR_MAIN_OBJ;
-    use libc::{dlsym, Dl_info};
+    use libc::{Dl_info, dlsym};
     use std::{ffi::CString, ptr};
 
     #[test]
@@ -194,12 +194,13 @@ mod tests {
         let (obj, off) = vaddr_to_obj_and_off(vaddr as usize).unwrap();
         // because the loader will load the object a +ve offset from the start of the address space.
         assert!(off < u64::try_from(vaddr as usize).unwrap());
-        assert!(obj
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with("ykaddr-"));
+        assert!(
+            obj.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("ykaddr-")
+        );
     }
 
     /// Check that converting a virtual address (from a shared object) to a file offset and back to

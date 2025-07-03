@@ -5,9 +5,9 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{jitc_yk::jit_ir::Module, CompiledTrace},
-    location::HotLocation,
     MT,
+    compile::{CompiledTrace, jitc_yk::jit_ir::Module},
+    location::HotLocation,
 };
 use parking_lot::Mutex;
 use std::{error::Error, sync::Arc};

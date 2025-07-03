@@ -5,7 +5,7 @@ use rerun_except::rerun_except;
 use std::{
     collections::HashMap,
     env,
-    fs::{canonicalize, create_dir_all, read_to_string, write, File},
+    fs::{File, canonicalize, create_dir_all, read_to_string, write},
     path::Path,
     process::Command,
 };

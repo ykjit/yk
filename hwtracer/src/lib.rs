@@ -143,7 +143,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{trace_closure, work_loop, Tracer, TracerBuilder, TracerKind};
+    use crate::{Tracer, TracerBuilder, TracerKind, trace_closure, work_loop};
     use std::{sync::Arc, thread};
 
     fn all_collectors() -> Vec<Arc<dyn Tracer>> {

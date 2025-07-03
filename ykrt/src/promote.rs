@@ -7,7 +7,7 @@ use crate::mt::MTThread;
 use std::ffi::{c_int, c_longlong, c_uint, c_void};
 
 /// Promote a `c_int` during trace recording.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
     if MTThread::is_tracing() {
@@ -20,7 +20,7 @@ pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
 }
 
 /// Promote a `c_uint` during trace recording.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_unsigned_int(val: c_uint) -> c_uint {
     if MTThread::is_tracing() {
@@ -33,7 +33,7 @@ pub extern "C" fn __yk_promote_c_unsigned_int(val: c_uint) -> c_uint {
 }
 
 /// Promote a `usize` during trace recording.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_long_long(val: c_longlong) -> c_longlong {
     if MTThread::is_tracing() {
@@ -46,7 +46,7 @@ pub extern "C" fn __yk_promote_c_long_long(val: c_longlong) -> c_longlong {
 }
 
 /// Promote a `usize` during trace recording.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __yk_promote_usize(val: usize) -> usize {
     if MTThread::is_tracing() {
         MTThread::with_borrow_mut(|mtt| {
@@ -58,7 +58,7 @@ pub extern "C" fn __yk_promote_usize(val: usize) -> usize {
 }
 
 /// Promote a pointer during trace recording.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __yk_promote_ptr(val: *const c_void) -> *const c_void {
     if MTThread::is_tracing() {
         MTThread::with_borrow_mut(|mtt| {
@@ -70,7 +70,7 @@ pub extern "C" fn __yk_promote_ptr(val: *const c_void) -> *const c_void {
 }
 
 /// Records a 64-bit return value of an idempotent function during trace recording.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __yk_idempotent_promote_i64(val: i64) -> i64 {
     if MTThread::is_tracing() {
         MTThread::with_borrow_mut(|mtt| {
@@ -82,7 +82,7 @@ pub extern "C" fn __yk_idempotent_promote_i64(val: i64) -> i64 {
 }
 
 /// Records a 32-bit return value of an idempotent function during trace recording.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __yk_idempotent_promote_i32(val: i32) -> i32 {
     if MTThread::is_tracing() {
         MTThread::with_borrow_mut(|mtt| {

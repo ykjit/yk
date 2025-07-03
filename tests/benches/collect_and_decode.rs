@@ -1,8 +1,8 @@
 //! Critereon benchmarks.
 
 use criterion::{
-    criterion_group, criterion_main, measurement::Measurement, BenchmarkGroup, BenchmarkId,
-    Criterion, SamplingMode,
+    BenchmarkGroup, BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main,
+    measurement::Measurement,
 };
 use std::{
     env,

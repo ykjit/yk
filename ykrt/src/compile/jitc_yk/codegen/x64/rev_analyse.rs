@@ -354,10 +354,12 @@ impl<'a> RevAnalyse<'a> {
     pub(super) fn next_use(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> Option<InstIdx> {
         // Our algorithm only works if `self.def_use[query_iidx]` is (a) sorted and (b) in reverse
         // order.
-        debug_assert!(self.def_use[usize::from(query_iidx)]
-            .iter()
-            .rev()
-            .is_sorted());
+        debug_assert!(
+            self.def_use[usize::from(query_iidx)]
+                .iter()
+                .rev()
+                .is_sorted()
+        );
         match self.def_use[usize::from(query_iidx)]
             .iter()
             .position(|x| *x <= cur_iidx)
@@ -800,15 +802,21 @@ mod test {
         assert_eq!(rev_an.reg_hints[1][1].0, InstIdx::unchecked_from(3));
         assert_eq!(rev_an.reg_hints[0][0].1, rev_an.reg_hints[1][1].1);
         assert_eq!(rev_an.reg_hints[0][1].1, rev_an.reg_hints[1][0].1);
-        assert!((0..5).all(|i| rev_an
-            .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(0))
-            .is_some()));
-        assert!((1..5).all(|i| rev_an
-            .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(0))
-            .is_some()));
-        assert!((2..5).all(|i| rev_an
-            .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(2))
-            .is_none()));
+        assert!((0..5).all(|i| {
+            rev_an
+                .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(0))
+                .is_some()
+        }));
+        assert!((1..5).all(|i| {
+            rev_an
+                .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(0))
+                .is_some()
+        }));
+        assert!((2..5).all(|i| {
+            rev_an
+                .reg_hint(InstIdx::unchecked_from(i), InstIdx::unchecked_from(2))
+                .is_none()
+        }));
         assert_eq!(
             (0..5)
                 .map(|i| rev_an

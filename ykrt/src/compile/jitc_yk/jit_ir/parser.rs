@@ -25,8 +25,8 @@ use super::super::{
     },
 };
 use fm::FMBuilder;
-use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
-use lrpar::{lrpar_mod, NonStreamingLexer, Span};
+use lrlex::{DefaultLexerTypes, LRNonStreamingLexer, lrlex_mod};
+use lrpar::{NonStreamingLexer, Span, lrpar_mod};
 use regex::Regex;
 use smallvec::smallvec;
 use std::{collections::HashMap, convert::TryFrom, error::Error, sync::OnceLock};
@@ -271,7 +271,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                         "ICmp instructions must assign to an i1, not '{}'",
                                         x.display(self.m)
                                     ),
-                                ))
+                                ));
                             }
                         }
                         let inst = ICmpInst::new(
@@ -298,7 +298,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                         "FCmp instructions must assign to an i1, not '{}'",
                                         x.display(self.m)
                                     ),
-                                ))
+                                ));
                             }
                         }
                         let inst = FCmpInst::new(

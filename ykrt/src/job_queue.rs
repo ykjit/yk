@@ -1,7 +1,7 @@
 //! The job queue. This runs 1 or more worker threads and has them run compilation jobs as
 //! appropriate.
 
-use crate::mt::{TraceId, MT};
+use crate::mt::{MT, TraceId};
 use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(feature = "yk_testing")]
 use std::env;
@@ -9,8 +9,8 @@ use std::{
     cmp,
     collections::VecDeque,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
 };

@@ -41,10 +41,10 @@ mod packets;
 mod parser;
 
 use crate::{
-    errors::{HWTracerError, TemporaryErrorKind},
-    llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
-    perf::collect::PerfTraceBuf,
     Block, BlockIteratorError,
+    errors::{HWTracerError, TemporaryErrorKind},
+    llvm_blockmap::{BlockMapEntry, LLVM_BLOCK_MAP, SuccessorKind},
+    perf::collect::PerfTraceBuf,
 };
 use intervaltree::IntervalTree;
 use std::{
@@ -874,7 +874,7 @@ fn is_ret_near(inst: &iced_x86::Instruction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{perf::PerfCollectorConfig, trace_closure, work_loop, TracerBuilder, TracerKind};
+    use crate::{TracerBuilder, TracerKind, perf::PerfCollectorConfig, trace_closure, work_loop};
 
     // FIXME: This test won't work until we teach rustc to embed bitcode and emit a basic block
     // section etc.
