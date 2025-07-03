@@ -1,4 +1,4 @@
--- ignore-if: test "$YKB_TRACER" = "swt"
+-- ignore-if: false
 -- Run-time:
 --   env-var: YK_HOT_THRESHOLD=3
 --   env-var: YKD_LOG=4
