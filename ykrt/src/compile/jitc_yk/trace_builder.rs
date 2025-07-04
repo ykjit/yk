@@ -57,7 +57,9 @@ pub(crate) struct TraceBuilder {
     inferred_consts: HashMap<jit_ir::InstIdx, jit_ir::ConstIdx>,
     /// Did this trace end in another frame?
     endframe: TraceEndFrame,
-    /// Whether or not we want blocks to be processed.
+    /// Whether or not we want blocks to be processed. Set to `true` by default and changed to
+    /// `false` when tracing has left the interpreter frame and we need to ignore any remaining
+    /// blocks.
     process_blocks: bool,
     /// Info regarding the most recently seen recursive call to the interpreter.
     last_interp_call: Option<(BBlockId, &'static DeoptSafepoint)>,
