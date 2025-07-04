@@ -19,6 +19,9 @@ use crate::{
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
 
+/// Caller-saved registers in DWARF notation.
+static CALLER_CLOBBER_REG: [u16; 9] = [0, 1, 2, 4, 5, 8, 9, 10, 11];
+
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {
     /// The AOT IR.
@@ -153,9 +156,34 @@ impl TraceBuilder {
             if var.len() > 1 {
                 todo!("Deal with multi register locations");
             }
+
+            // Rewrite registers to their spill locations. We need to do this as we no longer
+            // push/pop registers around the control point to reduce its overhead. We know that
+            // for every live variable in a caller-saved register there must exist a spill offset
+            // in that location's extras.
+            let loc = match &var[0] {
+                yksmp::Location::Register(reg, size, v) => {
+                    let mut newloc = None;
+                    for offset in v {
+                        if *offset < 0 {
+                            newloc = Some(yksmp::Location::Indirect(6, i32::from(*offset), *size));
+                            break;
+                        }
+                    }
+                    if let Some(loc) = newloc {
+                        loc
+                    } else if CALLER_CLOBBER_REG.contains(reg) {
+                        panic!("No spill offset for caller-saved register.")
+                    } else {
+                        var[0].clone()
+                    }
+                }
+                _ => var[0].clone(),
+            };
+
             let param_inst = jit_ir::ParamInst::new(ParamIdx::try_from(idx)?, input_tyidx).into();
             self.jit_mod.push(param_inst)?;
-            self.jit_mod.push_param(var[0].clone());
+            self.jit_mod.push_param(loc);
             self.local_map.insert(
                 aot_op.to_inst_id(),
                 jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
