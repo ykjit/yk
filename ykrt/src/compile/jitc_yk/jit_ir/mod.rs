@@ -3271,6 +3271,7 @@ impl GuardInst {
     }
 }
 
+/// Container for things that provide information required for deopt.
 #[derive(Debug)]
 pub(crate) enum HasGuardInfo {
     Guard(GuardInst),

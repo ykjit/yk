@@ -714,8 +714,8 @@ impl TraceBuilder {
                 // leaving it briefly without encountering a non-null location. As we only check
                 // the frame addresses at non-null locations, this special case slips through and
                 // we have to handle it here.
-                // FIXME: Abort side-traces the same way we do normal traces by emitting a return
-                // instruction.
+                // FIXME: Process side-traces that return from the starting frame in the same way
+                // we process normal traces, by emitting a return instruction.
                 return Err(CompilationError::General(
                     "Returning out of sidetrace currently unsupported.".into(),
                 ));
