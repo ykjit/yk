@@ -17,13 +17,17 @@
 //     yk-execution: deoptimise ...
 //     yk-tracing: start-tracing
 //     1: 3
-//     yk-warning: tracing-aborted: tracing went outside of starting frame
+//     yk-tracing: stop-tracing
+//     ...
 //     0: 2
-//     yk-tracing: start-tracing
+//     yk-execution: enter-jit-code
 //     0: 1
+//     yk-execution: deoptimise...
 //     exit
 
-// Test that we don't record a successful trace if we started tracing in an inner control point.
+// Used to test that we don't record a successful trace if we started tracing
+// in an inner control point. Now checks that we do generate a valid trace from
+// the inner control point.
 
 #include <assert.h>
 #include <stdio.h>

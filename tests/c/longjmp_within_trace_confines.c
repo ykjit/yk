@@ -11,7 +11,7 @@
 //     after setjmp
 //     after setjmp
 //     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: irregular control flow detected
+//     yk-warning: trace-compilation-aborted: ...
 //     i=1
 //     after setjmp
 //     after setjmp

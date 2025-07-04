@@ -61,6 +61,7 @@ impl Opt {
             // peeling.
             TraceKind::Sidetrace(_) => false,
             TraceKind::Connector(_) => false,
+            TraceKind::DifferentFrames => false,
         };
 
         // Step 1: optimise the module as-is.

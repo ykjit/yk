@@ -42,6 +42,20 @@ const RECOVER_REG: [usize; 31] = [
 /// from zero). This is used to allocate arrays whose indices need to be the DWARF register number.
 const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 
+#[unsafe(no_mangle)]
+pub(crate) extern "C" fn __yk_ret_from_trace(ctrid: u64) {
+    let ctr = MTThread::with_borrow(|mtt| mtt.compiled_trace(TraceId::from_u64(ctrid)))
+        .as_any()
+        .downcast::<X64CompiledTrace>()
+        .unwrap();
+    let mt = &ctr.mt;
+    mt.deopt();
+    mt.stats
+        .timing_state(crate::log::stats::TimingState::OutsideYk);
+    mt.log
+        .log(Verbosity::Execution, &format!("return {:?}", ctr.ctrid()));
+}
+
 /// Deoptimise back to the interpreter. This function is called from a failing guard (see
 /// [super::Assemble::codegen]).
 ///

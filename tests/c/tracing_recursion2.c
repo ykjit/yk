@@ -5,15 +5,21 @@
 //   stderr:
 //     6
 //     yk-tracing: start-tracing
-//     5
+//     1
+//     return
 //     yk-tracing: stop-tracing
 //     ...
-//     call @loop...
-//     deopt...
+//     return [safepoint: ...
 //     ...
+//     2
+//     yk-execution: enter-jit-code
+//     1
+//     return
+//     yk-execution: return ...
+//     exit
 
-// Check that traces that end in a different frame are compiled by emitting a
-// recursive call to the interpreter inside the trace.
+// Check that traces that left the interpreter loop during tracing emit a
+// return instruction.
 
 #include <assert.h>
 #include <stdio.h>
@@ -24,13 +30,15 @@
 
 void loop(YkMT *, YkLocation *, int);
 
+__attribute__((yk_outline))
 void loop(YkMT *mt, YkLocation *loc, int i) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, loc);
     fprintf(stderr, "%d\n", i);
-    if (i == 5)
-      loop(mt, loc, i - 1);
+    if (i == 6) {
+      loop(mt, loc, i - 5);
+    }
     i--;
   }
   fprintf(stderr, "return\n");
@@ -44,7 +52,6 @@ int main(int argc, char **argv) {
   YkLocation loc = yk_location_new();
 
   loop(mt, &loc, 6);
-
   fprintf(stderr, "exit\n");
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
