@@ -233,6 +233,11 @@ cargo_deny_mdbook_pid=$!
 for tracer in $TRACERS; do
     export YKB_TRACER="${tracer}"
     echo "===> Running ${tracer} tests"
+
+    # The lua test harness isn't clever enough to rebuild yklua when YKB_TRACER
+    # changes, so for now just nuke any existing yklua to force a rebuild.
+    rm -rf target/release/yklua
+
     RUST_TEST_SHUFFLE=1 cargo test --release
 
     if [ "${tracer}" = "hwt" ]; then

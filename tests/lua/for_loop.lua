@@ -1,4 +1,3 @@
--- ignore-if: test "$YKB_TRACER" = "swt"
 -- Run-time:
 --   env-var: YK_HOT_THRESHOLD=3
 --   env-var: YKD_LOG=4
@@ -8,23 +7,23 @@
 --     0
 --     1
 --     2
---     yk-tracing: start-tracing: for_loop.lua:35: GETTABUP
+--     yk-tracing: start-tracing: for_loop.lua:34: GETTABUP
 --     3
---     yk-tracing: stop-tracing: for_loop.lua:35: GETTABUP
---     --- Begin debugstrs: header: for_loop.lua:35: GETTABUP ---
---       for_loop.lua:35: GETTABUP
---       for_loop.lua:35: GETFIELD
---       for_loop.lua:35: SELF
---       for_loop.lua:35: GETTABUP
---       for_loop.lua:35: MOVE
---       for_loop.lua:35: CALL
---       for_loop.lua:35: LOADK
---       for_loop.lua:35: CALL
---       for_loop.lua:36: ADDI
---       for_loop.lua:34: FORLOOP
+--     yk-tracing: stop-tracing: for_loop.lua:34: GETTABUP
+--     --- Begin debugstrs: header: for_loop.lua:34: GETTABUP ---
+--       for_loop.lua:34: GETTABUP
+--       for_loop.lua:34: GETFIELD
+--       for_loop.lua:34: SELF
+--       for_loop.lua:34: GETTABUP
+--       for_loop.lua:34: MOVE
+--       for_loop.lua:34: CALL
+--       for_loop.lua:34: LOADK
+--       for_loop.lua:34: CALL
+--       for_loop.lua:35: ADDI
+--       for_loop.lua:33: FORLOOP
 --     --- End debugstrs ---
 --     4
---     yk-execution: enter-jit-code: for_loop.lua:35: GETTABUP
+--     yk-execution: enter-jit-code: for_loop.lua:34: GETTABUP
 --     5
 --     6
 --     yk-execution: deoptimise ...

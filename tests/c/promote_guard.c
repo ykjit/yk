@@ -1,3 +1,5 @@
+// ## SWT miscompiles the trace, giving the wrong output.
+// ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4

@@ -1,5 +1,3 @@
-// ## FIXME: SWT can't handle control points not in main.
-// ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG=4
 //   env-var: YKD_SERIALISE_COMPILATION=1

@@ -1,4 +1,3 @@
--- ignore-if: test "$YKB_TRACER" = "swt"
 -- Run-time:
 --   env-var: YK_HOT_THRESHOLD=3
 --   env-var: YKD_LOG=4
@@ -8,24 +7,24 @@
 --     0
 --     1
 --     2
---     yk-tracing: start-tracing: while_loop.lua:35: LEI
+--     yk-tracing: start-tracing: while_loop.lua:34: LEI
 --     3
 --     yk-tracing: stop-tracing: ...
---     --- Begin debugstrs: header: while_loop.lua:35: LEI ---
---       while_loop.lua:35: LEI
---       while_loop.lua:36: GETTABUP
---       while_loop.lua:36: GETFIELD
---       while_loop.lua:36: SELF
---       while_loop.lua:36: GETTABUP
---       while_loop.lua:36: MOVE
---       while_loop.lua:36: CALL
---       while_loop.lua:36: LOADK
---       while_loop.lua:36: CALL
---       while_loop.lua:37: ADDI
---       while_loop.lua:37: JMP
+--     --- Begin debugstrs: header: while_loop.lua:34: LEI ---
+--       while_loop.lua:34: LEI
+--       while_loop.lua:35: GETTABUP
+--       while_loop.lua:35: GETFIELD
+--       while_loop.lua:35: SELF
+--       while_loop.lua:35: GETTABUP
+--       while_loop.lua:35: MOVE
+--       while_loop.lua:35: CALL
+--       while_loop.lua:35: LOADK
+--       while_loop.lua:35: CALL
+--       while_loop.lua:36: ADDI
+--       while_loop.lua:36: JMP
 --     --- End debugstrs ---
 --     4
---     yk-execution: enter-jit-code: while_loop.lua:35: LEI
+--     yk-execution: enter-jit-code: while_loop.lua:34: LEI
 --     5
 --     6
 --     yk-execution: deoptimise ...
