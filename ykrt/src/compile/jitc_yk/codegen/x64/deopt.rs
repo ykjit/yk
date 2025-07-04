@@ -48,7 +48,7 @@ pub(crate) extern "C" fn __yk_ret_from_trace(ctrid: u64) {
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
-    let mt = Arc::clone(&ctr.mt);
+    let mt = &ctr.mt;
     mt.deopt();
     mt.stats
         .timing_state(crate::log::stats::TimingState::OutsideYk);
