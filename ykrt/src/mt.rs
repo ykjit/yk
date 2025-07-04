@@ -644,13 +644,7 @@ impl MT {
                 } => {
                     // If this assert fails then the code in `transition_control_point`,
                     // which rejects traces that end in another frame, didn't work.
-                    let endframe = if frameaddr < tracing_frameaddr {
-                        TraceEndFrame::Entered
-                    } else if frameaddr > tracing_frameaddr {
-                        TraceEndFrame::Left
-                    } else {
-                        TraceEndFrame::Same
-                    };
+                    let endframe = TraceEndFrame::from_frames(tracing_frameaddr, frameaddr);
                     (hl, thread_tracer, promotions, debug_strs, endframe)
                 }
                 _ => unreachable!(),

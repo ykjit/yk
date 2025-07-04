@@ -128,6 +128,23 @@ pub(crate) enum TraceEndFrame {
     Left,
 }
 
+impl TraceEndFrame {
+    pub(crate) fn from_frames(start: *mut c_void, end: *mut c_void) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if end < start {
+                Self::Entered
+            } else if end > start {
+                Self::Left
+            } else {
+                Self::Same
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        todo!()
+    }
+}
+
 /// What kind of trace does this module represent?
 #[derive(Clone)]
 pub(crate) enum TraceKind {
