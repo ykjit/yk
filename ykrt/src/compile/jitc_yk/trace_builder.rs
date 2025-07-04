@@ -21,14 +21,6 @@ use crate::{
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
 
-/// The mode for processing blocks.
-enum ProcessMode {
-    /// Process blocks normally.
-    Normal,
-    /// Don't process any remaining blocks (except in order to count promotions/debugstrs etc).
-    Skip,
-}
-
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {
     /// The AOT IR.
@@ -65,8 +57,8 @@ pub(crate) struct TraceBuilder {
     inferred_consts: HashMap<jit_ir::InstIdx, jit_ir::ConstIdx>,
     /// Did this trace end in another frame?
     endframe: TraceEndFrame,
-    /// Current mode for processing blocks.
-    process_mode: ProcessMode,
+    /// Whether or not we want blocks to be processed.
+    process_blocks: bool,
     /// Info regarding the most recently seen recursive call to the interpreter.
     last_interp_call: Option<(BBlockId, &'static DeoptSafepoint)>,
 }
@@ -109,7 +101,7 @@ impl TraceBuilder {
             debug_str_idx: 0,
             inferred_consts: HashMap::new(),
             endframe,
-            process_mode: ProcessMode::Normal,
+            process_blocks: true,
             last_interp_call: None,
         })
     }
@@ -733,7 +725,7 @@ impl TraceBuilder {
             // compiled trace into the interpreter.
             let safepoint = frame.safepoint.unwrap();
             self.jit_mod.push(jit_ir::Inst::Return(safepoint.id))?;
-            self.process_mode = ProcessMode::Skip;
+            self.process_blocks = false;
             Ok(())
         }
     }
@@ -1639,10 +1631,10 @@ impl TraceBuilder {
                     // In order to emit guards for conditional branches we need to peek at the next
                     // block.
                     let nextbb = trace_iter.peek().and_then(|x| self.lookup_aot_block(x));
-                    if let ProcessMode::Skip = self.process_mode {
-                        self.process_promotions_and_debug_strs_only(&bid)?;
-                    } else {
+                    if self.process_blocks {
                         self.process_block(&bid, &prev_bid, nextbb)?;
+                    } else {
+                        self.process_promotions_and_debug_strs_only(&bid)?;
                     }
                     if self.cp_block.as_ref() == Some(&bid) {
                         // When using the hardware tracer we will see two control point
