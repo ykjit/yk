@@ -75,12 +75,12 @@ impl Guard {
     /// directly into the parent trace.
     /// * `ctr`: The compiled side-trace.
     /// * `parent`: The immediate parent of the side-trace.
-    /// * `gidx`: The guard id of the side-trace.
+    /// * `gid`: The guard id of the side-trace.
     pub fn set_ctr(
         &self,
         ctr: Arc<dyn CompiledTrace>,
         parent: &Arc<dyn CompiledTrace>,
-        gidx: GuardIdx,
+        gid: GuardId,
     ) {
         let mut lk = self.kind.lock();
         let addr = ctr.entry();
@@ -92,24 +92,26 @@ impl Guard {
         // race condition. If we were to patch the parent trace first, there is a small window
         // where another thread takes the patched jump and deopts before we had a chance to call
         // `set_ctr` which sets information required by deopt.
-        parent.patch_guard(gidx, addr);
+        parent.patch_guard(gid, addr);
     }
 }
 
-/// Identify a [Guard] within a trace.
+/// Uniquely identify a [Guard] within a trace.
 ///
-/// This is guaranteed to be an index into an array that is freely convertible to/from [usize].
+/// The value contained in this ID has no specific semantics to the front-end: it is a token that
+/// compilers can interpret however they want provided they maintain the basic guarantee "this
+/// token uniquely identifies a guard within a given trace".
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct GuardIdx(usize);
+pub(crate) struct GuardId(usize);
 
-impl From<usize> for GuardIdx {
+impl From<usize> for GuardId {
     fn from(v: usize) -> Self {
         Self(v)
     }
 }
 
-impl From<GuardIdx> for usize {
-    fn from(v: GuardIdx) -> Self {
+impl From<GuardId> for usize {
+    fn from(v: GuardId) -> Self {
         v.0
     }
 }

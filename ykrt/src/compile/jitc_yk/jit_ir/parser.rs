@@ -213,7 +213,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             ));
                             inst_off += 1;
                         }
-                        let gidx = self
+                        let gid = self
                             .m
                             .push_guardinfo(GuardInfo::new(
                                 aot_ir::BBlockId::new(0.into(), 0.into()),
@@ -222,7 +222,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 0,
                             ))
                             .unwrap();
-                        let inst = GuardInst::new(self.process_operand(cond)?, is_true, gidx);
+                        let inst = GuardInst::new(self.process_operand(cond)?, is_true, gid);
                         self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::ICall {

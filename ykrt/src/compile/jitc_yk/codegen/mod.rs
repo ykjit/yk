@@ -30,7 +30,7 @@ pub(crate) trait CodeGen: Send + Sync {
     ///   defined in [super::YkSideTraceInfo::sp_offset].
     /// * `root_offset` - Stack pointer offset of the root trace as defined in
     ///   [super::YkSideTraceInfo::sp_offset].
-    /// * `prevguards` - List of [GuardIdx]'s of previous guards failures leading up to this trace.
+    /// * `prevguards` - List of [GuardId]'s of previous guards failures leading up to this trace.
     fn codegen(
         &self,
         m: Module,

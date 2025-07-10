@@ -777,7 +777,7 @@ impl fmt::Display for DisplayableOperand<'_> {
             Operand::Local(iid) => {
                 write!(f, "%{}_{}", usize::from(iid.bbidx), usize::from(iid.iidx))
             }
-            Operand::Global(gidx) => write!(f, "@{}", self.m.global_decls[*gidx].name()),
+            Operand::Global(gid) => write!(f, "@{}", self.m.global_decls[*gid].name()),
             Operand::Func(fidx) => write!(f, "{}", self.m.funcs[*fidx].name()),
         }
     }

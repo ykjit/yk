@@ -2194,7 +2194,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     .join(", ");
                 write!(
                     f,
-                    "guard {}, {}, [{live_vars}] ; trace_gidx {gidx} safepoint_id {}",
+                    "guard {}, {}, [{live_vars}] ; trace_gid {gidx} safepoint_id {}",
                     if *expect { "true" } else { "false" },
                     cond.unpack(self.m).display(self.m),
                     gi.safepoint_id
