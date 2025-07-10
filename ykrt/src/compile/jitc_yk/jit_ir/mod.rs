@@ -1493,8 +1493,6 @@ pub(crate) struct InlinedFrame {
     pub(crate) funcidx: aot_ir::FuncIdx,
     /// The deopt safepoint for [callinst].
     pub(crate) safepoint: &'static aot_ir::DeoptSafepoint,
-    /// The [Operand]s passed to [funcidx].
-    pub(crate) args: Vec<PackedOperand>,
 }
 
 impl InlinedFrame {
@@ -1502,13 +1500,11 @@ impl InlinedFrame {
         callinst: Option<aot_ir::InstId>,
         funcidx: aot_ir::FuncIdx,
         safepoint: &'static aot_ir::DeoptSafepoint,
-        args: Vec<Operand>,
     ) -> InlinedFrame {
         InlinedFrame {
             callinst,
             funcidx,
             safepoint,
-            args: args.iter().map(PackedOperand::new).collect::<Vec<_>>(),
         }
     }
 }
@@ -1883,17 +1879,7 @@ impl Inst {
                 let inlined_frames = ginfo
                     .inlined_frames()
                     .iter()
-                    .map(|x| {
-                        InlinedFrame::new(
-                            x.callinst.clone(),
-                            x.funcidx,
-                            x.safepoint,
-                            x.args
-                                .iter()
-                                .map(|x| op_mapper(m, &x.unpack(m)))
-                                .collect::<Vec<_>>(),
-                        )
-                    })
+                    .map(|x| InlinedFrame::new(x.callinst.clone(), x.funcidx, x.safepoint))
                     .collect::<Vec<_>>();
                 let newginfo = GuardInfo::new(
                     ginfo.bid().clone(),

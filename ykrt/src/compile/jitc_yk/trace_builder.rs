@@ -565,9 +565,6 @@ impl TraceBuilder {
                 frame.callinst.clone(),
                 frame.funcidx.unwrap(),
                 frame.safepoint.unwrap(),
-                // We don't need to copy the arguments since they are only required for LoadArg
-                // instructions which we won't see at the beginning of a sidetrace.
-                Vec::new(),
             ));
 
             // Collect live variables.
@@ -1419,7 +1416,9 @@ impl TraceBuilder {
                     funcidx: Some(x.funcidx),
                     callinst: x.callinst.clone(),
                     safepoint: Some(x.safepoint),
-                    args: x.args.clone(),
+                    // We don't need to copy the arguments since they are only required for LoadArg
+                    // instructions which we won't see at the beginning of a sidetrace.
+                    args: vec![],
                 })
                 .collect::<Vec<_>>();
 
