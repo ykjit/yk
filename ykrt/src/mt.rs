@@ -21,7 +21,7 @@ use parking_lot_core::SpinWait;
 
 use crate::{
     aotsmp::{AOT_STACKMAPS, load_aot_stackmaps},
-    compile::{CompilationError, CompiledTrace, Compiler, GuardIdx, default_compiler},
+    compile::{CompilationError, CompiledTrace, Compiler, GuardId, default_compiler},
     job_queue::{Job, JobQueue},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     log::{
@@ -335,7 +335,7 @@ impl MT {
         hl_arc: Arc<Mutex<HotLocation>>,
         trid: TraceId,
         parent_ctr: Arc<dyn CompiledTrace>,
-        gidx: GuardIdx,
+        gid: GuardId,
         connector_tid: TraceId,
     ) {
         self.stats.trace_recorded_ok();
@@ -356,7 +356,7 @@ impl MT {
                 trace_iter.0,
                 trid,
                 Arc::clone(&parent_ctr),
-                gidx,
+                gid,
                 target_ctr,
                 Arc::clone(&hl_arc),
                 trace_iter.1,
@@ -367,11 +367,11 @@ impl MT {
                     mt.compiled_traces
                         .lock()
                         .insert(ctr.ctrid(), Arc::clone(&ctr));
-                    parent_ctr.guard(gidx).set_ctr(ctr, &parent_ctr, gidx);
+                    parent_ctr.guard(gid).set_ctr(ctr, &parent_ctr, gid);
                     mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {
-                    parent_ctr.guard(gidx).trace_or_compile_failed(&mt);
+                    parent_ctr.guard(gid).trace_or_compile_failed(&mt);
                     mt.stats.trace_compiled_err();
                     match e {
                         CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
@@ -406,7 +406,7 @@ impl MT {
 
         let mt = Arc::clone(self);
         let failure = move || {
-            parent_ctr_cl.guard(gidx).trace_or_compile_failed(&mt);
+            parent_ctr_cl.guard(gid).trace_or_compile_failed(&mt);
         };
         self.job_queue.push(
             self,
@@ -471,7 +471,7 @@ impl MT {
             }
             TransitionControlPoint::StopSideTracing {
                 trid,
-                gidx,
+                gid,
                 parent_ctr,
                 connector_tid,
                 start,
@@ -511,7 +511,7 @@ impl MT {
                             hl,
                             trid,
                             parent_ctr,
-                            gidx,
+                            gid,
                             connector_tid,
                         );
                         if start {
@@ -526,7 +526,7 @@ impl MT {
                     Err(e) => {
                         MTThread::set_tracing(IsTracing::None);
                         self.job_queue.notify_failure(self, trid);
-                        parent_ctr.guard(gidx).trace_or_compile_failed(self);
+                        parent_ctr.guard(gid).trace_or_compile_failed(self);
                         self.stats.trace_recorded_err();
                         yklog!(
                             self.log,
@@ -979,14 +979,14 @@ impl MT {
                             _ => unreachable!(),
                         };
                         drop(lk);
-                        let Some((parent_ctr, gidx)) = gtrace else {
+                        let Some((parent_ctr, gid)) = gtrace else {
                             panic!()
                         };
-                        let gidx = *gidx;
+                        let gid = *gid;
                         let parent_ctr = Arc::clone(parent_ctr);
                         TransitionControlPoint::StopSideTracing {
                             trid: *tracing_trid,
-                            gidx,
+                            gid,
                             parent_ctr,
                             connector_tid,
                             start: false,
@@ -996,14 +996,14 @@ impl MT {
                         let next_tid = self.next_trace_id();
                         lk.kind = HotLocationKind::Tracing(next_tid);
                         drop(lk);
-                        let Some((parent_ctr, gidx)) = gtrace else {
+                        let Some((parent_ctr, gid)) = gtrace else {
                             panic!()
                         };
-                        let gidx = *gidx;
+                        let gid = *gid;
                         let parent_ctr = Arc::clone(parent_ctr);
                         TransitionControlPoint::StopSideTracing {
                             trid: *tracing_trid,
-                            gidx,
+                            gid,
                             parent_ctr,
                             connector_tid: next_tid,
                             start: true,
@@ -1045,9 +1045,9 @@ impl MT {
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
         parent_ctr: Arc<dyn CompiledTrace>,
-        gidx: GuardIdx,
+        gid: GuardId,
     ) -> TransitionGuardFailure {
-        if parent_ctr.guard(gidx).inc_failed(self) {
+        if parent_ctr.guard(gid).inc_failed(self) {
             if let Some(hl) = parent_ctr.hl().upgrade() {
                 // This thread should not be tracing anything.
                 debug_assert!(!MTThread::is_tracing());
@@ -1106,7 +1106,7 @@ impl MT {
         }
     }
 
-    /// Inform this meta-tracer that guard `gidx` has failed.
+    /// Inform this meta-tracer that guard `gid` has failed.
     ///
     // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
     // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
@@ -1114,10 +1114,10 @@ impl MT {
     pub(crate) fn guard_failure(
         self: &Arc<Self>,
         parent: Arc<dyn CompiledTrace>,
-        gidx: GuardIdx,
+        gid: GuardId,
         frameaddr: *mut c_void,
     ) {
-        match self.transition_guard_failure(Arc::clone(&parent), gidx) {
+        match self.transition_guard_failure(Arc::clone(&parent), gid) {
             TransitionGuardFailure::NoAction => {
                 self.stats
                     .timing_state(crate::log::stats::TimingState::OutsideYk);
@@ -1145,7 +1145,7 @@ impl MT {
                         debug_strs: Vec::new(),
                         frameaddr,
                         seen_hls: HashSet::new(),
-                        gtrace: Some((parent, gidx)),
+                        gtrace: Some((parent, gid)),
                     }),
                     Err(e) => {
                         MTThread::set_tracing(IsTracing::None);
@@ -1228,7 +1228,7 @@ enum MTThreadState {
         frameaddr: *mut c_void,
         /// If we're tracing from a guard, this will be `Some(parent_ctr,
         /// guard_idx_in_parent_ctr)`; for loop traces this will be `None`.
-        gtrace: Option<(Arc<dyn CompiledTrace>, GuardIdx)>,
+        gtrace: Option<(Arc<dyn CompiledTrace>, GuardId)>,
     },
     Executing {
         mt: Arc<MT>,
@@ -1453,7 +1453,7 @@ enum TransitionControlPoint {
     /// Stop side tracing.
     StopSideTracing {
         trid: TraceId,
-        gidx: GuardIdx,
+        gid: GuardId,
         parent_ctr: Arc<dyn CompiledTrace>,
         connector_tid: TraceId,
         // Should a new trace be immediately started after the guard trace?
@@ -1593,7 +1593,7 @@ mod tests {
 
     fn expect_start_side_tracing(mt: &Arc<MT>, ctr: Arc<dyn CompiledTrace>) {
         let TransitionGuardFailure::StartSideTracing(hl, trid) =
-            mt.transition_guard_failure(Arc::clone(&ctr), GuardIdx::from(0))
+            mt.transition_guard_failure(Arc::clone(&ctr), GuardId::from(0))
         else {
             panic!()
         };
@@ -1607,7 +1607,7 @@ mod tests {
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
                 seen_hls: HashSet::new(),
-                gtrace: Some((ctr, GuardIdx::from(0))),
+                gtrace: Some((ctr, GuardId::from(0))),
             });
         });
     }

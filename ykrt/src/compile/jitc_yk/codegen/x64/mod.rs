@@ -19,7 +19,7 @@ use crate::compile::jitc_yk::gdb::{self, GdbCtx};
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{
-        CompilationError, CompiledTrace, Guard, GuardIdx,
+        CompilationError, CompiledTrace, Guard, GuardId,
         jitc_yk::{
             CodeGen, YkSideTraceInfo,
             aot_ir::{self, DeoptSafepoint},
@@ -653,7 +653,7 @@ impl<'a> Assemble<'a> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 self.comment(format!(
-                    "guard {}, {}, [{live_vars}] ; trace_gidx {} safepoint_id {}",
+                    "guard {}, {}, [{live_vars}] ; trace_gid {} safepoint_id {}",
                     if x.expect() { "true" } else { "false" },
                     x.cond(self.m).display(self.m),
                     self.guards.len(),
@@ -3695,20 +3695,20 @@ impl X64CompiledTrace {
         &self.entry_vars
     }
 
-    /// Return the [CompiledGuard] at `gidx`.
-    fn compiled_guard(&self, gidx: GuardIdx) -> &CompiledGuard {
-        &self.compiled_guards[usize::from(gidx)]
+    /// Return the [CompiledGuard] at `gid`.
+    fn compiled_guard(&self, gid: GuardId) -> &CompiledGuard {
+        &self.compiled_guards[usize::from(gid)]
     }
 
     pub(crate) fn sidetraceinfo(
         &self,
-        gidx: GuardIdx,
+        gid: GuardId,
         target_ctr: Arc<dyn CompiledTrace>,
     ) -> Arc<YkSideTraceInfo<Register>> {
         let target_ctr = target_ctr.as_any().downcast::<X64CompiledTrace>().unwrap();
         // FIXME: Can we reference these instead of copying them, e.g. by passing in a reference to
-        // the `CompiledTrace` and `gidx` or better a reference to `DeoptInfo`?
-        let gd = &self.compiled_guards[usize::from(gidx)];
+        // the `CompiledTrace` and `gid` or better a reference to `DeoptInfo`?
+        let gd = &self.compiled_guards[usize::from(gid)];
         let lives = gd
             .live_vars
             .iter()
@@ -3744,20 +3744,20 @@ impl CompiledTrace for X64CompiledTrace {
         self.sp_offset
     }
 
-    fn guard(&self, gidx: GuardIdx) -> &crate::compile::Guard {
-        &self.compiled_guards[usize::from(gidx)].guard
+    fn guard(&self, gid: GuardId) -> &crate::compile::Guard {
+        &self.compiled_guards[usize::from(gid)].guard
     }
 
     /// Patch the address of a side-trace directly into the parent trace.
-    /// * `gidx`: The guard to be patched.
+    /// * `gid`: The guard to be patched.
     /// * `staddr`: The address of the side-trace.
-    fn patch_guard(&self, gidx: GuardIdx, staddr: *const std::ffi::c_void) {
+    fn patch_guard(&self, gid: GuardId, staddr: *const std::ffi::c_void) {
         // Since we have to temporarily make the parent trace writable, another thread trying
         // to patch this trace could interfere with that. Having this lock prevents this.
         let _lock = LK_PATCH.lock();
 
         // Calculate a pointer to the address we want to patch.
-        let patch_offset = self.compiled_guards[usize::from(gidx)].fail_offset;
+        let patch_offset = self.compiled_guards[usize::from(gid)].fail_offset;
         // Add 2 bytes to get to the address operand of the mov instruction.
         let patch_addr = unsafe { self.buf.ptr(patch_offset).offset(2) };
         // FIXME: Is it better/faster to protect the entire buffer in one go and then patch each
@@ -5871,7 +5871,7 @@ mod tests {
             ",
             "
                 ...
-                ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8] ; trace_gidx 0 safepoint_id 0
+                ; guard false, %0, [0:%0_0: %0, 0:%0_1: 10i8, 0:%0_2: 32i8, 0:%0_3: 42i8] ; trace_gid 0 safepoint_id 0
                 bt r.32._, 0x00
                 jb 0x...
                 ...

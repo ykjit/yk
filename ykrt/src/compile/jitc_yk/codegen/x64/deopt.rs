@@ -1,7 +1,7 @@
 use super::{Register, VarLocation};
 use crate::{
     aotsmp::AOT_STACKMAPS,
-    compile::{CompiledTrace, GuardIdx},
+    compile::{CompiledTrace, GuardId},
     log::Verbosity,
     mt::{MTThread, TraceId},
 };
@@ -49,7 +49,7 @@ const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 ///
 /// * `frameaddr` - the RBP value for main interpreter loop (and also the JIT since the trace
 ///   executes on the same frame)
-/// * `gidx` - the [GuardIdx] of the current failing guard
+/// * `gid` - the [GuardId] of the current failing guard
 /// * `gp_regs` - a pointer to the saved values of the 16 general purpose registers in the same
 ///   order as [crate::compile::jitc_yk::codegen::x64::lsregalloc::GP_REGS]
 /// * `fp_regs` - a pointer to the saved values of the 16 floating point registers
@@ -57,7 +57,7 @@ const REGISTER_NUM: usize = RECOVER_REG.len() + 2;
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn __yk_deopt(
     frameaddr: *mut c_void,
-    gidx: u64,
+    gid: u64,
     gp_regs: &[u64; 16],
     fp_regs: &[u64; 16],
     ctrid: u64,
@@ -69,14 +69,14 @@ pub(crate) extern "C" fn __yk_deopt(
     let mt = Arc::clone(&ctr.mt);
     mt.stats
         .timing_state(crate::log::stats::TimingState::Deopting);
-    let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
+    let gid = GuardId::from(usize::try_from(gid).unwrap());
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-    let cgd = &ctr.compiled_guard(gidx);
+    let cgd = &ctr.compiled_guard(gid);
 
     mt.deopt();
     mt.log.log(
         Verbosity::Execution,
-        &format!("deoptimise {:?} {gidx:?}", ctr.ctrid()),
+        &format!("deoptimise {:?} {gid:?}", ctr.ctrid()),
     );
 
     // Calculate space required for the new stack.
@@ -342,7 +342,7 @@ pub(crate) extern "C" fn __yk_deopt(
         newframedst = unsafe { newframedst.byte_add(REG64_BYTESIZE) };
     }
 
-    mt.guard_failure(ctr, gidx, frameaddr);
+    mt.guard_failure(ctr, gid, frameaddr);
 
     // Now overwrite the existing stack with our newly recreated one.
     unsafe { replace_stack(newframedst, newstack, memsize) };

@@ -14,7 +14,7 @@ use std::{
 use thiserror::Error;
 
 pub(crate) mod guard;
-pub(crate) use guard::{Guard, GuardIdx};
+pub(crate) use guard::{Guard, GuardId};
 #[cfg(jitc_yk)]
 pub mod jitc_yk;
 
@@ -60,7 +60,7 @@ pub(crate) trait Compiler: Send + Sync {
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,
         parent_ctr: Arc<dyn CompiledTrace>,
-        gidx: GuardIdx,
+        gid: GuardId,
         target_ctr: Arc<dyn CompiledTrace>,
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
@@ -89,9 +89,9 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
 
     /// Return a reference to the guard `id`.
-    fn guard(&self, gidx: GuardIdx) -> &Guard;
+    fn guard(&self, gid: GuardId) -> &Guard;
 
-    fn patch_guard(&self, gidx: GuardIdx, target: *const std::ffi::c_void);
+    fn patch_guard(&self, gid: GuardId, target: *const std::ffi::c_void);
 
     /// The pointer to this trace's executable code.
     fn entry(&self) -> *const c_void;
@@ -139,11 +139,11 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn guard(&self, _gidx: GuardIdx) -> &Guard {
+        fn guard(&self, _gid: GuardId) -> &Guard {
             panic!();
         }
 
-        fn patch_guard(&self, _gidx: GuardIdx, _target: *const std::ffi::c_void) {
+        fn patch_guard(&self, _gid: GuardId, _target: *const std::ffi::c_void) {
             panic!();
         }
 
@@ -194,12 +194,12 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn guard(&self, gidx: GuardIdx) -> &Guard {
-            assert_eq!(usize::from(gidx), 0);
+        fn guard(&self, gid: GuardId) -> &Guard {
+            assert_eq!(usize::from(gid), 0);
             &self.guard
         }
 
-        fn patch_guard(&self, _gidx: GuardIdx, _target: *const std::ffi::c_void) {
+        fn patch_guard(&self, _gid: GuardId, _target: *const std::ffi::c_void) {
             panic!();
         }
 
