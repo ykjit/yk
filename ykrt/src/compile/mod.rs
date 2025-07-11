@@ -4,6 +4,7 @@ use crate::{
     mt::{MT, TraceId},
     trace::AOTTraceIterator,
 };
+use jitc_yk::jit_ir::TraceEndFrame;
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
@@ -51,6 +52,7 @@ pub(crate) trait Compiler: Send + Sync {
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
         connector_ctr: Option<Arc<dyn CompiledTrace>>,
+        endframe: TraceEndFrame,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 
     /// Compile a guard trace into machine code.
@@ -65,6 +67,7 @@ pub(crate) trait Compiler: Send + Sync {
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
+        endframe: TraceEndFrame,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 

@@ -6,24 +6,18 @@
 //     yk-tracing: start-tracing
 //     early return
 //     6
-//     yk-warning: tracing-aborted: tracing went outside of starting frame
-//     5
-//     4
-//     yk-tracing: start-tracing
-//     3
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
+//     return...
 //     --- End jit-pre-opt ---
-//     2
-//     yk-execution: enter-jit-code
-//     1
-//     yk-execution: deoptimise ...
+//     ...
 //     return
 //     exit
 
-// Check that early return from a recursive interpreter loop aborts tracing,
-// but doesn't stop a location being retraced.
+// Used to check that early return from a recursive interpreter loop aborts
+// tracing, but doesn't stop a location being retraced. Now, simply checks that
+// we can trace and compile an early return.
 
 #include <assert.h>
 #include <stdio.h>

@@ -117,6 +117,34 @@ use ykaddr::addr::symbol_to_ptr;
 // This is simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::{BinOp, FloatPredicate, FloatTy, Predicate};
 
+/// Did this trace end in a different frame than it started in?
+#[derive(Debug)]
+pub(crate) enum TraceEndFrame {
+    /// The trace stopped in the same frame that it started in.
+    Same,
+    /// The trace stopped after entering a new frame.
+    Entered,
+    /// The trace stopped after leaving the starting frame.
+    Left,
+}
+
+impl TraceEndFrame {
+    pub(crate) fn from_frames(start: *mut c_void, end: *mut c_void) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if end < start {
+                Self::Entered
+            } else if end > start {
+                Self::Left
+            } else {
+                Self::Same
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        todo!()
+    }
+}
+
 /// What kind of trace does this module represent?
 #[derive(Clone)]
 pub(crate) enum TraceKind {
@@ -129,6 +157,8 @@ pub(crate) enum TraceKind {
     /// A sidetrace: this will start at the point of a guard and will jump to
     /// [SideTraceInfo::target_ctr].
     Sidetrace(Arc<YkSideTraceInfo<Register>>),
+    /// A trace where we stopped tracing in a different frame than we started in.
+    DifferentFrames,
 }
 
 impl std::fmt::Debug for TraceKind {
@@ -138,6 +168,7 @@ impl std::fmt::Debug for TraceKind {
             TraceKind::HeaderAndBody => write!(f, "HeaderAndBody"),
             TraceKind::Connector(_) => write!(f, "Connector"),
             TraceKind::Sidetrace(_) => write!(f, "Sidetrace"),
+            TraceKind::DifferentFrames => write!(f, "DifferentFrames"),
         }
     }
 }
@@ -244,6 +275,7 @@ impl Module {
     pub(crate) fn set_tracekind(&mut self, tracekind: TraceKind) {
         match (&self.tracekind, &tracekind) {
             (&TraceKind::HeaderOnly, &TraceKind::HeaderAndBody) => (),
+            (&TraceKind::HeaderOnly, &TraceKind::DifferentFrames) => (),
             (from, to) => panic!("Can't transition from a {from:?} trace to a {to:?} trace"),
         }
         self.tracekind = tracekind;
@@ -643,6 +675,10 @@ impl Module {
         info: GuardInfo,
     ) -> Result<GuardInfoIdx, CompilationError> {
         GuardInfoIdx::try_from(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
+    }
+
+    pub(crate) fn guard_info(&self, gidx: GuardInfoIdx) -> &GuardInfo {
+        &self.guard_info[usize::from(gidx)]
     }
 
     pub(crate) fn trace_header_start(&self) -> &[PackedOperand] {
@@ -1551,6 +1587,8 @@ pub(crate) enum Inst {
     TraceBodyStart,
     TraceBodyEnd,
     SidetraceEnd,
+    Deopt(GuardInfoIdx),
+    Return(u64),
 
     SExt(SExtInst),
     ZExt(ZExtInst),
@@ -1617,6 +1655,8 @@ impl Inst {
             Self::TraceBodyStart => m.void_tyidx(),
             Self::TraceBodyEnd => m.void_tyidx(),
             Self::SidetraceEnd => m.void_tyidx(),
+            Self::Deopt(_) => m.void_tyidx(),
+            Self::Return(_) => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
             Self::ZExt(si) => si.dest_tyidx(),
             Self::BitCast(i) => i.dest_tyidx(),
@@ -1667,6 +1707,8 @@ impl Inst {
                 | Inst::TraceBodyStart
                 | Inst::TraceBodyEnd
                 | Inst::SidetraceEnd
+                | Inst::Deopt(_)
+                | Inst::Return(_)
                 | Inst::Param(_)
                 | Inst::DebugStr(..)
         )
@@ -1763,6 +1805,12 @@ impl Inst {
                     x.unpack(m).map_iidx(f);
                 }
             }
+            Inst::Deopt(gidx) => {
+                for (_, pop) in m.guard_info[usize::from(*gidx)].live_vars() {
+                    pop.unpack(m).map_iidx(f);
+                }
+            }
+            Inst::Return(_) => (),
             Inst::SExt(SExtInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::ZExt(ZExtInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::BitCast(BitCastInst { val, .. }) => val.unpack(m).map_iidx(f),
@@ -1958,6 +2006,28 @@ impl Inst {
                 m.trace_header_end = m.trace_header_end.iter().map(|op| mapper(m, op)).collect();
                 Inst::SidetraceEnd
             }
+            Inst::Deopt(gidx) => {
+                let ginfo = &m.guard_info[usize::from(*gidx)];
+                let newlives = ginfo
+                    .live_vars()
+                    .iter()
+                    .map(|(aot, jit)| (aot.clone(), mapper(m, jit)))
+                    .collect();
+                let inlined_frames = ginfo
+                    .inlined_frames()
+                    .iter()
+                    .map(|x| InlinedFrame::new(x.callinst.clone(), x.funcidx, x.safepoint))
+                    .collect::<Vec<_>>();
+                let newginfo = GuardInfo::new(
+                    ginfo.bid().clone(),
+                    newlives,
+                    inlined_frames,
+                    ginfo.safepoint_id,
+                );
+                let newgidx = m.push_guardinfo(newginfo).unwrap();
+                Inst::Deopt(newgidx)
+            }
+            Inst::Return(id) => Inst::Return(*id),
             Inst::Trunc(TruncInst { val, dest_tyidx }) => Inst::Trunc(TruncInst {
                 val: mapper(m, val),
                 dest_tyidx: *dest_tyidx,
@@ -2260,6 +2330,27 @@ impl fmt::Display for DisplayableInst<'_> {
                     }
                 }
                 write!(f, "]")
+            }
+            Inst::Deopt(gidx) => {
+                let gi = &self.m.guard_info[usize::from(*gidx)];
+                let live_vars = gi
+                    .live_vars()
+                    .iter()
+                    .map(|(x, y)| {
+                        format!(
+                            "{}:%{}_{}: {}",
+                            usize::from(x.funcidx()),
+                            usize::from(x.bbidx()),
+                            usize::from(x.iidx()),
+                            y.unpack(self.m).display(self.m),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "deopt [{live_vars}]")
+            }
+            Inst::Return(id) => {
+                write!(f, "return [safepoint: {id}]")
             }
             Inst::SExt(i) => {
                 write!(f, "sext {}", i.val(self.m).display(self.m),)
@@ -3170,6 +3261,22 @@ impl GuardInst {
 
     pub(crate) fn guard_info<'a>(&self, m: &'a Module) -> &'a GuardInfo {
         &m.guard_info[usize::from(self.gidx)]
+    }
+}
+
+/// Container for things that provide information required for deopt.
+#[derive(Debug)]
+pub(crate) enum HasGuardInfo {
+    Guard(GuardInst),
+    Deopt(GuardInfoIdx),
+}
+
+impl HasGuardInfo {
+    pub(crate) fn guard_info<'a>(&self, m: &'a Module) -> &'a GuardInfo {
+        match self {
+            Self::Guard(inst) => inst.guard_info(m),
+            Self::Deopt(gidx) => m.guard_info(*gidx),
+        }
     }
 }
 

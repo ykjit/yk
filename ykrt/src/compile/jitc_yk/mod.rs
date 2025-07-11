@@ -8,6 +8,7 @@ use crate::{
     mt::{MT, TraceId},
     trace::AOTTraceIterator,
 };
+use jit_ir::TraceEndFrame;
 use parking_lot::Mutex;
 use std::{
     env,
@@ -110,6 +111,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
         connector_ctr: Option<Arc<dyn CompiledTrace>>,
+        endframe: TraceEndFrame,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         // If either `unwrap` fails, there is no chance of the system working correctly.
         let aot_mod = &*AOT_MOD;
@@ -127,6 +129,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
             promotions,
             debug_strs,
             connector_ctr,
+            endframe,
         )?;
 
         let ds = if let Some(x) = &hl.lock().debug_str {
@@ -141,6 +144,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
                 jit_ir::TraceKind::HeaderAndBody => unreachable!(),
                 jit_ir::TraceKind::Connector(_) => "connector",
                 jit_ir::TraceKind::Sidetrace(_) => "side-trace",
+                jit_ir::TraceKind::DifferentFrames => "call-recursion",
             };
             let mut out = String::new();
             out.push_str(&format!("--- Begin debugstrs: {kind}{ds} ---\n"));
@@ -199,6 +203,7 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
         connector_ctr: Option<Arc<dyn CompiledTrace>>,
+        endframe: TraceEndFrame,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         self.compile(
             mt,
@@ -209,6 +214,7 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
             promotions,
             debug_strs,
             connector_ctr,
+            endframe,
         )
     }
 
@@ -223,6 +229,7 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
+        endframe: TraceEndFrame,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let parent_ctr = parent_ctr
             .as_any()
@@ -238,6 +245,7 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
             promotions,
             debug_strs,
             None,
+            endframe,
         )
     }
 }
