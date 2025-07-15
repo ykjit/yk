@@ -10,6 +10,8 @@ use libc::c_void;
 use page_size;
 #[cfg(debug_assertions)]
 use std::collections::HashMap;
+#[cfg(debug_assertions)]
+use std::ops::Range;
 use std::{
     alloc::{Layout, alloc, realloc},
     ptr,
@@ -54,6 +56,85 @@ pub(crate) extern "C" fn __yk_ret_from_trace(ctrid: u64) {
         .timing_state(crate::log::stats::TimingState::OutsideYk);
     mt.log
         .log(Verbosity::Execution, &format!("return {:?}", ctr.ctrid()));
+}
+
+/// Determine if two ranges overlap.
+///
+/// (At the time of writing, Rust's `is_overlapping()` is only implemented on `Range<usize>`
+/// and we use `Range<isize>` in deopt).
+#[cfg(debug_assertions)]
+fn ranges_overlap(r1: &Range<isize>, r2: &Range<isize>) -> bool {
+    r1.start.max(r2.start) < r1.end.min(r2.end)
+}
+
+/// Check for obvious deopt issues.
+///
+/// For example:
+///  - Deopting the same register twice with different values.
+///  - Deopt overlapping memory regions.
+#[cfg(debug_assertions)]
+#[derive(Default)]
+struct DeoptChecker {
+    /// Register locations we've seen deopted before.
+    ///
+    /// The key is a DWARF register number. The value is a tuple of the size of the value (in
+    /// bytes) and the actual value we deopted.
+    seen_reg_locs: HashMap<usize, (usize, u64)>,
+    /// Base pointer-relative stack locations we've seen deopted before.
+    ///
+    /// Each element is a tuple capturing the memory range affected and a value that the range was
+    /// deopted to.
+    seen_mem_locs: Vec<(Range<isize>, u64)>,
+}
+
+#[cfg(debug_assertions)]
+impl DeoptChecker {
+    /// Records (and checks) a deopted location of a location `loc` with the value `val`.
+    ///
+    /// The encoding of `loc`:
+    ///  - loc >= 0: DWARF register number.
+    ///  - loc < 0: stack offset relative to rbp
+    ///
+    /// (note that a memory deopt of `basepointer-0` is never deopted and thus isn't necessary for
+    /// us to express, thus it's safe to assume that `loc==0` means register zero)
+    ///
+    /// # Panics
+    ///
+    /// If anything looks fishy.
+    fn record_and_check(&mut self, loc: isize, size: usize, val: u64) {
+        // Note: It's OK to deopt the same value to the same location.
+        if loc >= 0 {
+            // register location.
+            let loc = usize::try_from(loc).unwrap();
+            if let std::collections::hash_map::Entry::Vacant(e) = self.seen_reg_locs.entry(loc) {
+                e.insert((size, val));
+            } else {
+                let saw = self.seen_reg_locs[&loc];
+                if saw.1 != val {
+                    panic!(
+                        "Overlapping register deopt for DWARF reg {}! \
+                        {} bytes 0x{:016x} vs {} bytes 0x{:016x}",
+                        loc, saw.0, saw.1, size, val
+                    );
+                };
+            }
+        } else {
+            // mem location relative to the base pointer.
+            let new_rng = loc..(loc + isize::try_from(size).unwrap());
+            for (seen_rng, seen_val) in &self.seen_mem_locs {
+                if ranges_overlap(seen_rng, &new_rng) {
+                    // If the offsets and value is identical, that's ok.
+                    if *seen_rng != new_rng || *seen_val != val {
+                        panic!(
+                            "Overlapping memory deopt! \
+                        range: {seen_rng:?}, val: 0x{seen_val:016x} vs. range {new_rng:?}, val: 0x{val:016x}"
+                        );
+                    }
+                }
+            }
+            self.seen_mem_locs.push((new_rng, val));
+        }
+    }
 }
 
 /// Deoptimise back to the interpreter. This function is called from a failing guard (see
@@ -177,27 +258,9 @@ pub(crate) extern "C" fn __yk_deopt(
             }
         }
 
-        // Sanity check: We shouldn't deopt to the same location twice.
+        // Expensive sanity checks in debug builds.
         #[cfg(debug_assertions)]
-        let mut seen_locs = HashMap::new();
-        // Records deopt of a location `l` with the value `v`.
-        //
-        // l >= 0: DWARF register number.
-        // l < 0: stack offset relative to rbp
-        //
-        // (note rbp-0 is never deopted and thus isn't necessary for us to express)
-        //
-        // FIXME: check for overlapping stack regions too.
-        #[cfg(debug_assertions)]
-        let mut seen = |l: isize, v: u64| {
-            // It's OK to deopt the same value to the same location.
-            // FIXME: but why does this happen?
-            if let std::collections::hash_map::Entry::Vacant(e) = seen_locs.entry(l) {
-                e.insert(v);
-            } else {
-                debug_assert_eq!(seen_locs[&l], v, "duplicate deopt with different value");
-            }
-        };
+        let mut checker = DeoptChecker::default();
 
         // Now write all live variables to the new stack in the order they are listed in the AOT
         // stackmap.
@@ -245,11 +308,15 @@ pub(crate) extern "C" fn __yk_deopt(
             match aotloc {
                 SMLocation::Register(reg, size, extras) => {
                     #[cfg(debug_assertions)]
-                    seen(isize::try_from(*reg).unwrap(), jitval);
+                    checker.record_and_check(
+                        isize::try_from(*reg).unwrap(),
+                        usize::from(*size),
+                        jitval,
+                    );
                     registers[usize::from(*reg)] = jitval;
                     for extra in extras {
                         #[cfg(debug_assertions)]
-                        seen(isize::from(*extra), jitval);
+                        checker.record_and_check(isize::from(*extra), usize::from(*size), jitval);
                         // Write any additional locations that were tracked for this variable.
                         // Numbers greater or equal to zero are registers in Dwarf notation.
                         // Negative numbers are offsets relative to RBP.
@@ -295,7 +362,11 @@ pub(crate) extern "C" fn __yk_deopt(
                 }
                 SMLocation::Indirect(reg, off, size) => {
                     #[cfg(debug_assertions)]
-                    seen(isize::try_from(*off).unwrap(), jitval);
+                    checker.record_and_check(
+                        isize::try_from(*off).unwrap(),
+                        usize::from(*size),
+                        jitval,
+                    );
                     debug_assert_eq!(*reg, RBP_DWARF_NUM);
                     let temp = if i == 0 {
                         // While the bottom frame is already on the stack and doesn't need to
@@ -427,4 +498,100 @@ unsafe extern "C" fn replace_stack(dst: *mut c_void, src: *const c_void, size: u
         "pop rax",
         "ret",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(debug_assertions)]
+    use super::{DeoptChecker, ranges_overlap};
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn overlapping_ranges() {
+        assert!(ranges_overlap(&(1..10), &(5..6)));
+        assert!(ranges_overlap(&(5..6), &(1..10)));
+        assert!(ranges_overlap(&(1..2), &(1..2)));
+        assert!(ranges_overlap(&(-100..100), &(-1..0)));
+        assert!(ranges_overlap(&(-1..0), &(-100..100)));
+
+        assert!(!ranges_overlap(&(1..1), &(1..1)));
+        assert!(!ranges_overlap(&(0..5), &(5..10)));
+        assert!(!ranges_overlap(&(5..10), &(0..5)));
+        assert!(!ranges_overlap(&(1..2), &(9..10)));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn deopt_checker() {
+        let mut dc = DeoptChecker::default();
+        // Registers.
+        dc.record_and_check(0, 8, 0x11223344556677);
+        dc.record_and_check(0, 8, 0x11223344556677);
+        dc.record_and_check(1, 8, 0xaabbccddeeff00);
+        dc.record_and_check(8, 1, 0xaabbccddeeff00);
+        dc.record_and_check(8, 1, 0xaabbccddeeff00);
+        // Memory.
+        dc.record_and_check(-8, 8, 0x11223344556677);
+        dc.record_and_check(-12, 4, 0xffffffff);
+        dc.record_and_check(-16, 4, 0x11111111);
+        dc.record_and_check(-17, 1, 0xaa);
+        dc.record_and_check(-17, 1, 0xaa);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(
+        expected = "Overlapping register deopt for DWARF reg 0! 8 bytes 0x1122334455667788 vs 8 bytes 0xaabbccddeeff0011"
+    )]
+    fn deopt_checker_diff_regval() {
+        let mut dc = DeoptChecker::default();
+        dc.record_and_check(0, 8, 0x1122334455667788);
+        dc.record_and_check(0, 8, 0xaabbccddeeff0011);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(
+        expected = "Overlapping register deopt for DWARF reg 0! 8 bytes 0xffffffffffffffff vs 1 bytes 0x00000000000000ff"
+    )]
+    fn deopt_checker_ok_overlap() {
+        let mut dc = DeoptChecker::default();
+        dc.record_and_check(0, 8, 0xffffffffffffffff);
+        // In theory this could be OK, but for now we bail out. We haven't seen this in the wild.
+        dc.record_and_check(0, 1, 0xff);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(
+        expected = "Overlapping memory deopt! range: -8..0, val: 0xffffffffffffffff vs. range -8..0, val: 0x0000000000000000"
+    )]
+    fn deopt_checker_diff_memval() {
+        let mut dc = DeoptChecker::default();
+        dc.record_and_check(-8, 8, 0xffffffffffffffff);
+        dc.record_and_check(-8, 8, 0x0000000000000000);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(
+        expected = "Overlapping memory deopt! range: -8..0, val: 0xffffffffffffffff vs. range -8..-4, val: 0x0000000000000000"
+    )]
+    fn deopt_checker_overlap_mem() {
+        let mut dc = DeoptChecker::default();
+        dc.record_and_check(-8, 8, 0xffffffffffffffff);
+        dc.record_and_check(-8, 4, 0x000000);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(
+        expected = "Overlapping memory deopt! range: -8..0, val: 0xffffffffffffffff vs. range -1..0, val: 0x00000000000000ff"
+    )]
+    fn deopt_checker_ok_overlap_mem() {
+        let mut dc = DeoptChecker::default();
+        dc.record_and_check(-8, 8, 0xffffffffffffffff);
+        // In theory this could be OK, but for now we bail out. We haven't seen this in the wild.
+        dc.record_and_check(-1, 1, 0xff);
+    }
 }
