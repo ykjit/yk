@@ -465,9 +465,6 @@ impl MT {
                     });
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
-
-                // FIXME: Calling this function overwrites the current (Rust) function frame,
-                // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
                 unsafe { __yk_exec_trace(frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl, trid) => {
@@ -1196,32 +1193,10 @@ unsafe extern "C" fn __yk_exec_trace(
     frameaddr: *const c_void,
     rsp: *const c_void,
     trace: *const c_void,
-) -> ! {
+) {
     std::arch::naked_asm!(
-        // Reset RBP
-        "mov rbp, rdi",
-        // Reset RSP to the end of the control point frame (this includes the registers we pushed
-        // just before the control point)
-        "mov rsp, rsi",
-        "sub rsp, 8",   // Return address of control point call
-        "sub rsp, 104", // Registers pushed in naked cp call (includes alignment)
-        // Restore registers which were pushed to the stack in [ykcapi::__ykrt_control_point].
-        "pop r15",
-        "pop r14",
-        "pop r13",
-        "pop r12",
-        "pop r11",
-        "pop r10",
-        "pop r9",
-        "pop r8",
-        "pop rsi",
-        "pop rdi",
-        "pop rbx",
-        "pop rcx",
-        "pop rax",
-        "add rsp, 8", // Remove return pointer
-        // Call the trace function.
-        "jmp rdx",
+        // Write trace address over the return address of the control point call.
+        "mov [rsi-8], rdx",
         "ret",
     )
 }
