@@ -30,10 +30,9 @@ using `yk` before rebuilding them.
 
 ## `YKB_TRACER`
 
-The `YKB_TRACER` environment variable allows building yk with either `hwt` 
+The `YKB_TRACER` environment variable allows building yk with either `hwt`
 (Hardware Tracer) or `swt` (Software Software Tracer).
 
-`hwt` - Relies on Intel PT, suitable only for x86 CPUs supporting it.
+`swt` - CPU architecture-independent. The default.
 
-`swt` - CPU architecture-independent, but with fewer features compared to 
-`hwt`.
+`hwt` - Relies on Intel PT. Suitable only for x86 CPUs supporting it.

@@ -99,7 +99,7 @@ handle_arg() {
             # Don't optimise functions by changing their calling convention.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-dont-opt-func-abi"
             # Use software-tracer pass
-            if [ "${YKB_TRACER}" = "swt" ]; then
+            if [ "${YKB_TRACER}" != "hwt" ]; then
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
                 # Experimental module cloning support.
                 if [ "${YKB_SWTMODCLONE}" = "1" ]; then
