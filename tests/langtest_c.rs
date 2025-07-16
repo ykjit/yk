@@ -46,6 +46,17 @@ fn main() {
     #[cfg(not(target_arch = "x86_64"))]
     panic!("Unknown target_arch");
 
+    // Ensure YKB_TRACER is set, so that tests don't have to consider what the default tracer is
+    // when YKB_TRACER is absent from the env.
+    #[cfg(tracer_swt)]
+    unsafe {
+        env::set_var("YKB_TRACER", "swt")
+    };
+    #[cfg(tracer_hwt)]
+    unsafe {
+        env::set_var("YKB_TRACER", "hwt")
+    };
+
     LangTester::new()
         .comment_prefix(COMMENT_PREFIX)
         .test_dir("c")

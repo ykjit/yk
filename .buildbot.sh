@@ -167,20 +167,20 @@ for tracer in ${TRACERS}; do
     cargo-clippy-diff origin/master -- --all-features --tests -- -D warnings
 done
 
-# Run the tests multiple times on hwt to try and catch non-deterministic
+# Run the tests multiple times on swt to try and catch non-deterministic
 # failures. But running everything so often is expensive, so run other tracers'
 # tests just once.
-export YKB_TRACER=hwt
-echo "===> Running hwt tests"
+echo "===> Running swt tests"
 for _ in $(seq 10); do
-    RUST_TEST_SHUFFLE=1 cargo test
+    YKB_TRACER=swt RUST_TEST_SHUFFLE=1 cargo test
 done
 
-# test yklua/hwt in debug mode.
-PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug YKB_TRACER=hwt test_yklua
+# test yklua/swt in debug mode.
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug YKB_TRACER=swt test_yklua
 
 for tracer in ${TRACERS}; do
-    if [ "$tracer" = "hwt" ]; then
+    if [ "$tracer" = "swt" ]; then
+        # already tested above.
         continue
     fi
     echo "===> Running ${tracer} tests"
@@ -240,9 +240,9 @@ for tracer in $TRACERS; do
 
     RUST_TEST_SHUFFLE=1 cargo test --release
 
-    if [ "${tracer}" = "hwt" ]; then
-        # test yklua/hwt in release mode.
-        PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release YKB_TRACER=hwt test_yklua
+    if [ "${tracer}" = "swt" ]; then
+        # test yklua/swt in release mode.
+        PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release YKB_TRACER=${tracer} test_yklua
 
         # Do a quick run of the benchmark suite as a smoke test.
         pipx install rebench
@@ -265,7 +265,7 @@ done
 # Note that --profile-time doesn't work without --bench, so we have to run each
 # benchmark individually.
 for b in collect_and_decode promote; do
-    YKB_TRACER=hwt cargo bench --bench "${b}" -- --profile-time 1
+    YKB_TRACER=swt cargo bench --bench "${b}" -- --profile-time 1
 done
 
 # Test some BF programs.
