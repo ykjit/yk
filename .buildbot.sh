@@ -264,9 +264,10 @@ done
 #
 # Note that --profile-time doesn't work without --bench, so we have to run each
 # benchmark individually.
-for b in collect_and_decode promote; do
-    YKB_TRACER=swt cargo bench --bench "${b}" -- --profile-time 1
-done
+#
+# Note: collect_and_decode is hwt-specific.
+YKB_TRACER=hwt cargo bench --bench collect_and_decode -- --profile-time 1
+YKB_TRACER=swt cargo bench --bench promote -- --profile-time 1
 
 # Test some BF programs.
 git clone --depth=1 "$YKCBF_REPO"
