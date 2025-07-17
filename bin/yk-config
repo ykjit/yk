@@ -67,8 +67,6 @@ handle_arg() {
 
             # Interferes with the JIT's inlining stack.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-disable-tail-call-codegen"
-            # Fallthrough optimisations distort block mapping.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-no-fallthrough"
 
             # Ensure control point is patched.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-patch-control-point"
@@ -88,8 +86,6 @@ handle_arg() {
             # Ensure calls never appear in the entry block of a function.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-no-calls-in-entryblocks"
 
-            # Use the yk extensions to the blockmap section.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-extended-llvmbbaddrmap-section"
             # Enable fix for spill reloads before stackmaps.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-spillreloads-fix"
             # Enable shadow stacks.
@@ -98,21 +94,30 @@ handle_arg() {
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-add-locs"
             # Don't optimise functions by changing their calling convention.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-dont-opt-func-abi"
-            # Use software-tracer pass
-            if [ "${YKB_TRACER}" != "hwt" ]; then
+
+            # Tracer-specific flags.
+            if [ "${YKB_TRACER}" = "hwt" ]; then
+                # HWT-specific flags.
+                #
+                # Emit a basicblock map section. Used by the HWT mapper.
+                OUTPUT="${OUTPUT} -Wl,--lto-basic-block-sections=labels"
+                # Use the yk extensions to the blockmap section.
+                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-extended-llvmbbaddrmap-section"
+                # Fallthrough optimisations distort block mapping.
+                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-no-fallthrough"
+            else
+                # SWT-specific flags.
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
                 # Experimental module cloning support.
                 if [ "${YKB_SWTMODCLONE}" = "1" ]; then
                     OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"
                 fi
             fi
+
             # Disable backend optimisations that Yk can't handle by adding the
             # `optnone` attribute onto every function after high-level IR
             # optimisations have finished.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-optnone-after-ir-passes"
-
-            # Emit a basic block map section. Used for block mapping.
-            OUTPUT="${OUTPUT} -Wl,--lto-basic-block-sections=labels"
 
             # Ensure all symbols are exported so that the JIT can use them.
             # FIXME: https://github.com/ykjit/yk/issues/381
