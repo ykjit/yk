@@ -110,4 +110,15 @@ void *__yk_promote_ptr(void *);
 /// memory after this call has completed.
 void yk_debug_str(char *);
 
+int yk_pthread_create(
+    pthread_t *restrict thread,
+    const pthread_attr_t *restrict attr,
+    void *(*start_routine)(void *),
+    void *restrict arg
+);
+
+void yk_foreach_shadowstack(void (*closure)(void* shadow_start, void* shadow_end));
+
+void yk_init(void);
+
 #endif

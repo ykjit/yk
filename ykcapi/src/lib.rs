@@ -17,8 +17,9 @@
 #[cfg(feature = "ykd")]
 use std::ffi::CStr;
 use std::{
-    ffi::{CString, c_char, c_void},
+    ffi::{CString, c_char},
     mem::forget,
+    os::raw::c_void,
     ptr,
     sync::Arc,
 };
@@ -135,4 +136,14 @@ pub extern "C" fn yk_location_null() -> Location {
 #[unsafe(no_mangle)]
 pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn yk_foreach_shadowstack(f: extern "C" fn(*mut c_void, *mut c_void)) {
+    ykrt::yk_foreach_shadowstack(f)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn yk_init() {
+    ykrt::yk_init()
 }
