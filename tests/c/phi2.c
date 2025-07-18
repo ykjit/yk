@@ -3,7 +3,7 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_LOG=4
-//   env-var: YKD_LOG_STATS=/dev/null
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     yk-tracing: start-tracing
 //     i=4, val=6
@@ -37,10 +37,6 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-bool test_compiled_event(YkCStats stats) {
-  return stats.traces_compiled_ok == 1;
-}
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
@@ -54,9 +50,6 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    if (i == 3) {
-      __ykstats_wait_until(mt, test_compiled_event);
-    }
     NOOPT_VAL(cond);
     if (cond > 0) {
       val = 1;
