@@ -3,6 +3,8 @@
 //! account for context switches and the like. Thus the statistics are very much in "best effort"
 //! territory -- but it's better than nothing!
 
+#[cfg(feature = "yk_testing")]
+use crate::mt::MT;
 #[cfg(not(test))]
 use std::env;
 #[cfg(feature = "yk_testing")]
@@ -101,9 +103,9 @@ impl Stats {
     ///
     /// # Panics
     ///
-    /// If `YKD_LOG_STATS` is not set.
+    /// If `YKD_LOG_STATS` is not set or if a worker thread dies whilst waiting.
     #[cfg(feature = "yk_testing")]
-    fn wait_until<F>(&self, test: F)
+    fn wait_until<F>(&self, mt: &MT, test: F)
     where
         F: Fn(&mut StatsInner) -> bool,
     {
@@ -115,8 +117,10 @@ impl Stats {
                         .wait_until_condvar
                         .as_ref()
                         .expect("Can't call wait_until unless YKD_LOG_STATS is set")
-                        .wait(lk)
-                        .unwrap();
+                        .wait_timeout(lk, Duration::from_secs(1))
+                        .unwrap()
+                        .0;
+                    mt.check_job_queue_integrity();
                 }
             }
             None => panic!("Can't call wait_until unless YKD_LOG_STATS is set"),
@@ -302,7 +306,7 @@ mod yk_testing {
         if mt.stats.inner.is_none() {
             panic!("Statistics collection not enabled");
         }
-        mt.stats.wait_until(|inner| {
+        mt.stats.wait_until(mt, |inner| {
             let cstats = YkCStats {
                 traces_recorded_ok: inner.traces_recorded_ok,
                 traces_recorded_err: inner.traces_recorded_err,
