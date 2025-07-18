@@ -85,6 +85,26 @@ impl JobQueue {
         }
     }
 
+    /// Check the integrity of the job queue: if any job queue thread has panicked, this function
+    /// will itself panic. This should only be used for testing purposes.
+    #[cfg(feature = "yk_testing")]
+    pub(super) fn check_integrity(&self) {
+        let mut lk = self.worker_threads.lock();
+        let mut i = 0;
+        while i < lk.len() {
+            if lk[i].is_finished() {
+                if let Err(e) = lk.remove(i).join() {
+                    // Despite the name `resume_unwind` will abort if the unwind strategy in
+                    // Rust is set to `abort`.
+                    eprintln!("yk worker thread error");
+                    std::panic::resume_unwind(e);
+                }
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     /// Queue `job` to be run on a worker thread.
     pub(crate) fn push(self: &Arc<Self>, mt: &Arc<MT>, job: Job) {
         #[cfg(feature = "yk_testing")]

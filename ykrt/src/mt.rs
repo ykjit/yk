@@ -169,6 +169,13 @@ impl MT {
         }
     }
 
+    /// Check the integrity of the job queue: if any job queue thread has panicked, this function
+    /// will itself panic. This should only be used for testing purposes.
+    #[cfg(feature = "yk_testing")]
+    pub(crate) fn check_job_queue_integrity(&self) {
+        self.job_queue.check_integrity();
+    }
+
     /// Return this `MT` instance's current hot threshold. Notice that this value can be changed by
     /// other threads and is thus potentially stale as soon as it is read.
     pub fn hot_threshold(self: &Arc<Self>) -> HotThreshold {
