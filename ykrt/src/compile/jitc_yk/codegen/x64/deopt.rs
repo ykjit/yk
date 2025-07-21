@@ -123,10 +123,16 @@ impl DeoptChecker {
             let new_rng = loc..(loc + isize::try_from(size).unwrap());
             for (seen_rng, seen_val) in &self.seen_mem_locs {
                 if ranges_overlap(seen_rng, &new_rng) {
-                    // If the offsets and value is identical, that's ok.
-                    if *seen_rng != new_rng || *seen_val != val {
+                    // If the lower bound of the deopted memory region is the same *and* the value
+                    // written is identical, then this isn't necessarily a problem on a big-endian
+                    // system. This is because the least significant bytes will be written first in
+                    // memory.
+                    //
+                    // Note that this isn't sufficient to catch *all* safe overlapping memory
+                    // deopts, but it's a start, and I'd like to know what other cases can arise.
+                    if seen_rng.start != new_rng.start || *seen_val != val {
                         panic!(
-                            "Overlapping memory deopt! \
+                            "Suspicious memory deopt! \
                         range: {seen_rng:?}, val: 0x{seen_val:016x} vs. range {new_rng:?}, val: 0x{val:016x}"
                         );
                     }
@@ -564,7 +570,7 @@ mod tests {
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic(
-        expected = "Overlapping memory deopt! range: -8..0, val: 0xffffffffffffffff vs. range -8..0, val: 0x0000000000000000"
+        expected = "Suspicious memory deopt! range: -8..0, val: 0xffffffffffffffff vs. range -8..0, val: 0x0000000000000000"
     )]
     fn deopt_checker_diff_memval() {
         let mut dc = DeoptChecker::default();
@@ -575,7 +581,7 @@ mod tests {
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic(
-        expected = "Overlapping memory deopt! range: -8..0, val: 0xffffffffffffffff vs. range -8..-4, val: 0x0000000000000000"
+        expected = "Suspicious memory deopt! range: -8..0, val: 0xffffffffffffffff vs. range -8..-4, val: 0x0000000000000000"
     )]
     fn deopt_checker_overlap_mem() {
         let mut dc = DeoptChecker::default();
@@ -585,13 +591,13 @@ mod tests {
 
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(
-        expected = "Overlapping memory deopt! range: -8..0, val: 0xffffffffffffffff vs. range -1..0, val: 0x00000000000000ff"
-    )]
     fn deopt_checker_ok_overlap_mem() {
         let mut dc = DeoptChecker::default();
-        dc.record_and_check(-8, 8, 0xffffffffffffffff);
-        // In theory this could be OK, but for now we bail out. We haven't seen this in the wild.
-        dc.record_and_check(-1, 1, 0xff);
+        dc.record_and_check(-56, 8, 0x3);
+        dc.record_and_check(-56, 4, 0x3);
+
+        let mut dc = DeoptChecker::default();
+        dc.record_and_check(-100, 4, 0xff);
+        dc.record_and_check(-100, 1, 0xff);
     }
 }
