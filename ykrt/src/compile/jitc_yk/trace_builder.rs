@@ -116,7 +116,6 @@ impl TraceBuilder {
     fn lookup_aot_block(&self, tb: &TraceAction) -> Option<aot_ir::BBlockId> {
         match tb {
             TraceAction::MappedAOTBBlock { func_name, bb } => {
-                let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.funcidx(func_name);
                 if !self.aot_mod.func(func).is_declaration() {
                     Some(aot_ir::BBlockId::new(func, aot_ir::BBlockIdx::new(*bb)))
@@ -830,9 +829,7 @@ impl TraceBuilder {
                 // Find the function the constant pointer is referring to.
                 let dli = ykaddr::addr::dladdr(*vaddr).unwrap();
                 assert_eq!(dli.dli_saddr(), *vaddr);
-                let callee = self
-                    .aot_mod
-                    .funcidx(dli.dli_sname().unwrap().to_str().unwrap());
+                let callee = self.aot_mod.funcidx(dli.dli_sname().unwrap());
                 return self.direct_call_impl(
                     bid,
                     aot_inst_idx,
