@@ -4,6 +4,7 @@ use lang_tester::LangTester;
 use regex::Regex;
 use std::{env, fs::read_to_string, path::PathBuf, process::Command};
 use tempfile::TempDir;
+use tests::full_cargo_profile;
 use ykbuild::ykllvm_bin;
 
 const COMMENT: &str = ";";
@@ -44,11 +45,8 @@ fn main() {
             ]);
 
             let md = env::var("CARGO_MANIFEST_DIR").unwrap();
-            #[cfg(cargo_profile = "debug")]
-            let build_kind = "debug";
-            #[cfg(cargo_profile = "release")]
-            let build_kind = "release";
-            let dumper_path = [&md, "..", "target", build_kind, "dump_ir"]
+            let profile = full_cargo_profile();
+            let dumper_path = [&md, "..", "target", &profile, "dump_ir"]
                 .iter()
                 .collect::<PathBuf>();
             let mut dumper = Command::new(dumper_path);

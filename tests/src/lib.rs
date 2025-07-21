@@ -102,6 +102,18 @@ impl<'a> ExtraLinkage<'a> {
     }
 }
 
+// Determine the "full" cargo profile name, as it appears as an argument to `--profile` (not just
+// "debug" or "release", which is all cargo's `PROFILE` environment` can report).
+pub fn full_cargo_profile() -> String {
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    Path::new(&out_dir)
+        .components()
+        .nth_back(3)
+        .map(|x| x.as_os_str().to_str().unwrap())
+        .unwrap()
+        .to_owned()
+}
+
 /// Make a compiler command that compiles `src` to `exe`.
 ///
 /// `extra_objs` is a collection of other object files to link.
@@ -126,13 +138,9 @@ pub fn mk_compiler(
     .iter()
     .collect::<PathBuf>();
 
-    #[cfg(cargo_profile = "debug")]
-    let mode = "debug";
-    #[cfg(cargo_profile = "release")]
-    let mode = "release";
-
+    let profile = full_cargo_profile();
     let mut yk_config = Command::new(yk_config);
-    yk_config.args([mode, "--cflags", "--cppflags", "--ldflags", "--libs"]);
+    yk_config.args([&profile, "--cflags", "--cppflags", "--ldflags", "--libs"]);
     if let Some(extra_env) = extra_env {
         yk_config.envs(extra_env);
     }
