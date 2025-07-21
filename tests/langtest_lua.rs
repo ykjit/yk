@@ -22,6 +22,7 @@ mod inner {
         path::Path,
         process::{Command, exit},
     };
+    use tests::full_cargo_profile;
     use ykbuild::{target_dir, ykllvm_bin_dir};
 
     const YKLUA_SUBMODULE_PATH: &str = "yklua";
@@ -39,11 +40,6 @@ mod inner {
             );
         }
 
-        // Set variables for tests `ignore-if`s.
-        #[cfg(cargo_profile = "debug")]
-        let profile = "debug";
-        #[cfg(cargo_profile = "release")]
-        let profile = "release";
         let mut yklua_tgt_dir = target_dir();
         yklua_tgt_dir.push("yklua");
         create_dir_all(&yklua_tgt_dir).unwrap();
@@ -103,6 +99,7 @@ mod inner {
         // Because `make` is so quick, we can afford to run it every time this file is run -- if
         // there's nothing to do, it'll finish quicker than we can notice!
         let mut make_cmd = Command::new("make");
+        let profile = full_cargo_profile();
         make_cmd
             .args([
                 "-j".into(),
