@@ -118,15 +118,11 @@ pub struct CPTransition {
 /// * `stats` - Statistics tracker for recording the transition
 pub(crate) unsafe fn cp_transition_to_unopt(frameaddr: *const c_void, stats: &Stats) {
     // TODO: add cache for the asm code generation
-    let buffer = generate_transition_asm(
-        CPTransition {
-            smid: ControlPointStackMapId::Opt,
-            frameaddr,
-            trace_addr: 0 as *const c_void,
-        },
-        ControlPointStackMapId::Opt,
-        ControlPointStackMapId::UnOpt,
-    );
+    let buffer = generate_transition_asm(CPTransition {
+        smid: ControlPointStackMapId::Opt,
+        frameaddr,
+        trace_addr: 0 as *const c_void,
+    });
     stats.swt_transition_opt_to_unopt();
     unsafe {
         execute_asm_buffer(buffer);
@@ -145,15 +141,11 @@ pub(crate) unsafe fn cp_transition_to_unopt(frameaddr: *const c_void, stats: &St
 /// * `stats` - Statistics tracker for recording the transition
 pub(crate) unsafe fn cp_transition_to_opt(frameaddr: *const c_void, stats: &Stats) {
     // TODO: add cache for the asm code generation
-    let buffer = generate_transition_asm(
-        CPTransition {
-            smid: ControlPointStackMapId::UnOpt,
-            frameaddr,
-            trace_addr: 0 as *const c_void,
-        },
-        ControlPointStackMapId::UnOpt,
-        ControlPointStackMapId::Opt,
-    );
+    let buffer = generate_transition_asm(CPTransition {
+        smid: ControlPointStackMapId::UnOpt,
+        frameaddr,
+        trace_addr: 0 as *const c_void,
+    });
     stats.swt_transition_unopt_to_opt();
     unsafe {
         execute_asm_buffer(buffer);
@@ -177,15 +169,11 @@ pub(crate) unsafe fn cp_transition_to_unopt_and_exec_trace(
     stats: &Stats,
 ) {
     // TODO: add cache for the asm code generation
-    let buffer = generate_transition_asm(
-        CPTransition {
-            smid: ControlPointStackMapId::Opt,
-            frameaddr,
-            trace_addr,
-        },
-        ControlPointStackMapId::Opt,
-        ControlPointStackMapId::UnOpt,
-    );
+    let buffer = generate_transition_asm(CPTransition {
+        smid: ControlPointStackMapId::Opt,
+        frameaddr,
+        trace_addr,
+    });
     stats.swt_transition_opt_to_unopt();
     unsafe {
         execute_asm_buffer(buffer);
@@ -230,13 +218,20 @@ unsafe fn execute_asm_buffer(buffer: ExecutableBuffer) {
     }
 }
 
-fn generate_transition_asm(
-    transition: CPTransition,
-    src_smid: ControlPointStackMapId,
-    dst_smid: ControlPointStackMapId,
-) -> ExecutableBuffer {
+fn generate_transition_asm(transition: CPTransition) -> ExecutableBuffer {
     let frameaddr = transition.frameaddr as usize;
     let mut asm = Assembler::new().unwrap();
+
+    let src_smid: ControlPointStackMapId;
+    let dst_smid: ControlPointStackMapId;
+    
+    if transition.smid == ControlPointStackMapId::Opt {
+        src_smid = ControlPointStackMapId::Opt;
+        dst_smid = ControlPointStackMapId::UnOpt;
+    } else {
+        src_smid = ControlPointStackMapId::UnOpt;
+        dst_smid = ControlPointStackMapId::Opt;
+    }
 
     let (src_rec, src_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid as usize);
     let (dst_rec, dst_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid as usize);
