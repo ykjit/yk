@@ -67,18 +67,59 @@ pub extern "C" fn __ykrt_control_point(
     // Stackmap id for the control point.
     smid: u64,
 ) {
-    // FIXME: We could get rid of this entire function if we pass the frame's base pointer into the
-    // control point from the interpreter.
-    std::arch::naked_asm!(
-        // Pass the interpreter frame's base pointer via the 4th argument register.
-        "sub rsp, 8",   // Alignment
-        "mov rcx, rbp", // Pass interpreter frame's base pointer via 4th argument register.
-        "call __ykrt_control_point_real",
-        "add rsp, 8",
-        "ret",
-    );
+    #[cfg(not(swt_modclone))]
+    {
+        // FIXME: We could get rid of this entire function if we pass the frame's base pointer into the
+        // control point from the interpreter.
+        std::arch::naked_asm!(
+            // Pass the interpreter frame's base pointer via the 4th argument register.
+            "sub rsp, 8",   // Alignment
+            "mov rcx, rbp", // Pass interpreter frame's base pointer via 4th argument register.
+            "call __ykrt_control_point_real",
+            "add rsp, 8",
+            "ret",
+        );
+    }
+    #[cfg(swt_modclone)]
+    {
+        // FIXME: Adapt multi version swt control point transition.
+        std::arch::naked_asm!(
+            // Push all registers to the stack as these may contain trace inputs (live
+            // variables) referenced by the control point's stackmap.
+            "push rax",
+            "push rcx",
+            "push rbx",
+            "push rdi",
+            "push rsi",
+            "push r8",
+            "push r9",
+            "push r10",
+            "push r11",
+            "push r12",
+            "push r13",
+            "push r14",
+            "push r15",
+            // Pass the interpreter frame's base pointer via the 4th argument register.
+            "mov rcx, rbp",
+            "call __ykrt_control_point_real",
+            // Restore the previously pushed registers.
+            "pop r15",
+            "pop r14",
+            "pop r13",
+            "pop r12",
+            "pop r11",
+            "pop r10",
+            "pop r9",
+            "pop r8",
+            "pop rsi",
+            "pop rdi",
+            "pop rbx",
+            "pop rcx",
+            "pop rax",
+            "ret",
+        );
+    }
 }
-
 // The actual control point, after we have pushed the callee-saved registers.
 #[unsafe(no_mangle)]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]

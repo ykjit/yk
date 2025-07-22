@@ -311,6 +311,7 @@ pub(crate) extern "C" fn __yk_deopt(
             } else {
                 todo!("Deal with multi register locations");
             };
+
             match aotloc {
                 SMLocation::Register(reg, size, extras) => {
                     #[cfg(debug_assertions)]
