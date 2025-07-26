@@ -60,10 +60,7 @@ fn main() {
     LangTester::new()
         .comment_prefix(COMMENT_PREFIX)
         .test_dir("c")
-        .test_path_filter(|p: &Path| {
-            p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
-                && !p.file_name().unwrap().to_str().unwrap().contains(".old")
-        })
+        .test_path_filter(|p: &Path| p.extension().as_ref().and_then(|p| p.to_str()) == Some("c"))
         .test_extract(move |p| {
             read_to_string(p)
                 .unwrap()
