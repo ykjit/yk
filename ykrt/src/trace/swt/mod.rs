@@ -12,6 +12,16 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
+#[cfg(swt_modclone)]
+#[cfg(test)]
+pub(crate) mod asm;
+#[cfg(swt_modclone)]
+pub(crate) mod buffer;
+#[cfg(swt_modclone)]
+pub(crate) mod cp;
+#[cfg(swt_modclone)]
+pub(crate) mod live_vars;
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBBlock {
     function_index: usize,
@@ -59,6 +69,29 @@ pub extern "C" fn __yk_trace_basicblock(function_index: usize, block_index: usiz
                 block_index,
             });
         })
+    }
+}
+
+/// Does nothing except from exist. This function is just a placeholder
+/// for SWT multi-version IR execution.
+///
+/// # Arguments
+/// * `function_index` - The index of the function to which the basic
+/// block belongs.
+/// * `block_index` - The index of the basic block within the function.
+#[cfg(tracer_swt)]
+#[inline(never)]
+#[cold]
+#[unsafe(no_mangle)]
+pub extern "C" fn __yk_trace_basicblock_dummy(function_index: usize, block_index: usize) {
+    // NOTE - not sure how much affect this has on the compiler in practice.
+    // Consume the parameters to prevent LLVM from treating them as unused
+    std::hint::black_box(function_index);
+    std::hint::black_box(block_index);
+
+    // This tells LLVM that arbitrary memory may have been modified
+    unsafe {
+        std::arch::asm!("", options(nostack, preserves_flags));
     }
 }
 

@@ -1,3 +1,4 @@
+// ignore-if: test $CP_PATCHPOINT=1
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
@@ -8,7 +9,7 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //       ...
-//       call @indirect(%17, %18, %19, %20, %21)
+//       call @{{__yk_unopt_:indirect}}(%17, %18, %19, %20, %21)
 //       ...
 //     --- End jit-pre-opt ---
 //     0: 4

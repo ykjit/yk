@@ -25,7 +25,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i{{size}} = call @f(1i{{size}}) <idem_const 2i{{size}}>
+//     %{{_}}: i{{size}} = call @{{__yk_unopt_:f}}(1i{{size}}) <idem_const 2i{{size}}>
 //     ...
 //     --- End jit-pre-opt ---
 //     --- Begin jit-post-opt ---
