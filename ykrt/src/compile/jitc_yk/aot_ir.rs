@@ -32,7 +32,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     error::Error,
-    ffi::{CString, OsStr},
+    ffi::{CStr, CString, OsStr},
     fmt::{self, Display},
     fs,
     io::{BufRead, BufReader, Seek, SeekFrom},
@@ -114,22 +114,26 @@ pub(crate) struct Module {
     line_infos: HashMap<InstId, LineInfoLoc>,
     #[deku(skip)]
     source_files: Arc<Mutex<HashMap<PathBuf, Option<BufReader<fs::File>>>>>,
+    #[deku(skip)]
+    /// A cache mapping function names to function indices.
+    func_cache: HashMap<CString, FuncIdx>,
 }
 
 impl Module {
+    pub(crate) fn create_func_cache(&mut self) {
+        for (fidx, f) in self.funcs.iter().enumerate() {
+            self.func_cache
+                .insert(CString::new(f.name()).unwrap(), FuncIdx(fidx));
+        }
+    }
+
     /// Find a function by its name.
     ///
     /// # Panics
     ///
     /// Panics if no function exists with that name.
-    pub(crate) fn funcidx(&self, find_func: &str) -> FuncIdx {
-        // OPT: create a cache in the Module.
-        self.funcs
-            .iter()
-            .enumerate()
-            .find(|(_, f)| f.name == find_func)
-            .map(|(f_idx, _)| FuncIdx(f_idx))
-            .unwrap()
+    pub(crate) fn funcidx(&self, find_func: &CStr) -> FuncIdx {
+        self.func_cache[find_func]
     }
 
     pub(crate) fn ptr_off_bitsize(&self) -> u8 {
@@ -264,7 +268,8 @@ impl std::fmt::Display for Module {
 
 /// Deserialise an AOT module from the slice `data`.
 pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
-    let ((_, _), modu) = Module::from_bytes((data, 0))?;
+    let ((_, _), mut modu) = Module::from_bytes((data, 0))?;
+    modu.create_func_cache();
     Ok(modu)
 }
 
