@@ -1,6 +1,9 @@
 //! The mapper translates a hwtracer trace into an IR trace.
 
-use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorderError};
+use crate::{
+    compile::jitc_yk::AOT_MOD,
+    trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorderError},
+};
 use hwtracer::{
     Block, BlockIteratorError, HWTracerError, TemporaryErrorKind, Trace,
     llvm_blockmap::LLVM_BLOCK_MAP,
@@ -127,9 +130,10 @@ impl HWTTraceIterator {
                     sio.dli_fname().unwrap().to_str().unwrap()
                 );
                 if let Some(sym_name) = sio.dli_sname() {
+                    let func_idx = AOT_MOD.funcidx(sym_name);
                     for bb in ent.value.corr_bbs() {
                         self.push_upcoming(TraceAction::new_mapped_aot_block(
-                            sym_name,
+                            func_idx.into(),
                             usize::try_from(*bb).unwrap(),
                         ));
                     }

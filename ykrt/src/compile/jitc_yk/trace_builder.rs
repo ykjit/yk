@@ -115,10 +115,12 @@ impl TraceBuilder {
     // is unavailable (for example it was marked `yk_outline`).
     fn lookup_aot_block(&self, tb: &TraceAction) -> Option<aot_ir::BBlockId> {
         match tb {
-            TraceAction::MappedAOTBBlock { func_name, bb } => {
-                let func = self.aot_mod.funcidx(func_name);
-                if !self.aot_mod.func(func).is_declaration() {
-                    Some(aot_ir::BBlockId::new(func, aot_ir::BBlockIdx::new(*bb)))
+            TraceAction::MappedAOTBBlock { funcidx, bbidx } => {
+                if !self.aot_mod.func((*funcidx).into()).is_declaration() {
+                    Some(aot_ir::BBlockId::new(
+                        (*funcidx).into(),
+                        aot_ir::BBlockIdx::new(*bbidx),
+                    ))
                 } else {
                     None
                 }
@@ -1550,12 +1552,15 @@ impl TraceBuilder {
                 // first (guaranteed mappable) block in the trace. Note that empty traces are handled in
                 // the tracing phase so the `unwrap` is safe.
                 let prev = match trace_iter.peek().unwrap() {
-                    TraceAction::MappedAOTBBlock { func_name, bb } => {
-                        debug_assert!(*bb > 0);
+                    TraceAction::MappedAOTBBlock {
+                        funcidx: func_idx,
+                        bbidx,
+                    } => {
+                        debug_assert!(*bbidx > 0);
                         // It's `- 1` due to the way the ykllvm block splitting pass works.
                         TraceAction::MappedAOTBBlock {
-                            func_name,
-                            bb: bb - 1,
+                            funcidx: *func_idx,
+                            bbidx: bbidx - 1,
                         }
                     }
                     TraceAction::UnmappableBBlock => panic!(),
