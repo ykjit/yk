@@ -114,7 +114,7 @@ pub enum TraceAction {
         /// The index of the function that the block belongs to.
         funcidx: usize,
         /// The index of the block within the function.
-        bb: usize,
+        bbidx: usize,
     },
     /// One or more machine basic blocks that could not be mapped.
     ///
@@ -133,7 +133,7 @@ impl TraceAction {
     pub fn new_mapped_aot_block(func_idx: usize, bb: usize) -> Self {
         Self::MappedAOTBBlock {
             funcidx: func_idx,
-            bb,
+            bbidx: bb,
         }
     }
 

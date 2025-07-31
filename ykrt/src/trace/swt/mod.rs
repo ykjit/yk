@@ -84,7 +84,7 @@ impl Iterator for SWTraceIterator {
         self.bbs.next().map(|tb| {
             Ok(TraceAction::MappedAOTBBlock {
                 funcidx: tb.function_index,
-                bb: tb.block_index,
+                bbidx: tb.block_index,
             })
         })
     }
