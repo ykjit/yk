@@ -12,7 +12,7 @@
 //!
 //! This module thus contains tracing backends which can record and process traces.
 
-use std::{error::Error, ffi::CStr, fmt, sync::Arc};
+use std::{error::Error, fmt, sync::Arc};
 use thiserror::Error;
 
 #[cfg(tracer_hwt)]
@@ -111,8 +111,8 @@ pub(crate) enum AOTTraceIteratorError {
 pub enum TraceAction {
     /// A sucessfully mapped block.
     MappedAOTBBlock {
-        /// The name of the function containing the block.
-        func_name: &'static CStr,
+        /// The index of the function that the block belongs to.
+        funcidx: usize,
         /// The index of the block within the function.
         bb: usize,
     },
@@ -130,8 +130,11 @@ pub enum TraceAction {
 }
 
 impl TraceAction {
-    pub fn new_mapped_aot_block(func_name: &'static CStr, bb: usize) -> Self {
-        Self::MappedAOTBBlock { func_name, bb }
+    pub fn new_mapped_aot_block(func_idx: usize, bb: usize) -> Self {
+        Self::MappedAOTBBlock {
+            funcidx: func_idx,
+            bb,
+        }
     }
 
     pub fn new_unmappable_block() -> Self {

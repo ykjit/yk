@@ -4,40 +4,13 @@ use super::{
     AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorder, TraceRecorderError, Tracer,
 };
 use crate::mt::MTThread;
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    error::Error,
-    ffi::CString,
-    sync::{Arc, LazyLock},
-};
+use std::{cell::RefCell, error::Error, sync::Arc};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBBlock {
     function_index: usize,
     block_index: usize,
 }
-
-/// Mapping of function indices to function names.
-///
-/// FIXME: We shouldn't be reaching into codegen-backend-specific stuff here. There should probably
-/// be some kind of generic codegen interface that offers this information up.
-///
-/// FIXME: We also probably don't need a whole hashmap caching owned copies of all of the function
-/// names. Looking at the sole use-site of `FUNC_NAMES`, I reckon that (once the LLVM backend has
-/// been deleted) it would be sufficient to expose a thin wrapper around `Module::func_()` and use
-/// that for querying function names from indices.
-#[cfg(jitc_yk)]
-static FUNC_NAMES: LazyLock<HashMap<usize, CString>> = LazyLock::new(|| {
-    crate::compile::jitc_yk::AOT_MOD
-        .funcs()
-        .iter_enumerated()
-        .map(|(funcidx, func)| {
-            // unwrap cannot fail assuming that all symbols are UTF-8.
-            (usize::from(funcidx), CString::new(func.name()).unwrap())
-        })
-        .collect::<HashMap<_, _>>()
-});
 
 thread_local! {
     // Collection of traced basic blocks.
@@ -108,18 +81,12 @@ impl Iterator for SWTraceIterator {
     type Item = Result<TraceAction, AOTTraceIteratorError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.bbs
-            .next()
-            .map(|tb| match FUNC_NAMES.get(&tb.function_index) {
-                Some(name) => Ok(TraceAction::MappedAOTBBlock {
-                    func_name: name.as_c_str(),
-                    bb: tb.block_index,
-                }),
-                _ => panic!(
-                    "Failed to get function name by index {:?}",
-                    tb.function_index
-                ),
+        self.bbs.next().map(|tb| {
+            Ok(TraceAction::MappedAOTBBlock {
+                funcidx: tb.function_index,
+                bb: tb.block_index,
             })
+        })
     }
 }
 
