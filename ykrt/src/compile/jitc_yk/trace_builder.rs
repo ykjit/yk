@@ -24,6 +24,12 @@ use ykaddr::addr::symbol_to_ptr;
 /// Caller-saved registers in DWARF notation.
 static CALLER_CLOBBER_REG: [u16; 9] = [0, 1, 2, 4, 5, 8, 9, 10, 11];
 
+/// For now we blanket reject any trace containing a long jump.
+///
+/// "Hidden" (in foreign/outlined code) long jumps will be caught separately by control flow
+/// integrity checking.
+static LONGJMP_FUNCS: [&str; 3] = ["siglongjmp", "longjmp", "_longjmp"];
+
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {
     /// The AOT IR.
@@ -880,8 +886,15 @@ impl TraceBuilder {
         // `__yk_trace_basicblock` instruction calls into the beginning of
         // every basic block. These calls can be ignored as they are
         // only used to collect runtime information for the tracer itself.
-        if AOT_MOD.func(*callee).name() == "__yk_trace_basicblock" {
+        let callee_name = AOT_MOD.func(*callee).name();
+        if callee_name == "__yk_trace_basicblock" {
             return Ok(());
+        }
+
+        if LONGJMP_FUNCS.contains(&callee_name) {
+            return Err(CompilationError::General(format!(
+                "encountered call to {callee_name}"
+            )));
         }
 
         if inst.is_control_point(self.aot_mod) {

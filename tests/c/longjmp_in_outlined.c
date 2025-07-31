@@ -3,53 +3,53 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
 //   stderr:
-//     i=3
-//     after setjmp
-//     after setjmp
 //     yk-tracing: start-tracing
-//     i=2
-//     after setjmp
-//     after setjmp
+//     we jumped
 //     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: encountered call to longjmp
-//     i=1
-//     after setjmp
-//     after setjmp
-//     exit
+//     yk-warning: trace-compilation-aborted: irregular control flow detected
+//     ...
 
-// Check that something sensible happens when there's a longjmp within the
-// confines of the trace.
+// Tests that we can deal with longjmp when we outline over it.
 
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
+jmp_buf buf;
+
+// This function will be outlined by the trace builder.
+__attribute__((noinline))
+void ljmp() {
+  longjmp(buf, 1);
+}
+
+__attribute__((noinline, yk_outline))
+void opaque() {
+  ljmp();
+}
+
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
-  yk_mt_hot_threshold_set(mt, 1);
+  yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
-  jmp_buf buf;
 
-  int i = 3;
+  int i = 2;
   NOOPT_VAL(loc);
   NOOPT_VAL(i);
-  while (i > 0) {
-    yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "i=%d\n", i);
-
-    int r = setjmp(buf);
-    fprintf(stderr, "after setjmp\n");
-
-    if (r == 0) {
-      longjmp(buf, 1);
-      fprintf(stderr, "we jumped\n");
-    }
-    i--;
+  if (setjmp(buf) != 0) {
+    fprintf(stderr, "we jumped\n");
   }
-  fprintf(stderr, "exit");
+  while (i > 0) {
+    i--;
+    yk_mt_control_point(mt, &loc);
+    opaque();
+    fprintf(stderr, "i=%d\n", i);
+  }
+  printf("exit");
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);
