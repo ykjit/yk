@@ -66,6 +66,9 @@ pub(crate) struct TraceBuilder {
     finish_early: bool,
     /// Info regarding the most recently seen recursive call to the interpreter.
     last_interp_call: Option<(BBlockId, &'static DeoptSafepoint)>,
+    /// Secondary map for tracking unresolved call instructions that will be resolved in handle_ret.
+    /// This avoids creating placeholder instructions that interfere with optimizations.
+    unresolved_calls: HashMap<aot_ir::InstId, aot_ir::InstId>,
 }
 
 impl TraceBuilder {
@@ -108,6 +111,7 @@ impl TraceBuilder {
             endframe,
             finish_early: false,
             last_interp_call: None,
+            unresolved_calls: HashMap::new(),
         })
     }
 
@@ -503,7 +507,54 @@ impl TraceBuilder {
         op: &aot_ir::Operand,
     ) -> Result<jit_ir::Operand, CompilationError> {
         match op {
-            aot_ir::Operand::Local(iid) => Ok(self.local_map[iid].decopy(&self.jit_mod).clone()),
+            aot_ir::Operand::Local(iid) => {
+                if let Some(jit_op) = self.local_map.get(iid) {
+                    let result = jit_op.decopy(&self.jit_mod).clone();
+                    if let jit_ir::Operand::Var(idx) = &result {
+                        let current_last = self.jit_mod.last_inst_idx();
+                        if idx > &current_last {
+                            eprintln!("@@ WARNING: Forward reference! AOT {:?} maps to {:?} but current last inst is {:?}", 
+                                     iid, idx, current_last);
+                        }
+                    }
+                    Ok(result)
+                } else {
+                    panic!("Missing key in local_map: {:?}", iid);
+                    // No entry in the map - this is likely because we're processing a return value
+                    // from an inlined function, and the return variable hasn't been mapped yet.
+                    let func = self.aot_mod.func(iid.funcidx());
+                    eprintln!("@@ Error: Missing key in local_map: {:?} in function {}", iid, func.name());
+                    
+                    // Print debug information about frames
+                    eprintln!("@@ Current frames stack:");
+                    for (i, frame) in self.frames.iter().enumerate() {
+                        if let Some(fidx) = frame.funcidx {
+                            let fname = self.aot_mod.func(fidx).name();
+                            eprintln!("@@   Frame {}: {} (callinst: {:?})", i, fname, frame.callinst);
+                            
+                            if frame.callinst.as_ref() == Some(iid) {
+                                eprintln!("@@     - This frame's callinst matches our missing key!");
+                                eprintln!("@@     - This should have been handled by preemptive mapping");
+                            }
+                            
+                            if fidx == iid.funcidx() {
+                                eprintln!("@@     - Instruction belongs to this frame's function");
+                            }
+                        } else {
+                            eprintln!("@@   Frame {}: <unknown function>", i);
+                        }
+                    }
+                    
+                    // For diagnostics purposes, print instruction info
+                    if let Ok(bblock) = std::panic::catch_unwind(|| self.aot_mod.bblock(&BBlockId::new(iid.funcidx(), iid.bbidx()))) {
+                        if let Some(inst_idx) = (usize::from(iid.iidx()) < bblock.insts.len()).then(|| aot_ir::BBlockInstIdx::new(usize::from(iid.iidx()))) {
+                            eprintln!("@@   Instruction: {:?}", &bblock.insts[inst_idx]);
+                        }
+                    }
+                    
+                    panic!("Missing key in local_map: {:?} - Return value not mapped correctly", iid);
+                }
+            },
             aot_ir::Operand::Const(cidx) => {
                 let jit_const = self.handle_const(self.aot_mod.const_(*cidx))?;
                 Ok(jit_ir::Operand::Const(
@@ -732,7 +783,26 @@ impl TraceBuilder {
         if !self.frames.is_empty() {
             if let Some(val) = val {
                 let op = self.handle_operand(val)?;
-                self.local_map.insert(frame.callinst.unwrap(), op);
+                
+                // When we inline a function, the call instruction ID in the parent frame
+                // needs to be mapped to the return value from the inlined function.
+                // This is because in AOT IR, `%result = call func()` means the variable
+                // receiving the result (%result) has the same ID as the call instruction.
+                if let Some(callinst) = frame.callinst {
+                    // Remove from unresolved calls if it was tracked there
+                    if self.unresolved_calls.remove(&callinst).is_some() {
+                        // This was an unresolved call, replace the placeholder instruction
+                        if let Some(placeholder_op) = self.local_map.get(&callinst) {
+                            if let jit_ir::Operand::Var(placeholder_idx) = placeholder_op {
+                                // Replace the placeholder instruction with the actual return value
+                                eprintln!("@@ Replacing placeholder at {:?} with {:?} for AOT {:?}", placeholder_idx, op, callinst);
+                                self.jit_mod.replace_with_op(*placeholder_idx, op.clone());
+                            }
+                        }
+                    }
+                    // Map the call instruction to the actual return value
+                    self.local_map.insert(callinst, op);
+                }
             }
             Ok(())
         } else {
@@ -941,6 +1011,37 @@ impl TraceBuilder {
                 bid.bbidx(),
                 aot_ir::BBlockInstIdx::new(aot_inst_idx),
             );
+            
+            // Track this call instruction for later resolution in handle_ret
+            // This avoids creating placeholder instructions that interfere with optimizations
+            let func = self.aot_mod.func(*callee);
+            if let aot_ir::Ty::Func(fty) = self.aot_mod.type_(func.tyidx()) {
+                let ret_ty = self.aot_mod.type_(fty.ret_ty());
+                if !matches!(ret_ty, aot_ir::Ty::Void) {
+                    // Create a placeholder instruction that will be replaced by the actual
+                    // return value when the inlined function returns.
+                    //
+                    // Note: If the inlined function doesn't return in the traced path, this
+                    // placeholder may be used in subsequent computations. If such computations
+                    // feed into guard conditions, the optimizer may determine that guards will
+                    // always fail. This is correct behavior - it represents unreachable code
+                    // that will trigger deoptimization if executed.
+                    let jit_ret_ty = self.handle_type(ret_ty)?;
+                    let placeholder_inst = jit_ir::Inst::Placeholder(jit_ir::PlaceholderInst::new(jit_ret_ty));
+                    
+                    self.jit_mod.push(placeholder_inst)?;
+                    let placeholder_idx = self.jit_mod.last_inst_idx();
+                    let placeholder_val = jit_ir::Operand::Var(placeholder_idx);
+                    
+                    eprintln!("@@ Created placeholder at InstIdx({:?}) for AOT {:?}, type: {:?}, func: {}", 
+                             placeholder_idx, aot_iid, ret_ty, self.aot_mod.func(*callee).name());
+                    
+                    self.local_map.insert(aot_iid.clone(), placeholder_val);
+                    // Also track it for replacement in handle_ret
+                    self.unresolved_calls.insert(aot_iid.clone(), aot_iid.clone());
+                }
+            }
+            
             self.frames.push(InlinedFrame {
                 funcidx: Some(*callee),
                 callinst: Some(aot_iid),
@@ -1554,14 +1655,11 @@ impl TraceBuilder {
                 // first (guaranteed mappable) block in the trace. Note that empty traces are handled in
                 // the tracing phase so the `unwrap` is safe.
                 let prev = match trace_iter.peek().unwrap() {
-                    TraceAction::MappedAOTBBlock {
-                        funcidx: func_idx,
-                        bbidx,
-                    } => {
+                    TraceAction::MappedAOTBBlock { funcidx, bbidx } => {
                         debug_assert!(*bbidx > 0);
                         // It's `- 1` due to the way the ykllvm block splitting pass works.
                         TraceAction::MappedAOTBBlock {
-                            funcidx: *func_idx,
+                            funcidx: *funcidx,
                             bbidx: bbidx - 1,
                         }
                     }
@@ -1703,6 +1801,15 @@ impl TraceBuilder {
             // promotions and debug_str counts won't add up, so don't check them here.
             assert_eq!(self.promote_idx, self.promotions.len());
             assert_eq!(self.debug_str_idx, self.debug_strs.len());
+        }
+        
+        // Debug logging for unreplaced placeholders (this is expected and safe)
+        #[cfg(debug_assertions)]
+        if !self.unresolved_calls.is_empty() {
+            eprintln!("@@ INFO: {} unreplaced placeholders (functions that don't return in traced path):", self.unresolved_calls.len());
+            for (inst_id, _) in &self.unresolved_calls {
+                eprintln!("@@   Unreplaced: {:?}", inst_id);
+            }
         }
         let bid = self.cp_block.as_ref().unwrap();
         let blk = self.aot_mod.bblock(bid);

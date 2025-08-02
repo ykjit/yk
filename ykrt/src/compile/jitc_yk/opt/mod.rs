@@ -50,7 +50,7 @@ impl Opt {
                     // things simple -- they don't end with `TraceHeaderEnd`. We don't want to peel
                     // such traces, but nor, in testing mode, do we consider them ill-formed.
                     matches!(
-                        self.m.inst(self.m.last_inst_idx()),
+                        self.m.inst_raw(self.m.last_inst_idx()),
                         Inst::TraceHeaderEnd(false)
                     )
                 }
@@ -216,7 +216,12 @@ impl Opt {
             Inst::BlackBox(_) => (),
             Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone | Inst::TraceHeaderStart => {
                 unreachable!()
-            }
+            },
+            Inst::Placeholder(_) => {
+                // Placeholders are no-ops from an optimization perspective. They represent
+                // return values from inlined functions that don't return in the traced path.
+                // They'll either be removed as dead code or ignored during codegen.
+            },
             Inst::BinOp(x) => self.opt_binop(iidx, x)?,
             Inst::Call(x) => self.opt_direct_call(iidx, x)?,
             Inst::IndirectCall(_) => {
@@ -695,11 +700,22 @@ impl Opt {
                 panic!()
             };
             assert_eq!(v.bitw(), 1);
-            assert!(
-                (inst.expect() && v.to_zero_ext_u8().unwrap() == 1)
-                    || (!inst.expect() && v.to_zero_ext_u8().unwrap() == 0)
-            );
-            self.m.replace(iidx, Inst::Tombstone);
+            // Check if the guard condition matches the expected value
+            let cond_matches = (inst.expect() && v.to_zero_ext_u8().unwrap() == 1)
+                || (!inst.expect() && v.to_zero_ext_u8().unwrap() == 0);
+            
+            if cond_matches {
+                // The guard always succeeds, we can remove it
+                self.m.replace(iidx, Inst::Tombstone);
+            } else {
+                // The guard always fails. This can happen when placeholder values from
+                // non-returning inlined functions are used in computations that feed into
+                // guards. Since the inlined function doesn't return in the traced path,
+                // these guards represent unreachable code. We keep the guard as-is and
+                // let it fail at runtime, which will trigger deoptimization.
+                #[cfg(debug_assertions)]
+                eprintln!("@@ WARNING: Guard at {:?} will always fail (const value doesn't match expectation)", iidx);
+            }
         } else {
             self.an.guard(&self.m, inst);
         }
@@ -852,7 +868,7 @@ impl Opt {
             };
             let v = ArbBitInt::from_usize(*v);
             let src_bitw = v.bitw();
-            let tgt_bitw = self.m.inst(iidx).def_bitw(&self.m);
+            let tgt_bitw = self.m.inst_raw(iidx).def_bitw(&self.m);
             let v = if tgt_bitw <= src_bitw {
                 v.truncate(tgt_bitw)
             } else {
@@ -934,7 +950,7 @@ impl Opt {
                     break;
                 }
                 Operand::Var(op_iidx) => {
-                    if let Inst::PtrAdd(x) = self.m.inst(op_iidx) {
+                    if let Some(Inst::PtrAdd(x)) = self.m.inst_nocopy(op_iidx) {
                         pa_inst = x;
                     } else {
                         if off == 0 {

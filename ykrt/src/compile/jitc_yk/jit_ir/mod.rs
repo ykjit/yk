@@ -429,7 +429,7 @@ impl Module {
     /// This function has very few uses and unless you explicitly know why you're using it, you
     /// should instead use [Self::inst_no_copies] because not handling `Copy` instructions
     /// correctly leads to undefined behaviour.
-    fn inst_raw(&self, iidx: InstIdx) -> Inst {
+    pub(crate) fn inst_raw(&self, iidx: InstIdx) -> Inst {
         self.insts[usize::from(iidx)]
     }
 
@@ -451,14 +451,14 @@ impl Module {
         InstIdx::try_from(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
-    /// Iterate, in order, over the `InstIdx`s of this module skipping `Const`, `Copy`, and
-    /// `Tombstone` instructions.
+    /// Iterate, in order, over the `InstIdx`s of this module skipping `Const`, `Copy`,
+    /// `Tombstone`, and `Placeholder` instructions.
     pub(crate) fn iter_skipping_insts(
         &self,
     ) -> impl DoubleEndedIterator<Item = (InstIdx, Inst)> + '_ {
         (0..self.insts.len()).filter_map(|i| {
             let inst = &self.insts[i];
-            if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone) {
+            if !matches!(inst, Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone | Inst::Placeholder(_)) {
                 // The `unchecked_from` is safe because we know from `Self::push` that we can't have
                 // exceeded `InstIdx`'s bounds.
                 Some((InstIdx::unchecked_from(i), *inst))
@@ -1565,6 +1565,9 @@ pub(crate) enum Inst {
     /// This instruction has been permanently removed. Note: this must only be used if you are
     /// entirely sure that the value this instruction once produced is no longer used.
     Tombstone,
+    /// A placeholder instruction used for inlined function return values that haven't been
+    /// computed yet. This should be replaced by the actual return value before codegen.
+    Placeholder(PlaceholderInst),
 
     // "Normal" IR instructions.
     BinOp(BinOpInst),
@@ -1633,6 +1636,7 @@ impl Inst {
             Self::Const(x) => m.const_(*x).tyidx(m),
             Self::Copy(x) => m.inst_raw(*x).tyidx(m),
             Self::Tombstone => panic!(),
+            Self::Placeholder(x) => x.tyidx(),
 
             Self::BinOp(x) => x.tyidx(m),
             Self::IndirectCall(idx) => {
@@ -1680,6 +1684,7 @@ impl Inst {
             Inst::Copy(x) => m.inst_raw(*x).has_load_effect(m),
             Inst::Load(_) => true,
             Inst::Call(_) | Inst::IndirectCall(_) => true,
+            Inst::Placeholder(_) => false,
             _ => false,
         }
     }
@@ -1692,6 +1697,7 @@ impl Inst {
             Inst::Copy(x) => m.inst_raw(*x).has_store_effect(m),
             Inst::Store(_) => true,
             Inst::Call(_) | Inst::IndirectCall(_) => true,
+            Inst::Placeholder(_) => false,
             _ => false,
         }
     }
@@ -1736,6 +1742,7 @@ impl Inst {
             Inst::Const(_) => (),
             Inst::Copy(_) => (),
             Inst::Tombstone => (),
+            Inst::Placeholder(_) => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
                 lhs.unpack(m).map_iidx(f);
                 rhs.unpack(m).map_iidx(f);
@@ -1988,6 +1995,7 @@ impl Inst {
                 volatile: *volatile,
             }),
             Inst::Tombstone => Inst::Tombstone,
+            Inst::Placeholder(p) => Inst::Placeholder(*p),
             Inst::TraceBodyStart => {
                 m.trace_body_start = m.trace_body_start.iter().map(|op| mapper(m, op)).collect();
                 Inst::TraceBodyStart
@@ -2146,6 +2154,7 @@ impl Inst {
             (Self::PtrToInt(x), Self::PtrToInt(y)) => x.decopy_eq(m, y),
             (Self::IntToPtr(x), Self::IntToPtr(y)) => x.decopy_eq(m, y),
             (Self::UIToFP(x), Self::UIToFP(y)) => x.decopy_eq(m, y),
+            (Self::Placeholder(x), Self::Placeholder(y)) => x.tyidx() == y.tyidx(),
             (x, y) => todo!("{x:?} {y:?}"),
         }
     }
@@ -2174,6 +2183,7 @@ impl fmt::Display for DisplayableInst<'_> {
             #[cfg(test)]
             Inst::BlackBox(x) => write!(f, "black_box {}", x.operand(self.m).display(self.m)),
             Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
+            Inst::Placeholder(p) => write!(f, "placeholder<{}>", self.m.type_(p.tyidx()).display(self.m)),
 
             Inst::BinOp(BinOpInst { lhs, binop, rhs }) => write!(
                 f,
@@ -2407,6 +2417,7 @@ macro_rules! inst {
 inst!(BinOp, BinOpInst);
 #[cfg(test)]
 inst!(BlackBox, BlackBoxInst);
+inst!(Placeholder, PlaceholderInst);
 inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
@@ -2503,6 +2514,37 @@ impl BlackBoxInst {
 
     pub(crate) fn operand(&self, m: &Module) -> Operand {
         self.op.unpack(m)
+    }
+}
+
+/// A placeholder instruction that holds a type index. This is used as a temporary
+/// placeholder for return values from inlined functions.
+/// 
+/// When a function is inlined, we create a placeholder for its return value before
+/// processing the function body. If the function returns normally, the placeholder
+/// is replaced with the actual return value in handle_ret().
+/// 
+/// However, not all inlined functions return in the traced path:
+/// - The function might exit via exception handling or longjmp
+/// - The traced path might not reach a return instruction
+/// - The trace might end before the function completes
+/// 
+/// In these cases, the placeholder remains unreplaced. This is safe because the
+/// placeholder value is never actually used (dead code). The optimizer can remove
+/// these unused placeholders, or they're silently ignored during codegen.
+#[derive(Clone, Copy, Debug)]
+pub struct PlaceholderInst {
+    /// The type that this placeholder should produce.
+    tyidx: TyIdx,
+}
+
+impl PlaceholderInst {
+    pub(crate) fn new(tyidx: TyIdx) -> Self {
+        Self { tyidx }
+    }
+
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
     }
 }
 

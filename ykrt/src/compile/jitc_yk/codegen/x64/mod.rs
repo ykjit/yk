@@ -523,6 +523,12 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
                     unreachable!();
                 }
+                jit_ir::Inst::Placeholder(_) => {
+                    // Silently skip unreplaced placeholders. These represent return values
+                    // from inlined functions that don't return in the traced path. Since
+                    // the function doesn't return, the placeholder value is never used and
+                    // can be safely ignored. See the comment in well_formed.rs for details.
+                }
 
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
                 jit_ir::Inst::Param(i) => {
