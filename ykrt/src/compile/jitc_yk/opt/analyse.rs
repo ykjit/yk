@@ -69,8 +69,7 @@ impl Analyse {
                         if let (&Operand::Const(_lhs_cidx), &Operand::Const(_rhs_cidx)) =
                             (&lhs, &rhs)
                         {
-                            // Can we still hit this case?
-                            todo!();
+                            // FIXME: implement the optimisation.
                         }
                     }
                     op
