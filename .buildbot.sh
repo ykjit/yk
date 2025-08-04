@@ -6,7 +6,7 @@ ROOT_DIR=$(realpath $(pwd))
 
 # What git commit hash of yklua & ykcbf will we test in buildbot?
 YKLUA_REPO="https://github.com/ykjit/yklua.git"
-YKLUA_COMMIT="07d8857c51a0431af8623f962f105aebc7576e3e"
+YKLUA_COMMIT="8a288908efc4611892993a32f8ffadd08df8e8c6"
 YKCBF_REPO="https://github.com/ykjit/ykcbf.git"
 YKCBF_COMMIT="431b92593180e1e376d08ecf383c4a1ab8473b3d"
 
