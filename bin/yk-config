@@ -109,7 +109,7 @@ handle_arg() {
                 # SWT-specific flags.
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
                 # Experimental module cloning support.
-                if [ "${YKB_SWTMODCLONE}" = "1" ]; then
+                if [ "${YKB_SWT_MODCLONE}" = "1" ]; then
                     OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"
                 fi
             fi

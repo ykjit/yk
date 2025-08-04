@@ -10,6 +10,7 @@ atomic_enum = "0.3.0"
 byteorder = "1.4.3"
 deku = { version = "0.18.1", features = ["std"] }
 dynasmrt = "3.0.0"
+capstone = "0.9"
 indexmap = "2.2.6"
 libc = "0.2.148"
 memmap2 = "0.9"
