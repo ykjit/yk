@@ -1,5 +1,5 @@
-// ## FIXME: SWT can't handle control points not in main.
-// ignore-if: test "$YKB_TRACER" = "swt"
+// ## FIXME: YKB_SWT_MODCLONE can't handle control points not in main.
+// ignore-if: test "$YKB_SWT_MODCLONE" = "1"
 // Run-time:
 //   env-var: YKD_LOG_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1

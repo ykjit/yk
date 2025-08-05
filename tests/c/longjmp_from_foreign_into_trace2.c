@@ -1,4 +1,5 @@
-// ignore-if: test "$YKB_TRACER" = "swt"
+// ## FIXME: YKB_SWT_MODCLONE can't handle longjmp correctly. 
+// ignore-if: test "$YKB_SWT_MODCLONE" = "1"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
