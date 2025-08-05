@@ -482,7 +482,7 @@ impl MT {
                 #[cfg(swt_modclone)]
                 unsafe {
                     // Do the transition to unopt only if we are in opt mode.
-                    if smid == ControlPointStackMapId::Opt as u64 {
+                    if smid == ControlPointStackMapId::Opt.into() {
                         cp_transition_to_unopt_and_exec_trace(frameaddr, trace_addr, &self.stats);
                     }
                 }

@@ -21,6 +21,18 @@ pub enum ControlPointStackMapId {
     UnOpt = 1,
 }
 
+impl From<ControlPointStackMapId> for u64 {
+    fn from(value: ControlPointStackMapId) -> Self {
+        value as usize as u64
+    }
+}
+
+impl From<ControlPointStackMapId> for usize {
+    fn from(value: ControlPointStackMapId) -> Self {
+        value as usize
+    }
+}
+
 /// The size of a 64-bit register in bytes.
 pub(crate) static REG64_BYTESIZE: u64 = 8;
 
@@ -121,7 +133,7 @@ pub(crate) unsafe fn cp_transition_to_unopt(frameaddr: *const c_void, stats: &St
     let buffer = generate_transition_asm(CPTransition {
         smid: ControlPointStackMapId::Opt,
         frameaddr,
-        trace_addr: 0 as *const c_void,
+        trace_addr: std::ptr::null(),
     });
     stats.swt_transition_opt_to_unopt();
     unsafe {
@@ -144,7 +156,7 @@ pub(crate) unsafe fn cp_transition_to_opt(frameaddr: *const c_void, stats: &Stat
     let buffer = generate_transition_asm(CPTransition {
         smid: ControlPointStackMapId::UnOpt,
         frameaddr,
-        trace_addr: 0 as *const c_void,
+        trace_addr: std::ptr::null(),
     });
     stats.swt_transition_unopt_to_opt();
     unsafe {
@@ -233,8 +245,8 @@ fn generate_transition_asm(transition: CPTransition) -> ExecutableBuffer {
         dst_smid = ControlPointStackMapId::Opt;
     }
 
-    let (src_rec, src_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid as usize);
-    let (dst_rec, dst_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid as usize);
+    let (src_rec, src_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(src_smid.into());
+    let (dst_rec, dst_pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(dst_smid.into());
 
     let mut src_frame_size: u64 = src_rec.size;
     if src_pinfo.hasfp {
@@ -297,7 +309,7 @@ fn generate_transition_asm(transition: CPTransition) -> ExecutableBuffer {
     restore_registers(&mut asm, used_registers, rbp_offset_reg_store as i32);
 
     // If there is a trace to execute, jump to the trace.
-    if transition.trace_addr != 0 as *const c_void {
+    if !transition.trace_addr.is_null() {
         dynasm!(asm
             ; .arch x64
             ; mov rdx, QWORD transition.trace_addr as i64
