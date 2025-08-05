@@ -224,7 +224,7 @@ fn generate_transition_asm(transition: CPTransition) -> ExecutableBuffer {
 
     let src_smid: ControlPointStackMapId;
     let dst_smid: ControlPointStackMapId;
-    
+
     if transition.smid == ControlPointStackMapId::Opt {
         src_smid = ControlPointStackMapId::Opt;
         dst_smid = ControlPointStackMapId::UnOpt;
