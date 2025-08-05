@@ -183,7 +183,7 @@ pub(crate) fn register_jitted_code(
     // Write the comment lines out to a "source code file" that we want gdb to show lines from. As
     // we do this, we also build a mapping from virtual addresses to line numbers.
     let mut src_file = NamedTempFile::new()
-        .map_err(|_| CompilationError::InternalError("failed to create gdb src_file".into()))?;
+        .map_err(|e| CompilationError::General(format!("failed to create gdb src_file: {e}")))?;
     let mut lineinfos = Vec::new();
     let mut line_num = 1;
     let code_vaddr = jitted_code as usize;
@@ -193,8 +193,8 @@ pub(crate) fn register_jitted_code(
             vaddr: code_vaddr + off,
         });
         for line in lines {
-            writeln!(src_file, "{line}").map_err(|_| {
-                CompilationError::InternalError("failed to write into gdb src_file".into())
+            writeln!(src_file, "{line}").map_err(|e| {
+                CompilationError::General(format!("failed to write into gdb src_file: {e}"))
             })?;
             line_num += 1;
         }
@@ -202,7 +202,7 @@ pub(crate) fn register_jitted_code(
     // Ensure the source file is fully-written before gdb can read it.
     src_file
         .flush()
-        .map_err(|_| CompilationError::InternalError("failed to flush gdb src_file".into()))?;
+        .map_err(|e| CompilationError::General(format!("failed to flush gdb src_file: {e}")))?;
 
     // Build the symbol file we are going to give to gdb.
     //
