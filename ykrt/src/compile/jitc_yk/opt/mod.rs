@@ -612,8 +612,15 @@ impl Opt {
                     }
                 }
                 (Operand::Var(lhs_iidx), Operand::Var(rhs_iidx)) => {
+                    // If the operands are the same, then the result is always a zero.
                     if lhs_iidx == rhs_iidx {
-                        self.m.replace(iidx, Inst::Const(self.m.false_constidx()));
+                        let tyidx = inst.tyidx(&self.m);
+                        let cst = Const::Int(
+                            tyidx,
+                            ArbBitInt::from_u64(self.m.type_(tyidx).bitw().unwrap(), 0),
+                        );
+                        let cidx = self.m.insert_const(cst)?;
+                        self.m.replace(iidx, Inst::Const(cidx));
                     }
                 }
             },
@@ -1808,7 +1815,7 @@ mod test {
           ...
           entry:
             %0: i8 = param ...
-            black_box 0i1
+            black_box 0i8
         ",
         );
     }
