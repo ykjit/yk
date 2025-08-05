@@ -230,6 +230,69 @@ unsafe fn execute_asm_buffer(buffer: ExecutableBuffer) {
     }
 }
 
+/// Generates assembly code for control point transitions.
+///
+/// This function uses dynasm for runtime code generation rather than inline assembly or Rust
+/// for several critical reasons:
+///
+/// 1. **Dynamic Requirements**: The assembly sequence depends on runtime information including
+///    stack frame sizes, number of live variables, variable types, and their additional locations.
+///    This information comes from stackmaps that are only known at runtime, making compile-time
+///    inline assembly impossible.
+///
+/// 2. **Performance**: Generates optimal straight-line assembly code without function call
+///    overhead. Each transition gets a custom instruction sequence tailored to its specific
+///    variable transfer pattern (e.g., r15→rdx, [rbp-16]→r8, r9→[rbp-24]).
+///
+/// 3. **Future Caching**: The dynasm approach enables caching of generated code - we can
+///    generate once per controlpoint transition and reuse the ExecutableBuffer in subsequent
+///    executions. (TODO: implement caching)
+///
+/// The generated assembly performs:
+/// - Stack frame adjustment (RSP/RBP setup)
+/// - Allocates buffer for temporary storage of Direct and Indirect varibles.
+/// - Live variable transfers between source and destination locations
+/// - Register restoration
+/// - Control flow redirection (jump just after the source controlpoint or to a trace)
+///
+/// Exmple of generated ASM:
+///     // Stack frame adjustment (RSP/RBP setup)
+///     movabs rbp, 0x7ffe9c46df40
+///     movabs rsp, 0x7ffe9c46df40
+///     sub rsp, 0x40
+///     // Temp buffer (for Direct and Indirect)
+///     movabs rax, 0x12a8d650
+///     mov rcx, qword ptr [rbp - 0x38]
+///     mov qword ptr [rax], rcx
+///     mov rcx, qword ptr [rbp - 0x30]
+///     mov qword ptr [rax + 8], rcx
+///     movabs rax, 0x12a8d650
+///     mov rcx, qword ptr [rax]
+///     mov qword ptr [rbp - 0x38], rcx
+///     movabs rax, 0x12a8d650
+///     mov rcx, qword ptr [rax + 8]
+///     mov qword ptr [rbp - 0x30], rcx
+///     // Live varibles copy
+///     mov r15, qword ptr [rbp - 0xb0]
+///     mov r12, qword ptr [rbp - 0x98]
+///     // Register restore
+///     mov rax, qword ptr [rbp - 0x50]
+///     mov rcx, qword ptr [rbp - 0x58]
+///     mov rbx, qword ptr [rbp - 0x60]
+///     mov rdi, qword ptr [rbp - 0x68]
+///     mov rsi, qword ptr [rbp - 0x70]
+///     mov r8, qword ptr [rbp - 0x78]
+///     mov r9, qword ptr [rbp - 0x80]
+///     mov r10, qword ptr [rbp - 0x88]
+///     mov r11, qword ptr [rbp - 0x90]
+///     mov r13, qword ptr [rbp - 0xa0]
+///     mov r14, qword ptr [rbp - 0xa8]
+///     // Jump into trace
+///     movabs rdx, 0x7f1565029000
+///     jmp rdx
+//
+/// TODO: Implement caching for generated asm.
+/// TODO: Remove redundant asm instructions (e.g., repeated movabs for same buffer address).
 fn generate_transition_asm(transition: CPTransition) -> ExecutableBuffer {
     let frameaddr = transition.frameaddr as usize;
     let mut asm = Assembler::new().unwrap();
