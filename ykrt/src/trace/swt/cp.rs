@@ -379,7 +379,7 @@ fn generate_transition_asm(transition: CPTransition) -> ExecutableBuffer {
             ; jmp rdx
         );
     } else {
-        let call_offset = calc_after_cp_offset(dst_rec.offset).unwrap();
+        let call_offset = calc_post_cp_offset(dst_rec.offset).unwrap();
         let dst_target_addr = i64::try_from(dst_rec.offset).unwrap() + call_offset;
         dynasm!(asm
             ; .arch x64
@@ -424,14 +424,30 @@ fn restore_register(asm: &mut Assembler, dwarf_reg_num: u16, rbp_offset_reg_stor
     );
 }
 
-// Calculates the offset of the call instruction after the control point.
-// Example:
-//  CP Record offset points to 0x00000000002023a4, we want to find the
-//  instruction at 0x00000000002023b1.
-//  0x00000000002023a4 <+308>:	movabs $0x202620,%r11
-//  0x00000000002023ae <+318>:	call   *%r11
-//  0x00000000002023b1 <+321>:	jmp    0x2023b3 <main+323>
-fn calc_after_cp_offset(rec_offset: u64) -> Result<i64, Box<dyn Error>> {
+/// Calculates the offset to the instruction immediately following the control point call.
+///
+/// Control points in the AOT code are implemented as calls to `__ykrt_control_point`.
+/// When transitioning between optimised/unoptimised variants, we need to return to the
+/// instruction *after* this call to continue execution. This function disassembles the
+/// code starting at the control point's stackmap offset and finds the call instruction,
+/// returning the total byte offset from the start to just past the call.
+///
+/// # Arguments
+/// * `rec_offset` - The memory address recorded in the stackmap for this control point
+///
+/// # Returns
+/// The byte offset from `rec_offset` to the instruction after the call
+///
+/// # Example
+/// ```text
+/// Given this control point sequence:
+///   0x00000000002023a4 <+308>:  movabs $0x202620,%r11    ; Setup call target
+///   0x00000000002023ae <+318>:  call   *%r11             ; Call __ykrt_control_point
+///   0x00000000002023b1 <+321>:  jmp    0x2023b3          ; <- We return offset to here
+/// 
+/// calc_post_cp_offset(0x2023a4) returns 13 (0x2023b1 - 0x2023a4)
+/// ```
+fn calc_post_cp_offset(rec_offset: u64) -> Result<i64, Box<dyn Error>> {
     // Define the maximum number of bytes to disassemble
     const MAX_CODE_SIZE: usize = 64;
     // Read the machine code starting at rec_offset
@@ -583,8 +599,7 @@ mod cp_tests {
     }
 
     #[test]
-    fn test_calc_after_cp_offset_with_call_instruction() -> Result<(), Box<dyn Error>> {
-        // Arrange: Create a buffer with a call instruction
+    fn test_calc_post_cp_offset_with_call_instruction() -> Result<(), Box<dyn Error>> {
         let mut asm = Assembler::new().unwrap();
         let call_addr: i32 = 0x666;
         dynasm!(asm
@@ -595,13 +610,13 @@ mod cp_tests {
         );
         let buffer = asm.finalize().unwrap();
         let code_ptr = buffer.ptr(dynasmrt::AssemblyOffset(0)) as u64;
-        let offset = calc_after_cp_offset(code_ptr)?;
+        let offset = calc_post_cp_offset(code_ptr)?;
         assert_eq!(offset, 6, "The call offset should be 6 bytes");
         Ok(())
     }
 
     #[test]
-    fn test_calc_after_cp_offset_with_movabs_and_nops() -> Result<(), Box<dyn Error>> {
+    fn test_calc_post_cp_offset_with_movabs_and_nops() -> Result<(), Box<dyn Error>> {
         // Arrange: Create a buffer with movabs, multiple nops, and call instruction
         let mut asm = Assembler::new().unwrap();
         dynasm!(asm
@@ -613,7 +628,7 @@ mod cp_tests {
         );
         let buffer = asm.finalize().unwrap();
         let code_ptr = buffer.ptr(dynasmrt::AssemblyOffset(0)) as u64;
-        let offset = calc_after_cp_offset(code_ptr)?;
+        let offset = calc_post_cp_offset(code_ptr)?;
         assert_eq!(offset, 11, "The call offset should be 11 bytes");
         Ok(())
     }
