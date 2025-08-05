@@ -729,6 +729,18 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Binop result type incorrect for one or more operands")]
+    fn binop_wrong_result_type() {
+        Module::from_str(
+            "
+              entry:
+                %0: i32 = param reg
+                %1: i1 = xor %0, %0
+            ",
+        );
+    }
+
+    #[test]
     #[should_panic(
         expected = "Param instruction may only appear at the beginning of a trace or after another Param instruction"
     )]
