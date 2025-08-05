@@ -1701,7 +1701,35 @@ impl TraceBuilder {
             // promotions and debug_str counts won't add up, so don't check them here.
             assert_eq!(self.promote_idx, self.promotions.len());
             assert_eq!(self.debug_str_idx, self.debug_strs.len());
+
+            // If we didn't finish early, then we should be outlining the control point that
+            // stopped tracing.
+            assert!(self.outline_target_blk.is_some());
+            let cp_bid = self.cp_block.as_ref().unwrap();
+            let cp_blk = self.aot_mod.bblock(cp_bid);
+            // Block containing the call to the control point must end in an unconditional branch.
+            let term = cp_blk.insts.last().unwrap();
+            let aot_ir::Inst::Br { succ } = *term else {
+                panic!()
+            };
+            let expect_bid = BBlockId::new(cp_bid.funcidx(), succ);
+            let Some(outline_target_bid) = self.outline_target_blk.as_ref() else {
+                panic!()
+            };
+            if &expect_bid != outline_target_bid {
+                // Note that this prevents us from collecting a (valid) trace starting at stack
+                // depth N and stopping tracing at stack depth > N (with a recursive call to an
+                // interpreter loop). The problem is, this is indistinguishable from some longjmp
+                // scenarios (see opaque_longjmp.c).
+                return Err(CompilationError::General(
+                    "irregular control flow detected".into(),
+                ));
+            }
+        } else {
+            // If we did finish early, then we shouldn't be outlining.
+            assert!(self.outline_target_blk.is_none());
         }
+
         let bid = self.cp_block.as_ref().unwrap();
         let blk = self.aot_mod.bblock(bid);
         let cpcall = blk.insts.iter().rev().nth(1).unwrap();

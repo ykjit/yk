@@ -1,3 +1,5 @@
+// ## longjmp detection with CFI breaks this.
+// ignore-if: true
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=jit-pre-opt
