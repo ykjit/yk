@@ -66,6 +66,9 @@ pub enum TraceRecorderError {
     #[error("{0}")]
     #[allow(dead_code)]
     TraceBufferOverflow(String),
+    /// We can't use this trace.
+    #[error("{0}")]
+    TraceInvalid(String),
 }
 
 /// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s. The iterator must

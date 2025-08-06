@@ -10,8 +10,7 @@
 //     i=2
 //     after setjmp
 //     after setjmp
-//     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: ...
+//     yk-warning: stop-tracing-aborted: traced longjmp
 //     i=1
 //     after setjmp
 //     after setjmp
