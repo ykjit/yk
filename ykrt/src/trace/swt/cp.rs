@@ -444,7 +444,7 @@ fn restore_register(asm: &mut Assembler, dwarf_reg_num: u16, rbp_offset_reg_stor
 ///   0x00000000002023a4 <+308>:  movabs $0x202620,%r11    ; Setup call target
 ///   0x00000000002023ae <+318>:  call   *%r11             ; Call __ykrt_control_point
 ///   0x00000000002023b1 <+321>:  jmp    0x2023b3          ; <- We return offset to here
-/// 
+///
 /// calc_post_cp_offset(0x2023a4) returns 13 (0x2023b1 - 0x2023a4)
 /// ```
 fn calc_post_cp_offset(rec_offset: u64) -> Result<i64, Box<dyn Error>> {
