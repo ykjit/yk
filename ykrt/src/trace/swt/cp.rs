@@ -3,9 +3,11 @@ use std::env;
 use std::sync::LazyLock;
 
 use crate::aotsmp::AOT_STACKMAPS;
+use crate::trace::swt::asm::{configure_gdb_intel_formatter, print_disassembly};
 use crate::trace::swt::live_vars::{copy_live_vars_to_temp_buffer, set_destination_live_vars};
-use capstone::prelude::*;
+
 use dynasmrt::{DynasmApi, ExecutableBuffer, dynasm, x64::Assembler};
+use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, IntelFormatter};
 
 use std::error::Error;
 use std::ffi::c_void;
@@ -196,33 +198,7 @@ pub(crate) unsafe fn cp_transition_to_unopt_and_exec_trace(
 #[unsafe(no_mangle)]
 unsafe fn execute_asm_buffer(buffer: ExecutableBuffer) {
     if *YKD_SWT_VERBOSE_ASM {
-        let cs = Capstone::new()
-            .x86()
-            .mode(arch::x86::ArchMode::Mode64)
-            .build()
-            .unwrap();
-
-        let instructions = cs
-            .disasm_all(
-                unsafe {
-                    std::slice::from_raw_parts(
-                        buffer.ptr(dynasmrt::AssemblyOffset(0)) as *const u8,
-                        buffer.len(),
-                    )
-                },
-                0,
-            )
-            .unwrap();
-
-        println!("ASM DUMP:");
-        for i in instructions.iter() {
-            println!(
-                "  {:x}: {} {}",
-                i.address(),
-                i.mnemonic().unwrap(),
-                i.op_str().unwrap()
-            );
-        }
+        print_disassembly(&buffer);
     }
     unsafe {
         let func: unsafe fn() = std::mem::transmute(buffer.as_ptr());
@@ -452,21 +428,71 @@ fn calc_post_cp_offset(rec_offset: u64) -> Result<i64, Box<dyn Error>> {
     const MAX_CODE_SIZE: usize = 64;
     // Read the machine code starting at rec_offset
     let code_slice = unsafe { std::slice::from_raw_parts(rec_offset as *const u8, MAX_CODE_SIZE) };
-    let cs = Capstone::new()
-        .x86()
-        .mode(arch::x86::ArchMode::Mode64)
-        .build()
-        .unwrap();
-    // Disassemble the code
-    let instructions = cs.disasm_all(code_slice, rec_offset as u64).unwrap();
+
+    // Create a decoder for x86-64
+    let mut decoder = Decoder::with_ip(64, code_slice, rec_offset, DecoderOptions::NONE);
+
     // Initialize the offset accumulator
     let mut offset: i64 = 0;
-    for inst in instructions.iter() {
-        offset += inst.bytes().len() as i64;
+    let mut inst = Instruction::default();
 
-        if inst.mnemonic().unwrap_or("") == "call" {
-            return Ok(offset);
+    if *YKD_SWT_VERBOSE {
+        eprintln!("DEBUG calc_post_cp_offset: starting at 0x{:x}", rec_offset);
+
+        // Let's also disassemble and show what we're looking at
+        let mut temp_decoder = Decoder::with_ip(64, code_slice, rec_offset, DecoderOptions::NONE);
+        let mut temp_formatter = IntelFormatter::new();
+        configure_gdb_intel_formatter(&mut temp_formatter);
+        let mut temp_inst = Instruction::default();
+        let mut temp_output = String::new();
+        eprintln!("DEBUG: Disassembly from 0x{:x}:", rec_offset);
+        for _i in 0..10 {
+            // Show first 10 instructions
+            if !temp_decoder.can_decode() {
+                break;
+            }
+            temp_decoder.decode_out(&mut temp_inst);
+            temp_output.clear();
+            temp_formatter.format(&temp_inst, &mut temp_output);
+            eprintln!("  0x{:x}: {}", temp_inst.ip(), temp_output);
         }
+    }
+
+    while decoder.can_decode() {
+        decoder.decode_out(&mut inst);
+
+        if *YKD_SWT_VERBOSE {
+            eprintln!(
+                "DEBUG: offset={}, inst.ip()=0x{:x}, len={}, flow_control={:?}",
+                offset,
+                inst.ip(),
+                inst.len(),
+                inst.flow_control()
+            );
+        }
+
+        // Check if this is a call instruction (direct or indirect)
+        if matches!(
+            inst.flow_control(),
+            iced_x86::FlowControl::Call | iced_x86::FlowControl::IndirectCall
+        ) {
+            let result = offset + inst.len() as i64;
+            if *YKD_SWT_VERBOSE {
+                eprintln!(
+                    "DEBUG: Found call ({}), returning offset={}",
+                    match inst.flow_control() {
+                        iced_x86::FlowControl::Call => "direct",
+                        iced_x86::FlowControl::IndirectCall => "indirect",
+                        _ => "unknown",
+                    },
+                    result
+                );
+            }
+            // Return offset to the instruction after this call
+            return Ok(result);
+        }
+
+        offset += inst.len() as i64;
     }
 
     Err(format!(

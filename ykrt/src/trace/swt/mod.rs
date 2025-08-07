@@ -7,7 +7,6 @@ use crate::mt::MTThread;
 use std::{cell::RefCell, error::Error, sync::Arc};
 
 #[cfg(swt_modclone)]
-#[cfg(test)]
 pub(crate) mod asm;
 #[cfg(swt_modclone)]
 pub(crate) mod buffer;

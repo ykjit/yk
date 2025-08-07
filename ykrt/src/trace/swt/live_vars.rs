@@ -470,11 +470,6 @@ pub(crate) fn set_destination_live_vars(
 /// # Returns
 /// A HashMap mapping destination register numbers to their value sizes
 ///
-/// # Examples
-/// ```ignore
-/// let dest_regs = set_destination_live_vars(
-///     &mut asm, &src_record, &dst_record, 0x100, buffer
-/// );
 /// ```
 pub(crate) fn copy_live_vars_to_temp_buffer(
     asm: &mut Assembler,
@@ -599,16 +594,16 @@ mod tests {
 
                     assert_eq!(
                         instructions[0],
-                        format!("movabs rax, 0x{:x}", test_ptr),
+                        format!("mov rax, 0x{:x}", test_ptr),
                         "First instruction should load the pointer for size {}",
                         size
                     );
 
                     let expected_second = match size {
-                        1 => format!("mov r15b, byte ptr [rax + riz + 0x{:x}]", test_offset),
-                        2 => format!("mov r15w, word ptr [rax + riz + 0x{:x}]", test_offset),
-                        4 => format!("mov r15d, dword ptr [rax + riz + 0x{:x}]", test_offset),
-                        8 => format!("mov r15, qword ptr [rax + riz + 0x{:x}]", test_offset),
+                        1 => format!("mov r15b, byte ptr [rax + 0x{:x}]", test_offset),
+                        2 => format!("mov r15w, word ptr [rax + 0x{:x}]", test_offset),
+                        4 => format!("mov r15d, dword ptr [rax + 0x{:x}]", test_offset),
+                        8 => format!("mov r15, qword ptr [rax + 0x{:x}]", test_offset),
                         _ => unreachable!(),
                     };
 
@@ -643,23 +638,23 @@ mod tests {
 
                     let expected_instructions = match size {
                         1 => [
-                            format!("movabs rax, 0x{:x}", test_ptr),
-                            format!("mov cl, byte ptr [rax + riz + 0x{:x}]", test_src_offset),
+                            format!("mov rax, 0x{:x}", test_ptr),
+                            format!("mov cl, byte ptr [rax + 0x{:x}]", test_src_offset),
                             format!("mov byte ptr [rbp + 0x{:x}], cl", test_dst_offset),
                         ],
                         2 => [
-                            format!("movabs rax, 0x{:x}", test_ptr),
-                            format!("mov cx, word ptr [rax + riz + 0x{:x}]", test_src_offset),
+                            format!("mov rax, 0x{:x}", test_ptr),
+                            format!("mov cx, word ptr [rax + 0x{:x}]", test_src_offset),
                             format!("mov word ptr [rbp + 0x{:x}], cx", test_dst_offset),
                         ],
                         4 => [
-                            format!("movabs rax, 0x{:x}", test_ptr),
-                            format!("mov ecx, dword ptr [rax + riz + 0x{:x}]", test_src_offset),
+                            format!("mov rax, 0x{:x}", test_ptr),
+                            format!("mov ecx, dword ptr [rax + 0x{:x}]", test_src_offset),
                             format!("mov dword ptr [rbp + 0x{:x}], ecx", test_dst_offset),
                         ],
                         8 => [
-                            format!("movabs rax, 0x{:x}", test_ptr),
-                            format!("mov rcx, qword ptr [rax + riz + 0x{:x}]", test_src_offset),
+                            format!("mov rax, 0x{:x}", test_ptr),
+                            format!("mov rcx, qword ptr [rax + 0x{:x}]", test_src_offset),
                             format!("mov qword ptr [rbp + 0x{:x}], rcx", test_dst_offset),
                         ],
                         _ => unreachable!(),
@@ -804,7 +799,7 @@ mod tests {
                 verify_instruction_at_position(
                     &instructions,
                     1,
-                    "mov r15, qword ptr [rax + riz]", // Should have no explicit offset
+                    "mov r15, qword ptr [rax]", // Should have no explicit offset
                 );
 
                 // Test with negative offset
@@ -825,7 +820,7 @@ mod tests {
                 verify_instruction_at_position(
                     &instructions,
                     1,
-                    "mov ecx, dword ptr [rax + riz - 8]", // Should have negative offset
+                    "mov ecx, dword ptr [rax - 8]", // Should have negative offset
                 );
             }
         }
@@ -921,15 +916,14 @@ mod tests {
             let instructions = disassemble(&buffer);
 
             let expected_instructions = [
-                &format!("movabs rax, 0x{:x}", lvb.ptr as i64),
+                &format!("mov rax, 0x{:x}", lvb.ptr as i64),
                 "mov rcx, qword ptr [rbp + 0x38]",
-                "mov qword ptr [rax + riz], rcx",
+                "mov qword ptr [rax], rcx",
                 "mov rcx, qword ptr [rbp + 0x48]",
-                "mov qword ptr [rax + riz + 8], rcx",
+                "mov qword ptr [rax + 8], rcx",
                 "mov rcx, qword ptr [rbp + 0xac]",
-                "mov qword ptr [rax + riz + 0x10], rcx",
+                "mov qword ptr [rax + 0x10], rcx",
             ];
-
             verify_instruction_sequence(&instructions, &expected_instructions);
         }
     }
@@ -1087,8 +1081,8 @@ mod tests {
                 let instructions = disassemble(&buffer);
 
                 let expected_instructions = [
-                    &format!("movabs rax, 0x{:x}", ptr as i64),
-                    "mov r15, qword ptr [rax + riz]",
+                    &format!("mov rax, 0x{:x}", ptr as i64),
+                    "mov r15, qword ptr [rax]",
                 ];
 
                 verify_instruction_sequence(&instructions, &expected_instructions);
