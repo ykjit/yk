@@ -99,7 +99,9 @@ fn main() {
             let text_re = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
 
             // Pattern for SWT MODCLONE function mapping with optional __yk_unopt_ prefix
-            // E.g. use {{__yk_unopt_:function_name}} matches both "function_name" and "__yk_unopt_" prefix
+            // When YKB_SWT_MODCLONE=1: {{__yk_unopt_:function_name}} matches "__yk_unopt_function_name"
+            // When YKB_SWT_MODCLONE is unset: {{__yk_unopt_:function_name}} matches "function_name"
+            // This allows tests to work regardless of whether module cloning is enabled
             let swt_func_ptn = Regex::new(r"\{\{__yk_unopt_:([^}]+)\}\}").unwrap();
             let swt_func_text = Regex::new(r"(?:__yk_unopt_)?[a-zA-Z0-9\._]+").unwrap();
 
