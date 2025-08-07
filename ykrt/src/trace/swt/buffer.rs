@@ -1,3 +1,46 @@
+//! # Temporary Buffer Management for Live Variable Transfers
+//!
+//! This module provides temporary storage for live variables during control point
+//! transitions. It serves as an intermediate staging area for variables that need to be moved
+//! between source and destination locations.
+//!
+//! ## Purpose
+//!
+//! During control point transitions, variables stored in stack locations (`Indirect` and `Direct`)
+//! need temporary storage because source and destination locations might have conflicting values
+//! that can override each other.
+//! Example of live variables:
+//!
+//!  source: Indirect(6, -8, 8), Indirect(6, -16, 8)
+//!  destination: Indirect(6, -16, 8), Indirect(6, -8, 8)
+//!
+//!  We need to copy rbp-8 to rbp-16 and rbp-16 to rbp-8
+//!  Here we cannot copy the values from source to destination sequentially because
+//!  source values will be overwritten by other source values.
+//!  A temporary buffer solves this by serving as temporary storage for the values from
+//!  source and then copying them to destination.
+//!
+//! ## Temporary Buffers
+//!
+//! The module implements a thread-local buffer pool with two separate buffers:
+//! - **OPT_BUFFER**: Used for transitions from optimised variants.
+//! - **UNOPT_BUFFER**: Used for transitions from unoptimised variants.
+//!
+//! ## Buffer Lifecycle
+//!
+//! ```text
+//! 1. Calculate Size - Analyse stackmap record for Indirect/Direct variables.
+//!                     
+//! 2. Get/Create Buffer - Reuse existing buffer if already allocated.
+//!    Or allocate new buffer if needed.
+//!                     
+//! 3. Populate Buffer - Copy variables from stack to buffer.
+//!                     
+//! 4. Transfer Variables - Move variables from buffer to destinations.
+//!                     
+//! 5. Buffer Retention - Keep buffer instance live for reuse.
+//! ```
+
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::collections::HashMap;
 use yksmp::Location::{Direct, Indirect};
@@ -62,17 +105,21 @@ unsafe impl Send for AlignedBuffer {}
 // NOTE: We do NOT implement Sync for AlignedBuffer because concurrent access
 // to the same buffer would be unsafe. Each buffer should be used by only one
 // thread at a time, or protected by explicit synchronization.
-
 thread_local! {
     static OPT_BUFFER: std::cell::RefCell<Option<AlignedBuffer>> = std::cell::RefCell::new(None);
     static UNOPT_BUFFER: std::cell::RefCell<Option<AlignedBuffer>> = std::cell::RefCell::new(None);
 }
 
+/// A high-level interface for managing temporary live variable buffers.
+///
+/// This struct provides metadata and access to an allocated buffer used for storing
+/// live variables during control point transitions. It tracks the buffer's memory
+/// layout, size, and variable offsets for efficient access.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LiveVarsBuffer {
     pub ptr: *mut u8,
     pub layout: Layout,
-    // varibles are only used in tests - can eb removed
+    // TODO: variables are only used in tests - can be removed
     pub variables: HashMap<i32, i32>,
     pub size: i32,
 }
@@ -111,7 +158,7 @@ impl LiveVarsBuffer {
         }
     }
 
-    /// Gets or creates a buffer for the given stack map ID.
+    /// Gets or creates a thread-local buffer for temporary live variable storage.
     pub(crate) fn get_or_create(
         src_rec: &Record,
         smid: ControlPointStackMapId,
