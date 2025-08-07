@@ -479,7 +479,7 @@ impl MT {
                     });
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
-                #[cfg(swt_modclone)]
+                #[cfg(all(swt_modclone, target_arch = "x86_64"))]
                 unsafe {
                     // Do the transition to unopt only if we are in opt mode.
                     if smid == ControlPointStackMapId::Opt.into() {
@@ -638,7 +638,7 @@ impl MT {
                 }
             }
         });
-        #[cfg(swt_modclone)]
+        #[cfg(all(swt_modclone, target_arch = "x86_64"))]
         unsafe {
             cp_transition_to_unopt(frameaddr, &self.stats);
         }
@@ -706,7 +706,7 @@ impl MT {
             }
         }
         self.stats.timing_state(TimingState::OutsideYk);
-        #[cfg(swt_modclone)]
+        #[cfg(all(swt_modclone, target_arch = "x86_64"))]
         unsafe {
             cp_transition_to_opt(frameaddr, &self.stats);
         }

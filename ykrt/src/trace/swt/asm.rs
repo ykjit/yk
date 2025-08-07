@@ -26,7 +26,6 @@
 //! - [`verify_instruction_sequence`]: Compares entire instruction sequences with detailed
 //!   error reporting
 //! - [`verify_instruction_at_position`]: Checks specific instructions at given positions
-//!
 
 use dynasmrt::ExecutableBuffer;
 use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, IntelFormatter};

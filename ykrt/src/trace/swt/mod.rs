@@ -6,13 +6,13 @@ use super::{
 use crate::mt::MTThread;
 use std::{cell::RefCell, error::Error, sync::Arc};
 
-#[cfg(swt_modclone)]
+#[cfg(all(swt_modclone, target_arch = "x86_64"))]
 pub(crate) mod asm;
 #[cfg(swt_modclone)]
 pub(crate) mod buffer;
-#[cfg(swt_modclone)]
+#[cfg(all(swt_modclone, target_arch = "x86_64"))]
 pub(crate) mod cp;
-#[cfg(swt_modclone)]
+#[cfg(all(swt_modclone, target_arch = "x86_64"))]
 pub(crate) mod live_vars;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
