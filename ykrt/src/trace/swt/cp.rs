@@ -1,3 +1,39 @@
+//! # Control Point Transitions for Software Trace (SWT)
+//!
+//! This module implements the control point transition mechanism for yk SWT.
+//! This is an optimisation to reduce the tracing overhead with SWT.
+//!
+//! SWT has two major downsides: calls to the block recording function are expensive;
+//! and in order to trace the interpreter we have to disable many compile-time optimisations.
+//! This module addresses the former and sets the foundation for the latter problem.
+//! It does so by dynamically transitioning between two versions of the interpreter,
+//! one optimised and one unoptimised, depending on the JIT state.
+//! When the interpreter is running normally we use the optimised version;
+//! when we are tracing a hot loop, we switch to the unoptimised version.
+//!
+//! ## Transition Steps
+//!
+//! 1. **Stack Frame Management**: Adjusting RSP/RBP to match the destination function's layout
+//! 2. **Live Variable Copy**: Moving values between different storage locations (registers
+//!    and stack).
+//! 3. **Register Restoration**: Restoring callee-saved registers from their saved locations.
+//! 4. **Control Flow**: Jumping to the continuation point or executing a compiled trace.
+//!
+//! ## Key Components
+//!
+//! - [`CPTransition`]: Describes a control point transition request
+//! - [`ControlPointStackMapId`]: Identifies source/destination stackmap variants
+//! - [`generate_transition_asm`]: Core assembly generation logic
+//! - [`calc_post_cp_offset`]: Calculates return addresses after control point calls
+//! - Register mapping utilities for DWARF ↔ dynasm conversion
+//!
+//! ## Environment Variables
+//!
+//! - `YKD_SWT_VERBOSE`: Enable detailed transition logging
+//! - `YKD_SWT_VERBOSE_ASM`: Enable assembly disassembly output
+//! - `YKD_SWT_CP_BREAK`: Insert breakpoint instructions for debugging
+
+
 use std::collections::HashMap;
 use std::env;
 use std::sync::LazyLock;
