@@ -1,3 +1,28 @@
+//! # Live Variable Transfer for Control Point Transitions
+//!
+//! This module handles the task of transferring live variables between different
+//! function variants during control point transitions.
+//!
+//! ## Purpose
+//!
+//! When transitioning between optimised and unoptimised control points we need to maintain
+//! consistent state of the program. However, the same logical variable values may be
+//! stored in different locations. The purpose of this module is to copy these values from
+//! source locations to destination locations.
+//!
+//! The live variable transfer process operates in two main phases:
+//!
+//! ### Phase 1: Temporary Storage ([`copy_live_vars_to_temp_buffer`])
+//! - Copies `Indirect` and `Direct` variables from stack locations to a temporary buffer
+//!
+//! ### Phase 2: Destination Placement ([`set_destination_live_vars`])
+//! - Moves variables from temporary storage and registers to their destination locations
+//!   including additional locations.
+//! - Manages temporary register conflicts by deferring conflicting assignments.
+//!
+//! ## Assembly Generation
+//! This module generates straight-line assembly code tailored to each specific transfer pattern.
+
 use dynasmrt::{DynasmApi, dynasm, x64::Assembler};
 use smallvec::SmallVec;
 use std::alloc::Layout;
