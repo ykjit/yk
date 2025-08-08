@@ -58,7 +58,7 @@ pub(crate) struct AlignedBuffer {
 impl AlignedBuffer {
     /// Create a new aligned buffer with the specified size
     pub(crate) unsafe fn new(size: usize) -> Self {
-        let layout = Layout::from_size_align(size, 16)
+        let layout = Layout::from_size_align(size, 8)
             .expect("Failed to create layout for live vars buffer");
         let ptr = unsafe {
             let ptr = alloc(layout);
@@ -150,11 +150,11 @@ impl LiveVarsBuffer {
                 _ => { /* DO NOTHING */ }
             }
         }
-        // Align the buffer size to 16 bytes (only round up, never down)
-        if src_val_buffer_size % 16 == 0 {
+        // Align the buffer size to 8 bytes (only round up, never down)
+        if src_val_buffer_size % 8 == 0 {
             src_val_buffer_size
         } else {
-            ((src_val_buffer_size / 16) + 1) * 16
+            ((src_val_buffer_size / 8) + 1) * 8
         }
     }
 
@@ -215,8 +215,8 @@ mod tests {
 
         let buffer_size = LiveVarsBuffer::calculate_size(&mock_record);
         assert_eq!(
-            // 12 is the padding
-            16 + 8 + 4 + 8 + 12,
+            // 4 is the padding (round up 36 to the next multiple of 8)
+            16 + 8 + 4 + 8 + 4,
             buffer_size,
             "Buffer size should equal the sum of all live variable sizes + padding"
         );
@@ -227,11 +227,11 @@ mod tests {
         // Test cases with different initial sizes
         let test_cases = vec![
             (0, 0),   // 0 should remain 0
-            (1, 16),  // 1 should become 16
+            (1, 8),   // 1 should become 8
+            (8, 8),   // 8 should remain 8
+            (9, 16),  // 9 should become 16
+            (15, 16), // 15 should become 16
             (16, 16), // 16 should remain 16
-            (17, 32), // 17 should become 32
-            (31, 32), // 31 should become 32
-            (32, 32), // 32 should remain 32
         ];
         for (val_size, expected_buffer_size) in test_cases {
             // Create a mock record with the given buffer size

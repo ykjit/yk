@@ -933,7 +933,7 @@ mod tests {
             let mut asm = Assembler::new().unwrap();
             let lvb =
                 copy_live_vars_to_temp_buffer(&mut asm, &src_rec, ControlPointStackMapId::UnOpt);
-            assert_eq!(32, lvb.size);
+            assert_eq!(24, lvb.size);
             assert_eq!(3, lvb.variables.len());
 
             // Finalise and disassemble the code.
