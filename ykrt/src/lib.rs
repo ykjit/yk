@@ -12,6 +12,7 @@ mod job_queue;
 mod location;
 mod log;
 pub(crate) mod mt;
+pub(crate) mod profile;
 pub mod promote;
 pub(crate) mod stack;
 pub(crate) mod thread_intercept;

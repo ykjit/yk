@@ -109,6 +109,12 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
 
     /// Disassemble the JITted code into a string, for testing and deubgging.
     fn disassemble(&self, with_addrs: bool) -> Result<String, Box<dyn Error>>;
+
+    /// Return a slice containing the native executable code.
+    fn code(&self) -> &[u8];
+
+    /// Return a unique name for the trace that can be used for (e.g.) a symbol name.
+    fn name(&self) -> String;
 }
 
 #[cfg(test)]
@@ -165,6 +171,14 @@ mod compiled_trace_testing {
         fn disassemble(&self, _with_addrs: bool) -> Result<String, Box<dyn Error>> {
             panic!();
         }
+
+        fn code(&self) -> &[u8] {
+            panic!()
+        }
+
+        fn name(&self) -> String {
+            panic!();
+        }
     }
 
     /// A [CompiledTrace] implementation suitable only for testing basic transitions. The `hl` method will return a
@@ -219,6 +233,14 @@ mod compiled_trace_testing {
         }
 
         fn disassemble(&self, _with_addrs: bool) -> Result<String, Box<dyn Error>> {
+            panic!();
+        }
+
+        fn code(&self) -> &[u8] {
+            panic!()
+        }
+
+        fn name(&self) -> String {
             panic!();
         }
     }

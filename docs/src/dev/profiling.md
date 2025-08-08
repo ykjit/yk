@@ -79,15 +79,18 @@ $ cargo build --profile=release-with-debug
 ```
 
 Ensure that the interpreter you are profiling links to the appropriate version
-of yk and then call `perf record`:
+of yk and then run:
 
 ```
-$ perf record --call-graph dwarf -g ./interpreter ...args...
+$ /path/to/yk/bin/yk_perf_record --call-graph dwarf -g ./interpreter ...args...
 ```
 
 This uses `--call-graph dwarf` to force perf use DWARF debugging information:
 this will only be useful if you have compiled yk with embedded debugging
 information, as recommended above.
+
+The `yk_perf_record` wrapper script sets `YKD_TPROF=1` and automates the task
+of getting JITted code into the profile.
 
 
 ### Viewing a profile
