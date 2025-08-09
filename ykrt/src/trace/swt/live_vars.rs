@@ -74,6 +74,7 @@ struct RegToRbpParams {
     size: u16,
 }
 
+/// Emits asm instructions to load a value from an memory address into a register.
 fn emit_mem_to_reg(asm: &mut Assembler, params: MemToRegParams) {
     match params.size {
         1 => dynasm!(asm
@@ -92,6 +93,7 @@ fn emit_mem_to_reg(asm: &mut Assembler, params: MemToRegParams) {
     }
 }
 
+/// Emits asm instructions to copy a value from a memory address into an RBP-relative stack slot.
 fn emit_mem_to_mem(asm: &mut Assembler, params: MemToMemParams) {
     match params.size {
         1 => dynasm!(asm
@@ -118,6 +120,7 @@ fn emit_mem_to_mem(asm: &mut Assembler, params: MemToMemParams) {
     }
 }
 
+/// Emits asm instructions to load a value from an RBP-relative stack slot into a register.
 fn emit_rbp_to_reg(asm: &mut Assembler, params: RbpToRegParams) {
     match params.size {
         1 => dynasm!(asm; mov Rb(params.dst_reg), BYTE [rbp - params.rbp_offset]),
@@ -128,6 +131,7 @@ fn emit_rbp_to_reg(asm: &mut Assembler, params: RbpToRegParams) {
     }
 }
 
+/// Emits asm instructions to store a register into an RBP-relative stack slot.
 fn emit_reg_to_rbp(asm: &mut Assembler, params: RegToRbpParams) {
     match params.size {
         1 => dynasm!(asm; mov BYTE [rbp + params.rbp_offset], Rb(params.src_reg)),
@@ -138,6 +142,7 @@ fn emit_reg_to_rbp(asm: &mut Assembler, params: RegToRbpParams) {
     }
 }
 
+/// Emits additional destination copies for a register-to-register transfer.
 fn handle_register_to_register_additional_locations(
     asm: &mut dynasmrt::Assembler<dynasmrt::x64::X64Relocation>,
     reg_store_rbp_offset: i32,
@@ -183,7 +188,7 @@ fn handle_register_to_register_additional_locations(
     }
 }
 
-// Handles additional locations for indirect-to-register.
+/// Emits additional location copies for an indirect-to-register transfer.
 fn handle_indirect_to_register_additional_locations(
     asm: &mut dynasmrt::Assembler<dynasmrt::x64::X64Relocation>,
     dst_add_locs: &SmallVec<[i16; 1]>,
@@ -222,6 +227,9 @@ fn handle_indirect_to_register_additional_locations(
     }
 }
 
+/// Copies live variables values from source record to destination record.
+/// Returns a map of destination DWARF register numbers to the byte size 
+/// of the value written.
 pub(crate) fn set_destination_live_vars(
     asm: &mut Assembler,
     src_rec: &Record,
@@ -483,19 +491,10 @@ pub(crate) fn set_destination_live_vars(
     dest_reg_nums
 }
 
-/// Copies live variables from source to destination locations using a temporary buffer.
-
-/// # Arguments
-/// * `asm` - The assembler to emit instructions to
-/// * `src_rec` - Source stack map record containing live variable locations
-/// * `dst_rec` - Destination stack map record
-/// * `rbp_offset_reg_store` - Offset from RBP where registers are stored
-/// * `live_vars_buffer` - Temporary buffer for intermediate storage
-///
-/// # Returns
-/// A HashMap mapping destination register numbers to their value sizes
-///
-/// ```
+/// Copies Indirect and Direct live variables from RBP-relative stack slots into a
+/// temporary buffer.
+/// If no stack-based variables are present for `src_rec`, an empty buffer descriptor is
+/// returned with a null `ptr` and zero size.
 pub(crate) fn copy_live_vars_to_temp_buffer(
     asm: &mut Assembler,
     src_rec: &Record,

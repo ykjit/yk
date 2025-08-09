@@ -78,7 +78,6 @@ pub(crate) fn configure_gdb_intel_formatter(formatter: &mut IntelFormatter) {
 /// # Output Format
 ///
 /// ```text
-/// ASM DUMP:
 ///   7f1565029000: mov rbp, 0x7ffe9c46df40
 ///   7f1565029007: mov rsp, 0x7ffe9c46df40
 ///   7f156502900e: sub rsp, 0x40
@@ -97,13 +96,11 @@ pub(crate) fn print_disassembly(buffer: &ExecutableBuffer) {
     configure_gdb_intel_formatter(&mut formatter);
     let mut instruction = Instruction::default();
     let mut output = String::new();
-
-    println!("ASM DUMP:");
     while decoder.can_decode() {
         decoder.decode_out(&mut instruction);
         output.clear();
         formatter.format(&instruction, &mut output);
-        println!("  {:x}: {}", instruction.ip(), output);
+        eprintln!("  {:x}: {}", instruction.ip(), output);
     }
 }
 

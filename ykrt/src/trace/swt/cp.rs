@@ -233,6 +233,7 @@ pub(crate) unsafe fn cp_transition_to_unopt_and_exec_trace(
 #[unsafe(no_mangle)]
 unsafe fn execute_asm_buffer(buffer: ExecutableBuffer) {
     if *YKD_SWT_VERBOSE_ASM {
+        eprintln!("ASM DUMP:");
         print_disassembly(&buffer);
     }
     unsafe {
