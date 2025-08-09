@@ -14,7 +14,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{3}}: i32 = call @foo(%{{4}})
+//     %{{3}}: i32 = call @{{__yk_unopt_:foo}}(%{{4}})
 //     ...
 //     --- End jit-pre-opt ---
 //     i=3, r=6

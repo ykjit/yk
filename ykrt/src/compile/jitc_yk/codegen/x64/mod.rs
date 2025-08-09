@@ -368,7 +368,11 @@ impl<'a> Assemble<'a> {
                 // dynamically upon entering the control point (e.g. by subtracting the current RBP
                 // from the previous RBP).
                 if let Ok(sm) = AOT_STACKMAPS.as_ref() {
-                    let (rec, pinfo) = sm.get(0);
+                    // Traces from swt modclone are always comming from unoptimised code.
+                    // Unoptimised control point has a stackmap id of 1.
+                    let smid = if cfg!(swt_modclone) { 1 } else { 0 };
+
+                    let (rec, pinfo) = sm.get(smid);
                     let size = if pinfo.hasfp {
                         // The frame size includes the pushed RBP, but since we only care about the size of
                         // the local variables we need to subtract it again.
