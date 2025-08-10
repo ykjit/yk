@@ -516,10 +516,12 @@ impl<'a> Assemble<'a> {
             match &inst {
                 #[cfg(test)]
                 jit_ir::Inst::BlackBox(_) => (),
-                jit_ir::Inst::Const(_) | jit_ir::Inst::Copy(_) | jit_ir::Inst::Tombstone => {
+                jit_ir::Inst::Const(_)
+                | jit_ir::Inst::Copy(_)
+                | jit_ir::Inst::Tombstone
+                | jit_ir::Inst::Placeholder(_) => {
                     unreachable!();
                 }
-
                 jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
                 jit_ir::Inst::Param(i) => {
                     // Right now, `Param`s in the body contain dummy values, and shouldn't be

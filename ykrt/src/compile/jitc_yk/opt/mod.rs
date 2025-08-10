@@ -214,7 +214,11 @@ impl Opt {
         match self.m.inst(iidx) {
             #[cfg(test)]
             Inst::BlackBox(_) => (),
-            Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone | Inst::TraceHeaderStart => {
+            Inst::Const(_)
+            | Inst::Copy(_)
+            | Inst::Tombstone
+            | Inst::TraceHeaderStart
+            | Inst::Placeholder(_) => {
                 unreachable!()
             }
             Inst::BinOp(x) => self.opt_binop(iidx, x)?,

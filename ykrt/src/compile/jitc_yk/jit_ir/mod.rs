@@ -433,6 +433,11 @@ impl Module {
         self.insts[usize::from(iidx)]
     }
 
+    /// Check if the instruction at the specified index is a placeholder.
+    pub(crate) fn is_placeholder(&self, iidx: InstIdx) -> bool {
+        matches!(self.insts[usize::from(iidx)], Inst::Placeholder(_))
+    }
+
     pub(crate) fn push_indirect_call(
         &mut self,
         inst: IndirectCallInst,
@@ -1565,6 +1570,8 @@ pub(crate) enum Inst {
     /// This instruction has been permanently removed. Note: this must only be used if you are
     /// entirely sure that the value this instruction once produced is no longer used.
     Tombstone,
+    /// A placeholder instruction that will be replaced later.
+    Placeholder(PlaceholderInst),
 
     // "Normal" IR instructions.
     BinOp(BinOpInst),
@@ -1633,6 +1640,7 @@ impl Inst {
             Self::Const(x) => m.const_(*x).tyidx(m),
             Self::Copy(x) => m.inst_raw(*x).tyidx(m),
             Self::Tombstone => panic!(),
+            Self::Placeholder(p) => p.tyidx(),
 
             Self::BinOp(x) => x.tyidx(m),
             Self::IndirectCall(idx) => {
@@ -1736,6 +1744,7 @@ impl Inst {
             Inst::Const(_) => (),
             Inst::Copy(_) => (),
             Inst::Tombstone => (),
+            Inst::Placeholder(_) => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
                 lhs.unpack(m).map_iidx(f);
                 rhs.unpack(m).map_iidx(f);
@@ -1895,6 +1904,7 @@ impl Inst {
                 Operand::Var(iidx) => Inst::Copy(iidx),
                 Operand::Const(cidx) => Inst::Const(cidx),
             },
+            Inst::Placeholder(p) => Inst::Placeholder(*p),
             Inst::DynPtrAdd(inst) => {
                 let ptr = inst.ptr;
                 let num_elems = inst.num_elems;
@@ -2174,6 +2184,7 @@ impl fmt::Display for DisplayableInst<'_> {
             #[cfg(test)]
             Inst::BlackBox(x) => write!(f, "black_box {}", x.operand(self.m).display(self.m)),
             Inst::Const(_) | Inst::Copy(_) | Inst::Tombstone => unreachable!(),
+            Inst::Placeholder(_) => write!(f, "placeholder"),
 
             Inst::BinOp(BinOpInst { lhs, binop, rhs }) => write!(
                 f,
@@ -2430,6 +2441,27 @@ inst!(DebugStr, DebugStrInst);
 inst!(PtrToInt, PtrToIntInst);
 inst!(IntToPtr, IntToPtrInst);
 inst!(UIToFP, UIToFPInst);
+inst!(Placeholder, PlaceholderInst);
+
+/// A placeholder instruction that represents a future value.
+///
+/// This is used when inlining functions to create a placeholder for the return value
+/// that will be replaced with the actual value when the inlined function returns.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PlaceholderInst {
+    /// The type of the value this placeholder will eventually represent.
+    tyidx: TyIdx,
+}
+
+impl PlaceholderInst {
+    pub(crate) fn new(tyidx: TyIdx) -> Self {
+        Self { tyidx }
+    }
+
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
+    }
+}
 
 /// The operands for a [Instruction::BinOp]
 ///

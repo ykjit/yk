@@ -20,7 +20,6 @@ use crate::{
 };
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
-
 /// Caller-saved registers in DWARF notation.
 static CALLER_CLOBBER_REG: [u16; 9] = [0, 1, 2, 4, 5, 8, 9, 10, 11];
 
@@ -732,7 +731,29 @@ impl TraceBuilder {
         if !self.frames.is_empty() {
             if let Some(val) = val {
                 let op = self.handle_operand(val)?;
-                self.local_map.insert(frame.callinst.unwrap(), op);
+                if let Some(callinst) = frame.callinst {
+                    // Replace the placeholder
+                    if let Some(placeholder_op) = self.local_map.get(&callinst) {
+                        if let jit_ir::Operand::Var(placeholder_idx) = placeholder_op {
+                            // Check that we're not replacing a placeholder with another placeholder!
+                            if let jit_ir::Operand::Var(return_idx) = &op {
+                                if self.jit_mod.is_placeholder(*return_idx) {
+                                    return Err(CompilationError::General(
+                                        "Placeholder replacement chain detected - cannot replace placeholder with another placeholder".into()
+                                    ));
+                                }
+                            }
+                            self.jit_mod.replace_with_op(*placeholder_idx, op.clone());
+                        }
+                    }
+                    // Always update the local_map with the actual return value
+                    self.local_map.insert(callinst, op);
+                } else {
+                    // This should never happen since we set callinst in handle_call
+                    return Err(CompilationError::General(
+                        "Internal error: frame.callinst is None in handle_ret".into(),
+                    ));
+                }
             }
             Ok(())
         } else {
@@ -882,7 +903,9 @@ impl TraceBuilder {
         // `__yk_trace_basicblock` instruction calls into the beginning of
         // every basic block. These calls can be ignored as they are
         // only used to collect runtime information for the tracer itself.
-        if AOT_MOD.func(*callee).name() == "__yk_trace_basicblock" {
+        if AOT_MOD.func(*callee).name() == "__yk_trace_basicblock"
+            || AOT_MOD.func(*callee).name() == "__yk_trace_basicblock_dummy"
+        {
             return Ok(());
         }
 
@@ -939,6 +962,7 @@ impl TraceBuilder {
                 bid.bbidx(),
                 aot_ir::BBlockInstIdx::new(aot_inst_idx),
             );
+            self.handle_inlined_return_value(*callee, &aot_iid)?;
             self.frames.push(InlinedFrame {
                 funcidx: Some(*callee),
                 callinst: Some(aot_iid),
@@ -965,6 +989,54 @@ impl TraceBuilder {
             }
             self.copy_inst(inst, bid, aot_inst_idx)
         }
+    }
+    // Track inlined function return values as a Placeholder, it will be
+    // replaced later on with actual returned value in `handle_ret`.
+    //
+    // Exmaple:
+    //  Function `f` is called and returns value `%13_1`, when this function is inlined,
+    //  we need to add the return value to the `local_map` so that later instructions
+    //  that reference the `%13_1` (like %14_1: i1 = eq %13_1, 0i32) can be executed.
+    //
+    // ```
+    // bb13:
+    //      %13_1: i32 = call f(...)
+    //    bb14:
+    //      %14_1: i1 = eq %13_1, 0i32
+    // ```
+    // ## The Placeholder Solution:
+    // The placeholder mechanism solves this by creating a two-stage process:
+    //
+    // 1. Placeholder Creation (when encountering the inlined call):
+    // - Create a placeholder instruction that represents the future return value.
+    // - Add this placeholder to the local_map with the expected instruction ID.
+    //
+    // 2. Placeholder Resolution (when the inlined function returns):
+    // - When the actual return value is computed inside the inlined function.
+    // - Replace the placeholder with the actual value in handle_ret().
+    fn handle_inlined_return_value(
+        &mut self,
+        callee: aot_ir::FuncIdx,
+        aot_iid: &aot_ir::InstId,
+    ) -> Result<(), CompilationError> {
+        let func = self.aot_mod.func(callee);
+        if let aot_ir::Ty::Func(fty) = self.aot_mod.type_(func.tyidx()) {
+            let ret_ty = self.aot_mod.type_(fty.ret_ty());
+            // Check that we are dealing only with functions that return values.
+            if !matches!(ret_ty, aot_ir::Ty::Void) {
+                // Create a placeholder instruction
+                let jit_ret_ty = self.handle_type(ret_ty)?;
+                let placeholder_inst =
+                    jit_ir::Inst::Placeholder(jit_ir::PlaceholderInst::new(jit_ret_ty));
+
+                self.jit_mod.push(placeholder_inst)?;
+                let placeholder_idx = self.jit_mod.last_inst_idx();
+                let placeholder_val = jit_ir::Operand::Var(placeholder_idx);
+
+                self.local_map.insert(aot_iid.clone(), placeholder_val);
+            }
+        }
+        Ok(())
     }
 
     fn handle_store(
