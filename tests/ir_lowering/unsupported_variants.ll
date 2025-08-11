@@ -35,9 +35,9 @@
 ;         %{{_}}: ?ty<<4 x i1>> = unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer>>
 ;         br bb6
 ;     bb6:
-;         %{{_}}: i32 = unimplemented <<  %{{_}} = load atomic i32, ptr %{{_}} acquire, align 4>>
+;         %{{_}}: i32 = load %0_0
 ;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4 <note: addrspace>>>
-;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr %{{_}}, align 2>>
+;         %{{_}}: i32 = load %0_0
 ;         br ...
 ;         ...
 ;     bb10:

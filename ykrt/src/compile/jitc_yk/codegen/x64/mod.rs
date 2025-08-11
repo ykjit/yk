@@ -569,7 +569,47 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
                 jit_ir::Inst::Store(i) => self.cg_store(iidx, i),
                 jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
-                jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
+                jit_ir::Inst::Call(inst) => {
+                    let func_decl_idx = inst.target();
+                    match self.m.func_decl(func_decl_idx).name() {
+                        // This is a workaround for dealing with struct return values, which our
+                        // register allocator cannot handle. When we see this particular call we
+                        // look forwards for the matching `extractvalue` instructions and then
+                        // codegen all three instructions in one go.
+                        x if x.starts_with("llvm.umul.with.overflow") => {
+                            let (mut overflow, overflow_off) = if let Some((
+                                iidx,
+                                jit_ir::Inst::ExtractValue(einst),
+                            )) = iter.next()
+                            {
+                                (iidx, einst.index())
+                            } else {
+                                panic!("expected extractvalue instruction");
+                            };
+                            let (mut result, result_off) = if let Some((
+                                iidx,
+                                jit_ir::Inst::ExtractValue(einst),
+                            )) = iter.next()
+                            {
+                                (iidx, einst.index())
+                            } else {
+                                panic!("expected extractvalue instruction");
+                            };
+                            if overflow_off != 1 {
+                                // The extractvalue instructions aren't in the expected order, so
+                                // swap them.
+                                assert_eq!(result_off, 1);
+                                (overflow, result) = (result, overflow);
+                            }
+                            let args = (0..(inst.num_args()))
+                                .map(|i| inst.operand(self.m, i))
+                                .collect::<Vec<_>>();
+                            let [op_a, op_b] = args.try_into().unwrap();
+                            self.cg_umul_overflow(iidx, overflow, result, op_a, op_b);
+                        }
+                        _ => self.cg_call(iidx, inst)?,
+                    }
+                }
                 jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
                 jit_ir::Inst::ICmp(ic_inst) => {
                     next = iter.next();
@@ -619,6 +659,7 @@ impl<'a> Assemble<'a> {
                 jit_ir::Inst::PtrToInt(i) => self.cg_ptrtoint(iidx, i),
                 jit_ir::Inst::IntToPtr(i) => self.cg_inttoptr(iidx, i),
                 jit_ir::Inst::UIToFP(i) => self.cg_uitofp(iidx, i),
+                jit_ir::Inst::ExtractValue(_) => todo!(),
             }
 
             next = iter.next();
@@ -1782,6 +1823,7 @@ impl<'a> Assemble<'a> {
                     }
                 }
             }
+            Ty::Struct(_) => todo!(),
             Ty::Void | Ty::Func(_) => todo!(),
             Ty::Unimplemented(_) => todo!(),
         }
@@ -1943,6 +1985,7 @@ impl<'a> Assemble<'a> {
                         clobber_reg: true,
                     };
                 }
+                Ty::Struct(_) => todo!(),
                 Ty::Void => unreachable!(),
                 Ty::Unimplemented(_) => todo!(),
             }
@@ -2006,6 +2049,7 @@ impl<'a> Assemble<'a> {
                     }
                 }
             }
+            Ty::Struct(_) => todo!(),
             Ty::Func(_) => todo!(),
             Ty::Unimplemented(_) => todo!(),
         }
@@ -2153,6 +2197,7 @@ impl<'a> Assemble<'a> {
             Ty::Integer(_) => todo!(),
             Ty::Ptr => todo!(),
             Ty::Func(_) => todo!(),
+            Ty::Struct(_) => todo!(),
             Ty::Float(fty) => {
                 let [in_reg, out_reg] = self.ra.assign_fp_regs(
                     &mut self.asm,
@@ -2168,6 +2213,71 @@ impl<'a> Assemble<'a> {
             }
             Ty::Unimplemented(_) => todo!(),
         }
+    }
+
+    fn cg_umul_overflow(
+        &mut self,
+        iidx: InstIdx,
+        overflow: InstIdx,
+        result: InstIdx,
+        op_a: Operand,
+        op_b: Operand,
+    ) {
+        let bitw = op_a.bitw(self.m);
+        let [_lhs_reg, rhs_reg, _] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            iidx,
+            [
+                GPConstraint::Input {
+                    op: op_a,
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: Some(Rq::RAX),
+                    clobber_reg: true,
+                },
+                GPConstraint::Input {
+                    op: op_b,
+                    in_ext: RegExtension::ZeroExtended,
+                    force_reg: None,
+                    clobber_reg: false,
+                },
+                // Because we're dealing with unchecked multiply, the higher-order part of
+                // the result in RDX is ignored.
+                GPConstraint::Clobber { force_reg: Rq::RDX },
+            ],
+        );
+
+        // Find a register to store the overflow flag, which is stored in the first extractvalue
+        // instruction.
+        let [overflow_reg] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            overflow,
+            [GPConstraint::Output {
+                out_ext: RegExtension::Undefined,
+                force_reg: None,
+                can_be_same_as_input: false,
+            }],
+        );
+        // The 2nd extractvalue instruction stores the multiplication result which is in RAX.
+        let [_] = self.ra.assign_gp_regs(
+            &mut self.asm,
+            result,
+            [GPConstraint::Output {
+                out_ext: RegExtension::Undefined,
+                force_reg: Some(Rq::RAX),
+                can_be_same_as_input: false,
+            }],
+        );
+        assert!(rhs_reg != Rq::RAX && rhs_reg != Rq::RDX);
+
+        match bitw {
+            32 => dynasm!(self.asm; mul Rd(rhs_reg.code())),
+            64 => dynasm!(self.asm; mul Rq(rhs_reg.code())),
+            _ => todo!(),
+        }
+        dynasm!(self.asm
+            ; seto Rb(overflow_reg.code())
+            ; and Rb(overflow_reg.code()), 1
+        );
     }
 
     fn cg_fshl(&mut self, iidx: InstIdx, op_a: Operand, op_b: Operand, op_c: Operand) {
@@ -3472,6 +3582,7 @@ impl<'a> Assemble<'a> {
             Ty::Integer(_) | Ty::Ptr => self.cg_select_int_ptr(iidx, inst),
             Ty::Func(_) => todo!(),
             Ty::Float(_) => self.cg_select_float(iidx, inst),
+            Ty::Struct(_) => todo!(),
             Ty::Unimplemented(_) => unreachable!(),
         }
     }

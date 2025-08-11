@@ -86,7 +86,7 @@ impl JitDump {
     /// Create a jitdump file for the current PID.
     fn new() -> Result<Self, Box<dyn Error>> {
         let pid = unsafe { getpid() } as u32;
-        let filename = format!("jit-{}.dump", pid);
+        let filename = format!("jit-{pid}.dump");
         let mut f = OpenOptions::new()
             .create_new(true)
             .read(true)

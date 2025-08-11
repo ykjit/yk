@@ -344,6 +344,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 u16::try_from(size).unwrap(),
                                 smallvec![],
                             )),
+                            Ty::Struct(_) => todo!(),
                             Ty::Unimplemented(_) => todo!(),
                         };
                         let inst = ParamInst::new(pidx, type_);
