@@ -1,0 +1,9 @@
+#!/bin/sh
+#
+# Wraps `perf record` to automate the `perf inject -j` step.
+
+set -eu
+
+PERF_OUT=$(mktemp)
+YKD_TPROF=1 perf record -o $PERF_OUT -k CLOCK_MONOTONIC "$@"
+perf inject -j -i $PERF_OUT -o perf.data
