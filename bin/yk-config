@@ -108,6 +108,8 @@ handle_arg() {
             else
                 # SWT-specific flags.
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
+                # Wrap longjmp so we can detect it.
+                OUTPUT="${OUTPUT} -Wl,--wrap=longjmp"
                 # Experimental module cloning support.
                 if [ "${YKB_SWTMODCLONE}" = "1" ]; then
                     OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"

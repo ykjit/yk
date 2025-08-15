@@ -5,8 +5,7 @@
 //   stderr:
 //     yk-tracing: start-tracing
 //     we jumped
-//     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: irregular control flow detected
+//     yk-warning: stop-tracing-aborted: traced longjmp
 //     we jumped
 //     exit
 //     ...
