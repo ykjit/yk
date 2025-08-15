@@ -174,7 +174,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
         }
 
         // FIXME: This needs to be the combined stacksize of all parent traces.
-        let ct = self.codegen.codegen(jit_mod, mt, hl)?;
+        let ct = self.codegen.codegen(jit_mod, mt.clone(), hl)?;
 
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
@@ -188,6 +188,11 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
                 ct.disassemble(true).unwrap()
             ));
         }
+
+        // Register JITted code (if required).
+        mt.trace_profiler().register_ctr(&ct).map_err(|e| {
+            CompilationError::General(format!("failed to register jitted code with profiler: {e}"))
+        })?;
 
         Ok(ct)
     }

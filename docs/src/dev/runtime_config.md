@@ -44,3 +44,5 @@ The following environment variables are available (some only in certain configur
   options. Defaults to 1.
 * [`YKD_LOG_IR`](understanding_traces.html#ykd_log_ir) [with the `ykd` feature]
 * [`YKD_LOG_STATS`](profiling.html#jit-statistics)
+* `YKD_TPROF`: When "1" turns on [trace profiling support](profiling.html) (if
+  implemented for the current platform).

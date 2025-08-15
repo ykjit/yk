@@ -38,6 +38,7 @@ use crate::{
         Log, Verbosity,
         stats::{Stats, TimingState},
     },
+    profile::{PlatformTraceProfiler, profiler_for_current_platform},
     trace::{AOTTraceIterator, TraceRecorder, Tracer, default_tracer},
 };
 
@@ -116,6 +117,8 @@ pub struct MT {
     pub(crate) compiled_traces: Mutex<HashMap<TraceId, Arc<dyn CompiledTrace>>>,
     pub(crate) log: Log,
     pub(crate) stats: Stats,
+    /// The trace profiler implementation to use.
+    trace_profiler: Arc<dyn PlatformTraceProfiler>,
 }
 
 impl std::fmt::Debug for MT {
@@ -125,6 +128,10 @@ impl std::fmt::Debug for MT {
 }
 
 impl MT {
+    pub(crate) fn trace_profiler(&self) -> &Arc<dyn PlatformTraceProfiler> {
+        &self.trace_profiler
+    }
+
     // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
     // are no guarantees as to whether they will share resources effectively or fairly.
     pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
@@ -155,6 +162,7 @@ impl MT {
             compiled_traces: Mutex::new(HashMap::new()),
             log: Log::new()?,
             stats: Stats::new(),
+            trace_profiler: profiler_for_current_platform(),
         }))
     }
 

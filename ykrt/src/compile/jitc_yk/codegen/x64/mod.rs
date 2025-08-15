@@ -3838,6 +3838,14 @@ impl CompiledTrace for X64CompiledTrace {
     fn disassemble(&self, with_addrs: bool) -> Result<String, Box<dyn Error>> {
         AsmPrinter::new(&self.buf, &self.comments, with_addrs).to_string()
     }
+
+    fn code(&self) -> &[u8] {
+        &self.buf
+    }
+
+    fn name(&self) -> String {
+        format!("__yk_trace_{}", self.ctrid().as_u64())
+    }
 }
 
 /// Patch multiple addresses in contiguous memory. The slice is a sequence of pairs `(tgt, val)`:
