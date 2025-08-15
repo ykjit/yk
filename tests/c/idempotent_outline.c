@@ -21,7 +21,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i{{size}} = call @f(%{{v}}, %{{v}}) <idem_const 28i{{size}}>
+//     %{{_}}: i{{size}} = call @{{__yk_unopt_:f}}(%{{v}}, %{{v}}) <idem_const 28i{{size}}>
 //     ...
 //     --- End jit-pre-opt ---
 //     --- Begin jit-post-opt ---
