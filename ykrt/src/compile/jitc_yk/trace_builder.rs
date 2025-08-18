@@ -39,8 +39,8 @@ pub(crate) struct TraceBuilder {
     /// For a valid trace, this always contains at least one element, otherwise the trace returned
     /// out of the function that started tracing, which is problematic.
     frames: Vec<InlinedFrame>,
-    /// The block at which to stop outlining.
-    outline_target_blk: Option<BBlockId>,
+    /// If `Some`, the block we started inlining at, and the successor block to stop outlining at.
+    outline_info: Option<(BBlockId, BBlockId)>,
     /// Current count of recursive calls to the function in which outlining was started. Will be 0
     /// if `outline_target_blk` is None.
     recursion_count: usize,
@@ -98,7 +98,7 @@ impl TraceBuilder {
                 safepoint: None,
                 args: Vec::new(),
             }],
-            outline_target_blk: None,
+            outline_info: None,
             recursion_count: 0,
             promotions,
             promote_idx: 0,
@@ -1253,7 +1253,7 @@ impl TraceBuilder {
                 // We can only stop outlining when we see the succesor block and we are not in
                 // the middle of recursion.
                 let succbid = BBlockId::new(bid.funcidx(), *succ);
-                self.outline_target_blk = Some(succbid);
+                self.outline_info = Some((bid.to_owned(), succbid));
                 self.recursion_count = 0;
             }
             aot_ir::Inst::CondBr { .. } => {
@@ -1607,12 +1607,18 @@ impl TraceBuilder {
                             && !self.aot_mod.bblock(prev_mbid).is_return()
                         {
                             return Err(CompilationError::General(
-                                "irregular control flow detected".into(),
+                                "irregular control flow detected (unexpected successor)".into(),
                             ));
                         }
                     }
-                    if let Some(ref tgtbid) = self.outline_target_blk {
+                    if let Some((ref outbid, ref tgtbid)) = self.outline_info {
                         // We are currently outlining.
+                        if outbid == &bid {
+                            // a longjmp (or similar) may have occurred.
+                            return Err(CompilationError::General(
+                                "irregular control flow detected (outline recursion)".into(),
+                            ));
+                        }
                         if bid.funcidx() == tgtbid.funcidx() {
                             // We are inside the same function that started outlining.
                             if bid.is_entry() {
@@ -1631,7 +1637,7 @@ impl TraceBuilder {
                             // We've reached the successor block of the function/block that
                             // started outlining. We are done and can continue processing
                             // blocks normally.
-                            self.outline_target_blk = None;
+                            self.outline_info = None;
                             // We've returned from the recursive interpreter call so this info is
                             // no longer needed.
                             self.last_interp_call = None;
@@ -1680,7 +1686,7 @@ impl TraceBuilder {
                         match br.unwrap() {
                             aot_ir::Inst::Br { succ } => {
                                 let succbid = BBlockId::new(bid.funcidx(), *succ);
-                                self.outline_target_blk = Some(succbid);
+                                self.outline_info = Some((bid.to_owned(), succbid));
                                 self.recursion_count = 0;
                             }
                             _ => panic!(),
@@ -1694,6 +1700,17 @@ impl TraceBuilder {
                     prev_bid = None;
                 }
             }
+        }
+
+        // If we are still outlining, then it must be `yk_mt_control_point()` that is being
+        // outlined, otherwise we may have encountered something fishy, like a longjmp().
+        if let Some((ref outbid, _)) = self.outline_info
+            && outbid != self.cp_block.as_ref().unwrap()
+        {
+            return Err(CompilationError::General(
+                "irregular control flow detected (trace ended with outline successor pending)"
+                    .into(),
+            ));
         }
 
         if !self.finish_early {
