@@ -882,7 +882,9 @@ impl TraceBuilder {
         // `__yk_trace_basicblock` instruction calls into the beginning of
         // every basic block. These calls can be ignored as they are
         // only used to collect runtime information for the tracer itself.
-        if AOT_MOD.func(*callee).name() == "__yk_trace_basicblock" {
+        if AOT_MOD.func(*callee).name() == "__yk_trace_basicblock"
+            || AOT_MOD.func(*callee).name() == "__yk_trace_basicblock_dummy"
+        {
             return Ok(());
         }
 
