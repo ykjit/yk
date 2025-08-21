@@ -62,6 +62,9 @@ int main(int argc, char **argv) {
   YkLocation loc = yk_location_new();
   char msg[MAX_MSG];
 
+  // Prevent the OutlineUntraceable pass from marking g() yk_outline.
+  g();
+
   int i = 4;
   NOOPT_VAL(loc);
   NOOPT_VAL(i);
