@@ -60,6 +60,9 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
+  // Prevent the OutlineUntraceable pass from marking g() yk_outline.
+  g(0);
+
   size_t i = 4;
   NOOPT_VAL(loc);
   NOOPT_VAL(i);

@@ -119,6 +119,11 @@ handle_arg() {
             # optimisations have finished.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-optnone-after-ir-passes"
 
+            # Apply `yk_outline` to functions that can never be traced so that
+            # we don't pay the cost for unnecessary instrumentation (e.g.
+            # stackmaps, swt recording, ...).
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-outline-untraceable"
+
             # Ensure all symbols are exported so that the JIT can use them.
             # FIXME: https://github.com/ykjit/yk/issues/381
             # Find a better way of handling unexported globals inside a trace.
