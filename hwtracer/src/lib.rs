@@ -162,6 +162,9 @@ mod test {
 
     #[test]
     fn basic_collection() {
+        if !crate::pt::pt_supported() {
+            return;
+        }
         for c in all_collectors() {
             let trace = trace_closure(&c, || work_loop(500));
             assert_ne!(trace.len(), 0);
@@ -170,6 +173,9 @@ mod test {
 
     #[test]
     pub fn repeated_collection() {
+        if !crate::pt::pt_supported() {
+            return;
+        }
         for c in all_collectors() {
             for _ in 0..10 {
                 let trace = trace_closure(&c, || work_loop(500));
@@ -180,6 +186,9 @@ mod test {
 
     #[test]
     pub fn repeated_collection_different_collectors() {
+        if !crate::pt::pt_supported() {
+            return;
+        }
         for _ in 0..10 {
             for c in all_collectors() {
                 let trace = trace_closure(&c, || work_loop(500));
@@ -190,6 +199,9 @@ mod test {
 
     #[test]
     fn concurrent_collection() {
+        if !crate::pt::pt_supported() {
+            return;
+        }
         for c in all_collectors() {
             thread::scope(|s| {
                 let hndl = s.spawn(|| {

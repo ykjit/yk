@@ -1,7 +1,9 @@
 // Compiler:
+//   status: error
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
-// Run-time:
-//   env-var: YKD_SERIALISE_COMPILATION=1
+//   stderr:
+//     ... promotion detected in yk_outline annotated function 'g'
+//     ...
 
 // Check that promotes in indirect callees of outlined functions are consumed
 // properly during outlining. If we failed to consume them, an assertion would

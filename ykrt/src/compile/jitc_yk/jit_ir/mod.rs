@@ -2262,9 +2262,28 @@ impl fmt::Display for DisplayableInst<'_> {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
+                // The optimisation pass may have removed some guard instructions, so the `gidx`
+                // stored in this instruction may no longer be valid. In fact, the codegen ignores
+                // it entirely and uses the position in the vector as the guard index. In order to
+                // not confuse ourselves when looking at the printed IR, we should do the same
+                // here.
+                let mut actual_gidx = 0;
+                for (_, inst) in self.m.iter_skipping_insts() {
+                    if let Inst::Guard(GuardInst {
+                        cond: _,
+                        expect: _,
+                        gidx: other_gidx,
+                    }) = inst
+                    {
+                        if *gidx == other_gidx {
+                            break;
+                        }
+                        actual_gidx += 1;
+                    }
+                }
                 write!(
                     f,
-                    "guard {}, {}, [{live_vars}] ; trace_gid {gidx} safepoint_id {}",
+                    "guard {}, {}, [{live_vars}] ; trace_gid {actual_gidx} safepoint_id {}",
                     if *expect { "true" } else { "false" },
                     cond.unpack(self.m).display(self.m),
                     gi.safepoint_id

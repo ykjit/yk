@@ -8,7 +8,7 @@
 //     yk-tracing: start-tracing
 //     we jumped
 //     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: irregular control flow detected
+//     yk-warning: trace-compilation-aborted: irregular control flow detected (unexpected successor)
 //     we jumped
 //     exit
 //     ...

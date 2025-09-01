@@ -9,7 +9,7 @@
 //     yk-tracing: start-tracing
 //     we jumped
 //     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: irregular control flow detected
+//     yk-warning: trace-compilation-aborted: irregular control flow detected (unexpected successor)
 //     ...
 
 // Tests that we can deal with setjmp/longjmp when we jump from foreign code

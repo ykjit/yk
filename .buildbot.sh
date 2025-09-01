@@ -10,7 +10,7 @@ YKLUA_COMMIT="8a288908efc4611892993a32f8ffadd08df8e8c6"
 YKCBF_REPO="https://github.com/ykjit/ykcbf.git"
 YKCBF_COMMIT="431b92593180e1e376d08ecf383c4a1ab8473b3d"
 
-TRACERS="hwt swt"
+TRACERS="swt"
 
 # Build yklua and run the test suite.
 #
@@ -61,7 +61,7 @@ export RUSTUP_HOME
 export RUSTUP_INIT_SKIP_PATH_CHECK="yes"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh
 sh rustup.sh --default-host x86_64-unknown-linux-gnu \
-    --default-toolchain nightly \
+    --default-toolchain nightly-2025-08-17 \
     --no-modify-path \
     --profile default \
     -y
@@ -266,7 +266,7 @@ done
 # benchmark individually.
 #
 # Note: collect_and_decode is hwt-specific.
-YKB_TRACER=hwt cargo bench --bench collect_and_decode -- --profile-time 1
+#YKB_TRACER=hwt cargo bench --bench collect_and_decode -- --profile-time 1
 YKB_TRACER=swt cargo bench --bench promote -- --profile-time 1
 
 # Test some BF programs.
