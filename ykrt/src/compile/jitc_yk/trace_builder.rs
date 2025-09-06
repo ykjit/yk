@@ -1117,31 +1117,27 @@ impl TraceBuilder {
         let jit_tyidx = self.handle_type(test_val.type_(self.aot_mod))?;
         let bitw = self.jit_mod.type_(jit_tyidx).bitw().unwrap();
 
-        // Find out which case we traced.
-        let guard = match case_dests.iter().position(|&cd| cd == next_bb.bbidx()) {
-            Some(cidx) => {
-                // A non-default case was traced.
-                let val = case_values[cidx];
-                let bb = case_dests[cidx];
-
-                // Build the constant value to guard.
-                let jit_const = jit_ir::Const::Int(jit_tyidx, ArbBitInt::from_u64(bitw, val));
-                let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
-
-                // Perform the comparison.
-                let jit_test_val = self.handle_operand(test_val)?;
-                let cmp_inst =
-                    jit_ir::ICmpInst::new(jit_test_val, jit_ir::Predicate::Equal, jit_const_opnd);
-                let jit_cond = self.jit_mod.push_and_make_operand(cmp_inst.into())?;
-
-                // Guard the result of the comparison.
-                self.create_guard(bid, Some(&jit_cond), bb == next_bb.bbidx(), safepoint)?
+        // Find out which cases we need to guard. This can be either all (if we hit a default
+        // case), some (if multiple cases map to the same block), or one (if only one case maps to
+        // the next block in the trace).
+        let (expect, check_vals) = match case_dests.iter().position(|&cd| cd == next_bb.bbidx()) {
+            Some(_) => {
+                (
+                    true,
+                    // Multiple `case_values` might map to the same block, so we need to guard all
+                    // of the values which point to that block.
+                    case_dests
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, x)| *x == &next_bb.bbidx())
+                        .map(|(i, _)| case_values[i])
+                        .collect::<Vec<_>>(),
+                )
             }
             None => {
                 // If this assertion fails then the basic block that was executed next wasn't an
                 // arm of the switch and something has gone wrong.
                 assert_eq!(&next_bb.bbidx(), default_dest);
-
                 // The default case was traced.
                 //
                 // We need a guard that expresses that `test_val` was not any of the `case_values`.
@@ -1157,42 +1153,39 @@ impl TraceBuilder {
                 // OPT: Also depending on the shape of the cases you may be able to optimise. e.g.
                 // if they are a consecutive run, you could do a range check instead of all of
                 // these comparisons.
-                let mut cmps_opnds = Vec::new();
-                for cv in case_values {
-                    // Build a constant of the case value.
-                    let jit_const = jit_ir::Const::Int(jit_tyidx, ArbBitInt::from_u64(bitw, *cv));
-                    let jit_const_opnd =
-                        jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
-
-                    // Do the comparison.
-                    let jit_test_val = self.handle_operand(test_val)?;
-                    let cmp = jit_ir::ICmpInst::new(
-                        jit_test_val,
-                        jit_ir::Predicate::Equal,
-                        jit_const_opnd,
-                    );
-                    cmps_opnds.push(self.jit_mod.push_and_make_operand(cmp.into())?);
-                }
-
-                // OR together all the equality tests.
-                let mut jit_cond = None;
-                for cmp in cmps_opnds {
-                    if jit_cond.is_none() {
-                        jit_cond = Some(cmp);
-                    } else {
-                        // unwrap can't fail due to the above.
-                        let lhs = jit_cond.take().unwrap();
-                        let or = jit_ir::BinOpInst::new(lhs, BinOp::Or, cmp);
-                        jit_cond = Some(self.jit_mod.push_and_make_operand(or.into())?);
-                    }
-                }
-
-                // Guard the result of ORing all the comparisons together.
-                // unwrap can't fail: we already disregarded degenerate switches with no
-                // non-default cases.
-                self.create_guard(bid, Some(&jit_cond.unwrap()), false, safepoint)?
+                (false, Vec::from(case_values))
             }
         };
+
+        let mut cmps_opnds = Vec::new();
+        for cv in check_vals {
+            // Build a constant of the case value.
+            let jit_const = jit_ir::Const::Int(jit_tyidx, ArbBitInt::from_u64(bitw, cv));
+            let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
+
+            // Do the comparison.
+            let jit_test_val = self.handle_operand(test_val)?;
+            let cmp = jit_ir::ICmpInst::new(jit_test_val, jit_ir::Predicate::Equal, jit_const_opnd);
+            cmps_opnds.push(self.jit_mod.push_and_make_operand(cmp.into())?);
+        }
+
+        // OR together all the equality tests if there are more than one.
+        let mut jit_cond = None;
+        for cmp in cmps_opnds {
+            if jit_cond.is_none() {
+                jit_cond = Some(cmp);
+            } else {
+                // unwrap can't fail due to the above.
+                let lhs = jit_cond.take().unwrap();
+                let or = jit_ir::BinOpInst::new(lhs, BinOp::Or, cmp);
+                jit_cond = Some(self.jit_mod.push_and_make_operand(or.into())?);
+            }
+        }
+
+        // Guard the result of ORing all the comparisons together.
+        // unwrap can't fail: we already disregarded degenerate switches with no
+        // non-default cases.
+        let guard = self.create_guard(bid, Some(&jit_cond.unwrap()), expect, safepoint)?;
         self.copy_inst(guard, bid, aot_inst_idx)
     }
 
