@@ -29,26 +29,26 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i{{size}} = call @add_uintptr_t(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
+//     %{{_}}: i{{size}} = call @{{__yk_unopt_:add_uintptr_t}}(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
 //     ...
-//     %{{_}}: i32 = call @add_uint32_t(%{{_}}, 3i32) <idem_const 41i32>
+//     %{{_}}: i32 = call @{{__yk_unopt_:add_uint32_t}}(%{{_}}, 3i32) <idem_const 41i32>
 //     ...
-//     %{{_}}: i64 = call @add_uint64_t(%{{_}}, 4i64) <idem_const 43i64>
+//     %{{_}}: i64 = call @{{__yk_unopt_:add_uint64_t}}(%{{_}}, 4i64) <idem_const 43i64>
 //     ...
-//     %{{_}}: i{{size}} = call @add_uintptr_t(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
+//     %{{_}}: i{{size}} = call @{{__yk_unopt_:add_uintptr_t}}(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
 //     ...
-//     %{{_}}: i32 = call @add_uint32_t(%{{_}}, 3i32) <idem_const 41i32>
+//     %{{_}}: i32 = call @{{__yk_unopt_:add_uint32_t}}(%{{_}}, 3i32) <idem_const 41i32>
 //     ...
-//     %{{_}}: i64 = call @add_uint64_t(%{{_}}, 4i64) <idem_const 43i64>
+//     %{{_}}: i64 = call @{{__yk_unopt_:add_uint64_t}}(%{{_}}, 4i64) <idem_const 43i64>
 //     ...
 //     --- End jit-pre-opt ---
 //     --- Begin jit-post-opt ---
 //     ...
-//     %{{_}}: i{{size}} = call @add_uintptr_t(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
+//     %{{_}}: i{{size}} = call @{{__yk_unopt_:add_uintptr_t}}(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
 //     ...
-//     %{{_}}: i32 = call @add_uint32_t(%{{_}}, 3i32) <idem_const 41i32>
+//     %{{_}}: i32 = call @{{__yk_unopt_:add_uint32_t}}(%{{_}}, 3i32) <idem_const 41i32>
 //     ...
-//     %{{_}}: i64 = call @add_uint64_t(%{{_}}, 4i64) <idem_const 43i64>
+//     %{{_}}: i64 = call @{{__yk_unopt_:add_uint64_t}}(%{{_}}, 4i64) <idem_const 43i64>
 //     ...
 //     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{_}}, 39i{{size}})
 //     ...
@@ -70,6 +70,7 @@
 //     yk-execution: deoptimise ...
 
 // Check that idempotent functions work.
+
 
 #include <assert.h>
 #include <inttypes.h>

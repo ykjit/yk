@@ -14,6 +14,13 @@ use std::{
     },
 };
 
+#[cfg(swt_modclone)]
+use crate::trace::swt::cp::ControlPointStackMapId;
+#[cfg(swt_modclone)]
+use crate::trace::swt::cp::{
+    cp_transition_to_opt, cp_transition_to_unopt, cp_transition_to_unopt_and_exec_trace,
+};
+
 use atomic_enum::atomic_enum;
 use parking_lot::Mutex;
 #[cfg(not(all(feature = "yk_testing", not(test))))]
@@ -480,6 +487,16 @@ impl MT {
                     });
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
+                #[cfg(all(swt_modclone, target_arch = "x86_64"))]
+                unsafe {
+                    // Do the transition to unopt only if we are in opt mode.
+                    if smid == ControlPointStackMapId::Opt.into() {
+                        cp_transition_to_unopt_and_exec_trace(frameaddr, trace_addr, &self.stats);
+                    }
+                }
+
+                // FIXME: Calling this function overwrites the current (Rust) function frame,
+                // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
                 unsafe { __yk_exec_trace(frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl, trid) => {
@@ -629,6 +646,10 @@ impl MT {
                 }
             }
         });
+        #[cfg(all(swt_modclone, target_arch = "x86_64"))]
+        unsafe {
+            cp_transition_to_unopt(frameaddr, &self.stats);
+        }
     }
 
     /// Stop tracing of the trace with id `trid` at `loc`. If `connector_tid` is `Some`, the
@@ -693,6 +714,10 @@ impl MT {
             }
         }
         self.stats.timing_state(TimingState::OutsideYk);
+        #[cfg(all(swt_modclone, target_arch = "x86_64"))]
+        unsafe {
+            cp_transition_to_opt(frameaddr, &self.stats);
+        }
     }
 
     /// Perform the next step to `loc` in the `Location` state-machine for a control point. If

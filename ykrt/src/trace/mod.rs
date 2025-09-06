@@ -18,7 +18,7 @@ use thiserror::Error;
 #[cfg(tracer_hwt)]
 pub(crate) mod hwt;
 #[cfg(tracer_swt)]
-pub(crate) mod swt;
+pub mod swt;
 
 /// A `Tracer` is a front-end to a tracer backend (e.g. hardware or software tracing). The tracer
 /// backend may have its own configuration options, which is why `Tracer` does not have a `new`
