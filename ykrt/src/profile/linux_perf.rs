@@ -39,7 +39,7 @@ use super::PlatformTraceProfiler;
 use crate::compile::CompiledTrace;
 use byteorder::{NativeEndian, WriteBytesExt};
 use libc::{self, CLOCK_MONOTONIC, clock_gettime, getpid, timespec};
-use memmap2::{Mmap, MmapOptions};
+use memmap2::MmapOptions;
 use parking_lot::Mutex;
 use std::{
     error::Error,
@@ -75,13 +75,6 @@ fn now_timestamp() -> u64 {
 struct JitDump {
     /// The jitdump file we will write records to.
     jitdump: std::fs::File,
-    /// The mmap marker.
-    ///
-    /// We don't read or write to this mapping, but it is required by perf if we want it to
-    /// recognise our jitdump file. Further, we need it to stay alive for the remainder of the
-    /// profiling session, so we store it to prevent it from being dropped (and thus unmapped).
-    #[allow(dead_code)]
-    marker: Mmap,
     /// The current processes PID.
     pid: u32,
 }
@@ -129,14 +122,13 @@ impl JitDump {
 
         // For perf to see the and inject the JITted code, we have to map the jitdump file into
         // memory using a PROT_EXEC memmap().
+        //
+        // Note: this is intentionally dropped (and unmapped) immediately. Perf only needs to see
+        // the initial mapping event to recognise the JIT dump file.
         let opts = MmapOptions::new();
-        let marker = unsafe { opts.map_exec(&f).unwrap() };
+        let _ = unsafe { opts.map_exec(&f).unwrap() };
 
-        Ok(Self {
-            jitdump: f,
-            marker,
-            pid,
-        })
+        Ok(Self { jitdump: f, pid })
     }
 
     fn emit_code_load_record(
