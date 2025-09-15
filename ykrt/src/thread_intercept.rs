@@ -1,10 +1,36 @@
+#![allow(static_mut_refs)]
+
 use std::os::raw::{c_int, c_void};
 
 use libc::{dlsym, free, malloc, pthread_create};
+use std::mem::MaybeUninit;
 use std::{ffi::CString, ptr::null_mut};
+
+// FIXME: Use mutex for SHADOW_STACKS.
 
 // The size of the shadow stack. This is the same size as the default shadow stack in ykllvm.
 const SHADOW_STACK_SIZE: usize = 1000000;
+
+static mut SHADOW_STACKS: ShadowStacks = ShadowStacks::new();
+
+type ShadowStackPtr = *mut MaybeUninit<u8>;
+
+struct ShadowStacks {
+    stacks: Vec<ShadowStackPtr>,
+}
+
+impl ShadowStacks {
+    const fn new() -> Self {
+        ShadowStacks { stacks: Vec::new() }
+    }
+
+    fn register_current_thread(&mut self) {
+        let head = CString::new("shadowstack_0").unwrap();
+        let head_ptr = unsafe { dlsym(null_mut(), head.as_ptr()) as ShadowStackPtr };
+        assert!(!head_ptr.is_null());
+        self.stacks.push(head_ptr)
+    }
+}
 
 #[derive(Debug)]
 struct Target {
@@ -12,6 +38,21 @@ struct Target {
     pub arg: *mut c_void,
 }
 
+pub fn yk_foreach_shadowstack(f: extern "C" fn(*mut c_void, *mut c_void)) {
+    unsafe {
+        for ptr in SHADOW_STACKS.stacks.iter() {
+            let end = ptr.wrapping_byte_add(SHADOW_STACK_SIZE);
+            f(ptr.cast() as *mut c_void, end as *mut c_void);
+        }
+    }
+}
+
+// Called at program startup to register the shadowstack of the main thread.
+pub fn yk_init() {
+    unsafe { SHADOW_STACKS.register_current_thread() };
+}
+
+/// Create a new shadowstack for each new pthread.
 extern "C" fn wrap_thread_routine(tgt: *mut c_void) -> *mut c_void {
     let str = CString::new("shadowstack_0").unwrap();
     let tgt = unsafe { Box::from_raw(tgt as *mut Target) };
@@ -27,12 +68,14 @@ extern "C" fn wrap_thread_routine(tgt: *mut c_void) -> *mut c_void {
     unsafe {
         // Set shadowstack symbol with new allocated stack
         *(shadowstack_symbol_addr as *mut *mut c_void) = newsstack;
+        SHADOW_STACKS.register_current_thread();
     }
     let ret = (tgt.func)(tgt.arg);
     unsafe { free(newsstack) };
     ret
 }
 
+/// Wraps system pthread create
 #[unsafe(no_mangle)]
 pub extern "C" fn __wrap_pthread_create(
     thread: *mut libc::pthread_t,

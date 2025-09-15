@@ -1015,6 +1015,15 @@ pub(crate) enum Inst {
     DebugStr { msg: Operand },
     #[deku(id = "22")]
     IdempotentPromote { tyidx: TyIdx, val: Operand },
+    #[deku(id = "23")]
+    ExtractValue {
+        tyidx: TyIdx,
+        op: Operand,
+        #[deku(temp)]
+        num_indices: usize,
+        #[deku(count = "num_indices")]
+        indices: Vec<usize>,
+    },
     #[deku(id = "255")]
     Unimplemented {
         tyidx: TyIdx,
@@ -1098,6 +1107,11 @@ impl Inst {
             Self::FNeg { val } => Some(val.type_(m)),
             Self::DebugStr { .. } => None,
             Self::IdempotentPromote { tyidx, .. } => Some(m.type_(*tyidx)),
+            Self::ExtractValue {
+                op: _,
+                tyidx,
+                indices: _,
+            } => Some(m.type_(*tyidx)),
         }
     }
 
@@ -1389,6 +1403,13 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::DebugStr { msg } => write!(f, "debug_str {}", msg.display(self.m)),
             Inst::IdempotentPromote { val, .. } => {
                 write!(f, "idempotent_promote {}", val.display(self.m),)
+            }
+            Inst::ExtractValue {
+                op,
+                tyidx: _,
+                indices,
+            } => {
+                write!(f, "extractvalue {}, {:?}", op.display(self.m), indices,)
             }
         }
     }
@@ -1765,6 +1786,8 @@ impl Display for FloatTy {
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StructTy {
+    /// Total size in bits of this struct including alignment.
+    bit_size: u64,
     /// The number of fields the struct has.
     #[deku(temp)]
     num_fields: usize,
@@ -1782,6 +1805,18 @@ impl StructTy {
             struct_type: self,
             m,
         }
+    }
+
+    pub(crate) fn bit_size(&self) -> u64 {
+        self.bit_size
+    }
+
+    pub(crate) fn field_tyidxs(&self) -> &Vec<TyIdx> {
+        &self.field_tyidxs
+    }
+
+    pub(crate) fn field_bit_offs(&self) -> &Vec<usize> {
+        &self.field_bit_offs
     }
 }
 

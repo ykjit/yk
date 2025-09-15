@@ -488,6 +488,7 @@ impl<'a> RevAnalyse<'a> {
                                 self.push_reg_hint_fixed(iidx, arg, Register::FP(*reg));
                             }
                         }
+                        Ty::Struct(_) => todo!(),
                         Ty::Unimplemented(_) => panic!(),
                     }
                 }
@@ -516,6 +517,7 @@ impl<'a> RevAnalyse<'a> {
                         self.push_reg_hint_fixed(iidx, self.m.arg(aidx), Register::FP(*reg));
                     }
                 }
+                Ty::Struct(_) => todo!(),
                 Ty::Unimplemented(_) => panic!(),
             }
         }

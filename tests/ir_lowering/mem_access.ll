@@ -8,7 +8,7 @@
 ;         %0_2: i8 = load %0_0, volatile
 ;         %0_3: i8 = load %0_0
 ;         %0_4: i8 = load %0_0
-;         %0_5: i16 = unimplemented <<  %6 = load i16, ptr %0, align 1>>
+;         %0_5: i16 = load %0_0
 ;         *%0_0 = 0i8
 ;         *%0_0 = 0i8, volatile
 ;         *%0_0 = 0i8

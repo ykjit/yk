@@ -10,7 +10,7 @@ use super::{
     arbbitint::ArbBitInt,
     jit_ir::{self, Const, Operand, PackedOperand, ParamIdx, TraceKind},
 };
-use crate::compile::jitc_yk::aot_ir::DeoptSafepoint;
+use crate::compile::jitc_yk::aot_ir::{DeoptSafepoint, TyIdx};
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{CompilationError, CompiledTrace},
@@ -383,6 +383,9 @@ impl TraceBuilder {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_idempotent_promote(bid, iidx, val, nextinst)
                 }
+                aot_ir::Inst::ExtractValue { op, tyidx, indices } => {
+                    self.handle_extractvalue(bid, iidx, op, tyidx, indices)
+                }
                 _ => Err(CompilationError::General(format!(
                     "unimplemented: {inst:?}"
                 ))),
@@ -543,7 +546,18 @@ impl TraceBuilder {
                 let jit_retty = self.handle_type(self.aot_mod.type_(ft.ret_ty()))?;
                 jit_ir::Ty::Func(jit_ir::FuncTy::new(jit_args, jit_retty, ft.is_vararg()))
             }
-            aot_ir::Ty::Struct(_st) => todo!(),
+            aot_ir::Ty::Struct(st) => {
+                let mut fields = Vec::new();
+                for aotty in st.field_tyidxs() {
+                    let jit_ty = self.handle_type(self.aot_mod.type_(*aotty))?;
+                    fields.push(jit_ty);
+                }
+                jit_ir::Ty::Struct(jit_ir::StructTy::new(
+                    st.bit_size(),
+                    fields,
+                    st.field_bit_offs().clone(),
+                ))
+            }
             aot_ir::Ty::Float(ft) => {
                 let inner = match ft {
                     aot_ir::FloatTy::Float => jit_ir::FloatTy::Float,
@@ -616,6 +630,13 @@ impl TraceBuilder {
             for op in safepoint.lives.iter() {
                 match op {
                     aot_ir::Operand::Local(iid) => {
+                        let inst = self.aot_mod.inst(iid);
+                        if let Some(aot_ir::Ty::Struct(_)) = inst.def_type(self.aot_mod) {
+                            panic!(
+                                "can't deopt struct yet: {}",
+                                inst.display(self.aot_mod, None)
+                            );
+                        }
                         match self.local_map[iid] {
                             jit_ir::Operand::Var(liidx) => {
                                 // If, as often happens, a guard has in its live set the boolean
@@ -752,6 +773,7 @@ impl TraceBuilder {
             // remaining blocks and emit a return instruction that naturally returns from a
             // compiled trace into the interpreter.
             let safepoint = frame.safepoint.unwrap();
+            // FIXME: What if this has a return value?
             self.jit_mod.push(jit_ir::Inst::Return(safepoint.id))?;
             self.finish_early = true;
             Ok(())
@@ -796,6 +818,35 @@ impl TraceBuilder {
         tyidx: &aot_ir::TyIdx,
         volatile: bool,
     ) -> Result<(), CompilationError> {
+        if let aot_ir::Ty::Struct(_) = self.aot_mod.type_(*tyidx) {
+            // Our register allocator can't handle multiple registers for a single instruction.
+            // Luckily, we can rewrite struct loads and the `extractvalue` instructions that follow
+            // it into something simpler. For this we first ignore this load and replace it with
+            // its operand in the local map. When handling the `extractvalue` instruction we
+            // replace it with a ptradd and a load. For example, this
+            // ```
+            // %0: {i8, i64} = load %ptr
+            // %1: i8 = extractvalue %0, 0
+            // %2: i64 = extractvalue %0, 1
+            // ```
+            // becomes
+            // ```
+            // %1: ptr = ptr_add %ptr, 0
+            // %2: i8 = load %1
+            // %3: ptr = ptr_add %ptr, 8
+            // %4: i64 = load %3
+            // ```
+            // This also works when the load was inlined from another call, as the `ret` naturally
+            // forwards the loads operand from the local map.
+            let aot_iit = aot_ir::InstId::new(
+                bid.funcidx(),
+                bid.bbidx(),
+                aot_ir::BBlockInstIdx::new(aot_inst_idx),
+            );
+            let jitop = self.handle_operand(ptr)?;
+            self.local_map.insert(aot_iit, jitop);
+            return Ok(());
+        }
         let inst = jit_ir::LoadInst::new(
             self.handle_operand(ptr)?,
             self.handle_type(self.aot_mod.type_(*tyidx))?,
@@ -1234,6 +1285,59 @@ impl TraceBuilder {
         self.copy_inst(inst, bid, aot_inst_idx)
     }
 
+    fn handle_extractvalue(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        op: &aot_ir::Operand,
+        extracttyidx: &TyIdx,
+        indices: &[usize],
+    ) -> Result<(), CompilationError> {
+        assert_eq!(indices.len(), 1);
+        let jitop = self.handle_operand(op)?;
+        match jitop {
+            Operand::Var(jitiidx) => {
+                if let jit_ir::Inst::Call(_) = self.jit_mod.inst(jitiidx) {
+                    // We didn't manage to inline the call generating this struct, so we need to
+                    // emit the `extractvalue` instruction as is and handle it in the codegen (most
+                    // likely by processing the call and the (two) `extractvalue` instructions in
+                    // one go).
+                    let inst = jit_ir::ExtractValueInst::new(
+                        self.handle_operand(op)?,
+                        self.handle_type(self.aot_mod.type_(*extracttyidx))?,
+                        indices.into(),
+                    )
+                    .into();
+                    return self.copy_inst(inst, bid, aot_inst_idx);
+                }
+            }
+            _ => panic!(),
+        }
+
+        // Try to rewrite the `extractvalue` instruction into an equivalent ptradd/load
+        // instructions.
+        if let aot_ir::Operand::Local(id) = op {
+            match self.aot_mod.inst(id).def_type(self.aot_mod).unwrap() {
+                aot_ir::Ty::Struct(st) => {
+                    let off = st.field_bit_offs()[indices[0]] / 8;
+                    let ptradd = jit_ir::PtrAddInst::new(jitop, i32::try_from(off).unwrap());
+                    self.jit_mod.push(ptradd.into())?;
+                    let load = jit_ir::LoadInst::new(
+                        jit_ir::Operand::Var(self.jit_mod.last_inst_idx()),
+                        self.handle_type(self.aot_mod.type_(*extracttyidx))?,
+                        false,
+                    );
+                    self.jit_mod.push(load.into())?;
+                    self.link_iid_to_last_inst(bid, aot_inst_idx);
+                }
+                _ => panic!(),
+            }
+        } else {
+            panic!();
+        }
+        Ok(())
+    }
+
     /// Turn outlining until the specified call has been consumed from the trace.
     ///
     /// `terminst` is the terminating instruction immediately after the call, guaranteed to be
@@ -1299,6 +1403,7 @@ impl TraceBuilder {
             }
             jit_ir::Ty::Func(_) => todo!(),
             jit_ir::Ty::Float(_) => todo!(),
+            jit_ir::Ty::Struct(_) => todo!(),
             jit_ir::Ty::Unimplemented(_) => todo!(),
         };
         self.jit_mod.insert_const(c)

@@ -1093,6 +1093,26 @@ impl FuncTy {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct StructTy {
+    /// Total size in bits of this struct including alignment.
+    bit_size: u64,
+    /// The types of the fields.
+    field_tyidxs: Vec<TyIdx>,
+    /// The bit offsets of the fields (taking into account any required padding for alignment).
+    field_bit_offs: Vec<usize>,
+}
+
+impl StructTy {
+    pub(crate) fn new(bit_size: u64, field_tyidxs: Vec<TyIdx>, field_bit_offs: Vec<usize>) -> Self {
+        StructTy {
+            bit_size,
+            field_tyidxs,
+            field_bit_offs,
+        }
+    }
+}
+
 /// A type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Ty {
@@ -1108,6 +1128,7 @@ pub(crate) enum Ty {
     Ptr,
     Func(FuncTy),
     Float(FloatTy),
+    Struct(StructTy),
     Unimplemented(String),
 }
 
@@ -1136,6 +1157,7 @@ impl Ty {
                 FloatTy::Float => mem::size_of::<f32>(),
                 FloatTy::Double => mem::size_of::<f64>(),
             }),
+            Self::Struct(s) => Some(usize::try_from(s.bit_size.div_ceil(8)).unwrap()),
             Self::Unimplemented(_) => None,
         }
     }
@@ -1154,6 +1176,7 @@ impl Ty {
                 FloatTy::Float => u32::try_from(mem::size_of::<f32>() * 8).ok(),
                 FloatTy::Double => u32::try_from(mem::size_of::<f64>() * 8).ok(),
             },
+            Self::Struct(s) => Some(u32::try_from(s.bit_size).unwrap()),
             Self::Unimplemented(_) => None,
         }
     }
@@ -1195,6 +1218,22 @@ impl fmt::Display for DisplayableTy<'_> {
                 }
             }
             Ty::Float(ft) => write!(f, "{ft}"),
+            Ty::Struct(s) => {
+                write!(
+                    f,
+                    "{{{}}}",
+                    s.field_tyidxs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ti)| format!(
+                            "{}: {}",
+                            s.field_bit_offs[i],
+                            self.m.type_(*ti).display(self.m)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )
+            }
             Ty::Unimplemented(_) => write!(f, "?type"),
         }
     }
@@ -1604,6 +1643,7 @@ pub(crate) enum Inst {
     IntToPtr(IntToPtrInst),
     PtrToInt(PtrToIntInst),
     UIToFP(UIToFPInst),
+    ExtractValue(ExtractValueInst),
 }
 
 impl Inst {
@@ -1671,6 +1711,7 @@ impl Inst {
             Self::PtrToInt(i) => i.dest_tyidx(),
             Self::IntToPtr(_) => m.ptr_tyidx(),
             Self::UIToFP(i) => i.dest_tyidx(),
+            Self::ExtractValue(i) => i.tyidx(),
         }
     }
 
@@ -1836,6 +1877,7 @@ impl Inst {
             Inst::PtrToInt(PtrToIntInst { val, .. }) => val.unpack(m).map_iidx(f),
             Inst::IntToPtr(IntToPtrInst { val }) => val.unpack(m).map_iidx(f),
             Inst::UIToFP(UIToFPInst { val, .. }) => val.unpack(m).map_iidx(f),
+            Inst::ExtractValue(ExtractValueInst { op, .. }) => op.unpack(m).map_iidx(f),
         }
     }
 
@@ -2056,6 +2098,13 @@ impl Inst {
                 val: mapper(m, val),
                 dest_tyidx: *dest_tyidx,
             }),
+            Inst::ExtractValue(ExtractValueInst { op, tyidx, indices }) => {
+                Inst::ExtractValue(ExtractValueInst {
+                    op: mapper(m, op),
+                    tyidx: *tyidx,
+                    indices: *indices,
+                })
+            }
         };
         Ok(inst)
     }
@@ -2146,6 +2195,7 @@ impl Inst {
             (Self::PtrToInt(x), Self::PtrToInt(y)) => x.decopy_eq(m, y),
             (Self::IntToPtr(x), Self::IntToPtr(y)) => x.decopy_eq(m, y),
             (Self::UIToFP(x), Self::UIToFP(y)) => x.decopy_eq(m, y),
+            (Self::ExtractValue(x), Self::ExtractValue(y)) => x.decopy_eq(m, y),
             (x, y) => todo!("{x:?} {y:?}"),
         }
     }
@@ -2409,6 +2459,14 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(f, "int_to_ptr {}", i.val(self.m).display(self.m),)
             }
             Inst::UIToFP(i) => write!(f, "ui_to_fp {}", i.val(self.m).display(self.m)),
+            Inst::ExtractValue(i) => {
+                write!(
+                    f,
+                    "extractvalue {}, {}",
+                    i.val(self.m).display(self.m),
+                    i.indices
+                )
+            }
         }
     }
 }
@@ -2449,6 +2507,7 @@ inst!(DebugStr, DebugStrInst);
 inst!(PtrToInt, PtrToIntInst);
 inst!(IntToPtr, IntToPtrInst);
 inst!(UIToFP, UIToFPInst);
+inst!(ExtractValue, ExtractValueInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -3507,6 +3566,52 @@ impl FPExtInst {
 
     pub(crate) fn dest_tyidx(&self) -> TyIdx {
         self.dest_tyidx
+    }
+}
+
+/// The operands for a [Inst::ExtractValue]
+///
+/// # Semantics
+///
+/// Extracts the value of a member field of an aggregate value, like a struct or an array.
+#[derive(Clone, Copy, Debug)]
+pub struct ExtractValueInst {
+    // The source from which to extract from.
+    op: PackedOperand,
+    // The type of the source.
+    tyidx: TyIdx,
+    // The index from which to extract.
+    // FIXME: This can be list of indices and thus should be a vec.
+    indices: u8,
+}
+
+impl ExtractValueInst {
+    pub(crate) fn new(op: Operand, tyidx: TyIdx, indices: Vec<usize>) -> Self {
+        // We currently only deal with one index so we don't need to store a vec.
+        assert!(indices.len() == 1);
+        Self {
+            op: PackedOperand::new(&op),
+            tyidx,
+            indices: u8::try_from(indices[0]).unwrap(),
+        }
+    }
+
+    fn decopy_eq(&self, m: &Module, other: Self) -> bool {
+        self.val(m) == other.val(m) && self.tyidx == other.tyidx
+    }
+
+    pub(crate) fn val(&self, m: &Module) -> Operand {
+        self.op.unpack(m)
+    }
+
+    /// Returns the type index of the aggregate value.
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
+    }
+
+    /// Returns the index of the member field.
+    pub(crate) fn index(&self) -> u8 {
+        self.indices
     }
 }
 
