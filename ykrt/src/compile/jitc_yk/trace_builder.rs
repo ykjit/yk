@@ -773,7 +773,8 @@ impl TraceBuilder {
             // remaining blocks and emit a return instruction that naturally returns from a
             // compiled trace into the interpreter.
             let safepoint = frame.safepoint.unwrap();
-            // FIXME: What if this has a return value?
+            // We currently don't support passing values back during early returns.
+            assert!(val.is_none());
             self.jit_mod.push(jit_ir::Inst::Return(safepoint.id))?;
             self.finish_early = true;
             Ok(())
