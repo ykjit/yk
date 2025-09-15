@@ -113,9 +113,9 @@ handle_arg() {
             fi
 
             # Disable backend optimisations that Yk can't handle by adding the
-            # `optnone` attribute onto every function after high-level IR
-            # optimisations have finished.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-optnone-after-ir-passes"
+            # `optnone` attribute onto every traceable function after
+            # high-level IR optimisations have finished.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-mark-traceable-optnone-after-ir-passes"
 
             # Apply `yk_outline` to functions that can never be traced so that
             # we don't pay the cost for unnecessary instrumentation (e.g.
