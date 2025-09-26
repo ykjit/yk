@@ -891,6 +891,11 @@ impl TraceBuilder {
                 let dli = ykaddr::addr::dladdr(*vaddr).unwrap();
                 assert_eq!(dli.dli_saddr(), *vaddr);
                 let callee = self.aot_mod.funcidx(dli.dli_sname().unwrap());
+                if self.aot_mod.func(callee).is_idempotent() {
+                    // ykllvm doesn't insert idempotent recorder calls for indirect calls, so if we
+                    // allow this to proceed, it's not going to do the right thing.
+                    todo!();
+                }
                 return self.direct_call_impl(
                     bid,
                     aot_inst_idx,
