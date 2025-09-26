@@ -1014,8 +1014,6 @@ pub(crate) enum Inst {
     #[deku(id = "21")]
     DebugStr { msg: Operand },
     #[deku(id = "22")]
-    IdempotentPromote { tyidx: TyIdx, val: Operand },
-    #[deku(id = "23")]
     ExtractValue {
         tyidx: TyIdx,
         op: Operand,
@@ -1106,7 +1104,6 @@ impl Inst {
             Self::Promote { tyidx, .. } => Some(m.type_(*tyidx)),
             Self::FNeg { val } => Some(val.type_(m)),
             Self::DebugStr { .. } => None,
-            Self::IdempotentPromote { tyidx, .. } => Some(m.type_(*tyidx)),
             Self::ExtractValue {
                 op: _,
                 tyidx,
@@ -1230,13 +1227,13 @@ impl fmt::Display for DisplayableInst<'_> {
                 let safepoint_s = safepoint
                     .as_ref()
                     .map_or("".to_string(), |sp| format!(" {}", sp.display(self.m)));
-                write!(
-                    f,
-                    "call {}({}){}",
-                    self.m.func(*callee).name(),
-                    args_s,
-                    safepoint_s
-                )
+                let func = self.m.func(*callee);
+                let idem = if func.is_idempotent() {
+                    "idempotent "
+                } else {
+                    ""
+                };
+                write!(f, "call {}{}({}){}", idem, func.name(), args_s, safepoint_s)
             }
             Inst::CondBr {
                 cond,
@@ -1401,9 +1398,6 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(f, "fneg {}", val.display(self.m),)
             }
             Inst::DebugStr { msg } => write!(f, "debug_str {}", msg.display(self.m)),
-            Inst::IdempotentPromote { val, .. } => {
-                write!(f, "idempotent_promote {}", val.display(self.m),)
-            }
             Inst::ExtractValue {
                 op,
                 tyidx: _,
