@@ -879,32 +879,31 @@ impl TraceBuilder {
         debug_assert!(!inst.is_debug_call(self.aot_mod));
 
         let jit_callop = self.handle_operand(callop)?;
-        if let jit_ir::Operand::Var(callee_iidx) = jit_callop {
-            // let callee = self.jit_mod.inst(callee_iidx);
-            if let Some(cidx) = self.inferred_consts.get(&callee_iidx) {
-                // The callee is constant. We can treat this *indirect* call as if it were a
-                // *direct* call, and maybe even inline it.
-                let Const::Ptr(vaddr) = self.jit_mod.const_(*cidx) else {
-                    panic!();
-                };
-                // Find the function the constant pointer is referring to.
-                let dli = ykaddr::addr::dladdr(*vaddr).unwrap();
-                assert_eq!(dli.dli_saddr(), *vaddr);
-                let callee = self.aot_mod.funcidx(dli.dli_sname().unwrap());
-                if self.aot_mod.func(callee).is_idempotent() {
-                    // ykllvm doesn't insert idempotent recorder calls for indirect calls, so if we
-                    // allow this to proceed, it's not going to do the right thing.
-                    todo!();
-                }
-                return self.direct_call_impl(
-                    bid,
-                    aot_inst_idx,
-                    &callee,
-                    args,
-                    Some(safepoint),
-                    nextinst,
-                );
+        if let jit_ir::Operand::Var(callee_iidx) = jit_callop
+            && let Some(cidx) = self.inferred_consts.get(&callee_iidx)
+        {
+            // The callee is constant. We can treat this *indirect* call as if it were a
+            // *direct* call, and maybe even inline it.
+            let Const::Ptr(vaddr) = self.jit_mod.const_(*cidx) else {
+                panic!();
+            };
+            // Find the function the constant pointer is referring to.
+            let dli = ykaddr::addr::dladdr(*vaddr).unwrap();
+            assert_eq!(dli.dli_saddr(), *vaddr);
+            let callee = self.aot_mod.funcidx(dli.dli_sname().unwrap());
+            if self.aot_mod.func(callee).is_idempotent() {
+                // ykllvm doesn't insert idempotent recorder calls for indirect calls, so if we
+                // allow this to proceed, it's not going to do the right thing.
+                todo!();
             }
+            return self.direct_call_impl(
+                bid,
+                aot_inst_idx,
+                &callee,
+                args,
+                Some(safepoint),
+                nextinst,
+            );
         }
 
         // Convert AOT args to JIT args.
