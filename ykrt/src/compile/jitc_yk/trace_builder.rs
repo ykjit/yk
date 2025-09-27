@@ -219,11 +219,22 @@ impl TraceBuilder {
 
         for inst in blk.insts.iter() {
             match inst {
-                aot_ir::Inst::Promote { tyidx, .. }
-                | aot_ir::Inst::IdempotentPromote { tyidx, .. } => {
-                    // Consume the correct number of bytes from the promoted values array.
+                aot_ir::Inst::Promote { tyidx, .. } => {
                     self.promote_idx +=
                         usize::try_from(self.aot_mod.type_(*tyidx).bytew()).unwrap();
+                }
+                aot_ir::Inst::Call {
+                    callee: callee_fidx,
+                    ..
+                } => {
+                    let callee = self.aot_mod.func(*callee_fidx);
+                    if callee.is_idempotent() {
+                        let aot_ir::Ty::Func(fty) = self.aot_mod.type_(callee.tyidx()) else {
+                            panic!()
+                        };
+                        self.promote_idx +=
+                            usize::try_from(self.aot_mod.type_(fty.ret_ty()).bytew()).unwrap();
+                    }
                 }
                 aot_ir::Inst::DebugStr { .. } => {
                     // Skip this debug string.
@@ -378,10 +389,6 @@ impl TraceBuilder {
                 aot_ir::Inst::DebugStr { .. } => {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_debug_str(bid, iidx, nextinst)
-                }
-                aot_ir::Inst::IdempotentPromote { val, .. } => {
-                    let nextinst = blk.insts.last().unwrap();
-                    self.handle_idempotent_promote(bid, iidx, val, nextinst)
                 }
                 aot_ir::Inst::ExtractValue { op, tyidx, indices } => {
                     self.handle_extractvalue(bid, iidx, op, tyidx, indices)
@@ -872,27 +879,31 @@ impl TraceBuilder {
         debug_assert!(!inst.is_debug_call(self.aot_mod));
 
         let jit_callop = self.handle_operand(callop)?;
-        if let jit_ir::Operand::Var(callee_iidx) = jit_callop {
-            // let callee = self.jit_mod.inst(callee_iidx);
-            if let Some(cidx) = self.inferred_consts.get(&callee_iidx) {
-                // The callee is constant. We can treat this *indirect* call as if it were a
-                // *direct* call, and maybe even inline it.
-                let Const::Ptr(vaddr) = self.jit_mod.const_(*cidx) else {
-                    panic!();
-                };
-                // Find the function the constant pointer is referring to.
-                let dli = ykaddr::addr::dladdr(*vaddr).unwrap();
-                assert_eq!(dli.dli_saddr(), *vaddr);
-                let callee = self.aot_mod.funcidx(dli.dli_sname().unwrap());
-                return self.direct_call_impl(
-                    bid,
-                    aot_inst_idx,
-                    &callee,
-                    args,
-                    Some(safepoint),
-                    nextinst,
-                );
+        if let jit_ir::Operand::Var(callee_iidx) = jit_callop
+            && let Some(cidx) = self.inferred_consts.get(&callee_iidx)
+        {
+            // The callee is constant. We can treat this *indirect* call as if it were a
+            // *direct* call, and maybe even inline it.
+            let Const::Ptr(vaddr) = self.jit_mod.const_(*cidx) else {
+                panic!();
+            };
+            // Find the function the constant pointer is referring to.
+            let dli = ykaddr::addr::dladdr(*vaddr).unwrap();
+            assert_eq!(dli.dli_saddr(), *vaddr);
+            let callee = self.aot_mod.funcidx(dli.dli_sname().unwrap());
+            if self.aot_mod.func(callee).is_idempotent() {
+                // ykllvm doesn't insert idempotent recorder calls for indirect calls, so if we
+                // allow this to proceed, it's not going to do the right thing.
+                todo!();
             }
+            return self.direct_call_impl(
+                bid,
+                aot_inst_idx,
+                &callee,
+                args,
+                Some(safepoint),
+                nextinst,
+            );
         }
 
         // Convert AOT args to JIT args.
@@ -1003,11 +1014,30 @@ impl TraceBuilder {
             // call) or the compiler annotated it with `yk_outline`.
             self.outline_until_after_call(bid, nextinst);
             let jit_func_decl_idx = self.handle_func(*callee)?;
+
+            // If the callee is marked idempotent, retrieve the dynamically captured runtime value
+            // and stash it inside the JIT IR call instruction. Later if the optimiser can prove
+            // the arguments to the call are constant, the call can be replaced with this value.
+            //
+            // Note that functions marked `yk_idempotent` must not contain (or call functions that
+            // contain) promotions. Similarly, `yk_idempotent` functions must not directly or
+            // transitively call other functions marked `yk_idempotent`. It is UB to do either of
+            // these things (because the promote buffer would be consumed in the wrong order).
+            let idem_const = if func.is_idempotent() {
+                let func_tyidx = self.jit_mod.func_decl(jit_func_decl_idx).tyidx();
+                let jit_ir::Ty::Func(jit_fty) = self.jit_mod.type_(func_tyidx) else {
+                    panic!()
+                };
+                Some(self.promote_bytes_to_const(jit_fty.ret_tyidx())?)
+            } else {
+                None
+            };
+
             let inst = jit_ir::DirectCallInst::new(
                 &mut self.jit_mod,
                 jit_func_decl_idx,
                 jit_args,
-                None, // Note: the `idem_const` field may be populated later.
+                idem_const,
             )?
             .into();
             if self.frames.first().unwrap().funcidx == Some(*callee) {
@@ -1438,51 +1468,6 @@ impl TraceBuilder {
                 let jit_cond = self.jit_mod.push_and_make_operand(cmp_instr.into())?;
                 let guard = self.create_guard(bid, Some(&jit_cond), true, safepoint)?;
                 self.copy_inst(guard, bid, aot_inst_idx)
-            }
-            jit_ir::Operand::Const(_cidx) => todo!(),
-        }
-    }
-
-    fn handle_idempotent_promote(
-        &mut self,
-        bid: &aot_ir::BBlockId,
-        aot_inst_idx: usize,
-        val: &aot_ir::Operand,
-        nextinst: &'static aot_ir::Inst,
-    ) -> Result<(), CompilationError> {
-        // Sanity check: the callee whose return value was recorded must have been idempotent.
-        let aot_ir::Operand::Local(iid) = val else {
-            panic!();
-        };
-        let aot_ir::Inst::Call { callee, .. } = self.aot_mod.inst(iid) else {
-            panic!();
-        };
-        assert!(self.aot_mod.func(*callee).is_idempotent());
-        // Consume the dynamically captured return value out of the promote buffer, make it into a
-        // constant and stash its index into the (already emitted) call to the function that was
-        // marked idempotent.
-        let jit_ir::Operand::Var(call_iidx) = self.handle_operand(val)? else {
-            panic!();
-        };
-        let call_inst = self.jit_mod.inst(call_iidx);
-        let jit_ir::Inst::Call(ci) = call_inst else {
-            todo!();
-        };
-        let cidx = self.promote_bytes_to_const(call_inst.tyidx(&self.jit_mod))?;
-        let args = ci
-            .iter_args_idx()
-            .map(|i| self.jit_mod.arg(i).clone())
-            .collect();
-        let new_ci = jit_ir::DirectCallInst::new(&mut self.jit_mod, ci.target(), args, Some(cidx))?;
-        self.jit_mod.replace(call_iidx, jit_ir::Inst::Call(new_ci));
-
-        // Don't copy-in the call to the promote recorder.
-        self.outline_until_after_call(bid, nextinst);
-        match self.handle_operand(val)? {
-            jit_ir::Operand::Var(ref_iidx) => {
-                self.jit_mod.push(jit_ir::Inst::Copy(ref_iidx))?;
-                self.link_iid_to_last_inst(bid, aot_inst_idx);
-                Ok(())
             }
             jit_ir::Operand::Const(_cidx) => todo!(),
         }
