@@ -11,7 +11,6 @@ use crate::{
 use jit_ir::TraceEndFrame;
 use parking_lot::Mutex;
 use std::{
-    env,
     error::Error,
     fmt,
     marker::PhantomData,
@@ -30,15 +29,6 @@ mod int_signs;
 pub mod jit_ir;
 mod opt;
 mod trace_builder;
-
-/// Should we turn trace optimisations on or off? Defaults to "on".
-static YKD_OPT: LazyLock<bool> = LazyLock::new(|| {
-    let x = env::var("YKD_OPT");
-    match x.as_ref().map(|x| x.as_str()) {
-        Ok("0") => false,
-        Ok(_) | Err(_) => true,
-    }
-});
 
 pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
     let ir_slice = yk_ir_section().unwrap();
@@ -163,7 +153,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
             ));
         }
 
-        if *YKD_OPT {
+        if mt.opt_level() > 0 {
             jit_mod = opt::opt(jit_mod)?;
             if should_log_ir(IRPhase::PostOpt) {
                 jit_mod.dead_code_elimination();
