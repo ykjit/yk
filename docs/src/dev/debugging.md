@@ -1,5 +1,14 @@
 # Debugging
 
+## Disabling the JIT
+
+Sometimes it is useful to completely disable the JIT to verify that a problem is
+JIT-related. You can do this with the `YKD_JIT_ENABLE` environment variable:
+
+  * 1: JIT compilation enabled. Default if not otherwise specified.
+  * 0: JIT compilation disabled. The hot location counter will not increment,
+       preventing any tracing or compilation from occurring.
+
 ## Trace optimisation
 
 Trace optimisation can make it difficult to understand why a yk interpreter has
