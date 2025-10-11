@@ -27,6 +27,9 @@ performance down.
 
 The following environment variables are available (some only in certain configurations of yk):
 
+* `YKD_JIT_ENABLE`: set to "0" to disable JIT compilation entirely. When disabled,
+  the hot location counter will not increment, preventing any tracing or compilation
+  from occurring. Defaults to "1" (enabled).
 * `YKD_LOG=[<path>:]<level>` specifies where, and how much, general information
   yk will log during execution.
 
