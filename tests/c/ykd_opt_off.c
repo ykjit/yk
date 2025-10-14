@@ -12,6 +12,7 @@
 //     7: 4: 3
 //     7: 4: 2
 //     7: 4: 1
+//     exit
 
 
 // Check that basic trace compilation works.
@@ -43,5 +44,6 @@ int main(int argc, char **argv) {
   }
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
+  printf("exit\n");
   return (EXIT_SUCCESS);
 }

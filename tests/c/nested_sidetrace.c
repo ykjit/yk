@@ -1,3 +1,4 @@
+// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_LOG=4
@@ -67,7 +68,6 @@
 //     57
 //     60
 //     yk-execution: deoptimise ...
-//   stdout:
 //     exit
 
 // Tests that side-traces can be compiled from within other side-traces. In
@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "%d\n", res);
     i--;
   }
-  printf("exit");
+  fprintf(stderr, "exit");
   NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_shutdown(mt);

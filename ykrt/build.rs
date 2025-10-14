@@ -13,6 +13,8 @@ pub fn main() {
     // Always compile in yk's default JIT compiler.
     println!("cargo::rustc-cfg=jitc_yk");
     println!("cargo::rustc-check-cfg=cfg(jitc_yk)");
+    println!("cargo::rustc-cfg=jitc_j2");
+    println!("cargo::rustc-check-cfg=cfg(jitc_j2)");
 
     println!("cargo::rustc-check-cfg=cfg(tracer_hwt)");
     println!("cargo::rustc-check-cfg=cfg(tracer_swt)");
@@ -36,6 +38,21 @@ pub fn main() {
                 .unwrap()
         })
         .lexer_in_src_dir("compile/jitc_yk/jit_ir/jit_ir.l")
+        .unwrap()
+        .build()
+        .unwrap();
+
+    // We need to explicitly tell Cargo to track these files otherwise it won't rebuild when they
+    // change.
+    println!("cargo::rerun-if-changed=src/compile/j2/hir.l");
+    println!("cargo::rerun-if-changed=src/compile/j2/hir.y");
+    CTLexerBuilder::<DefaultLexerTypes<u8>>::new_with_lexemet()
+        .lrpar_config(|ctp| {
+            ctp.yacckind(YaccKind::Grmtools)
+                .grammar_in_src_dir("compile/j2/hir.y")
+                .unwrap()
+        })
+        .lexer_in_src_dir("compile/j2/hir.l")
         .unwrap()
         .build()
         .unwrap();

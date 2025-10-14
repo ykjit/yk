@@ -1,3 +1,4 @@
+// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -21,6 +22,7 @@
 //     i=2, elem=12
 //     i=1, elem=11
 //     yk-execution: deoptimise ...
+//     exit
 
 // Check dynamic ptradd instructions work.
 
@@ -48,5 +50,6 @@ int main(int argc, char **argv) {
   }
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
+  fprintf(stderr, "exit\n");
   return (EXIT_SUCCESS);
 }

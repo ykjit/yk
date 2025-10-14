@@ -3744,7 +3744,7 @@ impl<'a> Assemble<'a> {
         let gd = CompilingGuard {
             ginfo: hgi,
             guard_snapshot: self.ra.guard_snapshot(),
-            bid: ginfo.bid().clone(),
+            bid: *ginfo.bid(),
             fail_label,
             // We don't know the offset yet but will fill this in later.
             fail_offset: AssemblyOffset(0),
@@ -3889,7 +3889,7 @@ impl X64CompiledTrace {
         let callframes = gd.inlined_frames.clone();
 
         Arc::new(YkSideTraceInfo {
-            bid: gd.bid.clone(),
+            bid: gd.bid,
             lives,
             callframes,
             entry_vars: target_ctr.entry_vars().to_vec(),

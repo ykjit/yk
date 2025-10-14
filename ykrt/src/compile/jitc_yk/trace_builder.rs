@@ -699,7 +699,7 @@ impl TraceBuilder {
             }
         }
 
-        let gi = jit_ir::GuardInfo::new(bid.clone(), live_vars, callframes, safepoint.id);
+        let gi = jit_ir::GuardInfo::new(*bid, live_vars, callframes, safepoint.id);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
 
         if cond.is_none() {
@@ -1043,7 +1043,7 @@ impl TraceBuilder {
             if self.frames.first().unwrap().funcidx == Some(*callee) {
                 // Store the block id and safepoint for the most recently seen recursive
                 // interpreter call.
-                self.last_interp_call = Some((bid.clone(), safepoint.unwrap()));
+                self.last_interp_call = Some((*bid, safepoint.unwrap()));
             }
             self.copy_inst(inst, bid, aot_inst_idx)
         }
@@ -1102,7 +1102,8 @@ impl TraceBuilder {
             // sign extend it up (or truncate it down) to the right size. To date I've been unable
             // to get clang to emit code that would require an extend or truncate, so for now it's
             // a todo.
-            if num_elems.byte_size(&self.jit_mod) * 8 != self.aot_mod.ptr_off_bitsize().into() {
+            if num_elems.byte_size(&self.jit_mod) * 8 != usize::from(self.aot_mod.ptr_off_bitsize())
+            {
                 todo!();
             }
             let elem_size = u16::try_from(*elem_size).map_err(|_| {
@@ -1544,7 +1545,7 @@ impl TraceBuilder {
             let sti = Arc::clone(sti);
             // Set the previous block to the last block in the parent trace. Required in order to
             // process phi nodes.
-            prev_bid = Some(sti.bid.clone());
+            prev_bid = Some(sti.bid);
 
             // Setup the trace builder for side-tracing.
             // Create loads for the live variables that will be passed into the side-trace from the
@@ -1730,7 +1731,7 @@ impl TraceBuilder {
                             // process promoted values to make sure we've processed all promotion
                             // data and haven't messed up the mapping.
                             self.process_promotions_and_debug_strs_only(&bid)?;
-                            prev_bid = Some(bid.clone());
+                            prev_bid = Some(bid);
                             prev_mappable_bid = Some(bid);
                             continue;
                         }
@@ -1776,7 +1777,7 @@ impl TraceBuilder {
                             _ => panic!(),
                         }
                     }
-                    prev_bid = Some(bid.clone());
+                    prev_bid = Some(bid);
                     prev_mappable_bid = Some(bid);
                 }
                 None => {

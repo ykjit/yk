@@ -1971,12 +1971,8 @@ impl Inst {
                     .iter()
                     .map(|x| InlinedFrame::new(x.callinst.clone(), x.funcidx, x.safepoint))
                     .collect::<Vec<_>>();
-                let newginfo = GuardInfo::new(
-                    ginfo.bid().clone(),
-                    newlives,
-                    inlined_frames,
-                    ginfo.safepoint_id,
-                );
+                let newginfo =
+                    GuardInfo::new(*ginfo.bid(), newlives, inlined_frames, ginfo.safepoint_id);
                 let newgidx = m.push_guardinfo(newginfo).unwrap();
                 Inst::Guard(GuardInst {
                     cond: mapper(m, cond),
@@ -2060,12 +2056,8 @@ impl Inst {
                     .iter()
                     .map(|x| InlinedFrame::new(x.callinst.clone(), x.funcidx, x.safepoint))
                     .collect::<Vec<_>>();
-                let newginfo = GuardInfo::new(
-                    ginfo.bid().clone(),
-                    newlives,
-                    inlined_frames,
-                    ginfo.safepoint_id,
-                );
+                let newginfo =
+                    GuardInfo::new(*ginfo.bid(), newlives, inlined_frames, ginfo.safepoint_id);
                 let newgidx = m.push_guardinfo(newginfo).unwrap();
                 Inst::Deopt(newgidx)
             }

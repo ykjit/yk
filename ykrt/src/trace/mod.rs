@@ -107,7 +107,7 @@ pub(crate) enum AOTTraceIteratorError {
 }
 
 /// A processed item from a trace.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TraceAction {
     /// A sucessfully mapped block.
     MappedAOTBBlock {

@@ -1,9 +1,13 @@
+// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt,jit-post-opt
-//   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
+//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
-//     ...
+//     yk-tracing: start-tracing
+//     Can't JIT this!
+//     Or this!
+//     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     call call_me()...
@@ -15,7 +19,6 @@
 //     call @call_me()...
 //     ...
 //     --- End jit-pre-opt ---
-//     ...
 //     Can't JIT this!
 //     Or this!
 //     yk-execution: enter-jit-code
@@ -26,7 +29,7 @@
 //     Can't JIT this!
 //     Or this!
 //     yk-execution: deoptimise ...
-//     ...
+//     exit
 
 // Check that the `yk_outline` annotation works when a `yk_outline` annotated
 // function calls another function.
@@ -59,6 +62,7 @@ int main(int argc, char **argv) {
     i--;
   }
 
+  fprintf(stderr, "exit\n");
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);
