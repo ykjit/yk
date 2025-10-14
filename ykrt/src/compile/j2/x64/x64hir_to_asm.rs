@@ -32,7 +32,7 @@ use crate::{
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
             hir::*,
             hir_to_asm::HirToAsmBackend,
-            regalloc::{RegAlloc, RegCnstr, RegFill, VarLoc, VarLocs},
+            regalloc::{RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
             x64::{
                 asm::{Asm, LabelIdx, RelocKind},
                 x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, Reg},
@@ -213,15 +213,18 @@ impl<'a> X64HirToAsm<'a> {
 
         let bitw = b.inst_bitw(self.m, *lhs);
         let (imm, mut in_fill) = if pred == &Pred::Eq {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegFill::Zeroed)
+            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Zeroed)
         } else if pred.is_signed() {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegFill::Signed)
+            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
         } else {
-            (self.zero_ext_op_for_imm32(b, bitw, *rhs), RegFill::Zeroed)
+            (
+                self.zero_ext_op_for_imm32(b, bitw, *rhs),
+                RegCnstrFill::Zeroed,
+            )
         };
         if bitw == 32 || bitw == 64 {
             // We can relax sign / zero fill for values that are exactly 32/64 bit.
-            in_fill = RegFill::Undefined;
+            in_fill = RegCnstrFill::Undefined;
         }
         let c = if *expect {
             match pred {
@@ -970,8 +973,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             [
                 RegCnstr::InputOutput {
                     in_iidx: *src,
-                    in_fill: RegFill::Signed,
-                    out_fill: RegFill::Signed,
+                    in_fill: RegCnstrFill::Signed,
+                    out_fill: RegCnstrFill::Signed,
                     regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Temp {
@@ -1019,8 +1022,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
         let out_fill = match bitw {
-            32 | 64 => RegFill::Zeroed,
-            _ => RegFill::Undefined,
+            32 | 64 => RegCnstrFill::Zeroed,
+            _ => RegCnstrFill::Undefined,
         };
         if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
             let [lhsr] = ra.alloc(
@@ -1028,7 +1031,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 iidx,
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
-                    in_fill: RegFill::Undefined,
+                    in_fill: RegCnstrFill::Undefined,
                     out_fill,
                     regs: &NORMAL_GP_REGS,
                 }],
@@ -1051,13 +1054,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         out_fill,
                         regs: &NORMAL_GP_REGS,
                     },
                     RegCnstr::Input {
                         in_iidx: *rhs,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         regs: &NORMAL_GP_REGS,
                         clobber: false,
                     },
@@ -1093,10 +1096,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         And { tyidx: _, lhs, rhs }: &And,
     ) -> Result<(), CompilationError> {
         let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = (self.zero_ext_op_for_imm32(b, bitw, *rhs), RegFill::Zeroed);
+        let (imm, mut in_fill) = (
+            self.zero_ext_op_for_imm32(b, bitw, *rhs),
+            RegCnstrFill::Zeroed,
+        );
         if bitw == 32 || bitw == 64 {
             // We can relax sign / zero fill for values that are exactly 32/64 bit.
-            in_fill = RegFill::Undefined;
+            in_fill = RegCnstrFill::Undefined;
         }
 
         if let Some(imm) = imm {
@@ -1106,7 +1112,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill,
-                    out_fill: RegFill::Zeroed,
+                    out_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
@@ -1222,7 +1228,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 Ty::Int(_) | Ty::Ptr(_) => {
                     let in_fill = match arg_ty {
                         Ty::Func(_) | Ty::Void => unreachable!(),
-                        Ty::Int(_) | Ty::Ptr(_) => RegFill::Zeroed,
+                        Ty::Int(_) | Ty::Ptr(_) => RegCnstrFill::Zeroed,
                     };
                     let gp_off = gp_iter.next().unwrap();
                     debug_assert_matches!(gp_cnstrs[*gp_off], RegCnstr::Clobber { .. });
@@ -1246,13 +1252,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     // RAX isn't used as an input for non-varargs functions.
                     gp_cnstrs[RAX_OFF] = RegCnstr::InputOutput {
                         in_iidx: *tgt,
-                        in_fill: RegFill::Zeroed,
-                        out_fill: RegFill::Zeroed,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Zeroed,
                         regs: GP_CLOBBER_TMPS[RAX_OFF],
                     };
                 } else {
                     gp_cnstrs[RAX_OFF] = RegCnstr::Output {
-                        out_fill: RegFill::Zeroed,
+                        out_fill: RegCnstrFill::Zeroed,
                         regs: GP_CLOBBER_TMPS[RAX_OFF],
                         can_be_same_as_input: false,
                     };
@@ -1262,7 +1268,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 if fn_addr.is_none() && !fty.has_varargs {
                     gp_cnstrs[RAX_OFF] = RegCnstr::Input {
                         in_iidx: *tgt,
-                        in_fill: RegFill::Zeroed,
+                        in_fill: RegCnstrFill::Zeroed,
                         regs: GP_CLOBBER_TMPS[RAX_OFF],
                         clobber: true,
                     };
@@ -1298,7 +1304,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     gp_cnstrs,
                     [RegCnstr::Input {
                         in_iidx: *tgt,
-                        in_fill: RegFill::Zeroed,
+                        in_fill: RegCnstrFill::Zeroed,
                         regs: &NORMAL_GP_REGS,
                         clobber: true
                     }]
@@ -1334,18 +1340,18 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [
                     RegCnstr::Input {
                         in_iidx: *ptr,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         regs: &NORMAL_GP_REGS,
                         clobber: false,
                     },
                     RegCnstr::Input {
                         in_iidx: *num_elems,
-                        in_fill: RegFill::Zeroed,
+                        in_fill: RegCnstrFill::Zeroed,
                         regs: &NORMAL_GP_REGS,
                         clobber: false,
                     },
                     RegCnstr::Output {
-                        out_fill: RegFill::Zeroed,
+                        out_fill: RegCnstrFill::Zeroed,
                         regs: &NORMAL_GP_REGS,
                         can_be_same_as_input: true,
                     },
@@ -1367,7 +1373,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [
                     RegCnstr::Input {
                         in_iidx: *ptr,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         regs: &NORMAL_GP_REGS,
                         clobber: false,
                     },
@@ -1375,8 +1381,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     // that the value we overwrite.
                     RegCnstr::InputOutput {
                         in_iidx: *num_elems,
-                        in_fill: RegFill::Zeroed,
-                        out_fill: RegFill::Zeroed,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Zeroed,
                         regs: &NORMAL_GP_REGS,
                     },
                 ],
@@ -1424,7 +1430,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             [
                 RegCnstr::Input {
                     in_iidx: *cond,
-                    in_fill: RegFill::Undefined,
+                    in_fill: RegCnstrFill::Undefined,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
@@ -1479,15 +1485,18 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
         let bitw = b.inst_bitw(self.m, *lhs);
         let (imm, mut in_fill) = if pred == &Pred::Eq {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegFill::Zeroed)
+            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Zeroed)
         } else if pred.is_signed() {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegFill::Signed)
+            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
         } else {
-            (self.zero_ext_op_for_imm32(b, bitw, *rhs), RegFill::Zeroed)
+            (
+                self.zero_ext_op_for_imm32(b, bitw, *rhs),
+                RegCnstrFill::Zeroed,
+            )
         };
         if bitw == 32 || bitw == 64 {
             // We can relax sign / zero fill for values that are exactly 32/64 bit.
-            in_fill = RegFill::Undefined;
+            in_fill = RegCnstrFill::Undefined;
         }
 
         if let Some(imm) = imm {
@@ -1502,7 +1511,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         clobber: false,
                     },
                     RegCnstr::Output {
-                        out_fill: RegFill::Undefined,
+                        out_fill: RegCnstrFill::Undefined,
                         regs: &NORMAL_GP_REGS,
                         can_be_same_as_input: true,
                     },
@@ -1538,7 +1547,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         clobber: false,
                     },
                     RegCnstr::Output {
-                        out_fill: RegFill::Undefined,
+                        out_fill: RegCnstrFill::Undefined,
                         regs: &NORMAL_GP_REGS,
                         can_be_same_as_input: true,
                     },
@@ -1596,12 +1605,12 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             [
                 RegCnstr::Input {
                     in_iidx: ptr,
-                    in_fill: RegFill::Undefined,
+                    in_fill: RegCnstrFill::Undefined,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
                 RegCnstr::Output {
-                    out_fill: RegFill::Zeroed,
+                    out_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                     can_be_same_as_input: true,
                 },
@@ -1675,8 +1684,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 iidx,
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
-                    in_fill: RegFill::Undefined,
-                    out_fill: RegFill::Zeroed,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
@@ -1694,13 +1703,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
-                        in_fill: RegFill::Zeroed,
-                        out_fill: RegFill::Zeroed,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Zeroed,
                         regs: &NORMAL_GP_REGS,
                     },
                     RegCnstr::Input {
                         in_iidx: *rhs,
-                        in_fill: RegFill::Zeroed,
+                        in_fill: RegCnstrFill::Zeroed,
                         regs: &[Reg::RCX],
                         clobber: false,
                     },
@@ -1739,8 +1748,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
         let out_fill = match bitw {
-            32 | 64 => RegFill::Zeroed,
-            _ => RegFill::Undefined,
+            32 | 64 => RegCnstrFill::Zeroed,
+            _ => RegCnstrFill::Undefined,
         };
         let [_lhsr, rhsr, _] = ra.alloc(
             self,
@@ -1748,13 +1757,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             [
                 RegCnstr::InputOutput {
                     in_iidx: *lhs,
-                    in_fill: RegFill::Zeroed,
+                    in_fill: RegCnstrFill::Zeroed,
                     out_fill,
                     regs: &[Reg::RAX],
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
-                    in_fill: RegFill::Zeroed,
+                    in_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
@@ -1796,8 +1805,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
         let out_fill = match bitw {
-            32 | 64 => RegFill::Zeroed,
-            _ => RegFill::Undefined,
+            32 | 64 => RegCnstrFill::Zeroed,
+            _ => RegCnstrFill::Undefined,
         };
         let [lhsr, rhsr] = ra.alloc(
             self,
@@ -1805,13 +1814,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             [
                 RegCnstr::InputOutput {
                     in_iidx: *lhs,
-                    in_fill: RegFill::Undefined,
+                    in_fill: RegCnstrFill::Undefined,
                     out_fill,
                     regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
-                    in_fill: RegFill::Undefined,
+                    in_fill: RegCnstrFill::Undefined,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
@@ -1851,12 +1860,12 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             [
                 RegCnstr::Input {
                     in_iidx: *ptr,
-                    in_fill: RegFill::Undefined,
+                    in_fill: RegCnstrFill::Undefined,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
                 RegCnstr::Output {
-                    out_fill: RegFill::Zeroed,
+                    out_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                     can_be_same_as_input: true,
                 },
@@ -1903,19 +1912,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     [
                         RegCnstr::Input {
                             in_iidx: *cond,
-                            in_fill: RegFill::Undefined,
+                            in_fill: RegCnstrFill::Undefined,
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
                         RegCnstr::InputOutput {
                             in_iidx: *truev,
-                            in_fill: RegFill::Undefined,
-                            out_fill: RegFill::Undefined,
+                            in_fill: RegCnstrFill::Undefined,
+                            out_fill: RegCnstrFill::Undefined,
                             regs: &NORMAL_GP_REGS,
                         },
                         RegCnstr::Input {
                             in_iidx: *falsev,
-                            in_fill: RegFill::Undefined,
+                            in_fill: RegCnstrFill::Undefined,
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
@@ -1946,8 +1955,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             iidx,
             [RegCnstr::InputOutput {
                 in_iidx: *val,
-                in_fill: RegFill::Signed,
-                out_fill: RegFill::Signed,
+                in_fill: RegCnstrFill::Signed,
+                out_fill: RegCnstrFill::Signed,
                 regs: &NORMAL_GP_REGS,
             }],
         )?;
@@ -2007,7 +2016,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 iidx,
                 [RegCnstr::Input {
                     in_iidx: ptr,
-                    in_fill: RegFill::Undefined,
+                    in_fill: RegCnstrFill::Undefined,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 }],
@@ -2032,13 +2041,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [
                     RegCnstr::Input {
                         in_iidx: ptr,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         regs: &NORMAL_GP_REGS,
                         clobber: false,
                     },
                     RegCnstr::Input {
                         in_iidx: *val,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         regs: &NORMAL_GP_REGS,
                         clobber: false,
                     },
@@ -2080,7 +2089,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
         let in_fill = match bitw {
-            32 | 64 => RegFill::Undefined,
+            32 | 64 => RegCnstrFill::Undefined,
             x => todo!("{x}"),
         };
         if let Some(0) = self.sign_ext_op_for_imm32(b, *lhs) {
@@ -2090,7 +2099,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *rhs,
                     in_fill,
-                    out_fill: RegFill::Signed,
+                    out_fill: RegCnstrFill::Signed,
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
@@ -2109,7 +2118,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill,
-                    out_fill: RegFill::Signed,
+                    out_fill: RegCnstrFill::Signed,
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
@@ -2133,7 +2142,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
                         in_fill,
-                        out_fill: RegFill::Signed,
+                        out_fill: RegCnstrFill::Signed,
                         regs: &NORMAL_GP_REGS,
                     },
                     RegCnstr::Input {
@@ -2177,7 +2186,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             self,
             iidx,
             [RegCnstr::Output {
-                out_fill: RegFill::Zeroed,
+                out_fill: RegCnstrFill::Zeroed,
                 regs: &NORMAL_GP_REGS,
                 can_be_same_as_input: false,
             }],
@@ -2213,8 +2222,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             iidx,
             [RegCnstr::InputOutput {
                 in_iidx: *val,
-                in_fill: RegFill::Undefined,
-                out_fill: RegFill::Undefined,
+                in_fill: RegCnstrFill::Undefined,
+                out_fill: RegCnstrFill::Undefined,
                 regs: &NORMAL_GP_REGS,
             }],
         )?;
@@ -2233,8 +2242,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             iidx,
             [RegCnstr::InputOutput {
                 in_iidx: *val,
-                in_fill: RegFill::Zeroed,
-                out_fill: RegFill::Zeroed,
+                in_fill: RegCnstrFill::Zeroed,
+                out_fill: RegCnstrFill::Zeroed,
                 regs: &NORMAL_GP_REGS,
             }],
         )?;

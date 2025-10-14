@@ -705,14 +705,19 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     } else {
                         n_out.set_fill_iidxs_gridxs(
                             reg,
-                            *in_fill,
+                            RegFill::from_regcnstrfill(*in_fill),
                             smallvec![*in_iidx],
                             smallvec![],
                         );
                     }
                 }
                 RegCnstr::InputOutput { out_fill, .. } | RegCnstr::Output { out_fill, .. } => {
-                    n_out.set_fill_iidxs_gridxs(reg, *out_fill, smallvec![iidx], smallvec![]);
+                    n_out.set_fill_iidxs_gridxs(
+                        reg,
+                        RegFill::from_regcnstrfill(*out_fill),
+                        smallvec![iidx],
+                        smallvec![],
+                    );
                     output_reg = Some(reg);
                 }
                 RegCnstr::KeepAlive { .. } => (),
@@ -784,7 +789,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 } => {
                     if let IState::Stack(stack_off) = self.istates[iidx] {
                         let bitw = self.b.inst_bitw(self.m, iidx);
-                        be.spill(*reg, *out_fill, stack_off, bitw)?;
+                        be.spill(*reg, RegFill::from_regcnstrfill(*out_fill), stack_off, bitw)?;
                     }
                     self.is_used[*in_iidx] = iidx;
                 }
@@ -795,7 +800,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 } => {
                     if let IState::Stack(stack_off) = self.istates[iidx] {
                         let bitw = self.b.inst_bitw(self.m, iidx);
-                        be.spill(*reg, *out_fill, stack_off, bitw)?;
+                        be.spill(*reg, RegFill::from_regcnstrfill(*out_fill), stack_off, bitw)?;
                     }
                 }
                 RegCnstr::KeepAlive { .. } => (),
@@ -816,7 +821,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 | RegCnstr::InputOutput {
                     in_iidx, in_fill, ..
                 } => {
-                    n_in.set_fill_iidxs_gridxs(reg, *in_fill, smallvec![*in_iidx], smallvec![]);
+                    n_in.set_fill_iidxs_gridxs(
+                        reg,
+                        RegFill::from_regcnstrfill(*in_fill),
+                        smallvec![*in_iidx],
+                        smallvec![],
+                    );
                 }
                 RegCnstr::Output {
                     can_be_same_as_input,
@@ -1409,7 +1419,7 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
     /// treated as clobbered on exit.
     Input {
         in_iidx: InstIdx,
-        in_fill: RegFill,
+        in_fill: RegCnstrFill,
         regs: &'a [Reg],
         clobber: bool,
     },
@@ -1418,8 +1428,8 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
     /// with its upper bits matching fill `out_fill`.
     InputOutput {
         in_iidx: InstIdx,
-        in_fill: RegFill,
-        out_fill: RegFill,
+        in_fill: RegCnstrFill,
+        out_fill: RegCnstrFill,
         regs: &'a [Reg],
     },
     /// The result of the instruction will be in a register drawn from `regs` with its upper bits
@@ -1427,7 +1437,7 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
     /// optionally return a register that is also used for an input (in such a case, the input will
     /// implicitly be considered clobbered).
     Output {
-        out_fill: RegFill,
+        out_fill: RegCnstrFill,
         regs: &'a [Reg],
         can_be_same_as_input: bool,
     },
@@ -1441,9 +1451,20 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
     },
 }
 
-/// What should/are the *fill bits* of a register be set to? This `enum` serves two related
-/// purposes: in a [RegCnstr] it tells us what the fill bits should be; in other situations it
-/// tells us what the fill bits are.
+/// What should the *fill bits* of a register be set to?
+///
+/// See the description of [RegFill] for the definition of fill bits.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum RegCnstrFill {
+    /// We do not care what the fill bits are set to.
+    Undefined,
+    /// We want the fill bits to zero extend the value.
+    Zeroed,
+    /// We want the fill bits to sign extend the value.
+    Signed,
+}
+
+/// What are the *fill bits* of a register be set to?
 ///
 /// Fill bits are defined as follows:
 ///
@@ -1468,6 +1489,17 @@ pub(super) enum RegFill {
     Zeroed,
     /// The fill bits sign extend the value / we want the fill bits to sign extend the value.
     Signed,
+}
+
+impl RegFill {
+    /// Create a [RegFill] from a [RegCnstrFill].
+    fn from_regcnstrfill(rcf: RegCnstrFill) -> Self {
+        match rcf {
+            RegCnstrFill::Undefined => RegFill::Undefined,
+            RegCnstrFill::Zeroed => RegFill::Zeroed,
+            RegCnstrFill::Signed => RegFill::Signed,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1823,13 +1855,13 @@ mod test {
                 [
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
-                        in_fill: RegFill::Zeroed,
-                        out_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                     },
                     RegCnstr::Input {
                         in_iidx: *rhs,
-                        in_fill: RegFill::Zeroed,
+                        in_fill: RegCnstrFill::Zeroed,
                         regs: &GP_REGS,
                         clobber: false,
                     },
@@ -1897,7 +1929,7 @@ mod test {
                 [
                     RegCnstr::Input {
                         in_iidx: *cond,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         clobber: false,
                     },
@@ -1930,18 +1962,18 @@ mod test {
                 [
                     RegCnstr::Input {
                         in_iidx: *lhs,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         clobber: false,
                     },
                     RegCnstr::Input {
                         in_iidx: *rhs,
-                        in_fill: RegFill::Undefined,
+                        in_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         clobber: false,
                     },
                     RegCnstr::Output {
-                        out_fill: RegFill::Undefined,
+                        out_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         can_be_same_as_input: true,
                     },
