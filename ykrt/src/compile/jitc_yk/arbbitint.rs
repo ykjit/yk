@@ -9,6 +9,7 @@
 
 use super::int_signs::{SignExtend, Truncate};
 use std::{
+    fmt,
     hash::Hash,
     ops::{BitAnd, BitOr, BitXor},
 };
@@ -113,13 +114,13 @@ impl ArbBitInt {
     }
 
     /// Sign extend the underlying value and, if it is representable as an `i8`, return it.
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn to_sign_ext_i8(&self) -> Option<i8> {
         i8::try_from(self.val.sign_extend(self.bitw, 64) as i64).ok()
     }
 
     /// Sign extend the underlying value and, if it is representable as an `i16`, return it.
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub(crate) fn to_sign_ext_i16(&self) -> Option<i16> {
         i16::try_from(self.val.sign_extend(self.bitw, 64) as i64).ok()
     }
@@ -132,6 +133,15 @@ impl ArbBitInt {
     /// Sign extend the underlying value and, if it is representable as an `i64`, return it.
     pub(crate) fn to_sign_ext_i64(&self) -> Option<i64> {
         Some(self.val.sign_extend(self.bitw, 64) as i64)
+    }
+
+    /// Sign extend the underlying value and, if it is representable as an `isize`, return it.
+    pub(crate) fn to_sign_ext_isize(&self) -> Option<isize> {
+        assert_eq!(
+            usize::try_from(isize::BITS).unwrap(),
+            std::mem::size_of_val(&self.val) * 8
+        );
+        Some(self.val.sign_extend(self.bitw, isize::BITS) as isize)
     }
 
     /// zero extend the underlying value and, if it is representable as an `u8`, return it.
@@ -282,6 +292,12 @@ impl ArbBitInt {
             bitw: self.bitw,
             val: self.val.bitxor(other.val),
         }
+    }
+}
+
+impl fmt::Display for ArbBitInt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.val.truncate(self.bitw))
     }
 }
 

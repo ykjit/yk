@@ -2,12 +2,15 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
-//     ...
+//     yk-tracing: start-tracing
+//     p1==p2: 1, p2==p3: 0
+//     yk-tracing: stop-tracing
+//     p1==p2: 1, p2==p3: 0
 //     yk-execution: enter-jit-code
 //     p1==p2: 1, p2==p3: 0
 //     p1==p2: 1, p2==p3: 0
 //     yk-execution: deoptimise ...
-//     ...
+//     exit
 //
 
 // Check that pointer comparisons work.
@@ -39,5 +42,6 @@ int main(int argc, char **argv) {
   }
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
+  fprintf(stderr, "exit");
   return (EXIT_SUCCESS);
 }

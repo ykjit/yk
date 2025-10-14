@@ -1,31 +1,71 @@
+// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 //   stderr:
-//     ...
+//     yk-tracing: start-tracing
+//     0 0: zero
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{1}}: i1 = eq %{{_}}, 0i32
 //     guard true, %{{1}}, ...
 //     ...
 //     --- End jit-pre-opt ---
-//     ...
+//     1 0: zero
+//     2 0: zero
+//     3 0: zero
+//     4 0: zero
+//     5 0: zero
+//     6 0: zero
+//     7 0: zero
+//     8 0: zero
+//     9 0: zero
+//     10 1: one
+//     11 1: one
+//     12 1: one
+//     13 1: one
+//     14 1: one
+//     yk-tracing: start-side-tracing
+//     15 1: one
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{2}}: i1 = eq %{{_}}, 1i32
 //     guard true, %{{2}}, ...
 //     ...
 //     --- End jit-pre-opt ---
-//     ...
+//     16 1: one
+//     17 1: one
+//     18 1: one
+//     19 1: one
+//     20 2: two
+//     21 2: two
+//     22 2: two
+//     23 2: two
+//     yk-tracing: start-side-tracing
+//     24 2: two
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{3}}: i1 = eq %{{_}}, 2i32
 //     guard true, %{{3}}, ...
 //     ...
 //     --- End jit-pre-opt ---
-//     ...
+//     25 2: two
+//     26 2: two
+//     27 2: two
+//     28 2: two
+//     29 2: two
+//     30 99: default
+//     31 99: default
+//     32 99: default
+//     33 99: default
+//     yk-tracing: start-side-tracing
+//     34 99: default
+//     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{4}}: i1 = eq %{{c}}, 0i32
@@ -36,7 +76,12 @@
 //     guard false, %{{8}}, ...
 //     ...
 //     --- End jit-pre-opt ---
-//     ...
+//     35 99: default
+//     36 99: default
+//     37 99: default
+//     38 99: default
+//     39 99: default
+//     exit
 
 // Check that guards for switches are emitted correctly, including in
 // side-traces.

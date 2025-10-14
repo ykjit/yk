@@ -1,6 +1,6 @@
-// ignore-if: test "$YKB_TRACER" != "swt"
+// ignore-if: test "$YKB_TRACER" != "swt" -o "$YK_JITC" = "j2"
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-post-opt,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,jit-pre-opt,jit-post-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=4
 //   stderr:

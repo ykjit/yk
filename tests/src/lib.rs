@@ -19,13 +19,17 @@ pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy
         "call_ext_in_obj.c",
         "unmapped_setjmp.c",
         "loopy_funcs_not_inlined_by_default.c",
+        "loopy_funcs_not_inlined_by_default.j2.c",
         "not_loopy_funcs_inlined_by_default.c",
+        "not_loopy_funcs_inlined_by_default.j2.c",
         "reentrant.c",
         "shadow_reentrant.c",
         "indirect_external_function_call.c",
         "unroll_safe_implies_noinline.c",
         "unroll_safe_inlines.c",
+        "unroll_safe_inlines.j2.c",
         "yk_unroll_safe_vs_yk_outline.c",
+        "yk_unroll_safe_vs_yk_outline.j2.c",
     ] {
         map.insert(
             *test_file,

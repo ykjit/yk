@@ -69,9 +69,9 @@ int main(int argc, char **argv) {
   YkLocation loc2 = yk_location_new();
 
   loop(mt, &loc1, &loc2, 5, 0);
-  fprintf(stderr, "exit\n");
   yk_location_drop(loc1);
   yk_location_drop(loc2);
   yk_mt_shutdown(mt);
+  fprintf(stderr, "exit\n");
   return (EXIT_SUCCESS);
 }

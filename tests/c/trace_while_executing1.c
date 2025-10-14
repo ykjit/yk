@@ -1,3 +1,4 @@
+// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
@@ -50,9 +51,6 @@ void loop(YkMT *mt, YkLocation *loc1, YkLocation *loc2, int i, int depth) {
 
 __attribute__((yk_outline))
 void indirect(YkMT *mt, YkLocation *loc1, YkLocation *loc2, int i, int depth) {
-  // for (int j = 0; j < i; j++)
-  //   printf(".");
-  // printf("\n");
   if (depth == 0 && i == 3)
     loop(mt, loc1, loc2, i, 1);
 }

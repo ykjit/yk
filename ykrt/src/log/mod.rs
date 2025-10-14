@@ -136,6 +136,9 @@ pub(crate) enum IRPhase {
 #[cfg(not(feature = "ykd"))]
 mod internals {
     use super::IRPhase;
+    pub(crate) fn should_log_any_ir() -> bool {
+        false
+    }
     pub(crate) fn should_log_ir(_: IRPhase) -> bool {
         false
     }
@@ -185,6 +188,10 @@ mod internals {
         }
     }
 
+    pub(crate) fn should_log_any_ir() -> bool {
+        LOG_IR.is_some()
+    }
+
     pub(crate) fn should_log_ir(phase: IRPhase) -> bool {
         if let Some(true) = LOG_IR.as_ref().map(|(_, phases)| phases.contains(&phase)) {
             return true;
@@ -207,4 +214,4 @@ mod internals {
     }
 }
 
-pub(crate) use internals::{log_ir, should_log_ir};
+pub(crate) use internals::{log_ir, should_log_any_ir, should_log_ir};

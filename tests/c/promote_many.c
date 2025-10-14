@@ -1,9 +1,11 @@
+// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   stderr:
 //     yk-tracing: start-tracing
+//     99528
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -31,8 +33,13 @@
 //     guard true, %{{5}}, ...
 //     ...
 //     --- End jit-pre-opt ---
+//     199056
 //     yk-execution: enter-jit-code
+//     298584
+//     398112
+//     497640
 //     yk-execution: deoptimise ...
+//     exit
 
 // Check that promotion works in traces.
 
@@ -66,9 +73,12 @@ int main(int argc, char **argv) {
   for (int i = 0; i < 5; i++) {
     yk_mt_control_point(mt, &loc);
     y = inner(a, b, x, y, z);
+    fprintf(stderr, "%lu\n", y);
   }
 
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
+  fprintf(stderr, "exit");
+
   return (EXIT_SUCCESS);
 }
