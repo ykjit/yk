@@ -1,5 +1,11 @@
 # Debugging
 
+## Disabling the JIT
+
+Sometimes it is useful to completely disable the JIT to verify that a problem is
+JIT-related. You can do this with the `YK_JITC` environment variable (see
+[run-time configuration](runtime_config.md) for details).
+
 ## Trace optimisation
 
 Trace optimisation can make it difficult to understand why a yk interpreter has

@@ -115,6 +115,8 @@ pub struct MT {
     pub(crate) stats: Stats,
     /// The trace profiler implementation to use.
     trace_profiler: Arc<dyn PlatformTraceProfiler>,
+    /// Whether JIT compilation is enabled. Can be disabled with YK_JITC=none.
+    jit_enabled: AtomicBool,
 }
 
 impl std::fmt::Debug for MT {
@@ -150,6 +152,10 @@ impl MT {
                 .map_err(|e| format!("Invalid sidetrace threshold '{s}': {e}"))?,
             Err(_) => DEFAULT_SIDETRACE_THRESHOLD,
         };
+        let jit_enabled = match env::var("YK_JITC") {
+            Ok(s) => s != "none",
+            Err(_) => true, // Default to enabled
+        };
         Ok(Arc::new(Self {
             shutdown: AtomicBool::new(false),
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
@@ -166,6 +172,7 @@ impl MT {
             log: Log::new()?,
             stats: Stats::new(),
             trace_profiler: profiler_for_current_platform(),
+            jit_enabled: AtomicBool::new(jit_enabled),
         }))
     }
 
@@ -240,6 +247,11 @@ impl MT {
     /// these levels are interpreted is up to a given optimiser.
     pub fn opt_level(self: &Arc<Self>) -> u8 {
         self.opt_level.load(Ordering::Relaxed)
+    }
+
+    /// Return whether JIT compilation is enabled. Can be controlled with YK_JITC.
+    pub(crate) fn jit_enabled(self: &Arc<Self>) -> bool {
+        self.jit_enabled.load(Ordering::Relaxed)
     }
 
     /// Return the unique ID for the next trace.
@@ -733,6 +745,10 @@ impl MT {
         self: &Arc<Self>,
         loc: &Location,
     ) -> TransitionControlPoint {
+        // If JIT is disabled, don't increment the location count.
+        if !self.jit_enabled() {
+            return TransitionControlPoint::NoAction;
+        }
         match loc.hot_location() {
             Some(hl) => {
                 let mut lk;
