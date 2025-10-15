@@ -32,7 +32,7 @@ use crate::{
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
             hir::*,
             hir_to_asm::HirToAsmBackend,
-            regalloc::{RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
+            regalloc::{AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
             x64::{
                 asm::{Asm, LabelIdx, RelocKind},
                 x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, Reg},
@@ -46,7 +46,11 @@ use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
 use index_vec::IndexVec;
 use smallvec::{SmallVec, smallvec};
-use std::{assert_matches::debug_assert_matches, ffi::c_void, sync::Arc};
+use std::{
+    assert_matches::{assert_matches, debug_assert_matches},
+    ffi::c_void,
+    sync::Arc,
+};
 
 #[derive(Debug)]
 pub(in crate::compile::j2) struct X64HirToAsm<'a> {
@@ -308,7 +312,7 @@ impl<'a> X64HirToAsm<'a> {
                         [
                             RegCnstr::Input {
                                 in_iidx: load_iidx,
-                                in_fill,
+                                in_fill: in_fill.clone(),
                                 regs: &NORMAL_GP_REGS,
                                 clobber: false,
                             },
@@ -332,7 +336,7 @@ impl<'a> X64HirToAsm<'a> {
                         [
                             RegCnstr::Input {
                                 in_iidx: *lhs,
-                                in_fill,
+                                in_fill: in_fill.clone(),
                                 regs: &NORMAL_GP_REGS,
                                 clobber: false,
                             },
@@ -1536,7 +1540,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [
                     RegCnstr::Input {
                         in_iidx: *lhs,
-                        in_fill,
+                        in_fill: in_fill.clone(),
                         regs: &NORMAL_GP_REGS,
                         clobber: false,
                     },
@@ -1599,7 +1603,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }: &Load,
     ) -> Result<(), CompilationError> {
         let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
-        let [ptrr, outr] = ra.alloc(
+        let [(ptrr, _), (outr, out_fill)] = ra.alloc_with_fills(
             self,
             iidx,
             [
@@ -1610,7 +1614,12 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     clobber: false,
                 },
                 RegCnstr::Output {
-                    out_fill: RegCnstrFill::Zeroed,
+                    out_fill: RegCnstrFill::AnyOf(
+                        AnyOfFill::new()
+                            .with_undefined()
+                            .with_signed()
+                            .with_zeroed(),
+                    ),
                     regs: &NORMAL_GP_REGS,
                     can_be_same_as_input: true,
                 },
@@ -1626,22 +1635,52 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             Ty::Func(_) => todo!(),
             Ty::Int(bitw) => match bitw {
                 8 => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Movzx_r32_rm8,
-                        outr.to_reg32(),
-                        memop,
-                    ));
+                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movzx_r32_rm8,
+                            outr.to_reg32(),
+                            memop,
+                        ));
+                    } else {
+                        assert_matches!(out_fill, RegFill::Signed);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movsx_r64_rm8,
+                            outr.to_reg64(),
+                            memop,
+                        ));
+                    }
                 }
                 16 => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Movzx_r32_rm16,
-                        outr.to_reg32(),
-                        memop,
-                    ));
+                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movzx_r32_rm16,
+                            outr.to_reg32(),
+                            memop,
+                        ));
+                    } else {
+                        assert_matches!(out_fill, RegFill::Signed);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movsx_r64_rm16,
+                            outr.to_reg64(),
+                            memop,
+                        ));
+                    }
                 }
                 32 => {
-                    self.asm
-                        .push_inst(IcedInst::with2(Code::Mov_r32_rm32, outr.to_reg32(), memop));
+                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Mov_r32_rm32,
+                            outr.to_reg32(),
+                            memop,
+                        ));
+                    } else {
+                        assert_matches!(out_fill, RegFill::Signed);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movsxd_r64_rm32,
+                            outr.to_reg64(),
+                            memop,
+                        ));
+                    }
                 }
                 64 => {
                     self.asm
@@ -2141,7 +2180,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
-                        in_fill,
+                        in_fill: in_fill.clone(),
                         out_fill: RegCnstrFill::Signed,
                         regs: &NORMAL_GP_REGS,
                     },
@@ -3256,6 +3295,116 @@ mod test {
               ...
             "],
         );
+
+        // Load and sext in one go optimisation
+
+        // i8
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: i8 = load %0
+              %2: i64 = sext %1
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %1: i8 = load %0
+              movsx r.64._, byte [r.64._]
+              ; %2: i64 = sext %1
+              ; exit [%2]
+            "],
+        );
+
+        // i16
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: i16 = load %0
+              %2: i64 = sext %1
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %1: i16 = load %0
+              movsx r.64._, word [r.64._]
+              ; %2: i64 = sext %1
+              ; exit [%2]
+            "],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: i32 = load %0
+              %2: i64 = sext %1
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %1: i32 = load %0
+              movsxd r.64._, [r.64._]
+              ; %2: i64 = sext %1
+              ; exit [%2]
+            "],
+        );
+
+        // There is no i64 case because LLVM IR does not allow `sext` to/from the same bit size.
+
+        // Load and zext in one go optimisation
+
+        // i8
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: i8 = load %0
+              %2: i64 = zext %1
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %1: i8 = load %0
+              movzx r.32._, byte [r.64._]
+              ; %2: i64 = zext %1
+              ; exit [%2]
+            "],
+        );
+
+        // i16
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: i16 = load %0
+              %2: i64 = zext %1
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %1: i16 = load %0
+              movzx r.32._, word [r.64._]
+              ; %2: i64 = zext %1
+              ; exit [%2]
+            "],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: i32 = load %0
+              %2: i64 = zext %1
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %1: i32 = load %0
+              mov r.32._, [r.64._]
+              ; %2: i64 = zext %1
+              ; exit [%2]
+            "],
+        );
+
+        // There is no i64 case because LLVM IR does not allow `sext` to/from the same bit size.
     }
 
     #[test]

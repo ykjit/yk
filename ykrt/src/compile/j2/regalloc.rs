@@ -635,15 +635,50 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         Ok(())
     }
 
-    /// Allocate registers for the instruction at position `iidx`.
+    /// Allocate registers for the instruction at position `iidx`. Note: this function may leave
+    /// CPU flags in an undefined state.
     ///
-    /// This function may leave CPU flags in an undefined state.
+    /// # Panics
+    ///
+    /// If any [RegCnstr]s contain [RegCnstrFill::AnyOf].
     pub(super) fn alloc<const N: usize>(
         &mut self,
         be: &mut AB,
         iidx: InstIdx,
         cnstrs: [RegCnstr<AB::Reg>; N],
     ) -> Result<[AB::Reg; N], CompilationError> {
+        // If there are `AnyOf`s, the user should have called `alloc_with_fills`.
+        assert!(cnstrs.iter().all(|x| match x {
+            RegCnstr::InputOutput {
+                in_fill, out_fill, ..
+            } =>
+                !matches!(in_fill, RegCnstrFill::AnyOf(_))
+                    && !matches!(out_fill, RegCnstrFill::AnyOf(_)),
+            RegCnstr::Output { out_fill, .. } => !matches!(out_fill, RegCnstrFill::AnyOf(_)),
+            RegCnstr::Input { in_fill, .. } => !matches!(in_fill, RegCnstrFill::AnyOf(_)),
+            RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } | RegCnstr::KeepAlive { .. } => true,
+        }));
+
+        Ok(self.alloc_with_fills(be, iidx, cnstrs)?.map(|(reg, _)| reg))
+    }
+
+    /// Allocate registers and the required output [RegFill]s for the instruction at position
+    /// `iidx`. Note: This function may leave CPU flags in an undefined state.
+    ///
+    /// The output [RegFill] for a given [RegCnstr] is defined as follows:
+    ///
+    /// * [RegCnstr::Clobber], [RegCnstr::Temp], and [RegCnstr::KeepAlive] always return
+    ///   [RegFill::Undefined]
+    /// * [RegCnstrFill::Undefined], [RegCnstrFill::Signed], and [RegCnstrFill::Zeroed] return
+    ///   [RegFill::Undefined], [RegFill::Signed], and [RegFill::Zeroed] respectively.
+    /// * [RegCnstrFill::AnyOf] returns [RegFill::Undefined], [RegFill::Signed], and
+    ///   [RegFill::Zeroed] as appropriate.
+    pub(super) fn alloc_with_fills<const N: usize>(
+        &mut self,
+        be: &mut AB,
+        iidx: InstIdx,
+        mut cnstrs: [RegCnstr<AB::Reg>; N],
+    ) -> Result<[(AB::Reg, RegFill); N], CompilationError> {
         // Let us call `self.rstate` rstate *n+1:in* (i.e. the input for instruction *iidx+1*). What
         // we need to do here is multi-fold:
         //
@@ -671,6 +706,16 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 <= 1
         );
 
+        // `AnyOf` (currently) only makes sense in `out_fill`s.
+        assert!(cnstrs.iter().all(|x| match x {
+            RegCnstr::InputOutput { in_fill, .. } => !matches!(in_fill, RegCnstrFill::AnyOf(_)),
+            RegCnstr::Input { in_fill, .. } => !matches!(in_fill, RegCnstrFill::AnyOf(_)),
+            RegCnstr::Output { .. }
+            | RegCnstr::Clobber { .. }
+            | RegCnstr::Temp { .. }
+            | RegCnstr::KeepAlive { .. } => true,
+        }));
+
         // Phase 1: Find registers for constraints. Note that multiple constraints may end up
         // using the same register. This phase does not mutate `self`.
         let allocs = self.find_regs_for_constraints(iidx, &cnstrs)?;
@@ -682,12 +727,15 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // untouched by the current instruction.
         let mut n_out = self.rstates.clone();
 
-        // 2.1: Update for the state immediately after the instruction has produced outputs.
+        // 2.1: Update for the state immediately after the instruction has produced outputs and
+        // work out what fill this constraint should have.
         let mut output_reg = None; // Needed when outputs can end up in multiple registers.
-        for (reg, cnstr) in allocs.iter().cloned().zip(cnstrs.iter()) {
+        let mut rtn_fills = Vec::with_capacity(N);
+        for (reg, cnstr) in allocs.iter().cloned().zip(cnstrs.iter_mut()) {
             match cnstr {
                 RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } => {
                     n_out.set_fill_iidxs_gridxs(reg, RegFill::Undefined, smallvec![], smallvec![]);
+                    rtn_fills.push(RegFill::Undefined);
                 }
                 RegCnstr::Input {
                     in_iidx,
@@ -702,25 +750,35 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             smallvec![],
                             smallvec![],
                         );
+                        rtn_fills.push(RegFill::Undefined);
                     } else {
-                        n_out.set_fill_iidxs_gridxs(
-                            reg,
-                            RegFill::from_regcnstrfill(*in_fill),
-                            smallvec![*in_iidx],
-                            smallvec![],
-                        );
+                        let in_fill = RegFill::from_regcnstrfill(in_fill);
+                        n_out.set_fill_iidxs_gridxs(reg, in_fill, smallvec![*in_iidx], smallvec![]);
+                        rtn_fills.push(in_fill);
                     }
                 }
                 RegCnstr::InputOutput { out_fill, .. } | RegCnstr::Output { out_fill, .. } => {
-                    n_out.set_fill_iidxs_gridxs(
-                        reg,
-                        RegFill::from_regcnstrfill(*out_fill),
-                        smallvec![iidx],
-                        smallvec![],
-                    );
+                    if let RegCnstrFill::AnyOf(cnd_fills) = out_fill {
+                        let fill = if self.rstates.iidxs(reg).contains(&iidx) {
+                            self.rstates.fill(reg)
+                        } else if let Some(other_reg) = self.iter_reg_for(iidx).nth(0) {
+                            self.rstates.fill(other_reg)
+                        } else if cnd_fills.has_undefined() {
+                            RegFill::Undefined
+                        } else {
+                            todo!();
+                        };
+                        assert!(AnyOfFill::from_regfill(fill).intersects_with(cnd_fills));
+                        *out_fill = RegCnstrFill::from_regfill(fill);
+                    }
+                    let out_fill = RegFill::from_regcnstrfill(out_fill);
+                    n_out.set_fill_iidxs_gridxs(reg, out_fill, smallvec![iidx], smallvec![]);
+                    rtn_fills.push(out_fill);
                     output_reg = Some(reg);
                 }
-                RegCnstr::KeepAlive { .. } => (),
+                RegCnstr::KeepAlive { .. } => {
+                    rtn_fills.push(RegFill::Undefined);
+                }
             }
         }
 
@@ -789,7 +847,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 } => {
                     if let IState::Stack(stack_off) = self.istates[iidx] {
                         let bitw = self.b.inst_bitw(self.m, iidx);
-                        be.spill(*reg, RegFill::from_regcnstrfill(*out_fill), stack_off, bitw)?;
+                        be.spill(*reg, RegFill::from_regcnstrfill(out_fill), stack_off, bitw)?;
                     }
                     self.is_used[*in_iidx] = iidx;
                 }
@@ -800,7 +858,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 } => {
                     if let IState::Stack(stack_off) = self.istates[iidx] {
                         let bitw = self.b.inst_bitw(self.m, iidx);
-                        be.spill(*reg, RegFill::from_regcnstrfill(*out_fill), stack_off, bitw)?;
+                        be.spill(*reg, RegFill::from_regcnstrfill(out_fill), stack_off, bitw)?;
                     }
                 }
                 RegCnstr::KeepAlive { .. } => (),
@@ -823,7 +881,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 } => {
                     n_in.set_fill_iidxs_gridxs(
                         reg,
-                        RegFill::from_regcnstrfill(*in_fill),
+                        RegFill::from_regcnstrfill(in_fill),
                         smallvec![*in_iidx],
                         smallvec![],
                     );
@@ -902,7 +960,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
-        Ok(allocs)
+        assert_eq!(allocs.len(), rtn_fills.len());
+        Ok(allocs
+            .into_iter()
+            .zip(rtn_fills)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap())
     }
 
     /// For each constraint in `cnstrs`, return the register it should end up in. Note: multiple
@@ -1454,14 +1518,82 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
 /// What should the *fill bits* of a register be set to?
 ///
 /// See the description of [RegFill] for the definition of fill bits.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum RegCnstrFill {
+    /// We can accept any of the fill bits set in [AnyOfFill].
+    ///
+    /// Note: currently `AnyOf` can only be used in the `out_fill` of [RegCnstr::InputOutput] and
+    /// [RegCnstr::Output]. Using it elsewhere will result in undefined behaviour.
+    AnyOf(AnyOfFill),
     /// We do not care what the fill bits are set to.
     Undefined,
     /// We want the fill bits to zero extend the value.
     Zeroed,
     /// We want the fill bits to sign extend the value.
     Signed,
+}
+
+impl RegCnstrFill {
+    /// Create a [RegCnstrFill] from a [RegFill].
+    fn from_regfill(rf: RegFill) -> Self {
+        match rf {
+            RegFill::Undefined => RegCnstrFill::Undefined,
+            RegFill::Zeroed => RegCnstrFill::Zeroed,
+            RegFill::Signed => RegCnstrFill::Signed,
+        }
+    }
+}
+
+// The three constants below define the bits in the [AnyOfFill] bitfield.
+const ANYOFFILL_UNDEFINED: u8 = 1;
+const ANYOFFILL_SIGNED: u8 = 2;
+const ANYOFFILL_ZEROED: u8 = 4;
+
+/// A bitfield representing the valid fills an instruction can accept for
+/// [RegAlloc::alloc_with_fills].
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct AnyOfFill(u8);
+
+impl AnyOfFill {
+    /// Create a blank [AnyOfFill] i.e. one that does not accept any fills.
+    pub(super) const fn new() -> Self {
+        Self(0)
+    }
+
+    /// Construct an [AnyOfFill] from a [RegFill].
+    const fn from_regfill(fill: RegFill) -> Self {
+        match fill {
+            RegFill::Undefined => Self::new().with_undefined(),
+            RegFill::Zeroed => Self::new().with_zeroed(),
+            RegFill::Signed => Self::new().with_signed(),
+        }
+    }
+
+    /// Return the current [AnyOfFill] extended with the accepted of [RegFill::Undefined].
+    pub(super) const fn with_undefined(self) -> Self {
+        Self(self.0 | ANYOFFILL_UNDEFINED)
+    }
+
+    /// Return the current [AnyOfFill] extended with the accepted of [RegFill::Signed].
+    pub(super) const fn with_signed(self) -> Self {
+        Self(self.0 | ANYOFFILL_SIGNED)
+    }
+
+    /// Return the current [AnyOfFill] extended with the accepted of [RegFill::Zeroed].
+    pub(super) const fn with_zeroed(self) -> Self {
+        Self(self.0 | ANYOFFILL_ZEROED)
+    }
+
+    /// Does this [AnyOfFill] intersect with `other` i.e. do they share at least one set bit in
+    /// common?
+    const fn intersects_with(&self, other: &Self) -> bool {
+        (self.0 & other.0) != 0
+    }
+
+    /// Can `self` accept [RegFill::Undefined]?
+    const fn has_undefined(&self) -> bool {
+        (self.0 & ANYOFFILL_UNDEFINED) != 0
+    }
 }
 
 /// What are the *fill bits* of a register be set to?
@@ -1493,8 +1625,9 @@ pub(super) enum RegFill {
 
 impl RegFill {
     /// Create a [RegFill] from a [RegCnstrFill].
-    fn from_regcnstrfill(rcf: RegCnstrFill) -> Self {
+    fn from_regcnstrfill(rcf: &RegCnstrFill) -> Self {
         match rcf {
+            RegCnstrFill::AnyOf(_) => panic!(),
             RegCnstrFill::Undefined => RegFill::Undefined,
             RegCnstrFill::Zeroed => RegFill::Zeroed,
             RegCnstrFill::Signed => RegFill::Signed,
@@ -1613,6 +1746,61 @@ mod test {
     use regex::Regex;
     use std::sync::Arc;
     use strum::{Display, EnumCount, FromRepr};
+
+    #[test]
+    fn any_of_fill() {
+        assert_eq!(AnyOfFill::new().0, 0);
+        assert_ne!(AnyOfFill::new().with_undefined().0, 0);
+        assert_ne!(AnyOfFill::new().with_signed().0, 0);
+        assert_ne!(AnyOfFill::new().with_zeroed().0, 0);
+        assert_ne!(
+            AnyOfFill::new().with_undefined(),
+            AnyOfFill::new().with_signed()
+        );
+        assert_ne!(
+            AnyOfFill::new().with_undefined(),
+            AnyOfFill::new().with_zeroed()
+        );
+        assert_ne!(
+            AnyOfFill::new().with_signed(),
+            AnyOfFill::new().with_zeroed()
+        );
+
+        assert!(
+            AnyOfFill::new()
+                .with_undefined()
+                .intersects_with(&AnyOfFill::new().with_undefined())
+        );
+        assert!(
+            AnyOfFill::new()
+                .with_signed()
+                .intersects_with(&AnyOfFill::new().with_signed())
+        );
+        assert!(
+            AnyOfFill::new()
+                .with_zeroed()
+                .intersects_with(&AnyOfFill::new().with_zeroed())
+        );
+        assert!(
+            !AnyOfFill::new()
+                .with_undefined()
+                .intersects_with(&AnyOfFill::new().with_signed())
+        );
+        assert!(
+            !AnyOfFill::new()
+                .with_undefined()
+                .intersects_with(&AnyOfFill::new().with_zeroed())
+        );
+        assert!(
+            !AnyOfFill::new()
+                .with_signed()
+                .intersects_with(&AnyOfFill::new().with_zeroed())
+        );
+
+        assert!(AnyOfFill::new().with_undefined().has_undefined());
+        assert!(!AnyOfFill::new().with_signed().has_undefined());
+        assert!(!AnyOfFill::new().with_zeroed().has_undefined());
+    }
 
     #[derive(Copy, Clone, Debug, Display, EnumCount, FromRepr, PartialEq)]
     #[repr(u8)]
