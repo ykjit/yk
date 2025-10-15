@@ -83,6 +83,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "="  "DYNPTRADD" "LOCAL" "," "LOCAL" "," "INT" {
        Ok(AstInst::DynPtrAdd { local: $1?.span(), ty: $3?, ptr: $6?.span(), num_elems: $8?.span(), elem_size: $10?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FPEXT" "LOCAL" {
+      Ok(AstInst::FPExt { local: $1?.span(), ty: $3?, val: $6?.span() })
+    }
   | "LOCAL" ":" Ty "=" "GLOBAL" {
       Ok(AstInst::Global { local: $1?.span(), ty: $3?, name: $5?.span() })
     }
@@ -118,6 +121,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
     }
   | "LOCAL" ":" Ty "=" "SHL" "LOCAL" "," "LOCAL" {
       Ok(AstInst::Shl { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
+  | "LOCAL" ":" Ty "=" "SITOFP" "LOCAL" {
+      Ok(AstInst::SIToFP { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
   | "LOCAL" ":" Ty "=" "TRUNC" "LOCAL" {
       Ok(AstInst::Trunc { local: $1?.span(), ty: $3?, val: $6?.span() })
@@ -162,8 +168,8 @@ Pred -> Result<Pred, Box<dyn Error>>:
 
 Ty -> Result<AstTy, Box<dyn Error>>:
     "INT_TY" { Ok(AstTy::Int($1?.span())) }
-  | "FLOAT_TY" { Ok(AstTy::Float($1?.span())) }
-  | "DOUBLE_TY" { Ok(AstTy::Double($1?.span())) }
+  | "FLOAT_TY" { Ok(AstTy::Float) }
+  | "DOUBLE_TY" { Ok(AstTy::Double) }
   | "PTR" { Ok(AstTy::Ptr) }
   ;
 

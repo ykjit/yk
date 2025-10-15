@@ -425,6 +425,10 @@ pub(super) struct GuardRestore {
 /// A HIR type.
 #[derive(Debug, PartialEq)]
 pub(super) enum Ty {
+    // As in LLVM IR: a 64-bit floating-point value (IEEE-754 binary64).
+    Double,
+    // As in LLVM IR: a 32-bit floating-point value (IEEE-754 binary32).
+    Float,
     /// A function type.
     ///
     /// Because these are rather big, and also used fairly rarely, we defer the details to a `Box`
@@ -441,6 +445,8 @@ impl Ty {
     /// Return the bit width of a type.
     pub(super) fn bitw(&self) -> u32 {
         match self {
+            Ty::Double => 64,
+            Ty::Float => 32,
             Ty::Func(_func_ty) => todo!(),
             Ty::Int(bitw) => *bitw,
             Ty::Ptr(addrspace) => {
@@ -454,6 +460,8 @@ impl Ty {
 
     pub(super) fn to_string<Reg: RegT>(&self, _m: &Mod<Reg>) -> String {
         match self {
+            Ty::Double => "double".to_string(),
+            Ty::Float => "float".to_string(),
             Ty::Func(_func_ty) => todo!(),
             Ty::Int(bitw) => format!("i{bitw}"),
             Ty::Ptr(addrspace) => {
@@ -549,6 +557,7 @@ pub(super) enum Inst {
     Const,
     DynPtrAdd,
     Exit,
+    FPExt,
     Guard,
     ICmp,
     IntToPtr,
@@ -561,6 +570,7 @@ pub(super) enum Inst {
     Select,
     SExt,
     Shl,
+    SIToFP,
     Store,
     Sub,
     ThreadLocal,
@@ -1127,6 +1137,58 @@ impl InstT for Exit {
         // `Exit` is a pseudo-instruction, but it makes various things simpler if we pretend it has
         // a type.
         &Ty::Void
+    }
+}
+
+/// Cast from a smaller to a larger floating point type with the same semantics as LLVM's `fpext`.
+#[derive(Debug)]
+pub(super) struct FPExt {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+}
+
+impl InstT for FPExt {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        // Right now, we can only possibly go from Float -> Double with `fpext`. If we add other
+        // floating point types, that will change.
+        assert_matches!(
+            m.ty(self.tyidx),
+            Ty::Double,
+            "%{iidx:?}: return type is not a floating point type"
+        );
+
+        assert_matches!(
+            b.inst(self.val).ty(m),
+            Ty::Float,
+            "%{iidx:?}: val is not an integer"
+        );
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.val);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            val: f(self.val),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("fpext %{}", usize::from(self.val))
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
     }
 }
 
@@ -1890,6 +1952,56 @@ impl InstT for Shl {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!("shl %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
+}
+
+/// Cast a signed integer to floating point with the same semantics as LLVM's `sitofp`.
+#[derive(Debug)]
+pub(super) struct SIToFP {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+}
+
+impl InstT for SIToFP {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_matches!(
+            m.ty(self.tyidx),
+            Ty::Double | Ty::Float,
+            "%{iidx:?}: return type is not a floating point type"
+        );
+
+        assert_matches!(
+            b.inst(self.val).ty(m),
+            Ty::Int(_),
+            "%{iidx:?}: val is not an integer"
+        );
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.val);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            val: f(self.val),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("sitofp %{}", usize::from(self.val))
     }
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {

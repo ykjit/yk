@@ -173,6 +173,28 @@ impl Reg {
             x => unreachable!("{x:?}"),
         }
     }
+
+    pub(super) fn to_xmm(self) -> Register {
+        match self {
+            Reg::XMM0 => Register::XMM0,
+            Reg::XMM1 => Register::XMM1,
+            Reg::XMM2 => Register::XMM2,
+            Reg::XMM3 => Register::XMM3,
+            Reg::XMM4 => Register::XMM4,
+            Reg::XMM5 => Register::XMM5,
+            Reg::XMM6 => Register::XMM6,
+            Reg::XMM7 => Register::XMM7,
+            Reg::XMM8 => Register::XMM8,
+            Reg::XMM9 => Register::XMM9,
+            Reg::XMM10 => Register::XMM10,
+            Reg::XMM11 => Register::XMM11,
+            Reg::XMM12 => Register::XMM12,
+            Reg::XMM13 => Register::XMM13,
+            Reg::XMM14 => Register::XMM14,
+            Reg::XMM15 => Register::XMM15,
+            x => unreachable!("{x:?}"),
+        }
+    }
 }
 
 impl RegT for Reg {
@@ -259,6 +281,7 @@ impl std::fmt::Display for Reg {
 
 #[cfg(test)]
 struct X64TestRegIter<Reg> {
+    fp_regs: Box<dyn Iterator<Item = Reg>>,
     gp_regs: Box<dyn Iterator<Item = Reg>>,
 }
 
@@ -266,6 +289,28 @@ struct X64TestRegIter<Reg> {
 impl X64TestRegIter<Reg> {
     fn new() -> Self {
         Self {
+            fp_regs: Box::new(
+                [
+                    Reg::XMM0,
+                    Reg::XMM1,
+                    Reg::XMM2,
+                    Reg::XMM3,
+                    Reg::XMM4,
+                    Reg::XMM5,
+                    Reg::XMM6,
+                    Reg::XMM7,
+                    Reg::XMM8,
+                    Reg::XMM9,
+                    Reg::XMM10,
+                    Reg::XMM11,
+                    Reg::XMM12,
+                    Reg::XMM13,
+                    Reg::XMM14,
+                    Reg::XMM15,
+                ]
+                .iter()
+                .cloned(),
+            ),
             gp_regs: Box::new(
                 [
                     Reg::R15,
@@ -293,6 +338,7 @@ impl X64TestRegIter<Reg> {
 impl TestRegIter<Reg> for X64TestRegIter<Reg> {
     fn next_reg(&mut self, ty: &Ty) -> Option<Reg> {
         match ty {
+            Ty::Double | Ty::Float => self.fp_regs.next(),
             Ty::Func(_func_ty) => todo!(),
             Ty::Int(bitw) => {
                 if *bitw <= 64 {

@@ -351,6 +351,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     };
                     ra.set_exit_vlocs(is_loop, iidx, exit_vars, exit_vlocs);
                 }
+                Inst::FPExt(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fpext(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::Guard(
                     x @ Guard {
                         entry_vars: _,
@@ -443,6 +448,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 Inst::Shl(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_shl(&mut ra, b, iidx, x)?;
+                    }
+                }
+                Inst::SIToFP(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_sitofp(&mut ra, b, iidx, x)?;
                     }
                 }
                 Inst::Store(x) => self.be.i_store(&mut ra, b, iidx, x)?,
@@ -709,6 +719,14 @@ pub(super) trait HirToAsmBackend {
         inst: &DynPtrAdd,
     ) -> Result<(), CompilationError>;
 
+    fn i_fpext(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FPExt,
+    ) -> Result<(), CompilationError>;
+
     /// The instruction should use [RegCnstr::KeepAlive] for the values in `Guard::entry_vars`.
     ///
     /// The label returned should be the jump instruction to the guard body.
@@ -806,6 +824,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &Shl,
+    ) -> Result<(), CompilationError>;
+
+    fn i_sitofp(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &SIToFP,
     ) -> Result<(), CompilationError>;
 
     fn i_store(

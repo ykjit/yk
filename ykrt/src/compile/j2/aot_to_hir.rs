@@ -607,7 +607,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 hir::Ty::Func(Box::new(fty))
             }
             Ty::Struct(_ty) => todo!(),
-            Ty::Float(_ty) => todo!(),
+            Ty::Float(FloatTy::Double) => hir::Ty::Double,
+            Ty::Float(FloatTy::Float) => hir::Ty::Float,
             Ty::Unimplemented(_) => todo!(),
         };
         self.opt.push_ty(tyidx)
@@ -1068,8 +1069,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 nsw: false,
             }
             .into(),
-            CastKind::SIToFP => todo!(),
-            CastKind::FPExt => todo!(),
+            CastKind::SIToFP => hir::SIToFP { tyidx, val }.into(),
+            CastKind::FPExt => hir::FPExt { tyidx, val }.into(),
             CastKind::FPToSI => todo!(),
             CastKind::BitCast => todo!(),
             CastKind::PtrToInt => hir::PtrToInt { tyidx, val }.into(),
