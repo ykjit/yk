@@ -283,6 +283,12 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let exit_vars = locals.iter().map(|x| self.p_local(*x)).collect::<Vec<_>>();
                     self.insts.push(Inst::Exit(Exit(exit_vars)));
                 }
+                AstInst::FPExt { local, ty, val } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let val = self.p_local(val);
+                    self.insts.push(FPExt { tyidx, val }.into());
+                }
                 AstInst::Global { local, ty, name } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -506,6 +512,12 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
+                AstInst::SIToFP { local, ty, val } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let val = self.p_local(val);
+                    self.insts.push(SIToFP { tyidx, val }.into());
+                }
                 AstInst::Store { val, ptr } => {
                     let val = self.p_local(val);
                     let ptr = self.p_local(ptr);
@@ -625,8 +637,8 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
 
     fn p_ty(&mut self, astty: AstTy) -> TyIdx {
         match astty {
-            AstTy::Double(_span) => todo!(),
-            AstTy::Float(_span) => todo!(),
+            AstTy::Double => self.tys.push(Ty::Double),
+            AstTy::Float => self.tys.push(Ty::Float),
             AstTy::Int(span) => {
                 let s = self.lexer.span_str(span);
                 assert_eq!(s.chars().nth(0).unwrap(), 'i');
@@ -741,6 +753,11 @@ enum AstInst {
     Exit {
         locals: Vec<Span>,
     },
+    FPExt {
+        local: Span,
+        ty: AstTy,
+        val: Span,
+    },
     Global {
         local: Span,
         ty: AstTy,
@@ -815,6 +832,11 @@ enum AstInst {
         lhs: Span,
         rhs: Span,
     },
+    SIToFP {
+        local: Span,
+        ty: AstTy,
+        val: Span,
+    },
     Store {
         val: Span,
         ptr: Span,
@@ -839,8 +861,8 @@ enum AstInst {
 
 #[derive(Debug)]
 enum AstTy {
-    Double(Span),
-    Float(Span),
+    Double,
+    Float,
     Int(Span),
     Ptr,
     Void,

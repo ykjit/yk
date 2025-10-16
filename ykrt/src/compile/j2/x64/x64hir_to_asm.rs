@@ -19,6 +19,12 @@
 //! in instructions such as `ptrtoint`.
 //!
 //!
+//! ## Floating point
+//!
+//! We assume that floating point fills are irrelevant -- because we always use only the part of of
+//! an `xmm` register that contains data we want -- and always use `RegFill::Undefined`.
+//!
+//!
 //! ## Generating efficient code
 //!
 //! x64 frequently has several ways that equivalent behaviour can be encoded. This module tries
@@ -493,6 +499,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn iter_possible_regs(&self, b: &Block, iidx: InstIdx) -> impl Iterator<Item = Self::Reg> {
         match b.inst_ty(self.m, iidx) {
+            Ty::Double | Ty::Float => ALL_XMM_REGS.iter().cloned(),
             Ty::Func(_func_ty) => todo!(),
             Ty::Int(_) | Ty::Ptr(_) => NORMAL_GP_REGS.iter().cloned(),
             Ty::Void => todo!(),
@@ -1213,6 +1220,25 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             5, // R8
             6, // R9
         ];
+        // This is a sort-of-hack to assuage the borrow checker.
+        const FP_CLOBBER_TMPS: [&[Reg]; 16] = [
+            &[Reg::XMM0],
+            &[Reg::XMM1],
+            &[Reg::XMM2],
+            &[Reg::XMM3],
+            &[Reg::XMM4],
+            &[Reg::XMM5],
+            &[Reg::XMM6],
+            &[Reg::XMM7],
+            &[Reg::XMM8],
+            &[Reg::XMM9],
+            &[Reg::XMM10],
+            &[Reg::XMM11],
+            &[Reg::XMM12],
+            &[Reg::XMM13],
+            &[Reg::XMM14],
+            &[Reg::XMM15],
+        ];
 
         // This will be `Some(addr)` (a) the function is a constant pointer (b) and is
         // representable as a near call.
@@ -1221,20 +1247,31 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             .filter(|addr| self.asm.is_near_callable(*addr));
 
         let mut gp_cnstrs: [_; 9] = GP_CLOBBERS.map(|x| RegCnstr::Clobber { reg: x });
-        let _fp_cnstrs: [_; 16] = ALL_XMM_REGS.map(|x| RegCnstr::Clobber { reg: x });
-        let num_float_args = 0;
+        let mut fp_cnstrs: [_; 16] = ALL_XMM_REGS.map(|x| RegCnstr::Clobber { reg: x });
 
-        let mut gp_iter = GP_ARG_OFFS.iter();
+        let mut fp_args_off = 0;
+        let mut gp_args_iter = GP_ARG_OFFS.iter();
         for arg in args {
             let arg_ty = b.inst_ty(self.m, *arg);
             match arg_ty {
+                Ty::Double => {
+                    debug_assert_matches!(fp_cnstrs[fp_args_off], RegCnstr::Clobber { .. });
+                    fp_cnstrs[fp_args_off] = RegCnstr::Input {
+                        in_iidx: *arg,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: FP_CLOBBER_TMPS[fp_args_off],
+                        clobber: true,
+                    };
+                    fp_args_off += 1;
+                }
+                Ty::Float => todo!(),
                 Ty::Func(_) => todo!(),
                 Ty::Int(_) | Ty::Ptr(_) => {
                     let in_fill = match arg_ty {
-                        Ty::Func(_) | Ty::Void => unreachable!(),
+                        Ty::Double | Ty::Float | Ty::Func(_) | Ty::Void => unreachable!(),
                         Ty::Int(_) | Ty::Ptr(_) => RegCnstrFill::Zeroed,
                     };
-                    let gp_off = gp_iter.next().unwrap();
+                    let gp_off = gp_args_iter.next().unwrap();
                     debug_assert_matches!(gp_cnstrs[*gp_off], RegCnstr::Clobber { .. });
                     gp_cnstrs[*gp_off] = RegCnstr::Input {
                         in_iidx: *arg,
@@ -1249,10 +1286,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
         let fty = self.m.func_ty(*func_tyidx);
         match self.m.ty(fty.rtn_tyidx) {
+            Ty::Double | Ty::Float => todo!(),
             Ty::Func(_func_ty) => todo!(),
             Ty::Int(_) | Ty::Ptr(_) => {
                 debug_assert_matches!(gp_cnstrs[RAX_OFF], RegCnstr::Clobber { .. });
-                if fn_addr.is_none() && !fty.has_varargs && num_float_args == 0 {
+                if fn_addr.is_none() && !fty.has_varargs && fp_args_off == 0 {
                     // RAX isn't used as an input for non-varargs functions.
                     gp_cnstrs[RAX_OFF] = RegCnstr::InputOutput {
                         in_iidx: *tgt,
@@ -1281,7 +1319,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
 
         if !fty.has_varargs {
-            if num_float_args == 0 {
+            if fp_args_off == 0 {
                 let [..] = ra.alloc(self, iidx, gp_cnstrs)?;
                 if let Some(fn_addr) = fn_addr {
                     self.asm.push_reloc(
@@ -1296,14 +1334,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 todo!();
             }
         } else {
-            assert_eq!(num_float_args, 0);
+            // Calling a var args function.
             if let Some(fn_addr) = fn_addr {
-                let [..] = ra.alloc(self, iidx, gp_cnstrs)?;
+                if fp_args_off == 0 {
+                    let [..] = ra.alloc(self, iidx, gp_cnstrs)?;
+                } else {
+                    let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len()] =
+                        ra.alloc(self, iidx, concat_arrays!(gp_cnstrs, fp_cnstrs))?;
+                }
                 self.asm.push_reloc(
                     IcedInst::with_branch(Code::Call_rel32_64, 0),
                     RelocKind::NearCallWithAddr(fn_addr),
                 );
             } else {
+                assert_eq!(fp_args_off, 0);
                 let cnstrs: [_; GP_CLOBBERS.len() + 1] = concat_arrays!(
                     gp_cnstrs,
                     [RegCnstr::Input {
@@ -1320,7 +1364,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             self.asm.push_inst(IcedInst::with2(
                 Code::Mov_r32_imm32,
                 IcedReg::EAX,
-                num_float_args,
+                u32::try_from(fp_args_off).unwrap(),
             ));
         }
         Ok(())
@@ -1409,6 +1453,45 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 todo!();
             }
         }
+        Ok(())
+    }
+
+    fn i_fpext(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        FPExt { tyidx, val }: &FPExt,
+    ) -> Result<(), CompilationError> {
+        let [srcr, tgtr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+
+        match (b.inst_ty(self.m, *val), self.m.ty(*tyidx)) {
+            (Ty::Float, Ty::Double) => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cvtss2sd_xmm_xmmm32,
+                    tgtr.to_xmm(),
+                    srcr.to_xmm(),
+                ));
+            }
+            _ => todo!(),
+        }
+
         Ok(())
     }
 
@@ -1632,6 +1715,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         };
 
         match self.m.ty(*tyidx) {
+            Ty::Double | Ty::Float => todo!(),
             Ty::Func(_) => todo!(),
             Ty::Int(bitw) => match bitw {
                 8 => {
@@ -1941,6 +2025,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }: &Select,
     ) -> Result<(), CompilationError> {
         match self.m.ty(*tyidx) {
+            Ty::Double | Ty::Float => todo!(),
             Ty::Func(_) => todo!(),
             Ty::Int(_) => todo!(),
             Ty::Ptr(addrspace) => {
@@ -2016,6 +2101,45 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }: &Shl,
     ) -> Result<(), CompilationError> {
         todo!();
+    }
+
+    fn i_sitofp(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        SIToFP { tyidx, val }: &SIToFP,
+    ) -> Result<(), CompilationError> {
+        let [srcr, tgtr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    can_be_same_as_input: false,
+                },
+            ],
+        )?;
+
+        match self.m.ty(*tyidx) {
+            Ty::Double => todo!(),
+            Ty::Float => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cvtsi2ss_xmm_rm32,
+                    tgtr.to_xmm(),
+                    srcr.to_reg32(),
+                ));
+            }
+            _ => unreachable!(),
+        }
+        Ok(())
     }
 
     fn i_store(
@@ -3036,6 +3160,25 @@ mod test {
     }
 
     #[test]
+    fn cg_fpext() {
+        codegen_and_test(
+            "
+              %0: float = arg reg
+              %1: double = fpext %0
+              blackbox %1
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %1: double = fpext %0
+              cvtss2sd fp.128._, fp.128._
+              ; blackbox %1
+              ; exit [%0]
+            "],
+        );
+    }
+
+    #[test]
     fn cg_guard() {
         // The standard cases
         codegen_and_test(
@@ -3533,6 +3676,25 @@ mod test {
               ; %1: i64 = sext %0
               ; exit [%1]
             "#],
+        );
+    }
+
+    #[test]
+    fn cg_sitofp() {
+        codegen_and_test(
+            "
+              %0: i32 = arg reg
+              %1: float = sitofp %0
+              blackbox %1
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %1: float = sitofp %0
+              cvtsi2ss fp.128.x, r.32.x
+              ; blackbox %1
+              ; exit [%0]
+            "],
         );
     }
 

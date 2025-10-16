@@ -1809,9 +1809,14 @@ mod test {
         GPR1,
         GPR2,
         GPR3,
+        FP0,
+        FP1,
+        FP2,
+        FP3,
         Undefined,
     }
 
+    const FP_REGS: [TestReg; 4] = [TestReg::FP0, TestReg::FP1, TestReg::FP2, TestReg::FP3];
     const GP_REGS: [TestReg; 4] = [TestReg::GPR0, TestReg::GPR1, TestReg::GPR2, TestReg::GPR3];
 
     impl RegT for TestReg {
@@ -1909,6 +1914,7 @@ mod test {
 
         fn iter_possible_regs(&self, b: &Block, iidx: InstIdx) -> impl Iterator<Item = Self::Reg> {
             match b.inst_ty(self.m, iidx) {
+                Ty::Double | Ty::Float => FP_REGS.iter().cloned(),
                 Ty::Func(_func_ty) => todo!(),
                 Ty::Int(_) | Ty::Ptr(_) => GP_REGS.iter().cloned(),
                 Ty::Void => todo!(),
@@ -2099,6 +2105,16 @@ mod test {
             todo!()
         }
 
+        fn i_fpext(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FPExt,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_guard(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -2270,6 +2286,16 @@ mod test {
             _inst: &crate::compile::j2::hir::Shl,
         ) -> Result<(), CompilationError> {
             todo!()
+        }
+
+        fn i_sitofp(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SIToFP,
+        ) -> Result<(), CompilationError> {
+            todo!();
         }
 
         fn i_store(
