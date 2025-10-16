@@ -351,6 +351,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     };
                     ra.set_exit_vlocs(is_loop, iidx, exit_vars, exit_vlocs);
                 }
+                Inst::FAdd(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fadd(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::FPExt(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fpext(&mut ra, b, iidx, x)?;
@@ -717,6 +722,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &DynPtrAdd,
+    ) -> Result<(), CompilationError>;
+
+    fn i_fadd(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FAdd,
     ) -> Result<(), CompilationError>;
 
     fn i_fpext(

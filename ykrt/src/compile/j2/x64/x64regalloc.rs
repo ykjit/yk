@@ -72,6 +72,30 @@ impl Reg {
         }
     }
 
+    /// Is this a floating point register?
+    #[allow(clippy::match_like_matches_macro)]
+    pub(super) fn is_fp(&self) -> bool {
+        match self {
+            Reg::XMM0
+            | Reg::XMM1
+            | Reg::XMM2
+            | Reg::XMM3
+            | Reg::XMM4
+            | Reg::XMM5
+            | Reg::XMM6
+            | Reg::XMM7
+            | Reg::XMM8
+            | Reg::XMM9
+            | Reg::XMM10
+            | Reg::XMM11
+            | Reg::XMM12
+            | Reg::XMM13
+            | Reg::XMM14
+            | Reg::XMM15 => true,
+            _ => false,
+        }
+    }
+
     /// Is this a general purpose register?
     #[allow(clippy::match_like_matches_macro)]
     pub(super) fn is_gp(&self) -> bool {
