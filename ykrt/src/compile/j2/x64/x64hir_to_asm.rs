@@ -2106,7 +2106,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_sitofp(
         &mut self,
         ra: &mut RegAlloc<Self>,
-        _b: &Block,
+        b: &Block,
         iidx: InstIdx,
         SIToFP { tyidx, val }: &SIToFP,
     ) -> Result<(), CompilationError> {
@@ -2129,8 +2129,21 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         )?;
 
         match self.m.ty(*tyidx) {
-            Ty::Double => todo!(),
+            Ty::Double => match b.inst_bitw(self.m, *val) {
+                32 => self.asm.push_inst(IcedInst::with2(
+                    Code::Cvtsi2sd_xmm_rm32,
+                    tgtr.to_xmm(),
+                    srcr.to_reg32(),
+                )),
+                64 => self.asm.push_inst(IcedInst::with2(
+                    Code::Cvtsi2sd_xmm_rm64,
+                    tgtr.to_xmm(),
+                    srcr.to_reg64(),
+                )),
+                _ => todo!(),
+            },
             Ty::Float => {
+                assert_eq!(b.inst_bitw(self.m, *val), 32);
                 self.asm.push_inst(IcedInst::with2(
                     Code::Cvtsi2ss_xmm_rm32,
                     tgtr.to_xmm(),
@@ -3681,6 +3694,7 @@ mod test {
 
     #[test]
     fn cg_sitofp() {
+        // float
         codegen_and_test(
             "
               %0: i32 = arg reg
@@ -3692,6 +3706,42 @@ mod test {
               ...
               ; %1: float = sitofp %0
               cvtsi2ss fp.128.x, r.32.x
+              ; blackbox %1
+              ; exit [%0]
+            "],
+        );
+
+        // double
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg reg
+              %1: double = sitofp %0
+              blackbox %1
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %1: double = sitofp %0
+              cvtsi2sd fp.128._, r.32._
+              ; blackbox %1
+              ; exit [%0]
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg reg
+              %1: double = sitofp %0
+              blackbox %1
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %1: double = sitofp %0
+              cvtsi2sd fp.128._, r.64._
               ; blackbox %1
               ; exit [%0]
             "],
