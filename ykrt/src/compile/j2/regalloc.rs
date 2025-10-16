@@ -2378,24 +2378,7 @@ mod test {
             .unwrap()
     }
 
-    fn build_and_test(s: &str, ptn: &str) {
-        let m = str_to_mod::<TestReg>(s);
-
-        let hl = Arc::new(Mutex::new(HotLocation {
-            kind: HotLocationKind::Tracing(TraceId::testing()),
-            tracecompilation_errors: 0,
-            #[cfg(feature = "ykd")]
-            debug_str: None,
-        }));
-
-        let be = TestHirToAsm::new(&m);
-        let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
-        fmatcher(ptn)
-            .matches(&log)
-            .unwrap_or_else(|e| panic!("{e:?}\n\n{log}\n\n{ptn}"));
-    }
-
-    fn build_and_test_multi(s: &str, ptns: &[&str]) {
+    fn build_and_test(s: &str, ptns: &[&str]) {
         let m = str_to_mod::<TestReg>(s);
 
         let hl = Arc::new(Mutex::new(HotLocation {
@@ -2427,15 +2410,15 @@ mod test {
           %2: i8 = add %0, %1
           blackbox %2
         "#,
-            "
+            &["
           alloc GPR0 GPR1
-        ",
+        "],
         );
     }
 
     #[test]
     fn cycles() {
-        build_and_test_multi(
+        build_and_test(
             r#"
           %0: i8 = arg reg "GPR1"
           %1: i8 = arg reg "GPR0"
@@ -2458,7 +2441,7 @@ mod test {
             ],
         );
 
-        build_and_test_multi(
+        build_and_test(
             r#"
           %0: i8 = arg reg "GPR0"
           %1: i8 = arg reg "GPR1"
@@ -2487,7 +2470,7 @@ mod test {
             ],
         );
 
-        build_and_test_multi(
+        build_and_test(
             r#"
           %0: i8 = arg reg "GPR3"
           %1: i8 = arg reg "GPR2"
@@ -2548,7 +2531,7 @@ mod test {
           guard true, %5, [%2]
           exit [%0, %1]
         "#,
-            "
+            &["
           alloc GPR2
           alloc GPR0 GPR2 GPR2
           alloc GPR2 GPR3
@@ -2559,7 +2542,7 @@ mod test {
           spill GPR0 Undefined stack_off=8 bitw=8
           alloc GPR0 GPR1
           spill GPR0 Zeroed stack_off=16 bitw=8
-        ",
+        "],
         );
     }
 }
