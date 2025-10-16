@@ -704,6 +704,23 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 assert!(tgt_bitw >= x.bitw());
                 if tgt_fill == RegFill::Undefined || tgt_fill == RegFill::Zeroed {
                     match tgt_bitw {
+                        64 => {
+                            if let Some(x) = x.to_zero_ext_u32() {
+                                self.asm.push_inst(IcedInst::with2(
+                                    Code::Mov_rm32_imm32,
+                                    reg.to_reg32(),
+                                    x,
+                                ));
+                            } else if let Some(x) = x.to_zero_ext_u64() {
+                                self.asm.push_inst(IcedInst::with2(
+                                    Code::Mov_r64_imm64,
+                                    reg.to_reg64(),
+                                    x,
+                                ));
+                            } else {
+                                todo!();
+                            }
+                        }
                         32 => {
                             if let Some(x) = x.to_zero_ext_u32() {
                                 self.asm.push_inst(IcedInst::with2(
@@ -3006,9 +3023,40 @@ mod test {
             ",
             &["
               ...
-              mov r.64.y, 0xFFFFFFFF
+              mov r.32.y, 0xFFFFFFFF
               ; %2: i64 = add %0, %1
               add r.64.x, r.64.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg reg
+              %1: i64 = 0xFFFFFFFFAB
+              %2: i64 = add %0, %1
+              exit [%2]
+            ",
+            &["
+              ...
+              mov r.64.x, 0xFFFFFFFFAB
+              ; %2: i64 = add %0, %1
+              add r.64._, r.64.x
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg reg
+              %1: i64 = 0xFFFFFFFFFFFFFFFF
+              %2: i64 = add %0, %1
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = add %0, %1
+              add r.64._, 0xFFFFFFFFFFFFFFFF
               ...
             "],
         );
@@ -3206,6 +3254,70 @@ mod test {
               ; %5: i32 = add %3, %4
               add r.32._, 1
               ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_const() {
+        codegen_and_test(
+            "
+              %0: i32 = 0xFFFFFFFF
+              %1: i32 = 0xABCD1234
+              %2: i32 = add %0, %1
+              blackbox %2
+              exit []
+            ",
+            &["
+              ...
+              ; %0: i32 = 4294967295
+              mov r.32.x, 0xFFFFFFFF
+              ; %1: i32 = 2882343476
+              ; %2: i32 = add %0, %1
+              add r.32.x, 0xABCD1234
+              ; blackbox %2
+              ; exit []
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = 0xFFFFFFFF
+              %1: i64 = 0xABCD1234
+              %2: i64 = add %0, %1
+              blackbox %2
+              exit []
+            ",
+            &["
+              ...
+              ; %0: i64 = 4294967295
+              mov r.32.x, 0xFFFFFFFF
+              ; %1: i64 = 2882343476
+              mov r.32.y, 0xABCD1234
+              ; %2: i64 = add %0, %1
+              add r.64.x, r.64.y
+              ; blackbox %2
+              ; exit []
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = 0xFFFFFFFFFFFFFFFF
+              %1: i64 = 0xFFFFFFFFFFFFFFFE
+              %2: i64 = add %0, %1
+              blackbox %2
+              exit []
+            ",
+            &["
+              ...
+              ; %0: i64 = 18446744073709551615
+              mov r.64.x, 0xFFFFFFFFFFFFFFFF
+              ; %1: i64 = 18446744073709551614
+              ; %2: i64 = add %0, %1
+              add r.64.x, 0xFFFFFFFFFFFFFFFE
+              ; blackbox %2
+              ; exit []
             "],
         );
     }
@@ -4099,6 +4211,21 @@ mod test {
         codegen_and_test(
             "
               %0: i64 = arg reg
+              %1: i64 = 0
+              %2: i64 = sub %1, %0
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = sub %1, %0
+              neg r.64._
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg reg
               %1: i64 = 32
               %2: i64 = sub %0, %1
               exit [%2]
@@ -4120,7 +4247,7 @@ mod test {
             ",
             &["
               ...
-              mov r.64.y, 0xFFFFFFFF
+              mov r.32.y, 0xFFFFFFFF
               ; %2: i64 = sub %0, %1
               sub r.64.x, r.64.y
               ...
@@ -4130,14 +4257,15 @@ mod test {
         codegen_and_test(
             "
               %0: i64 = arg reg
-              %1: i64 = 0
+              %1: i64 = 0xFFFFFFFFFFFFFFFF
               %2: i64 = sub %1, %0
               exit [%2]
             ",
             &["
               ...
+              mov r.64.x, 0xFFFFFFFFFFFFFFFF
               ; %2: i64 = sub %1, %0
-              neg r.64._
+              sub r.64.x, r.64._
               ...
             "],
         );
