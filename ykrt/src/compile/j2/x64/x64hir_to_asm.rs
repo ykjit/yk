@@ -1508,6 +1508,48 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_fsub(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        FSub { tyidx, lhs, rhs }: &FSub,
+    ) -> Result<(), CompilationError> {
+        let [lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+        match self.m.ty(*tyidx) {
+            Ty::Double => self.asm.push_inst(IcedInst::with2(
+                Code::Subsd_xmm_xmmm64,
+                lhsr.to_xmm(),
+                rhsr.to_xmm(),
+            )),
+            Ty::Float => self.asm.push_inst(IcedInst::with2(
+                Code::Subss_xmm_xmmm32,
+                lhsr.to_xmm(),
+                rhsr.to_xmm(),
+            )),
+            _ => panic!(),
+        }
+
+        Ok(())
+    }
+
     fn i_fpext(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -3252,6 +3294,39 @@ mod test {
               ...
               ; %2: double = fadd %0, %1
               addsd fp.128.x, fp.128.y
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_fsub() {
+        codegen_and_test(
+            "
+              %0: float = arg reg
+              %1: float = arg reg
+              %2: float = fsub %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: float = fsub %0, %1
+              subss fp.128.x, fp.128.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: double = arg reg
+              %1: double = arg reg
+              %2: double = fsub %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: double = fsub %0, %1
+              subsd fp.128.x, fp.128.y
               ...
             "],
         );

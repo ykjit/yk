@@ -356,6 +356,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_fadd(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::FSub(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fsub(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::FPExt(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fpext(&mut ra, b, iidx, x)?;
@@ -730,6 +735,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &FAdd,
+    ) -> Result<(), CompilationError>;
+
+    fn i_fsub(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FSub,
     ) -> Result<(), CompilationError>;
 
     fn i_fpext(

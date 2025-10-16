@@ -779,7 +779,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             BinOp::FDiv => todo!(),
             BinOp::FMul => todo!(),
             BinOp::FRem => todo!(),
-            BinOp::FSub => todo!(),
+            BinOp::FSub => hir::FSub {
+                tyidx: self.p_ty(inst.def_type(self.am).unwrap())?,
+                lhs,
+                rhs,
+            }
+            .into(),
             BinOp::LShr => hir::LShr {
                 tyidx: self.p_ty(inst.def_type(self.am).unwrap())?,
                 lhs,
