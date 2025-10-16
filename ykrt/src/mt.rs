@@ -14,7 +14,6 @@ use std::{
     },
 };
 
-use atomic_enum::atomic_enum;
 use parking_lot::Mutex;
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
@@ -76,7 +75,7 @@ thread_local! {
     static THREAD_MTTHREAD: RefCell<MTThread> = RefCell::new(MTThread::new());
     /// Is this thread tracing something? Do not access this directly: use [MTThread::is_tracing]
     /// and friends.
-    static THREAD_IS_TRACING: AtomicIsTracing = const { AtomicIsTracing::new(IsTracing::None) };
+    static THREAD_IS_TRACING: RefCell<IsTracing> = const { RefCell::new(IsTracing::None) };
 }
 
 /// A meta-tracer. This is always passed around stored in an [Arc].
@@ -1319,17 +1318,17 @@ impl MTThread {
 
     /// Is this thread currently tracing something?
     pub(crate) fn is_tracing() -> bool {
-        THREAD_IS_TRACING.with(|x| x.load(Ordering::Relaxed) != IsTracing::None)
+        THREAD_IS_TRACING.with(|x| *x.borrow() != IsTracing::None)
     }
 
     /// What kind of tracing (if any!) is this thread undertaking?
     fn tracing_kind() -> IsTracing {
-        THREAD_IS_TRACING.with(|x| x.load(Ordering::Relaxed))
+        THREAD_IS_TRACING.with(|x| x.borrow().clone())
     }
 
     /// Mark this thread as currently tracing something.
     fn set_tracing(kind: IsTracing) {
-        THREAD_IS_TRACING.with(|x| x.store(kind, Ordering::Relaxed));
+        THREAD_IS_TRACING.with(|x| *x.borrow_mut() = kind);
     }
 
     /// Call `f` with a `&` reference to this thread's [MTThread] instance.
@@ -1483,8 +1482,7 @@ impl MTThread {
     }
 }
 
-#[atomic_enum]
-#[derive(PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 enum IsTracing {
     None,
     Loop,
