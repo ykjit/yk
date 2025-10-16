@@ -812,22 +812,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             n_out.set_fill_iidxs_gridxs(*reg, RegFill::Undefined, smallvec![], smallvec![]);
         }
 
-        for ((_src_reg, src_rstate), (reg, dst_rstate)) in n_out.iter().zip(self.rstates.iter()) {
-            assert_eq!(_src_reg, reg);
-
-            // Arrange fills, if necessary.
-            if !(src_rstate.iidxs.is_empty() || dst_rstate.iidxs.is_empty()) {
-                let src_bitw = iidxs_maxbitw(self.m, self.b, &src_rstate.iidxs);
-                let dst_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
-                if src_bitw != dst_bitw
-                    || src_rstate.iidxs != dst_rstate.iidxs
-                    || src_rstate.fill != dst_rstate.fill
-                {
-                    be.arrange_fill(reg, src_bitw, src_rstate.fill, dst_rstate.fill);
-                }
-            }
-        }
-
         // Phase 3.2: Spill outputs if they will need to be unspilled later.
         //
         // This also turns out to be a convenient place to calculate which instructions' values are
@@ -1943,11 +1927,14 @@ mod test {
 
         fn arrange_fill(
             &mut self,
-            _reg: Self::Reg,
-            _bitw: u32,
-            _src_fill: RegFill,
-            _dst_fill: RegFill,
+            reg: Self::Reg,
+            bitw: u32,
+            src_fill: RegFill,
+            dst_fill: RegFill,
         ) {
+            self.ra_log.push(format!(
+                "arrange_fill {reg:?} bitw={bitw} from={src_fill:?} to={dst_fill:?}"
+            ));
         }
 
         fn copy_reg(
@@ -2378,7 +2365,16 @@ mod test {
             .unwrap()
     }
 
-    fn build_and_test(s: &str, ptn: &str) {
+    /// Enable simple tests of the register allocator.
+    ///
+    /// This function takes a module `s` in and runs the register allocator on it with our "test"
+    /// backend above. It then runs each line of the log through `log_filter`, only keeping lines
+    /// where `log_filter` returns `true`. It recombines the log and then matches it against the
+    /// [fm] pattern `ptn`.
+    fn build_and_test<F>(s: &str, log_filter: F, ptns: &[&str])
+    where
+        F: Fn(&str) -> bool,
+    {
         let m = str_to_mod::<TestReg>(s);
 
         let hl = Arc::new(Mutex::new(HotLocation {
@@ -2390,23 +2386,11 @@ mod test {
 
         let be = TestHirToAsm::new(&m);
         let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
-        fmatcher(ptn)
-            .matches(&log)
-            .unwrap_or_else(|e| panic!("{e:?}\n\n{log}\n\n{ptn}"));
-    }
-
-    fn build_and_test_multi(s: &str, ptns: &[&str]) {
-        let m = str_to_mod::<TestReg>(s);
-
-        let hl = Arc::new(Mutex::new(HotLocation {
-            kind: HotLocationKind::Tracing(TraceId::testing()),
-            tracecompilation_errors: 0,
-            #[cfg(feature = "ykd")]
-            debug_str: None,
-        }));
-
-        let be = TestHirToAsm::new(&m);
-        let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
+        let log = log
+            .lines()
+            .filter(|s| log_filter(s))
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut failures = Vec::with_capacity(ptns.len());
         for ptn in ptns {
             match fmatcher(ptn).matches(&log) {
@@ -2427,21 +2411,25 @@ mod test {
           %2: i8 = add %0, %1
           blackbox %2
         "#,
-            "
+            |_| true,
+            &["
           alloc GPR0 GPR1
-        ",
+          arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
+          arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
+        "],
         );
     }
 
     #[test]
     fn cycles() {
-        build_and_test_multi(
+        build_and_test(
             r#"
           %0: i8 = arg reg "GPR1"
           %1: i8 = arg reg "GPR0"
           %2: i8 = add %0, %1
           blackbox %2
         "#,
+            |s| !s.starts_with("arrange_fill"),
             &[
                 "
           alloc GPR0 GPR1
@@ -2458,7 +2446,7 @@ mod test {
             ],
         );
 
-        build_and_test_multi(
+        build_and_test(
             r#"
           %0: i8 = arg reg "GPR0"
           %1: i8 = arg reg "GPR1"
@@ -2467,6 +2455,7 @@ mod test {
           %4: i8 = add %2, %3
           blackbox %4
         "#,
+            |s| !s.starts_with("arrange_fill"),
             &[
                 "
           alloc GPR0 GPR1
@@ -2487,7 +2476,7 @@ mod test {
             ],
         );
 
-        build_and_test_multi(
+        build_and_test(
             r#"
           %0: i8 = arg reg "GPR3"
           %1: i8 = arg reg "GPR2"
@@ -2500,6 +2489,7 @@ mod test {
           blackbox %6
           blackbox %7
         "#,
+            |s| !s.starts_with("arrange_fill"),
             &[
                 "
           alloc GPR0 GPR1
@@ -2548,7 +2538,8 @@ mod test {
           guard true, %5, [%2]
           exit [%0, %1]
         "#,
-            "
+            |s| !s.starts_with("arrange_fill"),
+            &["
           alloc GPR2
           alloc GPR0 GPR2 GPR2
           alloc GPR2 GPR3
@@ -2559,7 +2550,32 @@ mod test {
           spill GPR0 Undefined stack_off=8 bitw=8
           alloc GPR0 GPR1
           spill GPR0 Zeroed stack_off=16 bitw=8
-        ",
+        "],
+        );
+    }
+
+    #[test]
+    fn arrange_fills_once() {
+        // A case where guard optimism has to be undone.
+        //
+        // It's a bit hard to see in the test output, but note the spill to `stack_off=8` that is
+        // not used in the trace: that's the guard optimism being undone.
+        build_and_test(
+            r#"
+          %0: i8 = arg reg "GPR0"
+          %1: i8 = add %0, %0
+          blackbox %1
+          exit [%0]
+        "#,
+            |_| true,
+            &["
+          copy_reg from=GPR1 to=GPR0
+          arrange_fill GPR0 bitw=8 from=Zeroed to=Undefined
+          alloc GPR0 GPR1
+          copy_reg from=GPR0 to=GPR1
+          arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
+          arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
+        "],
         );
     }
 }
