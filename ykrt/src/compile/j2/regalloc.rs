@@ -1943,11 +1943,14 @@ mod test {
 
         fn arrange_fill(
             &mut self,
-            _reg: Self::Reg,
-            _bitw: u32,
-            _src_fill: RegFill,
-            _dst_fill: RegFill,
+            reg: Self::Reg,
+            bitw: u32,
+            src_fill: RegFill,
+            dst_fill: RegFill,
         ) {
+            self.ra_log.push(format!(
+                "arrange_fill {reg:?} bitw={bitw} from={src_fill:?} to={dst_fill:?}"
+            ));
         }
 
         fn copy_reg(
@@ -2378,7 +2381,16 @@ mod test {
             .unwrap()
     }
 
-    fn build_and_test(s: &str, ptns: &[&str]) {
+    /// Enable simple tests of the register allocator.
+    ///
+    /// This function takes a module `s` in and runs the register allocator on it with our "test"
+    /// backend above. It then runs each line of the log through `log_filter`, only keeping lines
+    /// where `log_filter` returns `true`. It recombines the log and then matches it against the
+    /// [fm] pattern `ptn`.
+    fn build_and_test<F>(s: &str, log_filter: F, ptns: &[&str])
+    where
+        F: Fn(&str) -> bool,
+    {
         let m = str_to_mod::<TestReg>(s);
 
         let hl = Arc::new(Mutex::new(HotLocation {
@@ -2390,6 +2402,11 @@ mod test {
 
         let be = TestHirToAsm::new(&m);
         let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
+        let log = log
+            .lines()
+            .filter(|s| log_filter(s))
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut failures = Vec::with_capacity(ptns.len());
         for ptn in ptns {
             match fmatcher(ptn).matches(&log) {
@@ -2410,8 +2427,11 @@ mod test {
           %2: i8 = add %0, %1
           blackbox %2
         "#,
+            |_| true,
             &["
           alloc GPR0 GPR1
+          arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
+          arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
         "],
         );
     }
@@ -2425,6 +2445,7 @@ mod test {
           %2: i8 = add %0, %1
           blackbox %2
         "#,
+            |s| !s.starts_with("arrange_fill"),
             &[
                 "
           alloc GPR0 GPR1
@@ -2450,6 +2471,7 @@ mod test {
           %4: i8 = add %2, %3
           blackbox %4
         "#,
+            |s| !s.starts_with("arrange_fill"),
             &[
                 "
           alloc GPR0 GPR1
@@ -2483,6 +2505,7 @@ mod test {
           blackbox %6
           blackbox %7
         "#,
+            |s| !s.starts_with("arrange_fill"),
             &[
                 "
           alloc GPR0 GPR1
@@ -2531,6 +2554,7 @@ mod test {
           guard true, %5, [%2]
           exit [%0, %1]
         "#,
+            |s| !s.starts_with("arrange_fill"),
             &["
           alloc GPR2
           alloc GPR0 GPR2 GPR2
