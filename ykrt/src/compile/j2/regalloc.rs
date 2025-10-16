@@ -812,22 +812,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             n_out.set_fill_iidxs_gridxs(*reg, RegFill::Undefined, smallvec![], smallvec![]);
         }
 
-        for ((_src_reg, src_rstate), (reg, dst_rstate)) in n_out.iter().zip(self.rstates.iter()) {
-            assert_eq!(_src_reg, reg);
-
-            // Arrange fills, if necessary.
-            if !(src_rstate.iidxs.is_empty() || dst_rstate.iidxs.is_empty()) {
-                let src_bitw = iidxs_maxbitw(self.m, self.b, &src_rstate.iidxs);
-                let dst_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
-                if src_bitw != dst_bitw
-                    || src_rstate.iidxs != dst_rstate.iidxs
-                    || src_rstate.fill != dst_rstate.fill
-                {
-                    be.arrange_fill(reg, src_bitw, src_rstate.fill, dst_rstate.fill);
-                }
-            }
-        }
-
         // Phase 3.2: Spill outputs if they will need to be unspilled later.
         //
         // This also turns out to be a convenient place to calculate which instructions' values are
@@ -2566,6 +2550,31 @@ mod test {
           spill GPR0 Undefined stack_off=8 bitw=8
           alloc GPR0 GPR1
           spill GPR0 Zeroed stack_off=16 bitw=8
+        "],
+        );
+    }
+
+    #[test]
+    fn arrange_fills_once() {
+        // A case where guard optimism has to be undone.
+        //
+        // It's a bit hard to see in the test output, but note the spill to `stack_off=8` that is
+        // not used in the trace: that's the guard optimism being undone.
+        build_and_test(
+            r#"
+          %0: i8 = arg reg "GPR0"
+          %1: i8 = add %0, %0
+          blackbox %1
+          exit [%0]
+        "#,
+            |_| true,
+            &["
+          copy_reg from=GPR1 to=GPR0
+          arrange_fill GPR0 bitw=8 from=Zeroed to=Undefined
+          alloc GPR0 GPR1
+          copy_reg from=GPR0 to=GPR1
+          arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
+          arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
         "],
         );
     }
