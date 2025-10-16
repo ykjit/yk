@@ -692,71 +692,51 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn sign_fill_const(
+    fn move_const(
         &mut self,
         reg: Reg,
         tgt_bitw: u32,
+        tgt_fill: RegFill,
         kind: &ConstKind,
     ) -> Result<(), CompilationError> {
         match kind {
             ConstKind::Int(x) => {
                 assert!(tgt_bitw >= x.bitw());
-                match tgt_bitw {
-                    32 => {
-                        if let Some(x) = x.to_sign_ext_i32() {
-                            self.asm.push_inst(IcedInst::with2(
-                                Code::Mov_rm64_imm32,
-                                reg.to_reg64(),
-                                x,
-                            ));
-                        } else {
-                            todo!();
+                if tgt_fill == RegFill::Undefined || tgt_fill == RegFill::Zeroed {
+                    match tgt_bitw {
+                        32 => {
+                            if let Some(x) = x.to_zero_ext_u32() {
+                                self.asm.push_inst(IcedInst::with2(
+                                    Code::Mov_r32_imm32,
+                                    reg.to_reg32(),
+                                    x,
+                                ));
+                            } else {
+                                todo!();
+                            }
                         }
+                        x => todo!("{x}"),
                     }
-                    x => todo!("{x}"),
-                }
-            }
-            ConstKind::Ptr(_x) => todo!(),
-        }
-        Ok(())
-    }
-
-    fn zero_fill_const(
-        &mut self,
-        reg: Reg,
-        tgt_bitw: u32,
-        kind: &ConstKind,
-    ) -> Result<(), CompilationError> {
-        match kind {
-            ConstKind::Int(x) => {
-                assert!(tgt_bitw >= x.bitw());
-                match tgt_bitw {
-                    1..=32 => {
-                        if let Some(x) = x.to_zero_ext_u32() {
-                            self.asm.push_inst(IcedInst::with2(
-                                Code::Mov_r32_imm32,
-                                reg.to_reg32(),
-                                x,
-                            ));
-                        } else {
-                            todo!();
+                } else {
+                    assert_eq!(tgt_fill, RegFill::Signed);
+                    match tgt_bitw {
+                        32 => {
+                            if let Some(x) = x.to_sign_ext_i32() {
+                                self.asm.push_inst(IcedInst::with2(
+                                    Code::Mov_rm64_imm32,
+                                    reg.to_reg64(),
+                                    x,
+                                ));
+                            } else {
+                                todo!();
+                            }
                         }
+                        x => todo!("{x}"),
                     }
-                    64 => {
-                        if let Some(x) = x.to_zero_ext_u64() {
-                            self.asm.push_inst(IcedInst::with2(
-                                Code::Mov_r64_imm64,
-                                reg.to_reg64(),
-                                x,
-                            ));
-                        } else {
-                            todo!();
-                        }
-                    }
-                    x => todo!("{x}"),
                 }
             }
             ConstKind::Ptr(x) => {
+                assert_ne!(tgt_fill, RegFill::Signed);
                 assert_eq!(tgt_bitw, 64);
                 self.asm.push_inst(IcedInst::with2(
                     Code::Mov_r64_imm64,

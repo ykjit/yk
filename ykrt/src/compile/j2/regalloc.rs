@@ -454,12 +454,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             // memory.
             for iidx in max_bitw_iter.clone() {
                 if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
-                    match fill {
-                        RegFill::Undefined | RegFill::Zeroed => {
-                            be.zero_fill_const(*reg, max_bitw, kind)?
-                        }
-                        RegFill::Signed => todo!(),
-                    }
+                    be.move_const(*reg, max_bitw, *fill, kind)?;
                     continue;
                 }
             }
@@ -622,12 +617,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             if let Some(i) = rstate.iidxs.iter().position(|x| *x == iidx) {
                 let bitw = self.b.inst_bitw(self.m, iidx);
                 if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
-                    match rstate.fill {
-                        RegFill::Undefined | RegFill::Zeroed => {
-                            be.zero_fill_const(reg, bitw, kind)?
-                        }
-                        RegFill::Signed => be.sign_fill_const(reg, bitw, kind)?,
-                    }
+                    be.move_const(reg, bitw, rstate.fill, kind)?
                 }
                 rstate.iidxs.remove(i);
             }
@@ -1907,19 +1897,11 @@ mod test {
 
         fn log(&mut self, _s: String) {}
 
-        fn sign_fill_const(
+        fn move_const(
             &mut self,
             _reg: Self::Reg,
             _tgt_bitw: u32,
-            _c: &ConstKind,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn zero_fill_const(
-            &mut self,
-            _reg: Self::Reg,
-            _tgt_bitw: u32,
+            _fill: RegFill,
             _c: &ConstKind,
         ) -> Result<(), CompilationError> {
             todo!()

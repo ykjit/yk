@@ -593,20 +593,12 @@ pub(super) trait HirToAsmBackend {
 
     fn log(&mut self, s: String);
 
-    /// Sign extend `c` to `tgt_bitw` bits. Note that `tgt_bitw` can be equal to, or greater than,
-    /// `c`'s "natural" bit width.
-    fn sign_fill_const(
+    /// Move the constant `c` into `bitw` bits of `reg`, filling upper bits as per `tgt_fill`.
+    fn move_const(
         &mut self,
         reg: Self::Reg,
         tgt_bitw: u32,
-        c: &ConstKind,
-    ) -> Result<(), CompilationError>;
-    /// Zero extend `c` to `tgt_bitw` bits. Note that `tgt_bitw` can be equal to, or greater than,
-    /// `c`'s "natural" bit width.
-    fn zero_fill_const(
-        &mut self,
-        reg: Self::Reg,
-        tgt_bitw: u32,
+        tgt_fill: RegFill,
         c: &ConstKind,
     ) -> Result<(), CompilationError>;
 
