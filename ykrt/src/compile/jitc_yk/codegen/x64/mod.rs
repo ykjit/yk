@@ -1916,6 +1916,10 @@ impl<'a> Assemble<'a> {
             }
             x => {
                 // If we have an optimised clone of the function, call it.
+                // Shims should already have been handled during trace construction.
+                assert!(!x.starts_with("__yk_shim_"));
+                // It's not possible to trace optimised clones.
+                assert!(!x.starts_with("__yk_opt_"));
                 let va = symbol_to_ptr(&format!("__yk_opt_{x}"))
                     .or_else(|_| symbol_to_ptr(x))
                     .map_err(|e| CompilationError::General(e.to_string()))?;
