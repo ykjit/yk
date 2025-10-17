@@ -2092,6 +2092,26 @@ mod test {
             todo!()
         }
 
+        fn i_fadd(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _fadd: &FAdd,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fsub(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _fadd: &FSub,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_fpext(
             &mut self,
             _ra: &mut RegAlloc<Self>,

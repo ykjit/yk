@@ -283,6 +283,30 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let exit_vars = locals.iter().map(|x| self.p_local(*x)).collect::<Vec<_>>();
                     self.insts.push(Inst::Exit(Exit(exit_vars)));
                 }
+                AstInst::FAdd {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(FAdd { tyidx, lhs, rhs }.into());
+                }
+                AstInst::FSub {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(FSub { tyidx, lhs, rhs }.into());
+                }
                 AstInst::FPExt { local, ty, val } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -752,6 +776,18 @@ enum AstInst {
     },
     Exit {
         locals: Vec<Span>,
+    },
+    FAdd {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    FSub {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
     },
     FPExt {
         local: Span,
