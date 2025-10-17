@@ -9,15 +9,14 @@
 //!
 //! ## Merging of different sized values
 //!
-//! When possible (e.g. sign extension or truncation) the register allocator merges multiple
-//! instruction values (i.e. two `iidx: InstIdx`s are put into one `iidxs: Vec<InstIdx>`). For
-//! example, if we `trunc` an `i64` to an `i1`, both values can still live in the same register. In
-//! such cases, the value with the larger bit width is the source of truth: after all, the `i1`
-//! value can be trivially generated from the `i64` but the `i64` cannot in general be recovered
-//! from the `i1`.
+//! When the value from instruction M can be derived, possibly with the associated [RegFill], from
+//! the value from instruction N (where M > N), the register allocator can merge the two values
+//! into one register. In other words, the source of truth is always the value derived from the
+//! earliest instruction (i.e. that with the smallest [InstIdx]).
 //!
-//! In some situations multiple values of the same bit width can be merged. In these cases, all
-//! those values must implicitly be the same, and any can be used in the other's stead.
+//! For example if an `i1` is sign-extended to an `i64`, the latter can always be derived from the
+//! former by re-sign-extending the `i1`. Similarly, if an `i64` is truncated to an `i1`, the
+//! latter is trivially rederivable from the former.
 //!
 //!
 //! ## Register fills
@@ -448,14 +447,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         be: &mut AB,
         ractions: &RegActions<AB::Reg>,
     ) -> Result<(), CompilationError> {
-        for RegUnspill { iidxs, reg, fill } in ractions.unspills.iter().rev() {
+        'a: for RegUnspill { iidxs, reg, fill } in ractions.unspills.iter().rev() {
             let (max_bitw, mut max_bitw_iter) = iter_maxbitw_iidxs(self.m, self.b, iidxs);
             // If we can unspill a constant, that's likely to be quicker than unspilling from
             // memory.
             for iidx in max_bitw_iter.clone() {
                 if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
                     be.move_const(*reg, max_bitw, *fill, kind)?;
-                    continue;
+                    continue 'a;
                 }
             }
 
@@ -604,33 +603,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         Ok(())
     }
 
-    /// This function *must* be called after the instruction at `iidx` is processed. It ensures
-    /// that any constants needed for `iidx` are in the correct registers.
-    ///
-    /// Technically this *could* be folded into [Self::pre_inst], but that makes logging confusing,
-    /// as constants would then "materialise" at the end of the previous instruction.
-    pub(super) fn post_inst(&mut self, be: &mut AB, iidx: InstIdx) -> Result<(), CompilationError> {
-        for (reg, rstate) in &mut self.rstates.iter_mut() {
-            if rstate.iidxs.is_empty() {
-                continue;
-            }
-            if let Some(i) = rstate.iidxs.iter().position(|x| *x == iidx) {
-                let bitw = self.b.inst_bitw(self.m, iidx);
-                if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
-                    be.move_const(reg, bitw, rstate.fill, kind)?
-                }
-                rstate.iidxs.remove(i);
-            }
-        }
-        Ok(())
-    }
-
     /// Allocate registers for the instruction at position `iidx`. Note: this function may leave
     /// CPU flags in an undefined state.
     ///
     /// # Panics
     ///
-    /// If any [RegCnstr]s contain [RegCnstrFill::AnyOf].
+    /// If `iidx` is an [Inst::Const] or any [RegCnstr]s contain [RegCnstrFill::AnyOf].
     pub(super) fn alloc<const N: usize>(
         &mut self,
         be: &mut AB,
@@ -663,12 +641,17 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     ///   [RegFill::Undefined], [RegFill::Signed], and [RegFill::Zeroed] respectively.
     /// * [RegCnstrFill::AnyOf] returns [RegFill::Undefined], [RegFill::Signed], and
     ///   [RegFill::Zeroed] as appropriate.
+    ///
+    /// # Panics
+    ///
+    /// If `iidx` is an [Inst::Const]
     pub(super) fn alloc_with_fills<const N: usize>(
         &mut self,
         be: &mut AB,
         iidx: InstIdx,
         mut cnstrs: [RegCnstr<AB::Reg>; N],
     ) -> Result<[(AB::Reg, RegFill); N], CompilationError> {
+        assert!(!matches!(self.b.inst(iidx), Inst::Const(_)));
         // Let us call `self.rstate` rstate *n+1:in* (i.e. the input for instruction *iidx+1*). What
         // we need to do here is multi-fold:
         //
@@ -941,6 +924,51 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             .collect::<Vec<_>>()
             .try_into()
             .unwrap())
+    }
+
+    /// For [Inst::Const] instructions only, allocate registers. This function should only be
+    /// called by [hir_to_asm]: backends should not call it.
+    ///
+    /// # Panics
+    ///
+    /// If this function is called on any other kind of instruction.
+    pub(super) fn alloc_const(
+        &mut self,
+        be: &mut AB,
+        iidx: InstIdx,
+    ) -> Result<(), CompilationError> {
+        assert_matches!(self.b.inst(iidx), Inst::Const(_));
+        // Constants should never be spilled.
+        assert_eq!(self.istates[iidx], IState::None);
+
+        // The constant might exist in multiple registers: we turn each into a [RegUnspill] and
+        // defer to [Self::asm_ractions] to choose how to do that unspilling.
+        let mut unspills = Vec::new();
+        for (reg, rstate) in self.rstates.iter_mut() {
+            if rstate.iidxs.contains(&iidx) {
+                rstate.iidxs.retain(|x| *x != iidx);
+                // If `rstate.iidxs` isn't empty, that means that multiple instructions' values
+                // have been merged into one register, and we can let the earlier value.
+                if rstate.iidxs.is_empty() {
+                    unspills.push(RegUnspill {
+                        iidxs: smallvec![iidx],
+                        reg,
+                        fill: rstate.fill,
+                    });
+                }
+            }
+        }
+
+        if !unspills.is_empty() {
+            let ractions = RegActions {
+                unspills,
+                self_copies: Vec::new(),
+                distinct_copies: Vec::new(),
+                spills: Vec::new(),
+            };
+            self.asm_ractions(be, &ractions)?;
+        }
+        Ok(())
     }
 
     /// For each constraint in `cnstrs`, return the register it should end up in. Note: multiple
@@ -1899,12 +1927,15 @@ mod test {
 
         fn move_const(
             &mut self,
-            _reg: Self::Reg,
-            _tgt_bitw: u32,
-            _fill: RegFill,
-            _c: &ConstKind,
+            reg: Self::Reg,
+            tgt_bitw: u32,
+            fill: RegFill,
+            c: &ConstKind,
         ) -> Result<(), CompilationError> {
-            todo!()
+            self.ra_log.push(format!(
+                "const {reg:?} tgt_bitw={tgt_bitw} fill={fill:?} {c:?}"
+            ));
+            Ok(())
         }
 
         fn arrange_fill(
@@ -2573,6 +2604,48 @@ mod test {
           copy_reg from=GPR0 to=GPR1
           arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
           arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
+        "],
+        );
+    }
+
+    #[test]
+    fn constants() {
+        build_and_test(
+            r#"
+          %0: i8 = 2
+          %1: i8 = add %0, %0
+          blackbox %1
+          exit []
+        "#,
+            |_| true,
+            &["
+          alloc GPR0 GPR1
+          const GPR1 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
+          const GPR0 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
+        "],
+        );
+    }
+
+    #[test]
+    fn constants_as_late_as_possible() {
+        build_and_test(
+            r#"
+          %0: i8 = 2
+          %1: i8 = add %0, %0
+          blackbox %1
+          %3: i8 = add %0, %0
+          blackbox %3
+          exit []
+        "#,
+            |_| true,
+            &["
+          alloc GPR0 GPR1
+          copy_reg from=GPR1 to=GPR0
+          arrange_fill GPR0 bitw=8 from=Zeroed to=Zeroed
+          arrange_fill GPR1 bitw=8 from=Zeroed to=Zeroed
+          alloc GPR0 GPR1
+          const GPR1 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
+          const GPR0 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
         "],
         );
     }

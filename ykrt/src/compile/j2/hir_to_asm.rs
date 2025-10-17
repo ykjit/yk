@@ -333,7 +333,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     ra.blackbox(iidx, *val);
                 }
                 Inst::Call(x) => self.be.i_call(&mut ra, b, iidx, x)?,
-                Inst::Const(_) => (),
+                Inst::Const(_) => {
+                    ra.alloc_const(&mut self.be, iidx)?;
+                }
                 Inst::DynPtrAdd(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_dynptradd(&mut ra, b, iidx, x)?;
@@ -488,7 +490,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                 }
             }
-            ra.post_inst(&mut self.be, iidx)?;
             if logging {
                 let ty = hinst.ty(self.m);
                 if ty == &Ty::Void {
