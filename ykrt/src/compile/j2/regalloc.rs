@@ -453,7 +453,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             // memory.
             for iidx in max_bitw_iter.clone() {
                 if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
-                    be.move_const(*reg, max_bitw, *fill, kind)?;
+                    let tmp_reg = if let Some(_tmp_reg) = be.const_needs_tmp_reg(*reg, kind) {
+                        todo!();
+                    } else {
+                        None
+                    };
+                    be.move_const(*reg, tmp_reg, max_bitw, *fill, kind)?;
                     continue 'a;
                 }
             }
@@ -1925,9 +1930,18 @@ mod test {
 
         fn log(&mut self, _s: String) {}
 
+        fn const_needs_tmp_reg(
+            &self,
+            _reg: Self::Reg,
+            _c: &ConstKind,
+        ) -> Option<impl Iterator<Item = Self::Reg>> {
+            None::<Box<dyn Iterator<Item = Self::Reg>>>
+        }
+
         fn move_const(
             &mut self,
             reg: Self::Reg,
+            tmp_reg: Option<Self::Reg>,
             tgt_bitw: u32,
             fill: RegFill,
             c: &ConstKind,

@@ -692,13 +692,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn const_needs_tmp_reg(&self, _reg: Reg, _c: &ConstKind) -> Option<impl Iterator<Item = Reg>> {
+        // The type annotation is just to satisfy type inference.
+        None::<Box<dyn Iterator<Item = Reg>>>
+    }
+
     fn move_const(
         &mut self,
         reg: Reg,
+        tmp_reg: Option<Self::Reg>,
         tgt_bitw: u32,
         tgt_fill: RegFill,
         kind: &ConstKind,
     ) -> Result<(), CompilationError> {
+        assert!(tmp_reg.is_none());
         match kind {
             ConstKind::Int(x) => {
                 assert!(tgt_bitw >= x.bitw());
