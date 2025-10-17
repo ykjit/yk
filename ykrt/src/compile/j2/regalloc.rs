@@ -2558,10 +2558,6 @@ mod test {
 
     #[test]
     fn arrange_fills_once() {
-        // A case where guard optimism has to be undone.
-        //
-        // It's a bit hard to see in the test output, but note the spill to `stack_off=8` that is
-        // not used in the trace: that's the guard optimism being undone.
         build_and_test(
             r#"
           %0: i8 = arg reg "GPR0"
