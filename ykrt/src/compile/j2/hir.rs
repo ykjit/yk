@@ -986,6 +986,20 @@ impl InstT for Const {
     fn assert_well_formed(&self, m: &dyn ModLikeT, _b: &dyn BlockLikeT, iidx: InstIdx) {
         let tyidx_bitw = m.ty(self.tyidx).bitw();
         let t = match &self.kind {
+            ConstKind::Double(_) => {
+                if tyidx_bitw == 64 {
+                    None
+                } else {
+                    Some(64)
+                }
+            }
+            ConstKind::Float(_) => {
+                if tyidx_bitw == 32 {
+                    None
+                } else {
+                    Some(32)
+                }
+            }
             ConstKind::Int(x) => {
                 if tyidx_bitw == x.bitw() {
                     None
@@ -1026,6 +1040,8 @@ impl InstT for Const {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, m: &M, _b: &B) -> String {
         match &self.kind {
+            ConstKind::Double(x) => x.to_string(),
+            ConstKind::Float(x) => x.to_string(),
             ConstKind::Int(x) => x.to_string(),
             ConstKind::Ptr(x) => {
                 if let Some(n) = m.addr_to_name(*x) {
@@ -1044,6 +1060,8 @@ impl InstT for Const {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum ConstKind {
+    Double(f64),
+    Float(f32),
     Int(ArbBitInt),
     Ptr(usize),
 }

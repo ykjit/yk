@@ -453,8 +453,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             // memory.
             for iidx in max_bitw_iter.clone() {
                 if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
-                    let tmp_reg = if let Some(_tmp_reg) = be.const_needs_tmp_reg(*reg, kind) {
-                        todo!();
+                    let tmp_reg = if let Some(mut tmp_reg_iter) = be.const_needs_tmp_reg(*reg, kind)
+                    {
+                        match tmp_reg_iter.find(|reg| self.rstates.iidxs(*reg).is_empty()) {
+                            Some(x) => Some(x),
+                            None => todo!(),
+                        }
                     } else {
                         None
                     };
@@ -1471,7 +1475,9 @@ impl<Reg: Display> Display for VarLoc<Reg> {
             VarLoc::StackOff(x) => write!(f, "StackOff({x})"),
             VarLoc::Reg(x) => write!(f, "Reg(\"{x}\")"),
             VarLoc::Const(x) => match x {
-                ConstKind::Int(x) => write!(f, "{}", x),
+                ConstKind::Double(x) => write!(f, "{x}"),
+                ConstKind::Float(x) => write!(f, "{x}"),
+                ConstKind::Int(x) => write!(f, "{x}"),
                 ConstKind::Ptr(_) => todo!(),
             },
         }
@@ -1933,9 +1939,13 @@ mod test {
         fn const_needs_tmp_reg(
             &self,
             _reg: Self::Reg,
-            _c: &ConstKind,
+            c: &ConstKind,
         ) -> Option<impl Iterator<Item = Self::Reg>> {
-            None::<Box<dyn Iterator<Item = Self::Reg>>>
+            if let ConstKind::Double(_) | ConstKind::Float(_) = c {
+                Some(GP_REGS.iter().cloned())
+            } else {
+                None
+            }
         }
 
         fn move_const(
@@ -1947,7 +1957,7 @@ mod test {
             c: &ConstKind,
         ) -> Result<(), CompilationError> {
             self.ra_log.push(format!(
-                "const {reg:?} tgt_bitw={tgt_bitw} fill={fill:?} {c:?}"
+                "const {reg:?} tmp_reg={tmp_reg:?} tgt_bitw={tgt_bitw} fill={fill:?} {c:?}"
             ));
             Ok(())
         }
@@ -2121,12 +2131,31 @@ mod test {
 
         fn i_fadd(
             &mut self,
-            _ra: &mut RegAlloc<Self>,
+            ra: &mut RegAlloc<Self>,
             _b: &Block,
-            _iidx: InstIdx,
-            _fadd: &FAdd,
+            iidx: InstIdx,
+            FAdd { lhs, rhs, .. }: &FAdd,
         ) -> Result<(), CompilationError> {
-            todo!()
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &FP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &FP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.ra_log.push(format!("alloc {lhsr:?} {rhsr:?}"));
+            Ok(())
         }
 
         fn i_fsub(
@@ -2634,8 +2663,8 @@ mod test {
             |_| true,
             &["
           alloc GPR0 GPR1
-          const GPR1 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
-          const GPR0 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
+          const GPR1 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
+          const GPR0 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
         "],
         );
     }
@@ -2658,8 +2687,27 @@ mod test {
           arrange_fill GPR0 bitw=8 from=Zeroed to=Zeroed
           arrange_fill GPR1 bitw=8 from=Zeroed to=Zeroed
           alloc GPR0 GPR1
-          const GPR1 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
-          const GPR0 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
+          const GPR1 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
+          const GPR0 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
+        "],
+        );
+    }
+
+    #[test]
+    fn constant_tmp_reg() {
+        build_and_test(
+            r#"
+          %0: double = 0.0double
+          %1: double = 1.0double
+          %2: double = fadd %0, %1
+          blackbox %2
+          exit []
+        "#,
+            |_| true,
+            &["
+          alloc FP0 FP1
+          const FP1 tmp_reg=Some(GPR0) tgt_bitw=64 fill=Zeroed Double(1.0)
+          const FP0 tmp_reg=Some(GPR0) tgt_bitw=64 fill=Zeroed Double(0.0)
         "],
         );
     }

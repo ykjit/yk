@@ -202,6 +202,7 @@ impl OptT for Opt {
                 }) = &self.insts[*val]
                 {
                     match kind {
+                        ConstKind::Double(_) | ConstKind::Float(_) => unreachable!(),
                         ConstKind::Int(src_val) => {
                             let dst_bitw = self.tys[*tyidx].bitw();
                             let dst_val = src_val.sign_extend(dst_bitw);
@@ -223,6 +224,7 @@ impl OptT for Opt {
                 }) = &self.insts[*val]
                 {
                     match kind {
+                        ConstKind::Double(_) | ConstKind::Float(_) => unreachable!(),
                         ConstKind::Int(src_val) => {
                             let dst_bitw = self.tys[*tyidx].bitw();
                             let dst_val = src_val.zero_extend(dst_bitw);

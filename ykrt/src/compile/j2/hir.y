@@ -146,7 +146,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   ;
 
 Const -> Result<AstConst, Box<dyn Error>>:
-    "INT" { Ok(AstConst::Int($1?.span())) }
+    "CONST_DOUBLE" { Ok(AstConst::Double($1?.span())) }
+  | "CONST_FLOAT" { Ok(AstConst::Float($1?.span())) }
+  | "INT" { Ok(AstConst::Int($1?.span())) }
   ;
 
 Locals -> Result<Vec<Span>, Box<dyn Error>>:

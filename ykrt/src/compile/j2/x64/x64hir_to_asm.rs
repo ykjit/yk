@@ -79,6 +79,8 @@ impl<'a> X64HirToAsm<'a> {
     fn zero_ext_op_for_imm8(&self, b: &Block, iidx: InstIdx) -> Option<u32> {
         if let Inst::Const(Const { kind, .. }) = b.inst(iidx) {
             match kind {
+                ConstKind::Double(_) => unreachable!(),
+                ConstKind::Float(_) => unreachable!(),
                 ConstKind::Int(x) => x.to_zero_ext_u8().map(u32::from),
                 ConstKind::Ptr(_) => todo!(),
             }
@@ -93,6 +95,8 @@ impl<'a> X64HirToAsm<'a> {
     fn sign_ext_op_for_imm32(&self, b: &Block, iidx: InstIdx) -> Option<i32> {
         if let Inst::Const(Const { kind, .. }) = b.inst(iidx) {
             match kind {
+                ConstKind::Double(_) => unreachable!(),
+                ConstKind::Float(_) => unreachable!(),
                 ConstKind::Int(x) => x.to_sign_ext_i32(),
                 ConstKind::Ptr(x) => i32::try_from(*x).ok(),
             }
@@ -107,6 +111,8 @@ impl<'a> X64HirToAsm<'a> {
     fn zero_ext_op_for_imm32(&self, b: &Block, bitw: u32, iidx: InstIdx) -> Option<i32> {
         if let Inst::Const(Const { kind, .. }) = b.inst(iidx) {
             match kind {
+                ConstKind::Double(_) => unreachable!(),
+                ConstKind::Float(_) => unreachable!(),
                 ConstKind::Int(x) => match bitw {
                     32 => x.to_zero_ext_u32().map(|x| x.cast_signed()),
                     64 => {
@@ -446,6 +452,312 @@ impl<'a> X64HirToAsm<'a> {
             },
         }
     }
+
+    fn _i_load_float(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Load {
+            tyidx,
+            ptr,
+            is_volatile,
+        }: &Load,
+    ) -> Result<(), CompilationError> {
+        assert_matches!(self.m.ty(*tyidx), Ty::Double | Ty::Float);
+        assert!(!is_volatile);
+
+        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
+        let [ptrr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: ptr,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    can_be_same_as_input: false,
+                },
+            ],
+        )?;
+        let memop = if off == 0 {
+            MemoryOperand::with_base(ptrr.to_reg64())
+        } else {
+            MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
+        };
+        match self.m.ty(*tyidx) {
+            Ty::Double => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movsd_xmm_xmmm64,
+                    outr.to_xmm(),
+                    memop,
+                ));
+            }
+            Ty::Float => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movss_xmm_xmmm32,
+                    outr.to_xmm(),
+                    memop,
+                ));
+            }
+            _ => unreachable!(),
+        }
+
+        Ok(())
+    }
+
+    fn _i_load_intptr(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Load {
+            tyidx,
+            ptr,
+            is_volatile,
+        }: &Load,
+    ) -> Result<(), CompilationError> {
+        assert_matches!(self.m.ty(*tyidx), Ty::Int(_) | Ty::Ptr(0));
+        assert!(!is_volatile);
+        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
+        let [(ptrr, _), (outr, out_fill)] = ra.alloc_with_fills(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: ptr,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::AnyOf(
+                        AnyOfFill::new()
+                            .with_undefined()
+                            .with_signed()
+                            .with_zeroed(),
+                    ),
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+        let memop = if off == 0 {
+            MemoryOperand::with_base(ptrr.to_reg64())
+        } else {
+            MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
+        };
+
+        match self.m.ty(*tyidx) {
+            Ty::Int(bitw) => match bitw {
+                8 => {
+                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movzx_r32_rm8,
+                            outr.to_reg32(),
+                            memop,
+                        ));
+                    } else {
+                        assert_matches!(out_fill, RegFill::Signed);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movsx_r64_rm8,
+                            outr.to_reg64(),
+                            memop,
+                        ));
+                    }
+                }
+                16 => {
+                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movzx_r32_rm16,
+                            outr.to_reg32(),
+                            memop,
+                        ));
+                    } else {
+                        assert_matches!(out_fill, RegFill::Signed);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movsx_r64_rm16,
+                            outr.to_reg64(),
+                            memop,
+                        ));
+                    }
+                }
+                32 => {
+                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Mov_r32_rm32,
+                            outr.to_reg32(),
+                            memop,
+                        ));
+                    } else {
+                        assert_matches!(out_fill, RegFill::Signed);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movsxd_r64_rm32,
+                            outr.to_reg64(),
+                            memop,
+                        ));
+                    }
+                }
+                64 => {
+                    self.asm
+                        .push_inst(IcedInst::with2(Code::Mov_r64_rm64, outr.to_reg64(), memop));
+                }
+                x => todo!("{x}"),
+            },
+            Ty::Ptr(_) => {
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Mov_r64_rm64, outr.to_reg64(), memop));
+            }
+            _ => unreachable!(),
+        }
+        Ok(())
+    }
+
+    fn _i_store_float(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Store {
+            ptr,
+            val,
+            is_volatile,
+        }: &Store,
+    ) -> Result<(), CompilationError> {
+        assert_matches!(b.inst_ty(self.m, *val), Ty::Double | Ty::Float);
+        assert!(!is_volatile);
+        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
+        let [ptrr, valr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: ptr,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+        let memop = if off == 0 {
+            MemoryOperand::with_base(ptrr.to_reg64())
+        } else {
+            MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
+        };
+
+        self.asm.push_inst(match b.inst_ty(self.m, *val) {
+            Ty::Double => IcedInst::with2(Code::Movsd_xmmm64_xmm, memop, valr.to_xmm()),
+            Ty::Float => IcedInst::with2(Code::Movss_xmmm32_xmm, memop, valr.to_xmm()),
+            _ => unreachable!(),
+        });
+
+        Ok(())
+    }
+
+    fn i_store_intptr(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Store {
+            ptr,
+            val,
+            is_volatile,
+        }: &Store,
+    ) -> Result<(), CompilationError> {
+        assert_matches!(b.inst_ty(self.m, *val), Ty::Int(_) | Ty::Ptr(0));
+        assert!(!is_volatile);
+        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
+        if let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
+            && let Some(_rhs) = self.sign_ext_op_for_imm32(b, *rhs)
+            && let Inst::Load(Load {
+                ptr: load_ptr,
+                is_volatile: false,
+                ..
+            }) = b.inst(*lhs)
+        {
+            let (load_ptr, load_off) = self
+                .flatten_ptradd_chain(b, *load_ptr)
+                .unwrap_or((*load_ptr, 0));
+            if (ptr, off) == (load_ptr, load_off)
+                && !b.heap_effects_on(*lhs, load_ptr + 1..iidx - 1)
+            {
+                // OPT!
+            }
+        }
+
+        let val_bitw = b.inst_bitw(self.m, *val);
+        if let Some(imm) = self.sign_ext_op_for_imm32(b, *val) {
+            let [ptrr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::Input {
+                    in_iidx: ptr,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                }],
+            )?;
+            let memop = if off == 0 {
+                MemoryOperand::with_base(ptrr.to_reg64())
+            } else {
+                MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
+            };
+
+            self.asm.push_inst(match val_bitw {
+                8 => IcedInst::with2(Code::Mov_rm8_imm8, memop, imm),
+                16 => IcedInst::with2(Code::Mov_rm16_imm16, memop, imm),
+                32 => IcedInst::with2(Code::Mov_rm32_imm32, memop, imm),
+                64 => IcedInst::with2(Code::Mov_rm64_imm32, memop, imm),
+                x => todo!("{x}"),
+            });
+        } else {
+            let [ptrr, valr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: ptr,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *val,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            let memop = if off == 0 {
+                MemoryOperand::with_base(ptrr.to_reg64())
+            } else {
+                MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
+            };
+
+            self.asm.push_inst(match val_bitw {
+                8 => IcedInst::with2(Code::Mov_rm8_r8, memop, valr.to_reg8()),
+                16 => IcedInst::with2(Code::Mov_rm16_r16, memop, valr.to_reg16()),
+                32 => IcedInst::with2(Code::Mov_rm32_r32, memop, valr.to_reg32()),
+                64 => IcedInst::with2(Code::Mov_rm64_r64, memop, valr.to_reg64()),
+                x => todo!("{x}"),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 impl HirToAsmBackend for X64HirToAsm<'_> {
@@ -692,9 +1004,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn const_needs_tmp_reg(&self, _reg: Reg, _c: &ConstKind) -> Option<impl Iterator<Item = Reg>> {
-        // The type annotation is just to satisfy type inference.
-        None::<Box<dyn Iterator<Item = Reg>>>
+    fn const_needs_tmp_reg(&self, _reg: Reg, c: &ConstKind) -> Option<impl Iterator<Item = Reg>> {
+        match c {
+            ConstKind::Double(_) | ConstKind::Float(_) => Some(NORMAL_GP_REGS.iter().cloned()),
+            ConstKind::Int(_) | ConstKind::Ptr(_) => None,
+        }
     }
 
     fn move_const(
@@ -705,9 +1019,37 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         tgt_fill: RegFill,
         kind: &ConstKind,
     ) -> Result<(), CompilationError> {
-        assert!(tmp_reg.is_none());
         match kind {
+            ConstKind::Double(x) => {
+                let tmp_reg = tmp_reg.unwrap();
+                assert!(tmp_reg.is_gp());
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movq_xmm_rm64,
+                    reg.to_xmm(),
+                    tmp_reg.to_reg64(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r64_imm64,
+                    tmp_reg.to_reg64(),
+                    x.to_bits().cast_signed(),
+                ));
+            }
+            ConstKind::Float(x) => {
+                let tmp_reg = tmp_reg.unwrap();
+                assert!(tmp_reg.is_gp());
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movd_xmm_rm32,
+                    reg.to_xmm(),
+                    tmp_reg.to_reg32(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r32_imm32,
+                    tmp_reg.to_reg32(),
+                    x.to_bits().cast_signed(),
+                ));
+            }
             ConstKind::Int(x) => {
+                assert!(tmp_reg.is_none());
                 assert!(tgt_bitw >= x.bitw());
                 if tgt_fill == RegFill::Undefined || tgt_fill == RegFill::Zeroed {
                     match tgt_bitw {
@@ -760,6 +1102,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }
             }
             ConstKind::Ptr(x) => {
+                assert!(tmp_reg.is_none());
                 assert_ne!(tgt_fill, RegFill::Signed);
                 assert_eq!(tgt_bitw, 64);
                 self.asm.push_inst(IcedInst::with2(
@@ -897,7 +1240,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     }
 
     fn copy_reg(&mut self, from_reg: Self::Reg, to_reg: Self::Reg) -> Result<(), CompilationError> {
-        assert!((from_reg.is_gp() && to_reg.is_gp()) || (from_reg.is_fp() && to_reg.is_fp()));
+        assert!(
+            (from_reg.is_gp() && to_reg.is_gp()) || (from_reg.is_fp() && to_reg.is_fp()),
+            "{from_reg:?} {to_reg:?}"
+        );
         if from_reg.is_gp() {
             self.asm.push_inst(IcedInst::with2(
                 Code::Mov_r64_rm64,
@@ -1777,106 +2123,14 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        Load {
-            tyidx,
-            ptr,
-            is_volatile: _,
-        }: &Load,
+        inst @ Load { tyidx, .. }: &Load,
     ) -> Result<(), CompilationError> {
-        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
-        let [(ptrr, _), (outr, out_fill)] = ra.alloc_with_fills(
-            self,
-            iidx,
-            [
-                RegCnstr::Input {
-                    in_iidx: ptr,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-                RegCnstr::Output {
-                    out_fill: RegCnstrFill::AnyOf(
-                        AnyOfFill::new()
-                            .with_undefined()
-                            .with_signed()
-                            .with_zeroed(),
-                    ),
-                    regs: &NORMAL_GP_REGS,
-                    can_be_same_as_input: true,
-                },
-            ],
-        )?;
-        let memop = if off == 0 {
-            MemoryOperand::with_base(ptrr.to_reg64())
-        } else {
-            MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
-        };
-
         match self.m.ty(*tyidx) {
-            Ty::Double | Ty::Float => todo!(),
+            Ty::Double | Ty::Float => self._i_load_float(ra, b, iidx, inst),
             Ty::Func(_) => todo!(),
-            Ty::Int(bitw) => match bitw {
-                8 => {
-                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Movzx_r32_rm8,
-                            outr.to_reg32(),
-                            memop,
-                        ));
-                    } else {
-                        assert_matches!(out_fill, RegFill::Signed);
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Movsx_r64_rm8,
-                            outr.to_reg64(),
-                            memop,
-                        ));
-                    }
-                }
-                16 => {
-                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Movzx_r32_rm16,
-                            outr.to_reg32(),
-                            memop,
-                        ));
-                    } else {
-                        assert_matches!(out_fill, RegFill::Signed);
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Movsx_r64_rm16,
-                            outr.to_reg64(),
-                            memop,
-                        ));
-                    }
-                }
-                32 => {
-                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Mov_r32_rm32,
-                            outr.to_reg32(),
-                            memop,
-                        ));
-                    } else {
-                        assert_matches!(out_fill, RegFill::Signed);
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Movsxd_r64_rm32,
-                            outr.to_reg64(),
-                            memop,
-                        ));
-                    }
-                }
-                64 => {
-                    self.asm
-                        .push_inst(IcedInst::with2(Code::Mov_r64_rm64, outr.to_reg64(), memop));
-                }
-                x => todo!("{x}"),
-            },
-            Ty::Ptr(_) => {
-                self.asm
-                    .push_inst(IcedInst::with2(Code::Mov_r64_rm64, outr.to_reg64(), memop));
-            }
-            Ty::Void => todo!(),
+            Ty::Int(_) | Ty::Ptr(_) => self._i_load_intptr(ra, b, iidx, inst),
+            Ty::Void => unreachable!(),
         }
-        Ok(())
     }
 
     fn i_lshr(
@@ -2258,91 +2512,14 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        Store {
-            ptr,
-            val,
-            is_volatile: _,
-        }: &Store,
+        inst @ Store { val, .. }: &Store,
     ) -> Result<(), CompilationError> {
-        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
-        if let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
-            && let Some(_rhs) = self.sign_ext_op_for_imm32(b, *rhs)
-            && let Inst::Load(Load {
-                ptr: load_ptr,
-                is_volatile: false,
-                ..
-            }) = b.inst(*lhs)
-        {
-            let (load_ptr, load_off) = self
-                .flatten_ptradd_chain(b, *load_ptr)
-                .unwrap_or((*load_ptr, 0));
-            if (ptr, off) == (load_ptr, load_off)
-                && !b.heap_effects_on(*lhs, load_ptr + 1..iidx - 1)
-            {
-                // OPT!
-            }
+        match b.inst_ty(self.m, *val) {
+            Ty::Double | Ty::Float => self._i_store_float(ra, b, iidx, inst),
+            Ty::Func(_) => todo!(),
+            Ty::Int(_) | Ty::Ptr(_) => self.i_store_intptr(ra, b, iidx, inst),
+            Ty::Void => unreachable!(),
         }
-
-        let val_bitw = b.inst_bitw(self.m, *val);
-        if let Some(imm) = self.sign_ext_op_for_imm32(b, *val) {
-            let [ptrr] = ra.alloc(
-                self,
-                iidx,
-                [RegCnstr::Input {
-                    in_iidx: ptr,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                }],
-            )?;
-            let memop = if off == 0 {
-                MemoryOperand::with_base(ptrr.to_reg64())
-            } else {
-                MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
-            };
-
-            self.asm.push_inst(match val_bitw {
-                8 => IcedInst::with2(Code::Mov_rm8_imm8, memop, imm),
-                16 => IcedInst::with2(Code::Mov_rm16_imm16, memop, imm),
-                32 => IcedInst::with2(Code::Mov_rm32_imm32, memop, imm),
-                64 => IcedInst::with2(Code::Mov_rm64_imm32, memop, imm),
-                x => todo!("{x}"),
-            });
-        } else {
-            let [ptrr, valr] = ra.alloc(
-                self,
-                iidx,
-                [
-                    RegCnstr::Input {
-                        in_iidx: ptr,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                    RegCnstr::Input {
-                        in_iidx: *val,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                ],
-            )?;
-            let memop = if off == 0 {
-                MemoryOperand::with_base(ptrr.to_reg64())
-            } else {
-                MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
-            };
-
-            self.asm.push_inst(match val_bitw {
-                8 => IcedInst::with2(Code::Mov_rm8_r8, memop, valr.to_reg8()),
-                16 => IcedInst::with2(Code::Mov_rm16_r16, memop, valr.to_reg16()),
-                32 => IcedInst::with2(Code::Mov_rm32_r32, memop, valr.to_reg32()),
-                64 => IcedInst::with2(Code::Mov_rm64_r64, memop, valr.to_reg64()),
-                x => todo!("{x}"),
-            });
-        }
-
-        Ok(())
     }
 
     fn i_sub(
@@ -3267,6 +3444,8 @@ mod test {
 
     #[test]
     fn cg_const() {
+        // Integers
+
         codegen_and_test(
             "
               %0: i32 = 0xFFFFFFFF
@@ -3323,6 +3502,54 @@ mod test {
               ; %1: i64 = 18446744073709551614
               ; %2: i64 = add %0, %1
               add r.64.x, 0xFFFFFFFFFFFFFFFE
+              ; blackbox %2
+              ; exit []
+            "],
+        );
+
+        // Doubles
+        codegen_and_test(
+            "
+              %0: double = 1.1double
+              %1: double = 2.1double
+              %2: double = fadd %0, %1
+              blackbox %2
+              exit []
+            ",
+            &["
+              ...
+              ; %0: double = 1.1
+              mov r.64.x, 0x3FF199999999999A
+              movq fp.128.x, r.64.x
+              ; %1: double = 2.1
+              mov r.64._, 0x4000CCCCCCCCCCCD
+              movq fp.128.y, r.64._
+              ; %2: double = fadd %0, %1
+              addsd fp.128.x, fp.128.y
+              ; blackbox %2
+              ; exit []
+            "],
+        );
+
+        // Floats
+        codegen_and_test(
+            "
+              %0: float = 1.1float
+              %1: float = 2.1float
+              %2: float = fadd %0, %1
+              blackbox %2
+              exit []
+            ",
+            &["
+              ...
+              ; %0: float = 1.1
+              mov r.32.x, 0x3F8CCCCD
+              movd fp.128.x, r.32.x
+              ; %1: float = 2.1
+              mov r.32._, 0x40066666
+              movd fp.128.y, r.32._
+              ; %2: float = fadd %0, %1
+              addss fp.128.x, fp.128.y
               ; blackbox %2
               ; exit []
             "],
@@ -3634,7 +3861,42 @@ mod test {
     }
 
     #[test]
-    fn cg_load() {
+    fn cg_load_float() {
+        // double
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: double = load %0
+              blackbox %1
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %1: double = load %0
+              movsd fp.128._, [r.64._]
+              ...
+            "],
+        );
+
+        // float
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: float = load %0
+              blackbox %1
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %1: float = load %0
+              movss fp.128._, [r.64._]
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_load_int() {
         // i8
         codegen_and_test(
             "
@@ -4008,7 +4270,42 @@ mod test {
     }
 
     #[test]
-    fn cg_store() {
+    fn cg_store_float() {
+        // double
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: double = arg reg
+              store %1, %0
+              exit [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              movsd [r.64._], fp.128._
+              ...
+            "],
+        );
+
+        // float
+        codegen_and_test(
+            "
+              %0: ptr = arg reg
+              %1: float = arg reg
+              store %1, %0
+              exit [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              movss [r.64._], fp.128._
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_store_int() {
         // i8
         codegen_and_test(
             "

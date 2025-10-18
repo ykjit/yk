@@ -212,6 +212,26 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
                     match kind {
+                        AstConst::Double(span) => {
+                            let s = self.lexer.span_str(span).trim_suffix("double");
+                            let v = s
+                                .parse::<f64>()
+                                .unwrap_or_else(|e| self.err_span(span, &e.to_string()));
+                            self.insts.push(Inst::Const(Const {
+                                tyidx,
+                                kind: ConstKind::Double(v),
+                            }));
+                        }
+                        AstConst::Float(span) => {
+                            let s = self.lexer.span_str(span).trim_suffix("float");
+                            let v = s
+                                .parse::<f32>()
+                                .unwrap_or_else(|e| self.err_span(span, &e.to_string()));
+                            self.insts.push(Inst::Const(Const {
+                                tyidx,
+                                kind: ConstKind::Float(v),
+                            }));
+                        }
                         AstConst::Int(span) => {
                             let s = self.lexer.span_str(span);
                             let Ty::Int(bitw) = self.tys[tyidx] else {
@@ -716,6 +736,8 @@ struct AstExtern {
 }
 
 enum AstConst {
+    Double(Span),
+    Float(Span),
     Int(Span),
 }
 
