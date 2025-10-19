@@ -2813,6 +2813,30 @@ mod test {
     }
 
     #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn fsub_type_consistency1() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: float = arg reg
+          %1: double = arg reg
+          %2: float = fsub %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn fsub_type_consistency2() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: float = arg reg
+          %1: float = arg reg
+          %2: double = fsub %0, %1
+        ",
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "%1: guard references a non-i1 for its condition")]
     fn guard_cond_must_be_i1() {
         str_to_mod::<DummyReg>(
