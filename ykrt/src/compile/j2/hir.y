@@ -86,6 +86,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "FADD" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FAdd { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FDIV" "LOCAL" "," "LOCAL" {
+       Ok(AstInst::FDiv { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
   | "LOCAL" ":" Ty "=" "FSUB" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FSub { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
