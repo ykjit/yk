@@ -461,11 +461,10 @@ impl<'a> X64HirToAsm<'a> {
         Load {
             tyidx,
             ptr,
-            is_volatile,
+            is_volatile: _,
         }: &Load,
     ) -> Result<(), CompilationError> {
         assert_matches!(self.m.ty(*tyidx), Ty::Double | Ty::Float);
-        assert!(!is_volatile);
 
         let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
         let [ptrr, outr] = ra.alloc(
@@ -519,11 +518,10 @@ impl<'a> X64HirToAsm<'a> {
         Load {
             tyidx,
             ptr,
-            is_volatile,
+            is_volatile: _,
         }: &Load,
     ) -> Result<(), CompilationError> {
         assert_matches!(self.m.ty(*tyidx), Ty::Int(_) | Ty::Ptr(0));
-        assert!(!is_volatile);
         let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
         let [(ptrr, _), (outr, out_fill)] = ra.alloc_with_fills(
             self,
@@ -626,11 +624,10 @@ impl<'a> X64HirToAsm<'a> {
         Store {
             ptr,
             val,
-            is_volatile,
+            is_volatile: _,
         }: &Store,
     ) -> Result<(), CompilationError> {
         assert_matches!(b.inst_ty(self.m, *val), Ty::Double | Ty::Float);
-        assert!(!is_volatile);
         let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
         let [ptrr, valr] = ra.alloc(
             self,
@@ -673,11 +670,10 @@ impl<'a> X64HirToAsm<'a> {
         Store {
             ptr,
             val,
-            is_volatile,
+            is_volatile: _,
         }: &Store,
     ) -> Result<(), CompilationError> {
         assert_matches!(b.inst_ty(self.m, *val), Ty::Int(_) | Ty::Ptr(0));
-        assert!(!is_volatile);
         let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
         if let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
             && let Some(_rhs) = self.sign_ext_op_for_imm32(b, *rhs)
@@ -1185,56 +1181,43 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         stack_off: u32,
         bitw: u32,
     ) -> Result<(), CompilationError> {
-        match reg {
-            Reg::RAX
-            | Reg::RCX
-            | Reg::RDX
-            | Reg::RBX
-            | Reg::RSI
-            | Reg::RDI
-            | Reg::R8
-            | Reg::R9
-            | Reg::R10
-            | Reg::R11
-            | Reg::R12
-            | Reg::R13
-            | Reg::R14
-            | Reg::R15 => match bitw {
+        let mop = MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off));
+        if reg.is_gp() {
+            match bitw {
                 1 => {
-                    let mop = MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off));
                     if fill == RegFill::Zeroed {
                         self.asm
-                            .push_inst(IcedInst::with2(Code::Mov_rm8_r8, mop, reg.to_reg8()));
+                            .push_inst(IcedInst::with2(Code::Mov_rm8_r8, mop, reg.to_reg8()))
                     } else {
                         self.asm.push_inst(IcedInst::with1(Code::Setb_rm8, mop));
                         self.asm
-                            .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, reg.to_reg32(), 0));
+                            .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, reg.to_reg32(), 0))
                     }
                 }
-                8 => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_rm8_r8,
-                        MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
-                        reg.to_reg8(),
-                    ));
-                }
-                32 => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_rm32_r32,
-                        MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
-                        reg.to_reg32(),
-                    ));
-                }
-                64 => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_rm64_r64,
-                        MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
-                        reg.to_reg64(),
-                    ));
-                }
+                8 => self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm8_r8,
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
+                    reg.to_reg8(),
+                )),
+                32 => self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm32_r32,
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
+                    reg.to_reg32(),
+                )),
+                64 => self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm64_r64,
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
+                    reg.to_reg64(),
+                )),
                 x => todo!("{x}"),
-            },
-            x => todo!("{x:?}"),
+            }
+        } else {
+            assert!(reg.is_fp());
+            self.asm.push_inst(match bitw {
+                64 => IcedInst::with2(Code::Movsd_xmmm64_xmm, mop, reg.to_xmm()),
+                32 => IcedInst::with2(Code::Movss_xmmm32_xmm, mop, reg.to_xmm()),
+                x => todo!("{x}"),
+            })
         }
         Ok(())
     }
@@ -1268,60 +1251,76 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         fill: RegFill,
         bitw: u32,
     ) -> Result<(), CompilationError> {
-        match bitw {
-            1..=8 => match fill {
-                RegFill::Undefined | RegFill::Zeroed => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Movzx_r32_rm8,
-                        reg.to_reg32(),
-                        MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
-                    ));
-                }
-                RegFill::Signed => match bitw {
-                    8 => {
+        let memop = MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off));
+        if reg.is_gp() {
+            match bitw {
+                1..=8 => match fill {
+                    RegFill::Undefined | RegFill::Zeroed => {
                         self.asm.push_inst(IcedInst::with2(
-                            Code::Movsx_r32_rm8,
+                            Code::Movzx_r32_rm8,
                             reg.to_reg32(),
-                            MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
+                            memop,
                         ));
                     }
-                    x => todo!("{x}"),
+                    RegFill::Signed => match bitw {
+                        8 => {
+                            self.asm.push_inst(IcedInst::with2(
+                                Code::Movsx_r32_rm8,
+                                reg.to_reg32(),
+                                memop,
+                            ));
+                        }
+                        x => todo!("{x}"),
+                    },
                 },
-            },
-            32 => match fill {
-                RegFill::Undefined | RegFill::Zeroed => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_r32_rm32,
-                        reg.to_reg32(),
-                        MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
-                    ));
+                32 => match fill {
+                    RegFill::Undefined | RegFill::Zeroed => {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Mov_r32_rm32,
+                            reg.to_reg32(),
+                            memop,
+                        ));
+                    }
+                    RegFill::Signed => {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movsxd_r64_rm32,
+                            reg.to_reg64(),
+                            memop,
+                        ));
+                    }
+                },
+                64 => match fill {
+                    RegFill::Undefined | RegFill::Zeroed => {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Mov_r64_rm64,
+                            reg.to_reg64(),
+                            memop,
+                        ));
+                    }
+                    RegFill::Signed => {
+                        assert_eq!(bitw, 64);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Mov_r64_rm64,
+                            reg.to_reg64(),
+                            memop,
+                        ));
+                    }
+                },
+                x => todo!("{x}"),
+            }
+        } else {
+            assert!(reg.is_fp());
+            match bitw {
+                64 => {
+                    self.asm
+                        .push_inst(IcedInst::with2(Code::Movsd_xmm_xmmm64, reg.to_xmm(), memop))
                 }
-                RegFill::Signed => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Movsxd_r64_rm32,
-                        reg.to_reg64(),
-                        MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
-                    ));
+                32 => {
+                    self.asm
+                        .push_inst(IcedInst::with2(Code::Movss_xmm_xmmm32, reg.to_xmm(), memop))
                 }
-            },
-            64 => match fill {
-                RegFill::Undefined | RegFill::Zeroed => {
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_r64_rm64,
-                        reg.to_reg64(),
-                        MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
-                    ));
-                }
-                RegFill::Signed => {
-                    assert_eq!(bitw, 64);
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_r64_rm64,
-                        reg.to_reg64(),
-                        MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
-                    ));
-                }
-            },
-            x => todo!("{x}"),
+                x => todo!("{x}"),
+            }
         }
         Ok(())
     }
@@ -1531,14 +1530,16 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             args,
         }: &Call,
     ) -> Result<(), CompilationError> {
-        // Calls on x64 with the SysV ABI have complex requirements. Some GP registers have special
-        // meanings in some, but not necessarily all, cases and some, but not all, GP registers are
-        // preserved across call. FP registers are much simpler: there are no special meanings, and
-        // no FP registers are preserved across calls.
+        // Calls on x64 with the SysV ABI have complex requirements and fiddly optimisation
+        // potential. Some GP registers have special meanings in some, but not necessarily all,
+        // cases and some, but not all, GP registers are preserved across call. FP registers are
+        // much simpler: there are no special meanings, and no FP registers are preserved across
+        // calls.
         //
-        // In essence, we build up constraints for every GP register that's part of the ABI and all
-        // FP registers. We start by assuming those registers are clobbered, and gradually refine
-        // them with more precise constraints as needed.
+        // At a high-level, we build up constraints for every GP and FP register, starting them in
+        // the `Clobber` constraint. We then add the constraints for inputs (phase 1). We then add
+        // the constraints for outputs (phase 2), which also -- to optimise things as far as
+        // possible -- means taking into account indirect function calls.
 
         // The GP registers we will clobber.
         //
@@ -1607,14 +1608,17 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             .filter(|addr| self.asm.is_near_callable(*addr));
 
         let mut gp_cnstrs: [_; 9] = GP_CLOBBERS.map(|x| RegCnstr::Clobber { reg: x });
+        // fp_cnstrs is stored in order `xmm0..=xmm15`. In particular, code below relies on
+        // fp_cnstrs[0] being `xmm0` for return values.
         let mut fp_cnstrs: [_; 16] = ALL_XMM_REGS.map(|x| RegCnstr::Clobber { reg: x });
 
+        // Phase 1: Deal with inputs.
         let mut fp_args_off = 0;
         let mut gp_args_iter = GP_ARG_OFFS.iter();
         for arg in args {
             let arg_ty = b.inst_ty(self.m, *arg);
             match arg_ty {
-                Ty::Double => {
+                Ty::Double | Ty::Float => {
                     debug_assert_matches!(fp_cnstrs[fp_args_off], RegCnstr::Clobber { .. });
                     fp_cnstrs[fp_args_off] = RegCnstr::Input {
                         in_iidx: *arg,
@@ -1624,7 +1628,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     };
                     fp_args_off += 1;
                 }
-                Ty::Float => todo!(),
                 Ty::Func(_) => todo!(),
                 Ty::Int(_) | Ty::Ptr(_) => {
                     let in_fill = match arg_ty {
@@ -1640,87 +1643,155 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         clobber: true,
                     };
                 }
-                Ty::Void => todo!(),
+                Ty::Void => unreachable!(),
             }
         }
 
+        // Phase 2: Deal with outputs. This is complicated by the fact that if we have an indirect
+        // function call, we can often put that in RAX, and avoid splatting a separate register.
         let fty = self.m.func_ty(*func_tyidx);
+        // This variable will end up with a [RegCnstr] for `tgt` iff (a) `fn_addr.is_none() ==
+        // true` and (b) `fty.has_varargs == true`.
+        let mut tgt_cnstr = None;
         match self.m.ty(fty.rtn_tyidx) {
-            Ty::Double | Ty::Float => todo!(),
+            Ty::Double | Ty::Float => {
+                match &fp_cnstrs[0] {
+                    RegCnstr::Clobber { reg } => {
+                        assert_eq!(*reg, Reg::XMM0);
+                        fp_cnstrs[0] = RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: FP_CLOBBER_TMPS[0],
+                            can_be_same_as_input: false,
+                        };
+                    }
+                    RegCnstr::Input {
+                        in_iidx,
+                        in_fill,
+                        regs,
+                        clobber: true,
+                    } => {
+                        fp_cnstrs[0] = RegCnstr::InputOutput {
+                            in_iidx: *in_iidx,
+                            in_fill: in_fill.clone(),
+                            out_fill: RegCnstrFill::Undefined,
+                            regs,
+                        };
+                    }
+                    _ => unreachable!(),
+                }
+                if fn_addr.is_none() {
+                    if !fty.has_varargs {
+                        assert_matches!(gp_cnstrs[RAX_OFF], RegCnstr::Clobber { .. });
+                        gp_cnstrs[RAX_OFF] = RegCnstr::Input {
+                            in_iidx: *tgt,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: GP_CLOBBER_TMPS[RAX_OFF],
+                            clobber: true,
+                        };
+                    } else {
+                        tgt_cnstr = Some(RegCnstr::Input {
+                            in_iidx: *tgt,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: true,
+                        });
+                    }
+                }
+            }
             Ty::Func(_func_ty) => todo!(),
             Ty::Int(_) | Ty::Ptr(_) => {
                 debug_assert_matches!(gp_cnstrs[RAX_OFF], RegCnstr::Clobber { .. });
-                if fn_addr.is_none() && !fty.has_varargs && fp_args_off == 0 {
-                    // RAX isn't used as an input for non-varargs functions.
-                    gp_cnstrs[RAX_OFF] = RegCnstr::InputOutput {
-                        in_iidx: *tgt,
-                        in_fill: RegCnstrFill::Zeroed,
-                        out_fill: RegCnstrFill::Zeroed,
-                        regs: GP_CLOBBER_TMPS[RAX_OFF],
-                    };
+                if fn_addr.is_none() {
+                    if !fty.has_varargs {
+                        // RAX isn't used as an input for non-varargs functions.
+                        assert_matches!(gp_cnstrs[RAX_OFF], RegCnstr::Clobber { .. });
+                        gp_cnstrs[RAX_OFF] = RegCnstr::InputOutput {
+                            in_iidx: *tgt,
+                            in_fill: RegCnstrFill::Undefined,
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: GP_CLOBBER_TMPS[RAX_OFF],
+                        };
+                    } else {
+                        gp_cnstrs[RAX_OFF] = RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: GP_CLOBBER_TMPS[RAX_OFF],
+                            can_be_same_as_input: false,
+                        };
+                        tgt_cnstr = Some(RegCnstr::Input {
+                            in_iidx: *tgt,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: true,
+                        });
+                    }
                 } else {
                     gp_cnstrs[RAX_OFF] = RegCnstr::Output {
-                        out_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Undefined,
                         regs: GP_CLOBBER_TMPS[RAX_OFF],
                         can_be_same_as_input: false,
                     };
                 }
             }
             Ty::Void => {
-                if fn_addr.is_none() && !fty.has_varargs {
-                    gp_cnstrs[RAX_OFF] = RegCnstr::Input {
-                        in_iidx: *tgt,
-                        in_fill: RegCnstrFill::Zeroed,
-                        regs: GP_CLOBBER_TMPS[RAX_OFF],
-                        clobber: true,
-                    };
+                if fn_addr.is_none() {
+                    if !fty.has_varargs {
+                        gp_cnstrs[RAX_OFF] = RegCnstr::Input {
+                            in_iidx: *tgt,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: GP_CLOBBER_TMPS[RAX_OFF],
+                            clobber: true,
+                        };
+                    } else {
+                        tgt_cnstr = Some(RegCnstr::Input {
+                            in_iidx: *tgt,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: true,
+                        });
+                    }
                 }
             }
         }
 
-        if !fty.has_varargs {
-            if fp_args_off == 0 {
-                let [..] = ra.alloc(self, iidx, gp_cnstrs)?;
-                if let Some(fn_addr) = fn_addr {
-                    self.asm.push_reloc(
-                        IcedInst::with_branch(Code::Call_rel32_64, 0),
-                        RelocKind::NearCallWithAddr(fn_addr),
-                    );
-                } else {
-                    self.asm
-                        .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
-                }
-            } else {
-                todo!();
-            }
+        if fty.has_varargs {
+            assert_matches!(
+                gp_cnstrs[RAX_OFF],
+                RegCnstr::Clobber { .. } | RegCnstr::Output { .. }
+            );
+        }
+
+        // Phase 3: allocate registers and generate code.
+        if let Some(fn_addr) = fn_addr {
+            assert!(tgt_cnstr.is_none());
+            let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len()] =
+                ra.alloc(self, iidx, concat_arrays!(gp_cnstrs, fp_cnstrs))?;
+            self.asm.push_reloc(
+                IcedInst::with_branch(Code::Call_rel32_64, 0),
+                RelocKind::NearCallWithAddr(fn_addr),
+            );
         } else {
-            // Calling a var args function.
-            if let Some(fn_addr) = fn_addr {
-                if fp_args_off == 0 {
-                    let [..] = ra.alloc(self, iidx, gp_cnstrs)?;
-                } else {
-                    let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len()] =
-                        ra.alloc(self, iidx, concat_arrays!(gp_cnstrs, fp_cnstrs))?;
-                }
-                self.asm.push_reloc(
-                    IcedInst::with_branch(Code::Call_rel32_64, 0),
-                    RelocKind::NearCallWithAddr(fn_addr),
+            assert!(fn_addr.is_none());
+            let callr = if let Some(tgt_cnstr) = tgt_cnstr {
+                assert_matches!(
+                    tgt_cnstr,
+                    RegCnstr::Input { .. } | RegCnstr::InputOutput { .. }
                 );
+                let [.., callr]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len() + 1] = ra.alloc(
+                    self,
+                    iidx,
+                    concat_arrays!(gp_cnstrs, fp_cnstrs, [tgt_cnstr]),
+                )?;
+                callr
             } else {
-                assert_eq!(fp_args_off, 0);
-                let cnstrs: [_; GP_CLOBBERS.len() + 1] = concat_arrays!(
-                    gp_cnstrs,
-                    [RegCnstr::Input {
-                        in_iidx: *tgt,
-                        in_fill: RegCnstrFill::Zeroed,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: true
-                    }]
-                );
-                let [.., tgtr] = ra.alloc(self, iidx, cnstrs)?;
-                self.asm
-                    .push_inst(IcedInst::with1(Code::Call_rm64, tgtr.to_reg64()));
-            }
+                assert!(tgt_cnstr.is_none());
+                let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len()] =
+                    ra.alloc(self, iidx, concat_arrays!(gp_cnstrs, fp_cnstrs))?;
+                Reg::RAX
+            };
+            self.asm
+                .push_inst(IcedInst::with1(Code::Call_rm64, callr.to_reg64()));
+        }
+        if fty.has_varargs {
             self.asm.push_inst(IcedInst::with2(
                 Code::Mov_r32_imm32,
                 IcedReg::EAX,
@@ -3283,10 +3354,6 @@ mod test {
 
     #[test]
     fn cg_call() {
-        // FIXME: These tests often assume that CALL instructions can be direct
-        // local calls. If/when that turns out not to be the case, we'll need
-        // to provide an alternative way of testing this.
-
         codegen_and_test(
             "
               extern abort()
@@ -3324,6 +3391,7 @@ mod test {
             ",
             &["
               ...
+              mov rax, r.64._
               ; call %0()
               call rax
               ...
@@ -3439,6 +3507,146 @@ mod test {
               add r.32._, 1
               ...
             "],
+        );
+
+        codegen_and_test(
+            r#"
+              extern f(float, double)
+
+              %0: ptr = arg reg "rax"
+              %1: float = arg reg "xmm15"
+              %2: double = arg reg "xmm14"
+              call f %0(%1, %2)
+              exit [%0, %1, %2]
+            "#,
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("rax")]
+              ; %1: float = arg [Reg("xmm15")]
+              ; %2: double = arg [Reg("xmm14")]
+              ...
+              movsd xmm0, xmm15
+              movsd xmm1, xmm14
+              ; call %0(%1, %2)
+              call rax
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            r#"
+              extern f() -> double
+
+              %0: double = arg reg "xmm15"
+              %1: ptr = arg reg "r15"
+              %2: double = call f %1()
+              %3: double = fadd %0, %2
+              exit [%3, %1]
+            "#,
+            &[r#"
+              ...
+              mov rax, r15
+              ; %2: double = call %1()
+              call rax
+              movsd xmm15, [rbp-{{_}}]
+              ; %3: double = fadd %0, %2
+              addsd xmm15, xmm0
+              ; exit [%3, %1]
+            "#],
+        );
+
+        codegen_and_test(
+            r#"
+              extern f(double) -> double
+
+              %0: double = arg reg "xmm15"
+              %1: ptr = arg reg "r15"
+              %2: double = call f %1(%0)
+              %3: double = fadd %0, %2
+              exit [%3, %1]
+            "#,
+            &[r#"
+              ...
+              mov rax, r15
+              movsd xmm0, xmm15
+              ; %2: double = call %1(%0)
+              call rax
+              movsd xmm15, [rbp-{{_}}]
+              ; %3: double = fadd %0, %2
+              addsd xmm15, xmm0
+              ; exit [%3, %1]
+            "#],
+        );
+
+        codegen_and_test(
+            r#"
+              extern f(float, double, ...)
+
+              %0: ptr = arg reg "rax"
+              %1: float = arg reg "xmm15"
+              %2: double = arg reg "xmm14"
+              call f %0(%1, %2)
+              exit [%0, %1, %2]
+            "#,
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("rax")]
+              ; %1: float = arg [Reg("xmm15")]
+              ; %2: double = arg [Reg("xmm14")]
+              ...
+              mov r.64.x, rax
+              movsd xmm0, xmm15
+              movsd xmm1, xmm14
+              ; call %0(%1, %2)
+              mov eax, 2
+              call r.64.x
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            r#"
+              extern f(...) -> double
+
+              %0: double = arg reg "xmm15"
+              %1: ptr = arg reg "r15"
+              %2: double = call f %1()
+              %3: double = fadd %0, %2
+              exit [%3, %1]
+            "#,
+            &[r#"
+              ...
+              ; %2: double = call %1()
+              mov eax, 0
+              call r.64._
+              movsd xmm15, [rbp-{{_}}]
+              ; %3: double = fadd %0, %2
+              addsd xmm15, xmm0
+              ; exit [%3, %1]
+            "#],
+        );
+
+        codegen_and_test(
+            r#"
+              extern f(double, ...) -> double
+
+              %0: double = arg reg "xmm15"
+              %1: ptr = arg reg "r15"
+              %2: double = call f %1(%0)
+              %3: double = fadd %0, %2
+              exit [%3, %1]
+            "#,
+            &[r#"
+              ...
+              movsd xmm0, xmm15
+              ; %2: double = call %1(%0)
+              mov eax, 1
+              call r.64._
+              movsd xmm15, [rbp-{{_}}]
+              ; %3: double = fadd %0, %2
+              addsd xmm15, xmm0
+              ; exit [%3, %1]
+            "#],
         );
     }
 
