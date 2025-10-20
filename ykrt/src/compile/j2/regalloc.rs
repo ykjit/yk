@@ -2625,9 +2625,9 @@ mod test {
         // not used in the trace: that's the guard optimism being undone.
         build_and_test(
             r#"
-          %0: i8 = arg reg "GPR0" ; spill
+          %0: i8 = arg reg "GPR0"
           %1: i8 = arg reg "GPR1"
-          %2: i8 = add %0, %1 ; spill=8
+          %2: i8 = add %0, %1
           %3: i8 = add %2, %2
           %4: i8 = add %3, %3
           %5: i1 = eq %0, %4
