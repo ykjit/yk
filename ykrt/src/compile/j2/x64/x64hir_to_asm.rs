@@ -3162,7 +3162,7 @@ mod test {
             "
           extern abort()
 
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: i8 = load %0
           %2: i8 = 10
           %3: i8 = add %1, %2
@@ -3228,7 +3228,7 @@ mod test {
         // i64
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = abs %0
               exit [%1]
             ",
@@ -3248,8 +3248,8 @@ mod test {
         // i8
         codegen_and_test(
             "
-              %0: i8 = arg reg
-              %1: i8 = arg reg
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
               %2: i8 = add %0, %1
               exit [%0, %2]
             ",
@@ -3263,7 +3263,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i8 = arg reg
+              %0: i8 = arg [reg]
               %1: i8 = 32
               %2: i8 = add %0, %1
               exit [%2]
@@ -3279,8 +3279,8 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: i32 = arg reg
-              %1: i32 = arg reg
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
               %2: i32 = add %0, %1
               exit [%0, %2]
             ",
@@ -3294,7 +3294,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i32 = arg reg
+              %0: i32 = arg [reg]
               %1: i32 = 32
               %2: i32 = add %0, %1
               exit [%2]
@@ -3309,7 +3309,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i32 = arg reg
+              %0: i32 = arg [reg]
               %1: i32 = 0xFFFFFFFF
               %2: i32 = add %0, %1
               exit [%2]
@@ -3325,8 +3325,8 @@ mod test {
         // i64
         codegen_and_test(
             "
-              %0: i64 = arg reg
-              %1: i64 = arg reg
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
               %2: i64 = add %0, %1
               exit [%0, %2]
             ",
@@ -3340,7 +3340,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 32
               %2: i64 = add %0, %1
               exit [%2]
@@ -3355,7 +3355,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 0xFFFFFFFF
               %2: i64 = add %0, %1
               exit [%2]
@@ -3371,7 +3371,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 0xFFFFFFFFAB
               %2: i64 = add %0, %1
               exit [%2]
@@ -3387,7 +3387,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 0xFFFFFFFFFFFFFFFF
               %2: i64 = add %0, %1
               exit [%2]
@@ -3406,7 +3406,7 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: i32 = arg reg
+              %0: i32 = arg [reg]
               %1: i32 = 0xFFFFFFFF
               %2: i32 = and %0, %1
               exit [%2]
@@ -3422,7 +3422,7 @@ mod test {
         // i64
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 0x0FFFFFFF
               %2: i64 = and %0, %1
               exit [%2]
@@ -3469,7 +3469,7 @@ mod test {
             "
               extern abort()
 
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               call abort %0()
               exit [%0]
             ",
@@ -3486,7 +3486,7 @@ mod test {
             "
               extern puts(ptr) -> i32
 
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: ptr = @puts
               %2: i32 = call puts %1(%0)
               %3: i32 = 1
@@ -3526,8 +3526,8 @@ mod test {
             "
               extern puts(ptr) -> i32
 
-              %0: ptr = arg reg
-              %1: ptr = arg reg
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
               %2: i32 = call puts %1(%0)
               %3: i32 = 1
               %4: i32 = add %2, %3
@@ -3549,7 +3549,7 @@ mod test {
             "
               extern printf(ptr, ...) -> i32
 
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: ptr = @printf
               %2: i64 = 2
               %3: i32 = call printf %1(%0, %2)
@@ -3573,8 +3573,8 @@ mod test {
             "
               extern printf(ptr, ...) -> i32
 
-              %0: ptr = arg reg
-              %1: ptr = arg reg
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
               %2: i64 = 2
               %3: i32 = call printf %1(%0, %2)
               %4: i32 = 1
@@ -3597,9 +3597,9 @@ mod test {
             r#"
               extern f(float, double)
 
-              %0: ptr = arg reg "rax"
-              %1: float = arg reg "xmm15"
-              %2: double = arg reg "xmm14"
+              %0: ptr = arg [reg "rax"]
+              %1: float = arg [reg "xmm15"]
+              %2: double = arg [reg "xmm14"]
               call f %0(%1, %2)
               exit [%0, %1, %2]
             "#,
@@ -3621,8 +3621,8 @@ mod test {
             r#"
               extern f() -> double
 
-              %0: double = arg reg "xmm15"
-              %1: ptr = arg reg "r15"
+              %0: double = arg [reg "xmm15"]
+              %1: ptr = arg [reg "r15"]
               %2: double = call f %1()
               %3: double = fadd %0, %2
               exit [%3, %1]
@@ -3643,8 +3643,8 @@ mod test {
             r#"
               extern f(double) -> double
 
-              %0: double = arg reg "xmm15"
-              %1: ptr = arg reg "r15"
+              %0: double = arg [reg "xmm15"]
+              %1: ptr = arg [reg "r15"]
               %2: double = call f %1(%0)
               %3: double = fadd %0, %2
               exit [%3, %1]
@@ -3666,9 +3666,9 @@ mod test {
             r#"
               extern f(float, double, ...)
 
-              %0: ptr = arg reg "rax"
-              %1: float = arg reg "xmm15"
-              %2: double = arg reg "xmm14"
+              %0: ptr = arg [reg "rax"]
+              %1: float = arg [reg "xmm15"]
+              %2: double = arg [reg "xmm14"]
               call f %0(%1, %2)
               exit [%0, %1, %2]
             "#,
@@ -3692,8 +3692,8 @@ mod test {
             r#"
               extern f(...) -> double
 
-              %0: double = arg reg "xmm15"
-              %1: ptr = arg reg "r15"
+              %0: double = arg [reg "xmm15"]
+              %1: ptr = arg [reg "r15"]
               %2: double = call f %1()
               %3: double = fadd %0, %2
               exit [%3, %1]
@@ -3714,8 +3714,8 @@ mod test {
             r#"
               extern f(double, ...) -> double
 
-              %0: double = arg reg "xmm15"
-              %1: ptr = arg reg "r15"
+              %0: double = arg [reg "xmm15"]
+              %1: ptr = arg [reg "r15"]
               %2: double = call f %1(%0)
               %3: double = fadd %0, %2
               exit [%3, %1]
@@ -3852,8 +3852,8 @@ mod test {
     fn cg_dynptradd() {
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: i64 = arg reg
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
               %2: ptr = dynptradd %0, %1, 1
               %3: ptr = dynptradd %0, %1, 2
               %4: ptr = dynptradd %0, %1, 4
@@ -3888,8 +3888,8 @@ mod test {
     fn cg_fadd() {
         codegen_and_test(
             "
-              %0: float = arg reg
-              %1: float = arg reg
+              %0: float = arg [reg]
+              %1: float = arg [reg]
               %2: float = fadd %0, %1
               exit [%0, %2]
             ",
@@ -3903,8 +3903,8 @@ mod test {
 
         codegen_and_test(
             "
-              %0: double = arg reg
-              %1: double = arg reg
+              %0: double = arg [reg]
+              %1: double = arg [reg]
               %2: double = fadd %0, %1
               exit [%0, %2]
             ",
@@ -3921,8 +3921,8 @@ mod test {
     fn cg_fdiv() {
         codegen_and_test(
             "
-              %0: float = arg reg
-              %1: float = arg reg
+              %0: float = arg [reg]
+              %1: float = arg [reg]
               %2: float = fdiv %0, %1
               exit [%0, %2]
             ",
@@ -3936,8 +3936,8 @@ mod test {
 
         codegen_and_test(
             "
-              %0: double = arg reg
-              %1: double = arg reg
+              %0: double = arg [reg]
+              %1: double = arg [reg]
               %2: double = fdiv %0, %1
               exit [%0, %2]
             ",
@@ -3954,8 +3954,8 @@ mod test {
     fn cg_fmul() {
         codegen_and_test(
             "
-              %0: float = arg reg
-              %1: float = arg reg
+              %0: float = arg [reg]
+              %1: float = arg [reg]
               %2: float = fmul %0, %1
               exit [%0, %2]
             ",
@@ -3969,8 +3969,8 @@ mod test {
 
         codegen_and_test(
             "
-              %0: double = arg reg
-              %1: double = arg reg
+              %0: double = arg [reg]
+              %1: double = arg [reg]
               %2: double = fmul %0, %1
               exit [%0, %2]
             ",
@@ -3987,8 +3987,8 @@ mod test {
     fn cg_fsub() {
         codegen_and_test(
             "
-              %0: float = arg reg
-              %1: float = arg reg
+              %0: float = arg [reg]
+              %1: float = arg [reg]
               %2: float = fsub %0, %1
               exit [%0, %2]
             ",
@@ -4002,8 +4002,8 @@ mod test {
 
         codegen_and_test(
             "
-              %0: double = arg reg
-              %1: double = arg reg
+              %0: double = arg [reg]
+              %1: double = arg [reg]
               %2: double = fsub %0, %1
               exit [%0, %2]
             ",
@@ -4020,7 +4020,7 @@ mod test {
     fn cg_fpext() {
         codegen_and_test(
             "
-              %0: float = arg reg
+              %0: float = arg [reg]
               %1: double = fpext %0
               blackbox %1
               exit [%0]
@@ -4040,7 +4040,7 @@ mod test {
         // The standard cases
         codegen_and_test(
             "
-              %0: i1 = arg reg
+              %0: i1 = arg [reg]
               guard true, %0, []
               exit [%0]
             ",
@@ -4065,7 +4065,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i1 = arg reg
+              %0: i1 = arg [reg]
               guard false, %0, []
               exit [%0]
             ",
@@ -4091,8 +4091,8 @@ mod test {
         // ICmp optimisation
         codegen_and_test(
             "
-              %0: i32 = arg reg
-              %1: i32 = arg reg
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
               %2: i1 = eq %0, %1
               guard true, %2, []
               exit [%0, %1]
@@ -4111,7 +4111,7 @@ mod test {
         // Icmp-const optimisation
         codegen_and_test(
             "
-              %0: i32 = arg reg
+              %0: i32 = arg [reg]
               %1: i32 = 0x14
               %2: i1 = eq %0, %1
               guard true, %2, []
@@ -4131,8 +4131,8 @@ mod test {
         // ICmp optimisation and zero/sign fill
         codegen_and_test(
             "
-              %0: i8 = arg reg
-              %1: i8 = arg reg
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
               %2: i1 = eq %0, %1
               guard true, %2, []
               exit [%0, %1]
@@ -4154,8 +4154,8 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i8 = arg reg
-              %1: i8 = arg reg
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
               %2: i1 = sgt %0, %1
               guard true, %2, []
               exit [%0, %1]
@@ -4177,8 +4177,8 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i8 = arg reg
-              %1: i8 = arg reg
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
               %2: i1 = ugt %0, %1
               guard true, %2, []
               exit [%0, %1]
@@ -4203,8 +4203,8 @@ mod test {
     fn cg_icmp() {
         codegen_and_test(
             "
-              %0: i32 = arg reg
-              %1: i32 = arg reg
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
               %2: i1 = eq %0, %1
               exit [%0, %2]
             ",
@@ -4223,7 +4223,7 @@ mod test {
         // double
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: double = load %0
               blackbox %1
               exit [%0]
@@ -4239,7 +4239,7 @@ mod test {
         // float
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: float = load %0
               blackbox %1
               exit [%0]
@@ -4258,7 +4258,7 @@ mod test {
         // i8
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i8 = load %0
               exit [%1]
             ",
@@ -4273,7 +4273,7 @@ mod test {
         // i16
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i16 = load %0
               exit [%1]
             ",
@@ -4288,7 +4288,7 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i32 = load %0
               exit [%1]
             ",
@@ -4303,7 +4303,7 @@ mod test {
         // i64
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i64 = load %0
               exit [%1]
             ",
@@ -4318,7 +4318,7 @@ mod test {
         // ptradd optimisation
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: ptr = ptradd %0, 8
               %2: i8 = load %1
               exit [%2]
@@ -4336,7 +4336,7 @@ mod test {
         // i8
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i8 = load %0
               %2: i64 = sext %1
               exit [%2]
@@ -4353,7 +4353,7 @@ mod test {
         // i16
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i16 = load %0
               %2: i64 = sext %1
               exit [%2]
@@ -4370,7 +4370,7 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i32 = load %0
               %2: i64 = sext %1
               exit [%2]
@@ -4391,7 +4391,7 @@ mod test {
         // i8
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i8 = load %0
               %2: i64 = zext %1
               exit [%2]
@@ -4408,7 +4408,7 @@ mod test {
         // i16
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i16 = load %0
               %2: i64 = zext %1
               exit [%2]
@@ -4425,7 +4425,7 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i32 = load %0
               %2: i64 = zext %1
               exit [%2]
@@ -4447,8 +4447,8 @@ mod test {
         // i8
         codegen_and_test(
             r#"
-              %0: i8 = arg reg "R8"
-              %1: i8 = arg reg "R9"
+              %0: i8 = arg [reg "R8"]
+              %1: i8 = arg [reg "R9"]
               %2: i8 = mul %0, %1
               exit [%0, %2]
             "#,
@@ -4465,8 +4465,8 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: i32 = arg reg
-              %1: i32 = arg reg
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
               %2: i32 = mul %0, %1
               exit [%0, %2]
             ",
@@ -4481,8 +4481,8 @@ mod test {
         // i64
         codegen_and_test(
             "
-              %0: i64 = arg reg
-              %1: i64 = arg reg
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
               %2: i64 = mul %0, %1
               exit [%0, %2]
             ",
@@ -4500,8 +4500,8 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: i32 = arg reg
-              %1: i32 = arg reg
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
               %2: i32 = or %0, %1
               exit [%0, %2]
             ",
@@ -4518,8 +4518,8 @@ mod test {
     fn cg_ptradd() {
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: i64 = arg reg
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
               %2: ptr = ptradd %0, 1
               exit [%0, %2]
             ",
@@ -4536,9 +4536,9 @@ mod test {
     fn cg_select() {
         codegen_and_test(
             "
-              %0: i1 = arg reg
-              %1: ptr = arg reg
-              %2: ptr = arg reg
+              %0: i1 = arg [reg]
+              %1: ptr = arg [reg]
+              %2: ptr = arg [reg]
               %3: ptr = select %0, %1, %2
               exit [%0, %3, %2]
             ",
@@ -4556,7 +4556,7 @@ mod test {
     fn cg_sext() {
         codegen_and_test(
             "
-              %0: i1 = arg reg
+              %0: i1 = arg [reg]
               %1: i64 = sext %0
               exit [%1]
             ",
@@ -4576,7 +4576,7 @@ mod test {
         // float
         codegen_and_test(
             "
-              %0: i32 = arg reg
+              %0: i32 = arg [reg]
               %1: float = sitofp %0
               blackbox %1
               exit [%0]
@@ -4595,7 +4595,7 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: i32 = arg reg
+              %0: i32 = arg [reg]
               %1: double = sitofp %0
               blackbox %1
               exit [%0]
@@ -4612,7 +4612,7 @@ mod test {
         // i64
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: double = sitofp %0
               blackbox %1
               exit [%0]
@@ -4632,8 +4632,8 @@ mod test {
         // double
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: double = arg reg
+              %0: ptr = arg [reg]
+              %1: double = arg [reg]
               store %1, %0
               exit [%0, %1]
             ",
@@ -4648,8 +4648,8 @@ mod test {
         // float
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: float = arg reg
+              %0: ptr = arg [reg]
+              %1: float = arg [reg]
               store %1, %0
               exit [%0, %1]
             ",
@@ -4667,8 +4667,8 @@ mod test {
         // i8
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: i8 = arg reg
+              %0: ptr = arg [reg]
+              %1: i8 = arg [reg]
               store %1, %0
               exit [%0, %1]
             ",
@@ -4682,7 +4682,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i8 = 2
               store %1, %0
               exit [%0]
@@ -4698,8 +4698,8 @@ mod test {
         // i16
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: i16 = arg reg
+              %0: ptr = arg [reg]
+              %1: i16 = arg [reg]
               store %1, %0
               exit [%0, %1]
             ",
@@ -4713,7 +4713,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i16 = 0x200
               store %1, %0
               exit [%0]
@@ -4729,8 +4729,8 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: i32 = arg reg
+              %0: ptr = arg [reg]
+              %1: i32 = arg [reg]
               store %1, %0
               exit [%0, %1]
             ",
@@ -4744,7 +4744,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i32 = 0x2000
               store %1, %0
               exit [%0]
@@ -4760,8 +4760,8 @@ mod test {
         // i64
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: i64 = arg reg
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
               store %1, %0
               exit [%0, %1]
             ",
@@ -4775,7 +4775,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: ptr = arg reg
+              %0: ptr = arg [reg]
               %1: i64 = 0x20000
               store %1, %0
               exit [%0]
@@ -4791,8 +4791,8 @@ mod test {
         // ptradd optimisation
         codegen_and_test(
             "
-              %0: ptr = arg reg
-              %1: i8 = arg reg
+              %0: ptr = arg [reg]
+              %1: i8 = arg [reg]
               %2: ptr = ptradd %0, 8
               store %1, %2
               exit [%0, %1]
@@ -4811,8 +4811,8 @@ mod test {
         // i32
         codegen_and_test(
             "
-              %0: i32 = arg reg
-              %1: i32 = arg reg
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
               %2: i32 = sub %0, %1
               exit [%0, %2]
             ",
@@ -4826,7 +4826,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i32 = arg reg
+              %0: i32 = arg [reg]
               %1: i32 = 32
               %2: i32 = sub %0, %1
               exit [%2]
@@ -4841,7 +4841,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i32 = arg reg
+              %0: i32 = arg [reg]
               %1: i32 = 0xFFFFFFFF
               %2: i32 = sub %0, %1
               exit [%2]
@@ -4857,8 +4857,8 @@ mod test {
         // i64
         codegen_and_test(
             "
-              %0: i64 = arg reg
-              %1: i64 = arg reg
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
               %2: i64 = sub %0, %1
               exit [%0, %2]
             ",
@@ -4872,7 +4872,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 0
               %2: i64 = sub %1, %0
               exit [%2]
@@ -4887,7 +4887,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 32
               %2: i64 = sub %0, %1
               exit [%2]
@@ -4902,7 +4902,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 0xFFFFFFFF
               %2: i64 = sub %0, %1
               exit [%2]
@@ -4918,7 +4918,7 @@ mod test {
 
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i64 = 0xFFFFFFFFFFFFFFFF
               %2: i64 = sub %1, %0
               exit [%2]
@@ -4937,7 +4937,7 @@ mod test {
     fn cg_trunc() {
         codegen_and_test(
             "
-              %0: i64 = arg reg
+              %0: i64 = arg [reg]
               %1: i1 = trunc %0
               exit [%1]
             ",
@@ -4954,7 +4954,7 @@ mod test {
     fn cg_zext() {
         codegen_and_test(
             "
-              %0: i1 = arg reg
+              %0: i1 = arg [reg]
               %1: i64 = zext %0
               exit [%1]
             ",

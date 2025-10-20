@@ -2618,10 +2618,10 @@ mod test {
     fn arg_cannot_appear_after_entry() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: i8 = 1
           %2: i16 = sext %0
-          %3: i8 = arg reg
+          %3: i8 = arg [reg]
         ",
         );
     }
@@ -2631,10 +2631,10 @@ mod test {
     fn entry_instructions_are_arg_const() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: i8 = 1
           %2: i16 = sext %0
-          %3: i8 = arg reg
+          %3: i8 = arg [reg]
         ",
         );
     }
@@ -2644,7 +2644,7 @@ mod test {
     fn exit_must_come_last() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           exit [%0]
           %2: i8 = add %0, %0
         ",
@@ -2656,7 +2656,7 @@ mod test {
     fn exit_vars_must_match_exit_vlocs() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           exit []
         ",
         );
@@ -2675,7 +2675,7 @@ mod test {
     fn abs_type_consistency() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: i16 = abs %0
         ",
         );
@@ -2686,8 +2686,8 @@ mod test {
     fn add_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i16 = add %0, %1
         ",
         );
@@ -2698,8 +2698,8 @@ mod test {
     fn add_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i8 = arg reg
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
           %2: i16 = add %0, %1
         ",
         );
@@ -2710,8 +2710,8 @@ mod test {
     fn and_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i16 = and %0, %1
         ",
         );
@@ -2722,8 +2722,8 @@ mod test {
     fn and_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i8 = arg reg
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
           %2: i16 = and %0, %1
         ",
         );
@@ -2734,8 +2734,8 @@ mod test {
     fn ashr_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i16 = ashr %0, %1
         ",
         );
@@ -2746,8 +2746,8 @@ mod test {
     fn ashr_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i8 = arg reg
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
           %2: i16 = ashr %0, %1
         ",
         );
@@ -2759,7 +2759,7 @@ mod test {
         str_to_mod::<DummyReg>(
             "
           extern f();
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: i16 = call f %0()
         ",
         );
@@ -2771,7 +2771,7 @@ mod test {
         str_to_mod::<DummyReg>(
             "
           extern f(i32);
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: i16 = call f %0()
         ",
         );
@@ -2783,7 +2783,7 @@ mod test {
         str_to_mod::<DummyReg>(
             "
           extern f();
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: i16 = call f %0(%0)
         ",
         );
@@ -2795,7 +2795,7 @@ mod test {
         str_to_mod::<DummyReg>(
             "
           extern f(i32);
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: i8 = 0
           call f %0(%1)
         ",
@@ -2807,7 +2807,7 @@ mod test {
     fn dynptradd_not_ptr() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: i8 = 0
           %2: ptr = dynptradd %0, %1, 1
         ",
@@ -2819,7 +2819,7 @@ mod test {
     fn dynptradd_not_int() {
         str_to_mod::<DummyReg>(
             "
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: ptr = dynptradd %0, %0, 1
         ",
         );
@@ -2830,8 +2830,8 @@ mod test {
     fn fadd_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: float = arg reg
-          %1: double = arg reg
+          %0: float = arg [reg]
+          %1: double = arg [reg]
           %2: float = fadd %0, %1
         ",
         );
@@ -2842,8 +2842,8 @@ mod test {
     fn fadd_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: float = arg reg
-          %1: float = arg reg
+          %0: float = arg [reg]
+          %1: float = arg [reg]
           %2: double = fadd %0, %1
         ",
         );
@@ -2854,8 +2854,8 @@ mod test {
     fn fdiv_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: float = arg reg
-          %1: double = arg reg
+          %0: float = arg [reg]
+          %1: double = arg [reg]
           %2: float = fdiv %0, %1
         ",
         );
@@ -2866,8 +2866,8 @@ mod test {
     fn fdiv_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: float = arg reg
-          %1: float = arg reg
+          %0: float = arg [reg]
+          %1: float = arg [reg]
           %2: double = fdiv %0, %1
         ",
         );
@@ -2878,8 +2878,8 @@ mod test {
     fn fmul_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: float = arg reg
-          %1: double = arg reg
+          %0: float = arg [reg]
+          %1: double = arg [reg]
           %2: float = fmul %0, %1
         ",
         );
@@ -2890,8 +2890,8 @@ mod test {
     fn fmul_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: float = arg reg
-          %1: float = arg reg
+          %0: float = arg [reg]
+          %1: float = arg [reg]
           %2: double = fmul %0, %1
         ",
         );
@@ -2902,8 +2902,8 @@ mod test {
     fn fsub_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: float = arg reg
-          %1: double = arg reg
+          %0: float = arg [reg]
+          %1: double = arg [reg]
           %2: float = fsub %0, %1
         ",
         );
@@ -2914,8 +2914,8 @@ mod test {
     fn fsub_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: float = arg reg
-          %1: float = arg reg
+          %0: float = arg [reg]
+          %1: float = arg [reg]
           %2: double = fsub %0, %1
         ",
         );
@@ -2926,7 +2926,7 @@ mod test {
     fn guard_cond_must_be_i1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           guard true, %0, []
         ",
         );
@@ -2937,8 +2937,8 @@ mod test {
     fn icmp_inconsistent_types() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i1 = eq %0, %1
         ",
         );
@@ -2949,7 +2949,7 @@ mod test {
     fn inttoptr_must_take_int() {
         str_to_mod::<DummyReg>(
             "
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: ptr = inttoptr %0
         ",
         );
@@ -2960,7 +2960,7 @@ mod test {
     fn inttoptr_must_return_pointer() {
         str_to_mod::<DummyReg>(
             "
-          %0: i64 = arg reg
+          %0: i64 = arg [reg]
           %1: i64 = inttoptr %0
         ",
         );
@@ -2971,7 +2971,7 @@ mod test {
     fn load_must_take_pointer() {
         str_to_mod::<DummyReg>(
             "
-          %0: i64 = arg reg
+          %0: i64 = arg [reg]
           %1: i8 = load %0
         ",
         );
@@ -2982,8 +2982,8 @@ mod test {
     fn lshr_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i16 = lshr %0, %1
         ",
         );
@@ -2994,8 +2994,8 @@ mod test {
     fn lshr_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i8 = arg reg
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
           %2: i16 = lshr %0, %1
         ",
         );
@@ -3006,8 +3006,8 @@ mod test {
     fn mul_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i16 = mul %0, %1
         ",
         );
@@ -3018,8 +3018,8 @@ mod test {
     fn mul_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i8 = arg reg
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
           %2: i16 = mul %0, %1
         ",
         );
@@ -3030,8 +3030,8 @@ mod test {
     fn or_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i16 = or %0, %1
         ",
         );
@@ -3042,8 +3042,8 @@ mod test {
     fn or_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i8 = arg reg
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
           %2: i16 = or %0, %1
         ",
         );
@@ -3054,7 +3054,7 @@ mod test {
     fn ptradd_not_ptr() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: ptr = ptradd %0, 1
         ",
         );
@@ -3065,7 +3065,7 @@ mod test {
     fn ptrtoint_must_take_pointer() {
         str_to_mod::<DummyReg>(
             "
-          %0: i64 = arg reg
+          %0: i64 = arg [reg]
           %1: i64 = ptrtoint %0
         ",
         );
@@ -3076,7 +3076,7 @@ mod test {
     fn ptrtoint_must_return_pointer() {
         str_to_mod::<DummyReg>(
             "
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: ptr = ptrtoint %0
         ",
         );
@@ -3087,8 +3087,8 @@ mod test {
     fn select_cond_must_be_i1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i32 = arg reg
+          %0: i8 = arg [reg]
+          %1: i32 = arg [reg]
           %2: i32 = select %0, %1, %1
         ",
         );
@@ -3099,8 +3099,8 @@ mod test {
     fn select_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i1 = arg reg
-          %1: i32 = arg reg
+          %0: i1 = arg [reg]
+          %1: i32 = arg [reg]
           %2: i32 = select %0, %0, %1
         ",
         );
@@ -3111,7 +3111,7 @@ mod test {
     fn sext_must_take_integer() {
         str_to_mod::<DummyReg>(
             "
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: i64 = sext %0
         ",
         );
@@ -3122,7 +3122,7 @@ mod test {
     fn sext_must_return_integer() {
         str_to_mod::<DummyReg>(
             "
-          %0: i1 = arg reg
+          %0: i1 = arg [reg]
           %1: ptr = sext %0
         ",
         );
@@ -3133,7 +3133,7 @@ mod test {
     fn sext_must_extend() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: i8 = sext %0
         ",
         );
@@ -3144,8 +3144,8 @@ mod test {
     fn shl_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i16 = shl %0, %1
         ",
         );
@@ -3156,8 +3156,8 @@ mod test {
     fn shl_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i8 = arg reg
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
           %2: i16 = shl %0, %1
         ",
         );
@@ -3168,7 +3168,7 @@ mod test {
     fn store_must_take_pointer() {
         str_to_mod::<DummyReg>(
             "
-          %0: i64 = arg reg
+          %0: i64 = arg [reg]
           store %0, %0
         ",
         );
@@ -3179,8 +3179,8 @@ mod test {
     fn sub_type_consistency1() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i16 = arg reg
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
           %2: i16 = sub %0, %1
         ",
         );
@@ -3191,8 +3191,8 @@ mod test {
     fn sub_type_consistency2() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
-          %1: i8 = arg reg
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
           %2: i16 = sub %0, %1
         ",
         );
@@ -3203,7 +3203,7 @@ mod test {
     fn trunc_must_take_integer() {
         str_to_mod::<DummyReg>(
             "
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: i64 = trunc %0
         ",
         );
@@ -3214,7 +3214,7 @@ mod test {
     fn trunc_must_return_integer() {
         str_to_mod::<DummyReg>(
             "
-          %0: i1 = arg reg
+          %0: i1 = arg [reg]
           %1: ptr = trunc %0
         ",
         );
@@ -3225,7 +3225,7 @@ mod test {
     fn trunc_must_truncate() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: i8 = trunc %0
         ",
         );
@@ -3236,7 +3236,7 @@ mod test {
     fn zext_must_take_integer() {
         str_to_mod::<DummyReg>(
             "
-          %0: ptr = arg reg
+          %0: ptr = arg [reg]
           %1: i64 = zext %0
         ",
         );
@@ -3247,7 +3247,7 @@ mod test {
     fn zext_must_return_integer() {
         str_to_mod::<DummyReg>(
             "
-          %0: i1 = arg reg
+          %0: i1 = arg [reg]
           %1: ptr = zext %0
         ",
         );
@@ -3258,7 +3258,7 @@ mod test {
     fn zext_must_extend() {
         str_to_mod::<DummyReg>(
             "
-          %0: i8 = arg reg
+          %0: i8 = arg [reg]
           %1: i8 = zext %0
         ",
         );

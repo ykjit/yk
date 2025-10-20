@@ -74,8 +74,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ASHR" "LOCAL" "," "LOCAL" {
       Ok(AstInst::AShr { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
-  | "LOCAL" ":" Ty "=" "ARG" VLoc {
-      Ok(AstInst::Arg { local: $1?.span(), ty: $3?, vloc: $6? })
+  | "LOCAL" ":" Ty "=" "ARG" "[" ArgList "]" {
+      Ok(AstInst::Arg { local: $1?.span(), ty: $3?, vlocs: $7? })
     }
   | "LOCAL" ":" Ty "=" Const {
        Ok(AstInst::Const { local: $1?.span(), ty: $3?, kind: $5? })
@@ -149,6 +149,11 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ZEXT" "LOCAL" {
       Ok(AstInst::ZExt { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
+  ;
+
+ArgList -> Result<Vec<AstVLoc>, Box<dyn Error>>:
+    ArgList "," VLoc { flattenr($1, $3) }
+  | VLoc { Ok(vec![$1?]) }
   ;
 
 Const -> Result<AstConst, Box<dyn Error>>:

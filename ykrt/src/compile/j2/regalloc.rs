@@ -2502,8 +2502,8 @@ mod test {
     fn simple() {
         build_and_test(
             r#"
-          %0: i8 = arg reg "GPR0"
-          %1: i8 = arg reg "GPR1"
+          %0: i8 = arg [reg "GPR0"]
+          %1: i8 = arg [reg "GPR1"]
           %2: i8 = add %0, %1
           blackbox %2
         "#,
@@ -2520,8 +2520,8 @@ mod test {
     fn cycles() {
         build_and_test(
             r#"
-          %0: i8 = arg reg "GPR1"
-          %1: i8 = arg reg "GPR0"
+          %0: i8 = arg [reg "GPR1"]
+          %1: i8 = arg [reg "GPR0"]
           %2: i8 = add %0, %1
           blackbox %2
         "#,
@@ -2544,9 +2544,9 @@ mod test {
 
         build_and_test(
             r#"
-          %0: i8 = arg reg "GPR0"
-          %1: i8 = arg reg "GPR1"
-          %2: i8 = arg reg "GPR2"
+          %0: i8 = arg [reg "GPR0"]
+          %1: i8 = arg [reg "GPR1"]
+          %2: i8 = arg [reg "GPR2"]
           %3: i8 = add %0, %1
           %4: i8 = add %2, %3
           blackbox %4
@@ -2574,10 +2574,10 @@ mod test {
 
         build_and_test(
             r#"
-          %0: i8 = arg reg "GPR3"
-          %1: i8 = arg reg "GPR2"
-          %2: i8 = arg reg "GPR1"
-          %3: i8 = arg reg "GPR0"
+          %0: i8 = arg [reg "GPR3"]
+          %1: i8 = arg [reg "GPR2"]
+          %2: i8 = arg [reg "GPR1"]
+          %3: i8 = arg [reg "GPR0"]
           %4: i8 = add %0, %1
           %5: i8 = add %4, %2
           %6: i8 = add %5, %3
@@ -2625,8 +2625,8 @@ mod test {
         // not used in the trace: that's the guard optimism being undone.
         build_and_test(
             r#"
-          %0: i8 = arg reg "GPR0"
-          %1: i8 = arg reg "GPR1"
+          %0: i8 = arg [reg "GPR0"]
+          %1: i8 = arg [reg "GPR1"]
           %2: i8 = add %0, %1
           %3: i8 = add %2, %2
           %4: i8 = add %3, %3
@@ -2654,7 +2654,7 @@ mod test {
     fn arrange_fills_once() {
         build_and_test(
             r#"
-          %0: i8 = arg reg "GPR0"
+          %0: i8 = arg [reg "GPR0"]
           %1: i8 = add %0, %0
           blackbox %1
           exit [%0]
