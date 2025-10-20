@@ -28,7 +28,7 @@ use crate::{
 use index_vec::IndexVec;
 use lrlex::{DefaultLexerTypes, LRNonStreamingLexer, lrlex_mod};
 use lrpar::{NonStreamingLexer, Span, lrpar_mod};
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 use std::{collections::HashMap, ffi::CString, marker::PhantomData};
 
 lrlex_mod!("compile/j2/hir.l");
@@ -146,40 +146,44 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
-                AstInst::Arg { local, ty, vloc } => {
+                AstInst::Arg { local, ty, vlocs } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
-                    let vloc = match vloc {
-                        AstVLoc::AutoReg => {
-                            if manualregused {
-                                self.err_span(
-                                    local,
-                                    "Can't mix `auto` and manually assigned registers",
-                                );
+                    let vlocs = vlocs
+                        .iter()
+                        .map(|vloc| match vloc {
+                            AstVLoc::AutoReg => {
+                                if manualregused {
+                                    self.err_span(
+                                        local,
+                                        "Can't mix `auto` and manually assigned registers",
+                                    );
+                                }
+                                autoregused = true;
+                                VarLoc::Reg(testregiter.next_reg(&self.tys[tyidx]).unwrap_or_else(
+                                    || self.err_span(local, "Exhausted automatic test registers"),
+                                ))
                             }
-                            autoregused = true;
-                            VarLoc::Reg(testregiter.next_reg(&self.tys[tyidx]).unwrap_or_else(
-                                || self.err_span(local, "Exhausted automatic test registers"),
-                            ))
-                        }
-                        AstVLoc::Reg(span) => {
-                            if autoregused {
-                                self.err_span(
-                                    local,
-                                    "Can't mix `auto` and manually assigned registers",
-                                );
+                            AstVLoc::Reg(span) => {
+                                if autoregused {
+                                    self.err_span(
+                                        local,
+                                        "Can't mix `auto` and manually assigned registers",
+                                    );
+                                }
+                                manualregused = true;
+                                let s =
+                                    self.lexer.span_str(*span).trim_prefix('"').trim_suffix('"');
+                                match Reg::from_str(s) {
+                                    Some(reg) => VarLoc::Reg(reg),
+                                    None => self.err_span(*span, &format!("No such register {s}")),
+                                }
                             }
-                            manualregused = true;
-                            let s = self.lexer.span_str(span).trim_prefix('"').trim_suffix('"');
-                            match Reg::from_str(s) {
-                                Some(reg) => VarLoc::Reg(reg),
-                                None => self.err_span(span, &format!("No such register {s}")),
-                            }
-                        }
-                        AstVLoc::AutoStack => todo!(),
-                        AstVLoc::Stack(_span) => todo!(),
-                    };
-                    entry_vlocs.push(VarLocs::new(smallvec![vloc]));
+                            AstVLoc::AutoStack => todo!(),
+                            AstVLoc::Stack(_span) => todo!(),
+                        })
+                        .collect::<SmallVec<_>>();
+                    entry_vlocs.push(VarLocs::new(vlocs));
                     self.insts.push(Arg { tyidx }.into());
                 }
                 AstInst::Call {
@@ -799,7 +803,7 @@ enum AstInst {
     Arg {
         local: Span,
         ty: AstTy,
-        vloc: AstVLoc,
+        vlocs: Vec<AstVLoc>,
     },
     Call {
         local: Option<Span>,
