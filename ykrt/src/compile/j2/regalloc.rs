@@ -555,7 +555,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// Force the value `iidx` to be marked as used at `cur_iidx`. Must only be used for testing purposes.
     #[cfg(test)]
     pub(super) fn blackbox(&mut self, cur_iidx: InstIdx, iidx: InstIdx) {
-        assert!(self.is_used[iidx] < cur_iidx);
         self.is_used[iidx] = cur_iidx;
     }
 
