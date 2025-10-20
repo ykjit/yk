@@ -333,7 +333,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     ra.blackbox(iidx, *val);
                 }
                 Inst::Call(x) => self.be.i_call(&mut ra, b, iidx, x)?,
-                Inst::Const(_) => (),
+                Inst::Const(_) => {
+                    ra.alloc_const(&mut self.be, iidx)?;
+                }
                 Inst::DynPtrAdd(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_dynptradd(&mut ra, b, iidx, x)?;
@@ -488,7 +490,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                 }
             }
-            ra.post_inst(&mut self.be, iidx)?;
             if logging {
                 let ty = hinst.ty(self.m);
                 if ty == &Ty::Void {
@@ -593,20 +594,24 @@ pub(super) trait HirToAsmBackend {
 
     fn log(&mut self, s: String);
 
-    /// Sign extend `c` to `tgt_bitw` bits. Note that `tgt_bitw` can be equal to, or greater than,
-    /// `c`'s "natural" bit width.
-    fn sign_fill_const(
-        &mut self,
+    /// If the constant `c` will need a temporary register in order to put it into `reg`, return an
+    /// iterator with the possible temporary registers. One of those will be selected and passed to
+    /// [Self::move_const]. Note: this may end up spilling other registers, so if you can avoid
+    /// allocating a temporary register, you should probably avoid doing so.
+    fn const_needs_tmp_reg(
+        &self,
         reg: Self::Reg,
-        tgt_bitw: u32,
         c: &ConstKind,
-    ) -> Result<(), CompilationError>;
-    /// Zero extend `c` to `tgt_bitw` bits. Note that `tgt_bitw` can be equal to, or greater than,
-    /// `c`'s "natural" bit width.
-    fn zero_fill_const(
+    ) -> Option<impl Iterator<Item = Self::Reg>>;
+    /// Move the constant `c` into `bitw` bits of `reg`, filling upper bits as per `tgt_fill`. If
+    /// [Self::const_needs_tmp_reg] returned `Some`, then a temporary register will be passed as
+    /// `Some(Self::Reg))`
+    fn move_const(
         &mut self,
         reg: Self::Reg,
+        tmp_reg: Option<Self::Reg>,
         tgt_bitw: u32,
+        tgt_fill: RegFill,
         c: &ConstKind,
     ) -> Result<(), CompilationError>;
 

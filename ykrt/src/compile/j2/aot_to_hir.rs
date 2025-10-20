@@ -499,17 +499,28 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             VarLoc::StackOff(_) => todo!(),
             VarLoc::Reg(_) => todo!(),
             VarLoc::Const(kind) => match kind {
+                hir::ConstKind::Double(_) => todo!(),
+                hir::ConstKind::Float(_) => todo!(),
                 hir::ConstKind::Int(x) => {
                     let tyidx = self.opt.push_ty(hir::Ty::Int(x.bitw()))?;
                     self.opt.push_inst(
                         hir::Const {
                             tyidx,
-                            kind: hir::ConstKind::Int(x.clone()),
+                            kind: kind.clone(),
                         }
                         .into(),
                     )
                 }
-                hir::ConstKind::Ptr(_) => todo!(),
+                hir::ConstKind::Ptr(_) => {
+                    let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
+                    self.opt.push_inst(
+                        hir::Const {
+                            tyidx,
+                            kind: kind.clone(),
+                        }
+                        .into(),
+                    )
+                }
             },
         }
     }
@@ -655,8 +666,26 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                             hir::ConstKind::Int(ArbBitInt::from_u64(x.bitw(), v)),
                         )
                     }
-                    Ty::Float(_) => {
-                        todo!();
+                    Ty::Float(FloatTy::Double) => {
+                        debug_assert_eq!(bytes.len(), 8);
+                        let v = f64::from_ne_bytes([
+                            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
+                            bytes[7],
+                        ]);
+                        let tyidx = self.opt.push_ty(hir::Ty::Double)?;
+                        self.const_to_iidx(tyidx, hir::ConstKind::Double(v))
+                    }
+                    Ty::Float(FloatTy::Float) => {
+                        // FIXME: Floats are currently stored in AOT as doubles
+                        // https://github.com/ykjit/yk/issues/1876
+                        debug_assert_eq!(bytes.len(), 8);
+                        let v = f64::from_ne_bytes([
+                            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
+                            bytes[7],
+                        ]);
+                        let v = v as f32;
+                        let tyidx = self.opt.push_ty(hir::Ty::Float)?;
+                        self.const_to_iidx(tyidx, hir::ConstKind::Float(v))
                     }
                     Ty::Ptr => {
                         debug_assert_eq!(bytes.len(), 8);
@@ -942,9 +971,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         let ftyidx = self.p_ty(self.am.type_(*ftyidx))?;
         let tgt_iidx = self.p_operand(callop)?;
-        if let hir::Inst::Const(_) = self.opt.inst(tgt_iidx) {
-            todo!();
-        }
         let mut jargs = SmallVec::with_capacity(args.len());
         for x in args {
             jargs.push(self.p_operand(x)?);

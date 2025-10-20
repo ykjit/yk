@@ -290,6 +290,8 @@ fn reconstruct(
                     VarLoc::StackOff(_) => todo!(),
                     VarLoc::Reg(_) => todo!(),
                     VarLoc::Const(kind) => match kind {
+                        ConstKind::Double(_) => todo!(),
+                        ConstKind::Float(_) => todo!(),
                         ConstKind::Int(x) => x.to_zero_ext_u64().unwrap(),
                         ConstKind::Ptr(x) => u64::try_from(*x).unwrap(),
                     },
@@ -314,8 +316,10 @@ fn reconstruct(
                     VarLoc::StackOff(_) => todo!(),
                     VarLoc::Reg(_) => todo!(),
                     VarLoc::Const(kind) => match kind {
+                        ConstKind::Double(_) => unreachable!(),
+                        ConstKind::Float(_) => unreachable!(),
                         ConstKind::Int(x) => x.to_zero_ext_u32().unwrap(),
-                        ConstKind::Ptr(_) => todo!(),
+                        ConstKind::Ptr(_) => unreachable!(),
                     },
                 };
 
@@ -339,6 +343,8 @@ fn reconstruct(
                     },
                     VarLoc::StackOff(_) => todo!(),
                     VarLoc::Reg(_) => todo!(),
+                    VarLoc::Const(ConstKind::Double(_)) => unreachable!(),
+                    VarLoc::Const(ConstKind::Float(_)) => unreachable!(),
                     VarLoc::Const(ConstKind::Int(x)) => x.to_zero_ext_u8().unwrap(),
                     VarLoc::Const(ConstKind::Ptr(_)) => unreachable!(),
                 };
