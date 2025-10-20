@@ -1929,6 +1929,90 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_fdiv(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        FDiv { tyidx, lhs, rhs }: &FDiv,
+    ) -> Result<(), CompilationError> {
+        let [lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+        match self.m.ty(*tyidx) {
+            Ty::Double => self.asm.push_inst(IcedInst::with2(
+                Code::Divsd_xmm_xmmm64,
+                lhsr.to_xmm(),
+                rhsr.to_xmm(),
+            )),
+            Ty::Float => self.asm.push_inst(IcedInst::with2(
+                Code::Divss_xmm_xmmm32,
+                lhsr.to_xmm(),
+                rhsr.to_xmm(),
+            )),
+            _ => panic!(),
+        }
+
+        Ok(())
+    }
+
+    fn i_fmul(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        FMul { tyidx, lhs, rhs }: &FMul,
+    ) -> Result<(), CompilationError> {
+        let [lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+        match self.m.ty(*tyidx) {
+            Ty::Double => self.asm.push_inst(IcedInst::with2(
+                Code::Mulsd_xmm_xmmm64,
+                lhsr.to_xmm(),
+                rhsr.to_xmm(),
+            )),
+            Ty::Float => self.asm.push_inst(IcedInst::with2(
+                Code::Mulss_xmm_xmmm32,
+                lhsr.to_xmm(),
+                rhsr.to_xmm(),
+            )),
+            _ => panic!(),
+        }
+
+        Ok(())
+    }
+
     fn i_fsub(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -3828,6 +3912,72 @@ mod test {
               ...
               ; %2: double = fadd %0, %1
               addsd fp.128.x, fp.128.y
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_fdiv() {
+        codegen_and_test(
+            "
+              %0: float = arg reg
+              %1: float = arg reg
+              %2: float = fdiv %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: float = fdiv %0, %1
+              divss fp.128.x, fp.128.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: double = arg reg
+              %1: double = arg reg
+              %2: double = fdiv %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: double = fdiv %0, %1
+              divsd fp.128.x, fp.128.y
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_fmul() {
+        codegen_and_test(
+            "
+              %0: float = arg reg
+              %1: float = arg reg
+              %2: float = fmul %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: float = fmul %0, %1
+              mulss fp.128.x, fp.128.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: double = arg reg
+              %1: double = arg reg
+              %2: double = fmul %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: double = fmul %0, %1
+              mulsd fp.128.x, fp.128.y
               ...
             "],
         );

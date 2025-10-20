@@ -2158,6 +2158,26 @@ mod test {
             Ok(())
         }
 
+        fn i_fdiv(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _fadd: &FDiv,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fmul(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _fmul: &FMul,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_fsub(
             &mut self,
             _ra: &mut RegAlloc<Self>,
