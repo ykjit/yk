@@ -310,6 +310,24 @@ impl Block {
                     exit_vars.len(),
                     "%{iidx:?}: number of exit vars does not match number of exit VarLocs"
                 );
+
+                for (i, (x, y)) in entry_vlocs.iter().zip(exit_vlocs.iter()).enumerate() {
+                    let entry_ty = self.insts[InstIdx::from(i)].ty(m);
+                    let exit_ty = self.insts[exit_vars[i]].ty(m);
+                    if entry_ty != exit_ty {
+                        panic!(
+                            "%{iidx:?}: exit var '%{:?}' at position '{i}' does match type of %{i}",
+                            exit_vars[i]
+                        );
+                    }
+
+                    if x != y {
+                        panic!(
+                            "%{iidx:?}: exit var '%{:?}' at position '{i}' does not match entry VarLoc",
+                            exit_vars[i]
+                        );
+                    }
+                }
             }
 
             inst.iter_iidxs(|op_iidx| {
@@ -2653,11 +2671,23 @@ mod test {
 
     #[test]
     #[should_panic(expected = "%1: number of exit vars does not match number of exit VarLocs")]
-    fn exit_vars_must_match_exit_vlocs() {
+    fn exit_vars_must_match_exit_vlocs_in_number() {
         str_to_mod::<DummyReg>(
             "
           %0: i8 = arg [reg]
           exit []
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: exit var '%1' at position '0' does match type of %0")]
+    fn exit_vars_must_match_exit_vlocs_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i1 = arg [reg]
+          exit [%1, %1]
         ",
         );
     }

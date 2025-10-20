@@ -3491,7 +3491,8 @@ mod test {
               %2: i32 = call puts %1(%0)
               %3: i32 = 1
               %4: i32 = add %2, %3
-              exit [%4]
+              blackbox %4
+              exit [%0]
             ",
             &[
                 r#"
@@ -3504,7 +3505,8 @@ mod test {
               ...
               ; %4: i32 = add %2, %3
               add r.32._, 1
-              ; exit [%4]
+              ; blackbox %4
+              ; exit [%0]
             "#,
                 r#"
               ...
@@ -3517,7 +3519,8 @@ mod test {
               ...
               ; %4: i32 = add %2, %3
               add r.32._, 1
-              ; exit [%4]
+              ; blackbox %4
+              ; exit [%0]
             "#,
             ],
         );
@@ -3555,7 +3558,8 @@ mod test {
               %3: i32 = call printf %1(%0, %2)
               %4: i32 = 1
               %5: i32 = add %3, %4
-              exit [%5]
+              blackbox %5
+              exit [%0]
             ",
             &["
               ...
@@ -3579,7 +3583,8 @@ mod test {
               %3: i32 = call printf %1(%0, %2)
               %4: i32 = 1
               %5: i32 = add %3, %4
-              exit [%0, %5]
+              blackbox %5
+              exit [%0, %1]
             ",
             &["
               ...
@@ -4206,7 +4211,8 @@ mod test {
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
               %2: i1 = eq %0, %1
-              exit [%0, %2]
+              blackbox %2
+              exit [%0, %1]
             ",
             &["
               ...
@@ -4260,7 +4266,8 @@ mod test {
             "
               %0: ptr = arg [reg]
               %1: i8 = load %0
-              exit [%1]
+              blackbox %1
+              exit [%0]
             ",
             &["
               ...
@@ -4275,7 +4282,8 @@ mod test {
             "
               %0: ptr = arg [reg]
               %1: i16 = load %0
-              exit [%1]
+              blackbox %1
+              exit [%0]
             ",
             &["
               ...
@@ -4290,7 +4298,8 @@ mod test {
             "
               %0: ptr = arg [reg]
               %1: i32 = load %0
-              exit [%1]
+              blackbox %1
+              exit [%0]
             ",
             &["
               ...
@@ -4305,7 +4314,8 @@ mod test {
             "
               %0: ptr = arg [reg]
               %1: i64 = load %0
-              exit [%1]
+              blackbox %1
+              exit [%0]
             ",
             &["
               ...
@@ -4321,7 +4331,8 @@ mod test {
               %0: ptr = arg [reg]
               %1: ptr = ptradd %0, 8
               %2: i8 = load %1
-              exit [%2]
+              blackbox %2
+              exit [%0]
             ",
             &["
               ...
@@ -4339,14 +4350,16 @@ mod test {
               %0: ptr = arg [reg]
               %1: i8 = load %0
               %2: i64 = sext %1
-              exit [%2]
+              blackbox %2
+              exit [%0]
             ",
             &["
               ...
               ; %1: i8 = load %0
               movsx r.64._, byte [r.64._]
               ; %2: i64 = sext %1
-              ; exit [%2]
+              ; blackbox %2
+              ; exit [%0]
             "],
         );
 
@@ -4356,14 +4369,16 @@ mod test {
               %0: ptr = arg [reg]
               %1: i16 = load %0
               %2: i64 = sext %1
-              exit [%2]
+              blackbox %2
+              exit [%0]
             ",
             &["
               ...
               ; %1: i16 = load %0
               movsx r.64._, word [r.64._]
               ; %2: i64 = sext %1
-              ; exit [%2]
+              ; blackbox %2
+              ; exit [%0]
             "],
         );
 
@@ -4373,14 +4388,16 @@ mod test {
               %0: ptr = arg [reg]
               %1: i32 = load %0
               %2: i64 = sext %1
-              exit [%2]
+              blackbox %2
+              exit [%0]
             ",
             &["
               ...
               ; %1: i32 = load %0
               movsxd r.64._, [r.64._]
               ; %2: i64 = sext %1
-              ; exit [%2]
+              ; blackbox %2
+              ; exit [%0]
             "],
         );
 
@@ -4394,14 +4411,16 @@ mod test {
               %0: ptr = arg [reg]
               %1: i8 = load %0
               %2: i64 = zext %1
-              exit [%2]
+              blackbox %2
+              exit [%0]
             ",
             &["
               ...
               ; %1: i8 = load %0
               movzx r.32._, byte [r.64._]
               ; %2: i64 = zext %1
-              ; exit [%2]
+              ; blackbox %2
+              ; exit [%0]
             "],
         );
 
@@ -4411,14 +4430,16 @@ mod test {
               %0: ptr = arg [reg]
               %1: i16 = load %0
               %2: i64 = zext %1
-              exit [%2]
+              blackbox %2
+              exit [%0]
             ",
             &["
               ...
               ; %1: i16 = load %0
               movzx r.32._, word [r.64._]
               ; %2: i64 = zext %1
-              ; exit [%2]
+              ; blackbox %2
+              ; exit [%0]
             "],
         );
 
@@ -4428,14 +4449,16 @@ mod test {
               %0: ptr = arg [reg]
               %1: i32 = load %0
               %2: i64 = zext %1
-              exit [%2]
+              blackbox %2
+              exit [%0]
             ",
             &["
               ...
               ; %1: i32 = load %0
               mov r.32._, [r.64._]
               ; %2: i64 = zext %1
-              ; exit [%2]
+              ; blackbox %2
+              ; exit [%0]
             "],
         );
 
@@ -4521,7 +4544,7 @@ mod test {
               %0: ptr = arg [reg]
               %1: i64 = arg [reg]
               %2: ptr = ptradd %0, 1
-              exit [%0, %2]
+              exit [%2, %1]
             ",
             &["
               ...
@@ -4557,15 +4580,15 @@ mod test {
         codegen_and_test(
             "
               %0: i1 = arg [reg]
-              %1: i64 = sext %0
+              %1: i1 = add %0, %0
+              %2: i64 = sext %0
+              blackbox %2
               exit [%1]
             ",
             &[r#"
               ...
-              ; %0: i1 = arg [Reg("r.64.x")]
-              and r.32.x, 1
-              neg r.64.x
-              ; %1: i64 = sext %0
+              ; %2: i64 = sext %0
+              ; blackbox %2
               ; exit [%1]
             "#],
         );
@@ -4938,14 +4961,16 @@ mod test {
         codegen_and_test(
             "
               %0: i64 = arg [reg]
-              %1: i1 = trunc %0
-              exit [%1]
+              %1: i64 = add %0, %0
+              %2: i1 = trunc %1
+              blackbox %2
+              exit [%0]
             ",
             &["
-              sub rsp, 0
-              ; %0: i64 = arg ...
-              ; %1: i1 = trunc %0
-              ; exit [%1]
+              ...
+              ; %2: i1 = trunc %1
+              ; blackbox %2
+              ; exit [%0]
             "],
         );
     }
@@ -4955,14 +4980,16 @@ mod test {
         codegen_and_test(
             "
               %0: i1 = arg [reg]
-              %1: i64 = zext %0
+              %1: i1 = add %0, %0
+              %2: i64 = zext %0
+              blackbox %2
               exit [%1]
             ",
             &[r#"
               ...
-              ; %0: i1 = arg [Reg("r.64.x")]
-              and r.32.x, 1
-              ...
+              ; %2: i64 = zext %0
+              ; blackbox %2
+              ; exit [%1]
             "#],
         );
     }
