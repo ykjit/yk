@@ -2420,6 +2420,16 @@ mod test {
             todo!()
         }
 
+        fn i_udiv(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &crate::compile::j2::hir::UDiv,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_zext(
             &mut self,
             _ra: &mut RegAlloc<Self>,
