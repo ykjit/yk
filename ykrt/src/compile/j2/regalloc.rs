@@ -415,6 +415,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         .unwrap()
                         .0,
                 );
+                println!("{break_reg:?} {:?}", ractions.distinct_copies);
 
                 ractions.spills.push(RegSpill {
                     iidxs: self.rstates.iidxs(break_reg).clone(),
@@ -2376,6 +2377,16 @@ mod test {
             _b: &Block,
             _iidx: InstIdx,
             _inst: &SIToFP,
+        ) -> Result<(), CompilationError> {
+            todo!();
+        }
+
+        fn i_srem(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SRem,
         ) -> Result<(), CompilationError> {
             todo!();
         }

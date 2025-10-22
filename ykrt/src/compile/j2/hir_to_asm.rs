@@ -477,6 +477,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_sitofp(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::SRem(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_srem(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::Store(x) => self.be.i_store(&mut ra, b, iidx, x)?,
                 Inst::Sub(x) => {
                     if ra.is_used(iidx) {
@@ -894,6 +899,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &SIToFP,
+    ) -> Result<(), CompilationError>;
+
+    fn i_srem(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &SRem,
     ) -> Result<(), CompilationError>;
 
     fn i_store(
