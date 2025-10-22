@@ -597,6 +597,7 @@ pub(super) enum Inst {
     Sub,
     ThreadLocal,
     Trunc,
+    UDiv,
     ZExt,
 }
 
@@ -2501,6 +2502,61 @@ impl InstT for Trunc {
     }
 }
 
+/// Unsigned integer division with normal LLVM semantics.
+#[derive(Debug)]
+pub(super) struct UDiv {
+    pub tyidx: TyIdx,
+    /// What LLVM calls `op1`.
+    pub lhs: InstIdx,
+    /// What LLVM calls `op2`.
+    pub rhs: InstIdx,
+    pub exact: bool,
+}
+
+impl InstT for UDiv {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert!(
+            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
+                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            "%{iidx:?}: inconsistent return / lhs / rhs types"
+        );
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.lhs);
+        f(self.rhs);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            lhs: f(self.lhs),
+            rhs: f(self.rhs),
+            exact: self.exact,
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "udiv %{}, %{}",
+            usize::from(self.lhs),
+            usize::from(self.rhs)
+        )
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
+}
+
 /// Zero extend with the same semantics as LLVM's `zext`.
 #[derive(Debug)]
 pub(super) struct ZExt {
@@ -3257,6 +3313,30 @@ mod test {
             "
           %0: i8 = arg [reg]
           %1: i8 = trunc %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn udiv_type_consistency1() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i16 = udiv %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn udiv_type_consistency2() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i16 = udiv %0, %1
         ",
         );
     }

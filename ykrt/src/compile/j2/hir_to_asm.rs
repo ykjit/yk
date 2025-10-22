@@ -494,6 +494,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_trunc(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::UDiv(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_udiv(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::ZExt(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_zext(&mut ra, b, iidx, x)?;
@@ -921,6 +926,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &Trunc,
+    ) -> Result<(), CompilationError>;
+
+    fn i_udiv(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &UDiv,
     ) -> Result<(), CompilationError>;
 
     fn i_zext(

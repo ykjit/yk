@@ -146,6 +146,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "STORE" "LOCAL" "," "LOCAL" {
       Ok(AstInst::Store { val: $2?.span(), ptr: $4?.span() })
     }
+  | "LOCAL" ":" Ty "=" "UDIV" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::UDiv { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
   | "LOCAL" ":" Ty "=" "ZEXT" "LOCAL" {
       Ok(AstInst::ZExt { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
