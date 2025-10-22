@@ -1849,7 +1849,7 @@ mod test {
         }
 
         fn iter_test_regs() -> impl TestRegIter<Self> {
-            TestRegTestIter {}
+            TestRegTestIter::new()
         }
 
         fn from_str(s: &str) -> Option<Self> {
@@ -1867,11 +1867,46 @@ mod test {
         pub(super) struct TestRegIdx = u8;
     }
 
-    struct TestRegTestIter {}
+    struct TestRegTestIter<Reg> {
+        fp_regs: Box<dyn Iterator<Item = Reg>>,
+        gp_regs: Box<dyn Iterator<Item = Reg>>,
+    }
 
-    impl TestRegIter<TestReg> for TestRegTestIter {
-        fn next_reg(&mut self, _: &Ty) -> Option<TestReg> {
-            Some(TestReg::GPR0)
+    impl TestRegTestIter<TestReg> {
+        fn new() -> Self {
+            Self {
+                fp_regs: Box::new(
+                    [TestReg::FP0, TestReg::FP1, TestReg::FP2, TestReg::FP3]
+                        .iter()
+                        .cloned(),
+                ),
+                gp_regs: Box::new(
+                    [TestReg::GPR0, TestReg::GPR1, TestReg::GPR2, TestReg::GPR3]
+                        .iter()
+                        .cloned(),
+                ),
+            }
+        }
+    }
+
+    impl TestRegIter<TestReg> for TestRegTestIter<TestReg> {
+        fn next_reg(&mut self, ty: &Ty) -> Option<TestReg> {
+            match ty {
+                Ty::Double | Ty::Float => self.fp_regs.next(),
+                Ty::Func(_func_ty) => todo!(),
+                Ty::Int(bitw) => {
+                    if *bitw <= 64 {
+                        self.gp_regs.next()
+                    } else {
+                        todo!()
+                    }
+                }
+                Ty::Ptr(addrspace) => {
+                    assert_eq!(*addrspace, 0);
+                    self.gp_regs.next()
+                }
+                Ty::Void => todo!(),
+            }
         }
     }
 
