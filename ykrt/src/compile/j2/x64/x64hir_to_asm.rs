@@ -2683,6 +2683,46 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_srem(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        SRem { tyidx, lhs, rhs }: &SRem,
+    ) -> Result<(), CompilationError> {
+        let bitw = self.m.ty(*tyidx).bitw();
+        let [_lhsr, rhsr, _] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &[Reg::RAX],
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Signed,
+                    regs: &[Reg::RDX],
+                    can_be_same_as_input: false,
+                },
+            ],
+        )?;
+        assert_ne!(rhsr, Reg::RAX);
+        assert_ne!(rhsr, Reg::RDX);
+        assert!(bitw > 0 && bitw <= 64);
+        self.asm
+            .push_inst(IcedInst::with1(Code::Idiv_rm64, rhsr.to_reg64()));
+        self.asm.push_inst(Ok(IcedInst::with(Code::Cqo)));
+        Ok(())
+    }
+
     fn i_store(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -4714,6 +4754,109 @@ mod test {
               cvtsi2sd fp.128._, r.64._
               ; blackbox %1
               ; exit [%0]
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_srem() {
+        // i64
+        codegen_and_test(
+            "
+              extern f(i64)
+
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i64 = srem %0, %1
+              call f %2(%3)
+              exit [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i64 = srem %0, %1
+              cqo
+              idiv r.64._
+              ...
+              mov rdi, rdx
+              ...
+              ; call %2(%3)
+              ...
+            "],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              extern f(i32)
+
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i32 = srem %0, %1
+              call f %2(%3)
+              exit [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i32 = srem %0, %1
+              cqo
+              idiv r.64._
+              ...
+              mov rdi, rdx
+              ...
+              ; call %2(%3)
+              ...
+            "],
+        );
+
+        // i16
+        codegen_and_test(
+            "
+              extern f(i16)
+
+              %0: i16 = arg [reg]
+              %1: i16 = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i16 = srem %0, %1
+              call f %2(%3)
+              exit [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i16 = srem %0, %1
+              cqo
+              idiv r.64._
+              ...
+              mov rdi, rdx
+              ...
+              ; call %2(%3)
+              ...
+            "],
+        );
+
+        // i8
+        codegen_and_test(
+            "
+              extern f(i8)
+
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i8 = srem %0, %1
+              call f %2(%3)
+              exit [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i8 = srem %0, %1
+              cqo
+              idiv r.64._
+              ...
+              mov rdi, rdx
+              ...
+              ; call %2(%3)
+              ...
             "],
         );
     }

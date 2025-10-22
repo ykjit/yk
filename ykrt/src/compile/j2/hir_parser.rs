@@ -590,6 +590,18 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let val = self.p_local(val);
                     self.insts.push(SIToFP { tyidx, val }.into());
                 }
+                AstInst::SRem {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(SRem { tyidx, lhs, rhs }.into());
+                }
                 AstInst::Store { val, ptr } => {
                     let val = self.p_local(val);
                     let ptr = self.p_local(ptr);
@@ -954,6 +966,12 @@ enum AstInst {
         local: Span,
         ty: AstTy,
         val: Span,
+    },
+    SRem {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
     },
     Store {
         val: Span,
