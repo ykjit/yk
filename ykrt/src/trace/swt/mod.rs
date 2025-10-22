@@ -17,7 +17,10 @@ thread_local! {
     static BASIC_BLOCKS: RefCell<Vec<TracingBBlock>> = const { RefCell::new(vec![]) };
 }
 
-/// Inserts LLVM IR basicblock metadata into a thread-local BASIC_BLOCKS vector.
+/// If the current thread is tracing, records the specified basicblock into the software tracing
+/// buffer.
+///
+/// If the current thread is not tracing, it does nothing.
 ///
 /// # Arguments
 /// * `function_index` - The index of the function to which the basic block belongs.

@@ -24,6 +24,9 @@ use ykaddr::addr::symbol_to_ptr;
 /// Caller-saved registers in DWARF notation.
 static CALLER_CLOBBER_REG: [u16; 9] = [0, 1, 2, 4, 5, 8, 9, 10, 11];
 
+/// The symbol prefix given to shim functions.
+static SHIM_PREFIX: &str = "__yk_shim_";
+
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {
     /// The AOT IR.
@@ -741,6 +744,15 @@ impl TraceBuilder {
         cond: &aot_ir::Operand,
         true_bb: &aot_ir::BBlockIdx,
     ) -> Result<(), CompilationError> {
+        if let aot_ir::Operand::Local(condiid) = cond {
+            let cond_inst = self.aot_mod.inst(condiid);
+            if let aot_ir::Inst::Call { callee, .. } = cond_inst
+                && self.aot_mod.func(*callee).name() == "__yk_is_my_thread_tracing"
+            {
+                // Don't guard this.
+                return Ok(());
+            }
+        }
         let jit_cond = self.handle_operand(cond)?;
         let guard =
             self.create_guard(bid, Some(&jit_cond), *true_bb == next_bb.bbidx(), safepoint)?;
@@ -965,6 +977,22 @@ impl TraceBuilder {
         safepoint: Option<&'static aot_ir::DeoptSafepoint>,
         nextinst: &'static aot_ir::Inst,
     ) -> Result<(), CompilationError> {
+        let mut callee = *callee;
+        let mut func = self.aot_mod.func(callee);
+        // If it's a shim, forward to the unoptimised version of the function so that it has an
+        // oppertunity to be inlined into the trace.
+        if func.name().starts_with(SHIM_PREFIX) {
+            let unopt_name = func.name().strip_prefix(SHIM_PREFIX).unwrap();
+            callee = self.aot_mod.funcidx(&CString::new(unopt_name).unwrap());
+            func = self.aot_mod.func(callee);
+            let aot_ir::Ty::Func(ft) = self.aot_mod.type_(func.tyidx()) else {
+                panic!();
+            };
+            if ft.is_vararg() {
+                // We currently don't shim calls to varargs functions.
+                unreachable!();
+            }
+        }
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
         for arg in args {
@@ -983,8 +1011,7 @@ impl TraceBuilder {
         }
 
         // Check if this is a recursive call by scanning the call stack for the callee.
-        let is_recursive = self.frames.iter().any(|f| f.funcidx == Some(*callee));
-        let func = self.aot_mod.func(*callee);
+        let is_recursive = self.frames.iter().any(|f| f.funcidx == Some(callee));
         if !func.is_declaration()
             && !func.is_outline()
             && !func.is_idempotent()
@@ -1003,7 +1030,7 @@ impl TraceBuilder {
                 aot_ir::BBlockInstIdx::new(aot_inst_idx),
             );
             self.frames.push(InlinedFrame {
-                funcidx: Some(*callee),
+                funcidx: Some(callee),
                 callinst: Some(aot_iid),
                 safepoint: None,
                 args: jit_args.iter().map(PackedOperand::new).collect::<Vec<_>>(),
@@ -1013,7 +1040,7 @@ impl TraceBuilder {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
             // call) or the compiler annotated it with `yk_outline`.
             self.outline_until_after_call(bid, nextinst);
-            let jit_func_decl_idx = self.handle_func(*callee)?;
+            let jit_func_decl_idx = self.handle_func(callee)?;
 
             // If the callee is marked idempotent, retrieve the dynamically captured runtime value
             // and stash it inside the JIT IR call instruction. Later if the optimiser can prove
@@ -1040,7 +1067,7 @@ impl TraceBuilder {
                 idem_const,
             )?
             .into();
-            if self.frames.first().unwrap().funcidx == Some(*callee) {
+            if self.frames.first().unwrap().funcidx == Some(callee) {
                 // Store the block id and safepoint for the most recently seen recursive
                 // interpreter call.
                 self.last_interp_call = Some((*bid, safepoint.unwrap()));

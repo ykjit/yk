@@ -110,6 +110,8 @@ handle_arg() {
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
                 # Make optimised clones of functions.
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"
+                # "shim" callees of traceable code.
+                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-shim-callees"
             fi
 
             # Disable backend optimisations that Yk can't handle by adding the
