@@ -5044,6 +5044,109 @@ mod test {
     }
 
     #[test]
+    fn cg_udiv() {
+        // i64
+        codegen_and_test(
+            "
+              extern f(i64)
+
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i64 = udiv %0, %1
+              call f %2(%3)
+              exit [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i64 = udiv %0, %1
+              xor edx, edx
+              div r.64._
+              ...
+              mov rdi, rax
+              ...
+              ; call %2(%3)
+              ...
+            "],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              extern f(i32)
+
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i32 = udiv %0, %1
+              call f %2(%3)
+              exit [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i32 = udiv %0, %1
+              xor edx, edx
+              div r.64._
+              ...
+              mov rdi, rax
+              ...
+              ; call %2(%3)
+              ...
+            "],
+        );
+
+        // i16
+        codegen_and_test(
+            "
+              extern f(i16)
+
+              %0: i16 = arg [reg]
+              %1: i16 = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i16 = udiv %0, %1
+              call f %2(%3)
+              exit [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i16 = udiv %0, %1
+              xor edx, edx
+              div r.64._
+              ...
+              mov rdi, rax
+              ...
+              ; call %2(%3)
+              ...
+            "],
+        );
+
+        // i8
+        codegen_and_test(
+            "
+              extern f(i8)
+
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i8 = udiv %0, %1
+              call f %2(%3)
+              exit [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i8 = udiv %0, %1
+              xor edx, edx
+              div r.64._
+              ...
+              mov rdi, rax
+              ...
+              ; call %2(%3)
+              ...
+            "],
+        );
+    }
+
+    #[test]
     fn cg_zext() {
         codegen_and_test(
             "
