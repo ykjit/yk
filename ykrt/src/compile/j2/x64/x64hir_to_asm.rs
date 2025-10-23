@@ -4206,7 +4206,7 @@ mod test {
             "
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
-              %2: i1 = eq %0, %1
+              %2: i1 = icmp eq %0, %1
               guard true, %2, []
               exit [%0, %1]
             ",
@@ -4226,7 +4226,7 @@ mod test {
             "
               %0: i32 = arg [reg]
               %1: i32 = 0x14
-              %2: i1 = eq %0, %1
+              %2: i1 = icmp eq %0, %1
               guard true, %2, []
               exit [%0]
             ",
@@ -4246,7 +4246,7 @@ mod test {
             "
               %0: i8 = arg [reg]
               %1: i8 = arg [reg]
-              %2: i1 = eq %0, %1
+              %2: i1 = icmp eq %0, %1
               guard true, %2, []
               exit [%0, %1]
             ",
@@ -4269,7 +4269,7 @@ mod test {
             "
               %0: i8 = arg [reg]
               %1: i8 = arg [reg]
-              %2: i1 = sgt %0, %1
+              %2: i1 = icmp sgt %0, %1
               guard true, %2, []
               exit [%0, %1]
             ",
@@ -4292,7 +4292,7 @@ mod test {
             "
               %0: i8 = arg [reg]
               %1: i8 = arg [reg]
-              %2: i1 = ugt %0, %1
+              %2: i1 = icmp ugt %0, %1
               guard true, %2, []
               exit [%0, %1]
             ",
@@ -4318,7 +4318,7 @@ mod test {
             "
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
-              %2: i1 = eq %0, %1
+              %2: i1 = icmp eq %0, %1
               blackbox %2
               exit [%0, %1]
             ",

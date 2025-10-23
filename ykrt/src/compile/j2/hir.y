@@ -101,8 +101,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "GLOBAL" {
       Ok(AstInst::Global { local: $1?.span(), ty: $3?, name: $5?.span() })
     }
-  | "LOCAL" ":" Ty "=" IPred "LOCAL" "," "LOCAL" {
-      Ok(AstInst::ICmp{ local: $1?.span(), ty: $3?, pred: $5?, lhs: $6?.span(), rhs: $8?.span() })
+  | "LOCAL" ":" Ty "=" "ICMP" IPred "LOCAL" "," "LOCAL" {
+      Ok(AstInst::ICmp{ local: $1?.span(), ty: $3?, pred: $6?, lhs: $7?.span(), rhs: $9?.span() })
     }
   | "LOCAL" ":" Ty "=" "LOAD" "LOCAL" {
       Ok(AstInst::Load { local: $1?.span(), ty: $3?, ptr: $6?.span() })

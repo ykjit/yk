@@ -3086,7 +3086,7 @@ mod test {
             "
           %0: i8 = arg [reg]
           %1: i16 = arg [reg]
-          %2: i1 = eq %0, %1
+          %2: i1 = icmp eq %0, %1
         ",
         );
     }
