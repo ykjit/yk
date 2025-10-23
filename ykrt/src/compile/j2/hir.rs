@@ -1561,11 +1561,11 @@ pub(super) struct Switch {
     pub seen_bbidxs: Vec<aot_ir::BBlockIdx>,
 }
 
-/// A comparison, with normal LLVM semantics.
+/// Integer comparison, with normal LLVM semantics.
 #[derive(Debug)]
 pub(super) struct ICmp {
     /// What LLVM calls `cond`.
-    pub pred: Pred,
+    pub pred: IPred,
     /// What LLVM calls `op1`.
     pub lhs: InstIdx,
     /// What LLVM calls `op2`.
@@ -1582,13 +1582,13 @@ impl InstT for ICmp {
         );
     }
 
-    /// For [Pred::Eq] and [Pred::Ne], canonicalise to favour references to constants on the RHS of
+    /// For [IPred::Eq] and [IPred::Ne], canonicalise to favour references to constants on the RHS of
     /// the addition.
     fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
     where
         Self: Sized,
     {
-        if (self.pred == Pred::Eq || self.pred == Pred::Ne)
+        if (self.pred == IPred::Eq || self.pred == IPred::Ne)
             && matches!(b.inst(self.lhs), Inst::Const(_))
             && !matches!(b.inst(self.rhs), Inst::Const(_))
         {
@@ -1639,9 +1639,9 @@ impl InstT for ICmp {
     }
 }
 
-/// A comparison predicate. These have the same names and semantics as their LLVM IR equivalents.
+/// Integer comparison predicate with the same semantics as their LLVM IR equivalents.
 #[derive(Debug, PartialEq)]
-pub(super) enum Pred {
+pub(super) enum IPred {
     Eq,
     Ne,
     Ugt,
@@ -1654,27 +1654,27 @@ pub(super) enum Pred {
     Sle,
 }
 
-impl Pred {
+impl IPred {
     /// Does this predicate do signed comparison (i.e. requiring sign extension of arguments).
     pub(super) fn is_signed(&self) -> bool {
         match self {
-            Pred::Eq | Pred::Ne | Pred::Ugt | Pred::Uge | Pred::Ult | Pred::Ule => false,
-            Pred::Sgt | Pred::Sge | Pred::Slt | Pred::Sle => true,
+            IPred::Eq | IPred::Ne | IPred::Ugt | IPred::Uge | IPred::Ult | IPred::Ule => false,
+            IPred::Sgt | IPred::Sge | IPred::Slt | IPred::Sle => true,
         }
     }
 
     fn to_str(&self) -> &str {
         match self {
-            Pred::Eq => "eq",
-            Pred::Ne => "ne",
-            Pred::Ugt => "ugt",
-            Pred::Uge => "uge",
-            Pred::Ult => "ult",
-            Pred::Ule => "ule",
-            Pred::Sgt => "sgt",
-            Pred::Sge => "sge",
-            Pred::Slt => "slt",
-            Pred::Sle => "sle",
+            IPred::Eq => "eq",
+            IPred::Ne => "ne",
+            IPred::Ugt => "ugt",
+            IPred::Uge => "uge",
+            IPred::Ult => "ult",
+            IPred::Ule => "ule",
+            IPred::Sgt => "sgt",
+            IPred::Sge => "sge",
+            IPred::Slt => "slt",
+            IPred::Sle => "sle",
         }
     }
 }

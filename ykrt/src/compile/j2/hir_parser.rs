@@ -900,7 +900,7 @@ enum AstInst {
     },
     ICmp {
         local: Span,
-        pred: Pred,
+        pred: IPred,
         ty: AstTy,
         lhs: Span,
         rhs: Span,

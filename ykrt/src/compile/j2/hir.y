@@ -101,7 +101,7 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "GLOBAL" {
       Ok(AstInst::Global { local: $1?.span(), ty: $3?, name: $5?.span() })
     }
-  | "LOCAL" ":" Ty "=" Pred "LOCAL" "," "LOCAL" {
+  | "LOCAL" ":" Ty "=" IPred "LOCAL" "," "LOCAL" {
       Ok(AstInst::ICmp{ local: $1?.span(), ty: $3?, pred: $5?, lhs: $6?.span(), rhs: $8?.span() })
     }
   | "LOCAL" ":" Ty "=" "LOAD" "LOCAL" {
@@ -178,17 +178,17 @@ LocalsList -> Result<Vec<Span>, Box<dyn Error>>:
   | "LOCAL" { Ok(vec![$1?.span()]) }
   ;
 
-Pred -> Result<Pred, Box<dyn Error>>:
-    "EQ" { Ok(Pred::Eq) }
-  | "NE" { Ok(Pred::Ne) }
-  | "UGT" { Ok(Pred::Ugt) }
-  | "UGE" { Ok(Pred::Uge) }
-  | "ULT" { Ok(Pred::Ult) }
-  | "ULE" { Ok(Pred::Ule) }
-  | "SGT" { Ok(Pred::Sgt) }
-  | "SGE" { Ok(Pred::Sge) }
-  | "SLT" { Ok(Pred::Slt) }
-  | "SLE" { Ok(Pred::Sle) }
+IPred -> Result<IPred, Box<dyn Error>>:
+    "EQ" { Ok(IPred::Eq) }
+  | "NE" { Ok(IPred::Ne) }
+  | "UGT" { Ok(IPred::Ugt) }
+  | "UGE" { Ok(IPred::Uge) }
+  | "ULT" { Ok(IPred::Ult) }
+  | "ULE" { Ok(IPred::Ule) }
+  | "SGT" { Ok(IPred::Sgt) }
+  | "SGE" { Ok(IPred::Sge) }
+  | "SLT" { Ok(IPred::Slt) }
+  | "SLE" { Ok(IPred::Sle) }
   ;
 
 Ty -> Result<AstTy, Box<dyn Error>>:
@@ -211,7 +211,7 @@ Unmatched -> ():
 
 %%
 
-use crate::compile::j2::{hir::Pred, hir_parser::*};
+use crate::compile::j2::{hir::IPred, hir_parser::*};
 use std::error::Error;
 
 fn flattenr<T>(lhs: Result<Vec<T>, Box<dyn Error>>, rhs: Result<T, Box<dyn Error>>)

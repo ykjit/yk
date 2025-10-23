@@ -228,7 +228,7 @@ impl<'a> X64HirToAsm<'a> {
         };
 
         let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred == &Pred::Eq {
+        let (imm, mut in_fill) = if pred == &IPred::Eq {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Zeroed)
         } else if pred.is_signed() {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
@@ -244,29 +244,29 @@ impl<'a> X64HirToAsm<'a> {
         }
         let c = if *expect {
             match pred {
-                Pred::Eq => Code::Jne_rel32_64,
-                Pred::Ne => Code::Je_rel32_64,
-                Pred::Ugt => Code::Jbe_rel32_64,
-                Pred::Uge => Code::Jb_rel32_64,
-                Pred::Ult => Code::Jae_rel32_64,
-                Pred::Ule => Code::Ja_rel32_64,
-                Pred::Sgt => Code::Jle_rel32_64,
-                Pred::Sge => Code::Jl_rel32_64,
-                Pred::Slt => Code::Jge_rel32_64,
-                Pred::Sle => Code::Jg_rel32_64,
+                IPred::Eq => Code::Jne_rel32_64,
+                IPred::Ne => Code::Je_rel32_64,
+                IPred::Ugt => Code::Jbe_rel32_64,
+                IPred::Uge => Code::Jb_rel32_64,
+                IPred::Ult => Code::Jae_rel32_64,
+                IPred::Ule => Code::Ja_rel32_64,
+                IPred::Sgt => Code::Jle_rel32_64,
+                IPred::Sge => Code::Jl_rel32_64,
+                IPred::Slt => Code::Jge_rel32_64,
+                IPred::Sle => Code::Jg_rel32_64,
             }
         } else {
             match pred {
-                Pred::Eq => Code::Je_rel32_64,
-                Pred::Ne => Code::Jne_rel32_64,
-                Pred::Ugt => Code::Ja_rel32_64,
-                Pred::Uge => Code::Jae_rel32_64,
-                Pred::Ult => Code::Jb_rel32_64,
-                Pred::Ule => Code::Jbe_rel32_64,
-                Pred::Sgt => Code::Jg_rel32_64,
-                Pred::Sge => Code::Jge_rel32_64,
-                Pred::Slt => Code::Jl_rel32_64,
-                Pred::Sle => Code::Jle_rel32_64,
+                IPred::Eq => Code::Je_rel32_64,
+                IPred::Ne => Code::Jne_rel32_64,
+                IPred::Ugt => Code::Ja_rel32_64,
+                IPred::Uge => Code::Jae_rel32_64,
+                IPred::Ult => Code::Jb_rel32_64,
+                IPred::Ule => Code::Jbe_rel32_64,
+                IPred::Sgt => Code::Jg_rel32_64,
+                IPred::Sge => Code::Jge_rel32_64,
+                IPred::Slt => Code::Jl_rel32_64,
+                IPred::Sle => Code::Jle_rel32_64,
             }
         };
         if let Some(imm) = imm {
@@ -313,7 +313,7 @@ impl<'a> X64HirToAsm<'a> {
                 IcedInst::with_branch(c, 0),
                 RelocKind::BranchWithLabel(label),
             );
-            self.i_cmp_const(bitw, rmop, imm);
+            self.i_icmp_const(bitw, rmop, imm);
             Ok(label)
         } else {
             let (rmop, rhsr) =
@@ -371,12 +371,12 @@ impl<'a> X64HirToAsm<'a> {
                 IcedInst::with_branch(c, 0),
                 RelocKind::BranchWithLabel(label),
             );
-            self.i_cmp_reg(bitw, rmop, rhsr);
+            self.i_icmp_reg(bitw, rmop, rhsr);
             Ok(label)
         }
     }
 
-    fn i_cmp_const(&mut self, bitw: u32, rmop: RegOrMemOp, rhs: i32) {
+    fn i_icmp_const(&mut self, bitw: u32, rmop: RegOrMemOp, rhs: i32) {
         if rhs == 0
             && let RegOrMemOp::Reg(reg) = rmop
         {
@@ -422,7 +422,7 @@ impl<'a> X64HirToAsm<'a> {
         }
     }
 
-    fn i_cmp_reg(&mut self, bitw: u32, rmop: RegOrMemOp, rhsr: Reg) {
+    fn i_icmp_reg(&mut self, bitw: u32, rmop: RegOrMemOp, rhsr: Reg) {
         match rmop {
             RegOrMemOp::Reg(lhsr) => match bitw {
                 1..=32 => self.asm.push_inst(IcedInst::with2(
@@ -2178,20 +2178,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }: &ICmp,
     ) -> Result<(), CompilationError> {
         let c = match pred {
-            Pred::Eq => Code::Sete_rm8,
-            Pred::Ne => Code::Setne_rm8,
-            Pred::Ugt => Code::Seta_rm8,
-            Pred::Uge => Code::Setae_rm8,
-            Pred::Ult => Code::Setb_rm8,
-            Pred::Ule => Code::Setbe_rm8,
-            Pred::Sgt => Code::Setg_rm8,
-            Pred::Sge => Code::Setge_rm8,
-            Pred::Slt => Code::Setl_rm8,
-            Pred::Sle => Code::Setle_rm8,
+            IPred::Eq => Code::Sete_rm8,
+            IPred::Ne => Code::Setne_rm8,
+            IPred::Ugt => Code::Seta_rm8,
+            IPred::Uge => Code::Setae_rm8,
+            IPred::Ult => Code::Setb_rm8,
+            IPred::Ule => Code::Setbe_rm8,
+            IPred::Sgt => Code::Setg_rm8,
+            IPred::Sge => Code::Setge_rm8,
+            IPred::Slt => Code::Setl_rm8,
+            IPred::Sle => Code::Setle_rm8,
         };
 
         let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred == &Pred::Eq {
+        let (imm, mut in_fill) = if pred == &IPred::Eq {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Zeroed)
         } else if pred.is_signed() {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)

@@ -1185,16 +1185,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let lhs = self.p_operand(lhs)?;
         let rhs = self.p_operand(rhs)?;
         let pred = match pred {
-            Predicate::Equal => hir::Pred::Eq,
-            Predicate::NotEqual => hir::Pred::Ne,
-            Predicate::UnsignedGreater => hir::Pred::Ugt,
-            Predicate::UnsignedGreaterEqual => hir::Pred::Uge,
-            Predicate::UnsignedLess => hir::Pred::Ult,
-            Predicate::UnsignedLessEqual => hir::Pred::Ule,
-            Predicate::SignedGreater => hir::Pred::Sgt,
-            Predicate::SignedGreaterEqual => hir::Pred::Sge,
-            Predicate::SignedLess => hir::Pred::Slt,
-            Predicate::SignedLessEqual => hir::Pred::Sle,
+            Predicate::Equal => hir::IPred::Eq,
+            Predicate::NotEqual => hir::IPred::Ne,
+            Predicate::UnsignedGreater => hir::IPred::Ugt,
+            Predicate::UnsignedGreaterEqual => hir::IPred::Uge,
+            Predicate::UnsignedLess => hir::IPred::Ult,
+            Predicate::UnsignedLessEqual => hir::IPred::Ule,
+            Predicate::SignedGreater => hir::IPred::Sgt,
+            Predicate::SignedGreaterEqual => hir::IPred::Sge,
+            Predicate::SignedLess => hir::IPred::Slt,
+            Predicate::SignedLessEqual => hir::IPred::Sle,
         };
         self.push_inst_and_link_local(
             iid,
@@ -1287,7 +1287,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         let icmp = self.opt.push_inst(
             hir::ICmp {
-                pred: hir::Pred::Eq,
+                pred: hir::IPred::Eq,
                 lhs: val_iidx,
                 rhs: const_iidx,
                 samesign: false,
@@ -1488,7 +1488,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 )?;
                 self.opt.push_inst(
                     hir::ICmp {
-                        pred: hir::Pred::Eq,
+                        pred: hir::IPred::Eq,
                         lhs: val_iidx,
                         rhs: const_iidx,
                         samesign: false,
@@ -1505,7 +1505,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     self.const_to_iidx(tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(bitw, *v)))?;
                 let next_icmp = self.opt.push_inst(
                     hir::ICmp {
-                        pred: hir::Pred::Eq,
+                        pred: hir::IPred::Eq,
                         lhs: val_iidx,
                         rhs: const_iidx,
                         samesign: false,
