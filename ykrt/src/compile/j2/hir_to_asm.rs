@@ -358,6 +358,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_fadd(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::FCmp(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fcmp(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::FDiv(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fdiv(&mut ra, b, iidx, x)?;
@@ -760,6 +765,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &FAdd,
+    ) -> Result<(), CompilationError>;
+
+    fn i_fcmp(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FCmp,
     ) -> Result<(), CompilationError>;
 
     fn i_fdiv(

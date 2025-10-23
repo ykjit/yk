@@ -86,6 +86,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "FADD" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FAdd { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FCMP" FPred "LOCAL" "," "LOCAL" {
+      Ok(AstInst::FCmp{ local: $1?.span(), ty: $3?, pred: $6?, lhs: $7?.span(), rhs: $9?.span() })
+    }
   | "LOCAL" ":" Ty "=" "FDIV" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FDiv { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
@@ -166,6 +169,25 @@ Const -> Result<AstConst, Box<dyn Error>>:
     "CONST_DOUBLE" { Ok(AstConst::Double($1?.span())) }
   | "CONST_FLOAT" { Ok(AstConst::Float($1?.span())) }
   | "INT" { Ok(AstConst::Int($1?.span())) }
+  ;
+
+FPred -> Result<FPred, Box<dyn Error>>:
+    "FALSE" { Ok(FPred::False) }
+  | "OEQ" { Ok(FPred::Oeq) }
+  | "OGT" { Ok(FPred::Ogt) }
+  | "OGE" { Ok(FPred::Oge) }
+  | "OLT" { Ok(FPred::Olt) }
+  | "OLE" { Ok(FPred::Ole) }
+  | "ONE" { Ok(FPred::One) }
+  | "ORD" { Ok(FPred::Ord) }
+  | "UEQ" { Ok(FPred::Ueq) }
+  | "UGT" { Ok(FPred::Ugt) }
+  | "UGE" { Ok(FPred::Uge) }
+  | "ULT" { Ok(FPred::Ult) }
+  | "ULE" { Ok(FPred::Ule) }
+  | "UNE" { Ok(FPred::Une) }
+  | "UNO" { Ok(FPred::Uno) }
+  | "TRUE" { Ok(FPred::True) }
   ;
 
 Locals -> Result<Vec<Span>, Box<dyn Error>>:

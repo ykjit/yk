@@ -576,6 +576,7 @@ pub(super) enum Inst {
     DynPtrAdd,
     Exit,
     FAdd,
+    FCmp,
     FDiv,
     FMul,
     FSub,
@@ -1241,6 +1242,112 @@ impl InstT for FAdd {
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
         m.ty(self.tyidx)
+    }
+}
+
+/// Floating point comparison, with normal LLVM semantics.
+#[derive(Debug)]
+pub(super) struct FCmp {
+    /// What LLVM calls `cond`.
+    pub pred: FPred,
+    /// What LLVM calls `op1`.
+    pub lhs: InstIdx,
+    /// What LLVM calls `op2`.
+    pub rhs: InstIdx,
+}
+
+impl InstT for FCmp {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).ty(m),
+            b.inst(self.rhs).ty(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.lhs);
+        f(self.rhs);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            pred: self.pred,
+            lhs: f(self.lhs),
+            rhs: f(self.rhs),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "fcmp {} %{}, %{}",
+            self.pred.to_str(),
+            usize::from(self.lhs),
+            usize::from(self.rhs)
+        )
+    }
+
+    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
+        &Ty::Int(1)
+    }
+}
+
+/// Floating point comparison predicate with the same semantics as their LLVM IR equivalents.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(super) enum FPred {
+    False,
+    Oeq,
+    Ogt,
+    Oge,
+    Olt,
+    Ole,
+    One,
+    Ord,
+    Ueq,
+    Ugt,
+    Uge,
+    Ult,
+    Ule,
+    Une,
+    Uno,
+    True,
+}
+
+impl FPred {
+    fn to_str(self) -> &'static str {
+        match self {
+            FPred::False => "false",
+            FPred::Oeq => "oeq",
+            FPred::Ogt => "ogt",
+            FPred::Oge => "oge",
+            FPred::Olt => "olt",
+            FPred::Ole => "ole",
+            FPred::One => "one",
+            FPred::Ord => "ord",
+            FPred::Ueq => "ueq",
+            FPred::Ugt => "ugt",
+            FPred::Uge => "uge",
+            FPred::Ult => "ult",
+            FPred::Ule => "ule",
+            FPred::Une => "une",
+            FPred::Uno => "uno",
+            FPred::True => "true",
+        }
     }
 }
 

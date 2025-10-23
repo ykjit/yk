@@ -748,7 +748,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 Inst::CondBr { .. } => self.p_condbr(iid, bid, inst)?,
                 Inst::DebugStr { .. } => todo!(),
                 Inst::ExtractValue { .. } => todo!(),
-                Inst::FCmp { .. } => todo!(),
+                Inst::FCmp { .. } => self.p_fcmp(iid, inst)?,
                 Inst::FNeg { val: _ } => todo!(),
                 Inst::ICmp { .. } => self.p_icmp(iid, inst)?,
                 Inst::IndirectCall { .. } => self.p_icall(iid, bid, inst)?,
@@ -1170,6 +1170,40 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             safepoint,
             None,
         )
+    }
+
+    fn p_fcmp(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::FCmp {
+            tyidx: _,
+            lhs,
+            pred,
+            rhs,
+        } = inst
+        else {
+            panic!()
+        };
+        let lhs = self.p_operand(lhs)?;
+        let rhs = self.p_operand(rhs)?;
+        let pred = match pred {
+            FloatPredicate::False => hir::FPred::False,
+            FloatPredicate::OrderedEqual => hir::FPred::Oeq,
+            FloatPredicate::OrderedGreater => hir::FPred::Ogt,
+            FloatPredicate::OrderedGreaterEqual => hir::FPred::Oge,
+            FloatPredicate::OrderedLess => hir::FPred::Olt,
+            FloatPredicate::OrderedLessEqual => hir::FPred::Ole,
+            FloatPredicate::OrderedNotEqual => hir::FPred::One,
+            FloatPredicate::Ordered => hir::FPred::Ord,
+            FloatPredicate::Unordered => hir::FPred::Uno,
+            FloatPredicate::UnorderedEqual => hir::FPred::Ueq,
+            FloatPredicate::UnorderedGreater => hir::FPred::Ugt,
+            FloatPredicate::UnorderedGreaterEqual => hir::FPred::Uge,
+            FloatPredicate::UnorderedLess => hir::FPred::Ult,
+            FloatPredicate::UnorderedLessEqual => hir::FPred::Ule,
+            FloatPredicate::UnorderedNotEqual => hir::FPred::Une,
+            FloatPredicate::True => hir::FPred::True,
+        };
+        self.push_inst_and_link_local(iid, hir::FCmp { pred, lhs, rhs }.into())
+            .map(|_| ())
     }
 
     fn p_icmp(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
