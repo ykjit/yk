@@ -2816,13 +2816,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }],
             )?;
 
-            match bitw {
-                64 => {
-                    self.asm
-                        .push_inst(IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64()));
-                }
+            self.asm.push_inst(match bitw {
+                32 => IcedInst::with1(Code::Neg_rm32, rhsr.to_reg32()),
+                64 => IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64()),
                 x => todo!("{x}"),
-            }
+            });
         } else if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
             let [lhsr] = ra.alloc(
                 self,
@@ -5433,6 +5431,21 @@ mod test {
               ...
               ; %2: i32 = sub %0, %1
               sub r.32.x, r.32.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 0
+              %2: i32 = sub %1, %0
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %2: i32 = sub %1, %0
+              neg r.32._
               ...
             "],
         );
