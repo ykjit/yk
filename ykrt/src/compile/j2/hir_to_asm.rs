@@ -654,21 +654,22 @@ pub(super) trait HirToAsmBackend {
     ///   of the spilt value.
     fn align_spill(&self, stack_off: u32, bitw: u32) -> u32;
 
-    /// Spill `bitw` bits in `reg` to `stack_off` (which may or may not be aligned for `bitw`).
-    /// This function may leave CPU flags in an undefined state.
+    /// Spill `bitw` bits in `reg`, whose fill is `in_fill` to `stack_off` (which may or may not be
+    /// aligned for `bitw`). Note: this function may leave CPU flags in an undefined state.
     fn spill(
         &mut self,
         reg: Self::Reg,
-        fill: RegFill,
+        in_fill: RegFill,
         stack_off: u32,
         bitw: u32,
     ) -> Result<(), CompilationError>;
 
+    /// Unspill `bitw` bits from `stack_off` to `reg` with a fill of `out_fill`.
     fn unspill(
         &mut self,
         stack_off: u32,
         reg: Self::Reg,
-        fill: RegFill,
+        out_fill: RegFill,
         bitw: u32,
     ) -> Result<(), CompilationError>;
 

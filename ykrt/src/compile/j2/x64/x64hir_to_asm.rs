@@ -1177,7 +1177,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn spill(
         &mut self,
         reg: Reg,
-        fill: RegFill,
+        in_fill: RegFill,
         stack_off: u32,
         bitw: u32,
     ) -> Result<(), CompilationError> {
@@ -1185,7 +1185,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         if reg.is_gp() {
             match bitw {
                 1 => {
-                    if fill == RegFill::Zeroed {
+                    if in_fill == RegFill::Zeroed {
                         self.asm
                             .push_inst(IcedInst::with2(Code::Mov_rm8_r8, mop, reg.to_reg8()))
                     } else {
@@ -1253,13 +1253,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         &mut self,
         stack_off: u32,
         reg: Self::Reg,
-        fill: RegFill,
+        out_fill: RegFill,
         bitw: u32,
     ) -> Result<(), CompilationError> {
         let memop = MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off));
         if reg.is_gp() {
             match bitw {
-                1..=8 => match fill {
+                1..=8 => match out_fill {
                     RegFill::Undefined | RegFill::Zeroed => {
                         self.asm.push_inst(IcedInst::with2(
                             Code::Movzx_r32_rm8,
@@ -1278,7 +1278,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         x => todo!("{x}"),
                     },
                 },
-                16 => match fill {
+                16 => match out_fill {
                     RegFill::Undefined | RegFill::Zeroed => {
                         self.asm.push_inst(IcedInst::with2(
                             Code::Movzx_r32_rm16,
@@ -1294,7 +1294,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         ));
                     }
                 },
-                32 => match fill {
+                32 => match out_fill {
                     RegFill::Undefined | RegFill::Zeroed => {
                         self.asm.push_inst(IcedInst::with2(
                             Code::Mov_r32_rm32,
@@ -1310,7 +1310,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         ));
                     }
                 },
-                64 => match fill {
+                64 => match out_fill {
                     RegFill::Undefined | RegFill::Zeroed => {
                         self.asm.push_inst(IcedInst::with2(
                             Code::Mov_r64_rm64,
