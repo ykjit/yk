@@ -2578,18 +2578,65 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn i_shl(
         &mut self,
-        _ra: &mut RegAlloc<Self>,
-        _b: &Block,
-        _iidx: InstIdx,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
         Shl {
             tyidx: _,
-            lhs: _,
-            rhs: _,
-            nuw: _,
-            nsw: _,
+            lhs,
+            rhs,
+            nuw,
+            nsw,
         }: &Shl,
     ) -> Result<(), CompilationError> {
-        todo!();
+        // We don't handle nuw or nsw yet.
+        assert!(!*nuw && !*nsw);
+
+        let bitw = b.inst_bitw(self.m, *lhs);
+        if let Some(imm) = self.zero_ext_op_for_imm8(b, *rhs) {
+            let out_fill = match bitw {
+                32 | 64 => RegCnstrFill::Zeroed,
+                _ => RegCnstrFill::Undefined,
+            };
+            let [lhsr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill,
+                    regs: &NORMAL_GP_REGS,
+                }],
+            )?;
+            self.asm.push_inst(match bitw {
+                32 => IcedInst::with2(Code::Shl_rm32_imm8, lhsr.to_reg32(), imm),
+                x => todo!("{x}"),
+            });
+        } else {
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Zeroed,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &[Reg::RCX],
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Shl_rm32_CL, lhsr.to_reg32(), rhsr.to_reg8()),
+                x => todo!("{x}"),
+            });
+        }
+        Ok(())
     }
 
     fn i_sitofp(
@@ -4917,6 +4964,46 @@ mod test {
               cvtsi2sd fp.128._, r.64._
               ; blackbox %1
               ; exit [%0]
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_shl() {
+        // Constant RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 3
+              %2: i32 = shl %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i32 = shl %0, %1
+              shl r.32._, 3
+              ...
+            "],
+        );
+
+        // Variable RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = shl %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = shl %0, %1
+              shl r.32.x, cl
+              ...
             "],
         );
     }
