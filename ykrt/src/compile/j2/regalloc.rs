@@ -165,102 +165,57 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         be: &mut AB,
         entry_vlocs: &[VarLocs<AB::Reg>],
     ) {
-        // In essence, we do all of the copying/spilling/unspilling of the entry variables in one
-        // go, as that allows us to minimise register shuffling. This can be thought of as "one
-        // register allocation call covering multiple instructions".
+        // In essence, this is a simple, special case of normal register allocation. First we work
+        // out what the rstate after trace entry will be, diff that, and generate the appropriate
+        // code.
 
-        let mut self_copies = Vec::new();
-        let mut distinct_copies = Vec::new();
-        let mut unspills = Vec::new();
-        'a: for (dst_reg, rstate) in self
-            .rstates
-            .iter()
-            .filter(|(_, rstate)| !rstate.iidxs.is_empty())
-        {
-            let (max_bitw, max_bitw_iter) = iter_maxbitw_iidxs(self.m, self.b, &rstate.iidxs);
-            for iidx in max_bitw_iter {
-                for vloc in entry_vlocs[usize::from(iidx)].iter() {
-                    if let VarLoc::Reg(src_reg) = vloc {
-                        let cpy = RegCopy {
-                            bitw: max_bitw,
-                            src_reg: *src_reg,
-                            src_fill: RegFill::Undefined,
-                            dst_reg,
-                            dst_fill: rstate.fill,
-                        };
-                        if *src_reg == dst_reg {
-                            self_copies.push(cpy);
-                        } else {
-                            distinct_copies.push(cpy);
-                        }
-                        continue 'a;
-                    }
-                }
-
-                for vloc in entry_vlocs[usize::from(iidx)].iter() {
-                    match vloc {
-                        VarLoc::Stack(_stack_off) => {
-                            unspills.push(RegUnspill {
-                                iidxs: smallvec![iidx],
-                                reg: dst_reg,
-                                fill: rstate.fill,
-                            });
-                            break;
-                        }
-                        VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(_) => todo!(),
-                        VarLoc::Const(_) => (),
-                    }
-                }
-            }
-        }
-
-        // Some entry variables might not have been spilled coming into the trace, but may have
-        // been required to be spilled during the trace. If so, spill them now.
-        let mut spills = Vec::new();
+        let mut in_rstate = RStates::<AB::Reg>::new();
         for (iidx, vlocs) in entry_vlocs
             .iter()
             .enumerate()
             .map(|(x, y)| (InstIdx::from(x), y))
         {
-            match self.istates[iidx] {
-                IState::None => (),
-                IState::Stack(stack_off) => {
-                    if !vlocs.iter().any(|vloc| *vloc == VarLoc::Stack(stack_off)) {
-                        let Some(VarLoc::Reg(reg)) =
-                            vlocs.iter().find(|vloc| matches!(vloc, VarLoc::Reg(_)))
-                        else {
-                            panic!("{iidx:?}")
-                        };
-                        spills.push(RegSpill {
-                            iidxs: smallvec![iidx],
-                            reg: *reg,
-                        });
+            for vloc in vlocs.iter() {
+                if let VarLoc::Reg(reg) = vloc {
+                    if !in_rstate.iidxs(*reg).is_empty() {
+                        let bitw = self.b.inst_bitw(self.m, iidx);
+                        if bitw > iidxs_maxbitw(self.m, self.b, in_rstate.iidxs(*reg)) {
+                            todo!();
+                        }
                     }
+                    in_rstate.set_fill_iidxs_gridxs(
+                        *reg,
+                        RegFill::Undefined,
+                        smallvec![iidx],
+                        smallvec![],
+                    );
                 }
-                IState::StackOff(_) => (),
             }
         }
 
-        let mut ractions = RegActions {
-            spills,
-            self_copies,
-            distinct_copies,
-            unspills,
-        };
+        let mut ractions = self.rstate_diff_to_action(&in_rstate);
         self.toposort_distinct_copies(&mut ractions).unwrap();
         self.asm_ractions(be, &ractions).unwrap();
-        for RegSpill { iidxs, reg } in &ractions.spills {
-            for iidx in iidxs {
-                let bitw = self.b.inst_bitw(self.m, *iidx);
-                match self.istates[*iidx] {
-                    IState::None => todo!(),
-                    IState::Stack(stack_off) => {
-                        be.spill(*reg, self.rstates.fill(*reg), stack_off, bitw)
-                            .unwrap();
-                    }
-                    IState::StackOff(_) => todo!(),
-                }
+
+        // Because we are, in a sense, allocating registers for multiple instructions in one go, we
+        // now need to find all `arg` instructions that we need to spill i.e. those where (1) they
+        // aren't spilt coming into the trace (2) during register allocation we've marked them down
+        // as needing spilling.
+        for (iidx, vlocs) in entry_vlocs
+            .iter()
+            .enumerate()
+            .map(|(x, y)| (InstIdx::from(x), y))
+        {
+            if let IState::Stack(stack_off) = self.istates[iidx]
+                && !vlocs.iter().any(|vloc| matches!(vloc, VarLoc::Stack(_)))
+            {
+                let Some(VarLoc::Reg(reg)) =
+                    vlocs.iter().find(|vloc| matches!(vloc, VarLoc::Reg(_)))
+                else {
+                    panic!("{iidx:?}")
+                };
+                let bitw = self.b.inst_bitw(self.m, iidx);
+                be.spill(*reg, RegFill::Undefined, stack_off, bitw).unwrap();
             }
         }
     }
@@ -424,11 +379,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
                 let mut new_unspills = Vec::new();
                 ractions.distinct_copies.retain(|rcopy| {
-                    if rcopy.src_reg != break_reg {
+                    if rcopy.dst_reg != break_reg {
                         true
                     } else {
                         new_unspills.push(RegUnspill {
-                            iidxs: self.rstates.iidxs(rcopy.src_reg).clone(),
+                            iidxs: self.rstates.iidxs(rcopy.dst_reg).clone(),
                             reg: rcopy.dst_reg,
                             fill: rcopy.src_fill,
                         });
@@ -1849,7 +1804,7 @@ mod test {
         }
 
         fn iter_test_regs() -> impl TestRegIter<Self> {
-            TestRegTestIter {}
+            TestRegTestIter::new()
         }
 
         fn from_str(s: &str) -> Option<Self> {
@@ -1867,11 +1822,46 @@ mod test {
         pub(super) struct TestRegIdx = u8;
     }
 
-    struct TestRegTestIter {}
+    struct TestRegTestIter<Reg> {
+        fp_regs: Box<dyn Iterator<Item = Reg>>,
+        gp_regs: Box<dyn Iterator<Item = Reg>>,
+    }
 
-    impl TestRegIter<TestReg> for TestRegTestIter {
-        fn next_reg(&mut self, _: &Ty) -> Option<TestReg> {
-            Some(TestReg::GPR0)
+    impl TestRegTestIter<TestReg> {
+        fn new() -> Self {
+            Self {
+                fp_regs: Box::new(
+                    [TestReg::FP0, TestReg::FP1, TestReg::FP2, TestReg::FP3]
+                        .iter()
+                        .cloned(),
+                ),
+                gp_regs: Box::new(
+                    [TestReg::GPR0, TestReg::GPR1, TestReg::GPR2, TestReg::GPR3]
+                        .iter()
+                        .cloned(),
+                ),
+            }
+        }
+    }
+
+    impl TestRegIter<TestReg> for TestRegTestIter<TestReg> {
+        fn next_reg(&mut self, ty: &Ty) -> Option<TestReg> {
+            match ty {
+                Ty::Double | Ty::Float => self.fp_regs.next(),
+                Ty::Func(_func_ty) => todo!(),
+                Ty::Int(bitw) => {
+                    if *bitw <= 64 {
+                        self.gp_regs.next()
+                    } else {
+                        todo!()
+                    }
+                }
+                Ty::Ptr(addrspace) => {
+                    assert_eq!(*addrspace, 0);
+                    self.gp_regs.next()
+                }
+                Ty::Void => todo!(),
+            }
         }
     }
 
@@ -2085,7 +2075,8 @@ mod test {
                     },
                 ],
             )?;
-            self.ra_log.push(format!("alloc {lhsr:?} {rhsr:?}"));
+            self.ra_log
+                .push(format!("alloc %{iidx:?} {lhsr:?} {rhsr:?}"));
             Ok(())
         }
 
@@ -2154,7 +2145,8 @@ mod test {
                     },
                 ],
             )?;
-            self.ra_log.push(format!("alloc {lhsr:?} {rhsr:?}"));
+            self.ra_log
+                .push(format!("alloc %{iidx:?} {lhsr:?} {rhsr:?}"));
             Ok(())
         }
 
@@ -2237,7 +2229,7 @@ mod test {
                 ],
             )?;
 
-            self.ra_log.push(format!("alloc {cndr:?}"));
+            self.ra_log.push(format!("alloc %{iidx:?} {cndr:?}"));
             Ok(TestLabelIdx::new(0))
         }
 
@@ -2277,7 +2269,7 @@ mod test {
                 ],
             )?;
             self.ra_log
-                .push(format!("alloc {lhsr:?} {rhsr:?} {outr:?}"));
+                .push(format!("alloc %{iidx:?} {lhsr:?} {rhsr:?} {outr:?}"));
             Ok(())
         }
 
@@ -2539,7 +2531,7 @@ mod test {
         "#,
             |_| true,
             &["
-          alloc GPR0 GPR1
+          alloc %2 GPR0 GPR1
           arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
           arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
         "],
@@ -2558,16 +2550,16 @@ mod test {
             |s| !s.starts_with("arrange_fill"),
             &[
                 "
-          alloc GPR0 GPR1
+          alloc %2 GPR0 GPR1
           unspill stack_off=8 GPR1 Undefined bitw=8
           copy_reg from=GPR1 to=GPR0
-          spill GPR0 Zeroed stack_off=8 bitw=8
+          spill GPR0 Undefined stack_off=8 bitw=8
         ",
                 "
-          alloc GPR0 GPR1
+          alloc %2 GPR0 GPR1
           unspill stack_off=8 GPR0 Undefined bitw=8
           copy_reg from=GPR0 to=GPR1
-          spill GPR1 Zeroed stack_off=8 bitw=8
+          spill GPR1 Undefined stack_off=8 bitw=8
         ",
             ],
         );
@@ -2584,20 +2576,20 @@ mod test {
             |s| !s.starts_with("arrange_fill"),
             &[
                 "
-          alloc GPR0 GPR1
-          alloc GPR1 GPR2
+          alloc %4 GPR0 GPR1
+          alloc %3 GPR1 GPR2
           unspill stack_off=8 GPR0 Undefined bitw=8
           copy_reg from=GPR0 to=GPR1
           copy_reg from=GPR1 to=GPR2
-          spill GPR2 Zeroed stack_off=8 bitw=8
+          spill GPR2 Undefined stack_off=8 bitw=8
         ",
                 "
-          alloc GPR0 GPR1
-          alloc GPR1 GPR2
+          alloc %4 GPR0 GPR1
+          alloc %3 GPR1 GPR2
           unspill stack_off=8 GPR1 Undefined bitw=8
           copy_reg from=GPR1 to=GPR2
           copy_reg from=GPR2 to=GPR0
-          spill GPR0 Zeroed stack_off=8 bitw=8
+          spill GPR0 Undefined stack_off=8 bitw=8
         ",
             ],
         );
@@ -2618,30 +2610,30 @@ mod test {
             |s| !s.starts_with("arrange_fill"),
             &[
                 "
-          alloc GPR0 GPR1
+          alloc %7 GPR0 GPR1
           unspill stack_off=8 GPR0 Zeroed bitw=8
-          alloc GPR0 GPR1
+          alloc %6 GPR0 GPR1
           spill GPR0 Undefined stack_off=8 bitw=8
-          alloc GPR0 GPR2
-          alloc GPR0 GPR3
+          alloc %5 GPR0 GPR2
+          alloc %4 GPR0 GPR3
           unspill stack_off=16 GPR0 Undefined bitw=8
           copy_reg from=GPR0 to=GPR1
           copy_reg from=GPR1 to=GPR2
           copy_reg from=GPR2 to=GPR3
-          spill GPR3 Zeroed stack_off=16 bitw=8
+          spill GPR3 Undefined stack_off=16 bitw=8
         ",
                 "
-          alloc GPR0 GPR1
+          alloc %7 GPR0 GPR1
           unspill stack_off=8 GPR0 Zeroed bitw=8
-          alloc GPR0 GPR1
-          spill GPR0 Undefined stack_off=8 bitw=8
-          alloc GPR0 GPR2
-          alloc GPR0 GPR3
+          alloc %6 GPR0 GPR1
+          spill add GPR0 Undefined stack_off=8 bitw=8
+          alloc %5 GPR0 GPR2
+          alloc %4 GPR0 GPR3
           unspill stack_off=16 GPR1 Undefined bitw=8
           copy_reg from=GPR1 to=GPR2
           copy_reg from=GPR2 to=GPR3
           copy_reg from=GPR3 to=GPR0
-          spill GPR0 Zeroed stack_off=16 bitw=8
+          spill GPR0 Undefined stack_off=16 bitw=8
         ",
             ],
         );
@@ -2666,16 +2658,16 @@ mod test {
         "#,
             |s| !s.starts_with("arrange_fill"),
             &["
-          alloc GPR2
-          alloc GPR0 GPR2 GPR2
-          alloc GPR2 GPR3
+          alloc %6 GPR2
+          alloc %5 GPR0 GPR2 GPR2
+          alloc %4 GPR2 GPR3
           unspill stack_off=16 GPR0 Undefined bitw=8
           copy_reg from=GPR2 to=GPR3
-          alloc GPR2 GPR0
+          alloc %3 GPR2 GPR0
           copy_reg from=GPR0 to=GPR2
           spill GPR0 Undefined stack_off=8 bitw=8
-          alloc GPR0 GPR1
-          spill GPR0 Zeroed stack_off=16 bitw=8
+          alloc %2 GPR0 GPR1
+          spill GPR0 Undefined stack_off=16 bitw=8
         "],
         );
     }
@@ -2693,7 +2685,7 @@ mod test {
             &["
           copy_reg from=GPR1 to=GPR0
           arrange_fill GPR0 bitw=8 from=Zeroed to=Undefined
-          alloc GPR0 GPR1
+          alloc %1 GPR0 GPR1
           copy_reg from=GPR0 to=GPR1
           arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
           arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
@@ -2712,7 +2704,7 @@ mod test {
         "#,
             |_| true,
             &["
-          alloc GPR0 GPR1
+          alloc %1 GPR0 GPR1
           const GPR1 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
           const GPR0 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
         "],
@@ -2732,11 +2724,11 @@ mod test {
         "#,
             |_| true,
             &["
-          alloc GPR0 GPR1
+          alloc %3 GPR0 GPR1
           copy_reg from=GPR1 to=GPR0
           arrange_fill GPR0 bitw=8 from=Zeroed to=Zeroed
           arrange_fill GPR1 bitw=8 from=Zeroed to=Zeroed
-          alloc GPR0 GPR1
+          alloc %1 GPR0 GPR1
           const GPR1 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
           const GPR0 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
         "],
@@ -2755,9 +2747,33 @@ mod test {
         "#,
             |_| true,
             &["
-          alloc FP0 FP1
+          alloc %2 FP0 FP1
           const FP1 tmp_reg=Some(GPR0) tgt_bitw=64 fill=Zeroed Double(1.0)
           const FP0 tmp_reg=Some(GPR0) tgt_bitw=64 fill=Zeroed Double(0.0)
+        "],
+        );
+    }
+
+    #[test]
+    fn only_spill_a_register_once() {
+        build_and_test(
+            r#"
+          %0: i64 = arg [reg]
+          %1: i64 = arg [reg]
+          %2: i64 = add %0, %1
+          blackbox %2
+          exit [%1, %0]
+        "#,
+            |_| true,
+            &["
+          unspill stack_off=8 GPR1 Undefined bitw=64
+          arrange_fill GPR0 bitw=64 from=Zeroed to=Undefined
+          alloc %2 GPR1 GPR0
+          unspill stack_off=16 GPR0 Undefined bitw=64
+          copy_reg from=GPR0 to=GPR1
+          arrange_fill GPR1 bitw=64 from=Undefined to=Zeroed
+          spill GPR0 Undefined stack_off=8 bitw=64
+          spill GPR1 Undefined stack_off=16 bitw=64
         "],
         );
     }
