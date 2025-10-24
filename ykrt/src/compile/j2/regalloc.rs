@@ -1981,12 +1981,12 @@ mod test {
         fn spill(
             &mut self,
             reg: Self::Reg,
-            fill: RegFill,
+            in_fill: RegFill,
             stack_off: u32,
             bitw: u32,
         ) -> Result<(), CompilationError> {
             self.ra_log.push(format!(
-                "spill {reg:?} {fill:?} stack_off={stack_off} bitw={bitw}"
+                "spill {reg:?} {in_fill:?} stack_off={stack_off} bitw={bitw}"
             ));
             Ok(())
         }
@@ -1995,11 +1995,11 @@ mod test {
             &mut self,
             stack_off: u32,
             reg: Self::Reg,
-            fill: RegFill,
+            out_fill: RegFill,
             bitw: u32,
         ) -> Result<(), CompilationError> {
             self.ra_log.push(format!(
-                "unspill stack_off={stack_off} {reg:?} {fill:?} bitw={bitw}"
+                "unspill stack_off={stack_off} {reg:?} {out_fill:?} bitw={bitw}"
             ));
             Ok(())
         }
