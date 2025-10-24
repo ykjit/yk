@@ -4784,6 +4784,46 @@ mod test {
     }
 
     #[test]
+    fn cg_lshr() {
+        // Constant RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 3
+              %2: i32 = lshr %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i32 = lshr %0, %1
+              shr r.32._, 3
+              ...
+            "],
+        );
+
+        // Variable RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = lshr %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = lshr %0, %1
+              shr r.32.x, cl
+              ...
+            "],
+        );
+    }
+
+    #[test]
     fn cg_mul() {
         // i8
         codegen_and_test(
