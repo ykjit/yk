@@ -581,6 +581,7 @@ pub(super) enum Inst {
     FMul,
     FSub,
     FPExt,
+    FPToSI,
     Guard,
     ICmp,
     IntToPtr,
@@ -1576,6 +1577,56 @@ impl InstT for FPExt {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!("fpext %{}", usize::from(self.val))
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
+}
+
+/// Cast a floating point number to a signed integer with the same semantics as LLVM's `fptosi`.
+#[derive(Debug)]
+pub(super) struct FPToSI {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+}
+
+impl InstT for FPToSI {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_matches!(
+            m.ty(self.tyidx),
+            Ty::Int(_),
+            "%{iidx:?}: val is not an integer"
+        );
+
+        assert_matches!(
+            b.inst(self.val).ty(m),
+            Ty::Double | Ty::Float,
+            "%{iidx:?}: return type is not a floating point type"
+        );
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.val);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            val: f(self.val),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("fptosi %{}", usize::from(self.val))
     }
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {

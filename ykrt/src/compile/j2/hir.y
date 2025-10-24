@@ -101,6 +101,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "FPEXT" "LOCAL" {
       Ok(AstInst::FPExt { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FPTOSI" "LOCAL" {
+      Ok(AstInst::FPToSI { local: $1?.span(), ty: $3?, val: $6?.span() })
+    }
   | "LOCAL" ":" Ty "=" "GLOBAL" {
       Ok(AstInst::Global { local: $1?.span(), ty: $3?, name: $5?.span() })
     }

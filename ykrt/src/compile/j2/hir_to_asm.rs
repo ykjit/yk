@@ -383,6 +383,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_fpext(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::FPToSI(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fptosi(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::Guard(
                     x @ Guard {
                         entry_vars: _,
@@ -806,6 +811,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &FPExt,
+    ) -> Result<(), CompilationError>;
+
+    fn i_fptosi(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FPToSI,
     ) -> Result<(), CompilationError>;
 
     /// The instruction should use [RegCnstr::KeepAlive] for the values in `Guard::entry_vars`.
