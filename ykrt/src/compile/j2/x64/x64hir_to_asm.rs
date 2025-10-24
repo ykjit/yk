@@ -1164,6 +1164,28 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
+    fn copy_reg(&mut self, from_reg: Self::Reg, to_reg: Self::Reg) -> Result<(), CompilationError> {
+        assert!(
+            (from_reg.is_gp() && to_reg.is_gp()) || (from_reg.is_fp() && to_reg.is_fp()),
+            "{from_reg:?} {to_reg:?}"
+        );
+        if from_reg.is_gp() {
+            self.asm.push_inst(IcedInst::with2(
+                Code::Mov_r64_rm64,
+                to_reg.to_reg64(),
+                from_reg.to_reg64(),
+            ));
+        } else {
+            assert!(from_reg.is_fp());
+            self.asm.push_inst(IcedInst::with2(
+                Code::Movsd_xmm_xmmm64,
+                to_reg.to_xmm(),
+                from_reg.to_xmm(),
+            ));
+        }
+        Ok(())
+    }
+
     fn align_spill(&self, stack_off: u32, bitw: u32) -> u32 {
         match bitw {
             1..=8 => stack_off + 1,
@@ -1223,28 +1245,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 32 => IcedInst::with2(Code::Movss_xmmm32_xmm, mop, reg.to_xmm()),
                 x => todo!("{x}"),
             })
-        }
-        Ok(())
-    }
-
-    fn copy_reg(&mut self, from_reg: Self::Reg, to_reg: Self::Reg) -> Result<(), CompilationError> {
-        assert!(
-            (from_reg.is_gp() && to_reg.is_gp()) || (from_reg.is_fp() && to_reg.is_fp()),
-            "{from_reg:?} {to_reg:?}"
-        );
-        if from_reg.is_gp() {
-            self.asm.push_inst(IcedInst::with2(
-                Code::Mov_r64_rm64,
-                to_reg.to_reg64(),
-                from_reg.to_reg64(),
-            ));
-        } else {
-            assert!(from_reg.is_fp());
-            self.asm.push_inst(IcedInst::with2(
-                Code::Movsd_xmm_xmmm64,
-                to_reg.to_xmm(),
-                from_reg.to_xmm(),
-            ));
         }
         Ok(())
     }
