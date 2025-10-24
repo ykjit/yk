@@ -576,6 +576,7 @@ pub(super) enum Inst {
     DynPtrAdd,
     Exit,
     FAdd,
+    FCmp,
     FDiv,
     FMul,
     FSub,
@@ -1244,6 +1245,112 @@ impl InstT for FAdd {
     }
 }
 
+/// Floating point comparison, with normal LLVM semantics.
+#[derive(Debug)]
+pub(super) struct FCmp {
+    /// What LLVM calls `cond`.
+    pub pred: FPred,
+    /// What LLVM calls `op1`.
+    pub lhs: InstIdx,
+    /// What LLVM calls `op2`.
+    pub rhs: InstIdx,
+}
+
+impl InstT for FCmp {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).ty(m),
+            b.inst(self.rhs).ty(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.lhs);
+        f(self.rhs);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            pred: self.pred,
+            lhs: f(self.lhs),
+            rhs: f(self.rhs),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "fcmp {} %{}, %{}",
+            self.pred.to_str(),
+            usize::from(self.lhs),
+            usize::from(self.rhs)
+        )
+    }
+
+    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
+        &Ty::Int(1)
+    }
+}
+
+/// Floating point comparison predicate with the same semantics as their LLVM IR equivalents.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(super) enum FPred {
+    False,
+    Oeq,
+    Ogt,
+    Oge,
+    Olt,
+    Ole,
+    One,
+    Ord,
+    Ueq,
+    Ugt,
+    Uge,
+    Ult,
+    Ule,
+    Une,
+    Uno,
+    True,
+}
+
+impl FPred {
+    fn to_str(self) -> &'static str {
+        match self {
+            FPred::False => "false",
+            FPred::Oeq => "oeq",
+            FPred::Ogt => "ogt",
+            FPred::Oge => "oge",
+            FPred::Olt => "olt",
+            FPred::Ole => "ole",
+            FPred::One => "one",
+            FPred::Ord => "ord",
+            FPred::Ueq => "ueq",
+            FPred::Ugt => "ugt",
+            FPred::Uge => "uge",
+            FPred::Ult => "ult",
+            FPred::Ule => "ule",
+            FPred::Une => "une",
+            FPred::Uno => "uno",
+            FPred::True => "true",
+        }
+    }
+}
+
 /// Floating point `/` with normal LLVM semantics.
 #[derive(Debug)]
 pub(super) struct FDiv {
@@ -1561,11 +1668,11 @@ pub(super) struct Switch {
     pub seen_bbidxs: Vec<aot_ir::BBlockIdx>,
 }
 
-/// A comparison, with normal LLVM semantics.
+/// Integer comparison, with normal LLVM semantics.
 #[derive(Debug)]
 pub(super) struct ICmp {
     /// What LLVM calls `cond`.
-    pub pred: Pred,
+    pub pred: IPred,
     /// What LLVM calls `op1`.
     pub lhs: InstIdx,
     /// What LLVM calls `op2`.
@@ -1582,13 +1689,13 @@ impl InstT for ICmp {
         );
     }
 
-    /// For [Pred::Eq] and [Pred::Ne], canonicalise to favour references to constants on the RHS of
+    /// For [IPred::Eq] and [IPred::Ne], canonicalise to favour references to constants on the RHS of
     /// the addition.
     fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
     where
         Self: Sized,
     {
-        if (self.pred == Pred::Eq || self.pred == Pred::Ne)
+        if (self.pred == IPred::Eq || self.pred == IPred::Ne)
             && matches!(b.inst(self.lhs), Inst::Const(_))
             && !matches!(b.inst(self.rhs), Inst::Const(_))
         {
@@ -1639,9 +1746,9 @@ impl InstT for ICmp {
     }
 }
 
-/// A comparison predicate. These have the same names and semantics as their LLVM IR equivalents.
+/// Integer comparison predicate with the same semantics as their LLVM IR equivalents.
 #[derive(Debug, PartialEq)]
-pub(super) enum Pred {
+pub(super) enum IPred {
     Eq,
     Ne,
     Ugt,
@@ -1654,27 +1761,27 @@ pub(super) enum Pred {
     Sle,
 }
 
-impl Pred {
+impl IPred {
     /// Does this predicate do signed comparison (i.e. requiring sign extension of arguments).
     pub(super) fn is_signed(&self) -> bool {
         match self {
-            Pred::Eq | Pred::Ne | Pred::Ugt | Pred::Uge | Pred::Ult | Pred::Ule => false,
-            Pred::Sgt | Pred::Sge | Pred::Slt | Pred::Sle => true,
+            IPred::Eq | IPred::Ne | IPred::Ugt | IPred::Uge | IPred::Ult | IPred::Ule => false,
+            IPred::Sgt | IPred::Sge | IPred::Slt | IPred::Sle => true,
         }
     }
 
     fn to_str(&self) -> &str {
         match self {
-            Pred::Eq => "eq",
-            Pred::Ne => "ne",
-            Pred::Ugt => "ugt",
-            Pred::Uge => "uge",
-            Pred::Ult => "ult",
-            Pred::Ule => "ule",
-            Pred::Sgt => "sgt",
-            Pred::Sge => "sge",
-            Pred::Slt => "slt",
-            Pred::Sle => "sle",
+            IPred::Eq => "eq",
+            IPred::Ne => "ne",
+            IPred::Ugt => "ugt",
+            IPred::Uge => "uge",
+            IPred::Ult => "ult",
+            IPred::Ule => "ule",
+            IPred::Sgt => "sgt",
+            IPred::Sge => "sge",
+            IPred::Slt => "slt",
+            IPred::Sle => "sle",
         }
     }
 }
@@ -3086,7 +3193,7 @@ mod test {
             "
           %0: i8 = arg [reg]
           %1: i16 = arg [reg]
-          %2: i1 = eq %0, %1
+          %2: i1 = icmp eq %0, %1
         ",
         );
     }

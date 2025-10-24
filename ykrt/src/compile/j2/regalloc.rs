@@ -2158,6 +2158,16 @@ mod test {
             Ok(())
         }
 
+        fn i_fcmp(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _fcmp: &FCmp,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_fdiv(
             &mut self,
             _ra: &mut RegAlloc<Self>,
@@ -2650,7 +2660,7 @@ mod test {
           %2: i8 = add %0, %1
           %3: i8 = add %2, %2
           %4: i8 = add %3, %3
-          %5: i1 = eq %0, %4
+          %5: i1 = icmp eq %0, %4
           guard true, %5, [%2]
           exit [%0, %1]
         "#,

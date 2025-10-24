@@ -748,7 +748,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 Inst::CondBr { .. } => self.p_condbr(iid, bid, inst)?,
                 Inst::DebugStr { .. } => todo!(),
                 Inst::ExtractValue { .. } => todo!(),
-                Inst::FCmp { .. } => todo!(),
+                Inst::FCmp { .. } => self.p_fcmp(iid, inst)?,
                 Inst::FNeg { val: _ } => todo!(),
                 Inst::ICmp { .. } => self.p_icmp(iid, inst)?,
                 Inst::IndirectCall { .. } => self.p_icall(iid, bid, inst)?,
@@ -1172,6 +1172,40 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         )
     }
 
+    fn p_fcmp(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::FCmp {
+            tyidx: _,
+            lhs,
+            pred,
+            rhs,
+        } = inst
+        else {
+            panic!()
+        };
+        let lhs = self.p_operand(lhs)?;
+        let rhs = self.p_operand(rhs)?;
+        let pred = match pred {
+            FloatPredicate::False => hir::FPred::False,
+            FloatPredicate::OrderedEqual => hir::FPred::Oeq,
+            FloatPredicate::OrderedGreater => hir::FPred::Ogt,
+            FloatPredicate::OrderedGreaterEqual => hir::FPred::Oge,
+            FloatPredicate::OrderedLess => hir::FPred::Olt,
+            FloatPredicate::OrderedLessEqual => hir::FPred::Ole,
+            FloatPredicate::OrderedNotEqual => hir::FPred::One,
+            FloatPredicate::Ordered => hir::FPred::Ord,
+            FloatPredicate::Unordered => hir::FPred::Uno,
+            FloatPredicate::UnorderedEqual => hir::FPred::Ueq,
+            FloatPredicate::UnorderedGreater => hir::FPred::Ugt,
+            FloatPredicate::UnorderedGreaterEqual => hir::FPred::Uge,
+            FloatPredicate::UnorderedLess => hir::FPred::Ult,
+            FloatPredicate::UnorderedLessEqual => hir::FPred::Ule,
+            FloatPredicate::UnorderedNotEqual => hir::FPred::Une,
+            FloatPredicate::True => hir::FPred::True,
+        };
+        self.push_inst_and_link_local(iid, hir::FCmp { pred, lhs, rhs }.into())
+            .map(|_| ())
+    }
+
     fn p_icmp(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
         let Inst::ICmp {
             tyidx: _,
@@ -1185,16 +1219,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let lhs = self.p_operand(lhs)?;
         let rhs = self.p_operand(rhs)?;
         let pred = match pred {
-            Predicate::Equal => hir::Pred::Eq,
-            Predicate::NotEqual => hir::Pred::Ne,
-            Predicate::UnsignedGreater => hir::Pred::Ugt,
-            Predicate::UnsignedGreaterEqual => hir::Pred::Uge,
-            Predicate::UnsignedLess => hir::Pred::Ult,
-            Predicate::UnsignedLessEqual => hir::Pred::Ule,
-            Predicate::SignedGreater => hir::Pred::Sgt,
-            Predicate::SignedGreaterEqual => hir::Pred::Sge,
-            Predicate::SignedLess => hir::Pred::Slt,
-            Predicate::SignedLessEqual => hir::Pred::Sle,
+            Predicate::Equal => hir::IPred::Eq,
+            Predicate::NotEqual => hir::IPred::Ne,
+            Predicate::UnsignedGreater => hir::IPred::Ugt,
+            Predicate::UnsignedGreaterEqual => hir::IPred::Uge,
+            Predicate::UnsignedLess => hir::IPred::Ult,
+            Predicate::UnsignedLessEqual => hir::IPred::Ule,
+            Predicate::SignedGreater => hir::IPred::Sgt,
+            Predicate::SignedGreaterEqual => hir::IPred::Sge,
+            Predicate::SignedLess => hir::IPred::Slt,
+            Predicate::SignedLessEqual => hir::IPred::Sle,
         };
         self.push_inst_and_link_local(
             iid,
@@ -1287,7 +1321,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         let icmp = self.opt.push_inst(
             hir::ICmp {
-                pred: hir::Pred::Eq,
+                pred: hir::IPred::Eq,
                 lhs: val_iidx,
                 rhs: const_iidx,
                 samesign: false,
@@ -1488,7 +1522,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 )?;
                 self.opt.push_inst(
                     hir::ICmp {
-                        pred: hir::Pred::Eq,
+                        pred: hir::IPred::Eq,
                         lhs: val_iidx,
                         rhs: const_iidx,
                         samesign: false,
@@ -1505,7 +1539,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     self.const_to_iidx(tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(bitw, *v)))?;
                 let next_icmp = self.opt.push_inst(
                     hir::ICmp {
-                        pred: hir::Pred::Eq,
+                        pred: hir::IPred::Eq,
                         lhs: val_iidx,
                         rhs: const_iidx,
                         samesign: false,

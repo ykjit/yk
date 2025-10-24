@@ -228,7 +228,7 @@ impl<'a> X64HirToAsm<'a> {
         };
 
         let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred == &Pred::Eq {
+        let (imm, mut in_fill) = if pred == &IPred::Eq {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Zeroed)
         } else if pred.is_signed() {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
@@ -244,29 +244,29 @@ impl<'a> X64HirToAsm<'a> {
         }
         let c = if *expect {
             match pred {
-                Pred::Eq => Code::Jne_rel32_64,
-                Pred::Ne => Code::Je_rel32_64,
-                Pred::Ugt => Code::Jbe_rel32_64,
-                Pred::Uge => Code::Jb_rel32_64,
-                Pred::Ult => Code::Jae_rel32_64,
-                Pred::Ule => Code::Ja_rel32_64,
-                Pred::Sgt => Code::Jle_rel32_64,
-                Pred::Sge => Code::Jl_rel32_64,
-                Pred::Slt => Code::Jge_rel32_64,
-                Pred::Sle => Code::Jg_rel32_64,
+                IPred::Eq => Code::Jne_rel32_64,
+                IPred::Ne => Code::Je_rel32_64,
+                IPred::Ugt => Code::Jbe_rel32_64,
+                IPred::Uge => Code::Jb_rel32_64,
+                IPred::Ult => Code::Jae_rel32_64,
+                IPred::Ule => Code::Ja_rel32_64,
+                IPred::Sgt => Code::Jle_rel32_64,
+                IPred::Sge => Code::Jl_rel32_64,
+                IPred::Slt => Code::Jge_rel32_64,
+                IPred::Sle => Code::Jg_rel32_64,
             }
         } else {
             match pred {
-                Pred::Eq => Code::Je_rel32_64,
-                Pred::Ne => Code::Jne_rel32_64,
-                Pred::Ugt => Code::Ja_rel32_64,
-                Pred::Uge => Code::Jae_rel32_64,
-                Pred::Ult => Code::Jb_rel32_64,
-                Pred::Ule => Code::Jbe_rel32_64,
-                Pred::Sgt => Code::Jg_rel32_64,
-                Pred::Sge => Code::Jge_rel32_64,
-                Pred::Slt => Code::Jl_rel32_64,
-                Pred::Sle => Code::Jle_rel32_64,
+                IPred::Eq => Code::Je_rel32_64,
+                IPred::Ne => Code::Jne_rel32_64,
+                IPred::Ugt => Code::Ja_rel32_64,
+                IPred::Uge => Code::Jae_rel32_64,
+                IPred::Ult => Code::Jb_rel32_64,
+                IPred::Ule => Code::Jbe_rel32_64,
+                IPred::Sgt => Code::Jg_rel32_64,
+                IPred::Sge => Code::Jge_rel32_64,
+                IPred::Slt => Code::Jl_rel32_64,
+                IPred::Sle => Code::Jle_rel32_64,
             }
         };
         if let Some(imm) = imm {
@@ -313,7 +313,7 @@ impl<'a> X64HirToAsm<'a> {
                 IcedInst::with_branch(c, 0),
                 RelocKind::BranchWithLabel(label),
             );
-            self.i_cmp_const(bitw, rmop, imm);
+            self.i_icmp_const(bitw, rmop, imm);
             Ok(label)
         } else {
             let (rmop, rhsr) =
@@ -371,12 +371,12 @@ impl<'a> X64HirToAsm<'a> {
                 IcedInst::with_branch(c, 0),
                 RelocKind::BranchWithLabel(label),
             );
-            self.i_cmp_reg(bitw, rmop, rhsr);
+            self.i_icmp_reg(bitw, rmop, rhsr);
             Ok(label)
         }
     }
 
-    fn i_cmp_const(&mut self, bitw: u32, rmop: RegOrMemOp, rhs: i32) {
+    fn i_icmp_const(&mut self, bitw: u32, rmop: RegOrMemOp, rhs: i32) {
         if rhs == 0
             && let RegOrMemOp::Reg(reg) = rmop
         {
@@ -422,7 +422,7 @@ impl<'a> X64HirToAsm<'a> {
         }
     }
 
-    fn i_cmp_reg(&mut self, bitw: u32, rmop: RegOrMemOp, rhsr: Reg) {
+    fn i_icmp_reg(&mut self, bitw: u32, rmop: RegOrMemOp, rhsr: Reg) {
         match rmop {
             RegOrMemOp::Reg(lhsr) => match bitw {
                 1..=32 => self.asm.push_inst(IcedInst::with2(
@@ -1950,6 +1950,128 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_fcmp(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        FCmp { pred, lhs, rhs }: &FCmp,
+    ) -> Result<(), CompilationError> {
+        // As per LLVM, some comparisons can be rewritten to equivalents that we can generate
+        // better code for on x64. See `NeedSwap` in
+        // https://github.com/llvm/llvm-project/blob/2b340c10a611d929fee25e6222909c8915e3d6b6/llvm/lib/Target/X86/X86InstrInfo.cpp#L3388
+        let (pred, lhs, rhs) = match pred {
+            FPred::Ugt => (FPred::Ult, rhs, lhs),
+            FPred::Uge => (FPred::Ule, rhs, lhs),
+            FPred::Olt => (FPred::Ogt, rhs, lhs),
+            FPred::Ole => (FPred::Oge, rhs, lhs),
+            _ => (*pred, lhs, rhs),
+        };
+
+        let bitw = b.inst_bitw(self.m, *lhs);
+        let (lhsr, rhsr) = match pred {
+            FPred::One | FPred::Oge | FPred::Ogt | FPred::Ueq | FPred::Ult | FPred::Ule => {
+                let [lhsr, rhsr, outr] = ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &ALL_XMM_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: *rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &ALL_XMM_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            can_be_same_as_input: false,
+                        },
+                    ],
+                )?;
+
+                self.asm.push_inst(match pred {
+                    FPred::One => IcedInst::with1(Code::Setne_rm8, outr.to_reg8()),
+                    FPred::Oge => IcedInst::with1(Code::Setae_rm8, outr.to_reg8()),
+                    FPred::Ogt => IcedInst::with1(Code::Seta_rm8, outr.to_reg8()),
+                    FPred::Ueq => IcedInst::with1(Code::Sete_rm8, outr.to_reg8()),
+                    FPred::Ult => IcedInst::with1(Code::Setb_rm8, outr.to_reg8()),
+                    FPred::Ule => IcedInst::with1(Code::Setbe_rm8, outr.to_reg8()),
+                    _ => unreachable!(),
+                });
+                (lhsr, rhsr)
+            }
+            FPred::Oeq | FPred::Une => {
+                let [lhsr, rhsr, outr, tmpr] = ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &ALL_XMM_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: *rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &ALL_XMM_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            can_be_same_as_input: false,
+                        },
+                        RegCnstr::Temp {
+                            regs: &NORMAL_GP_REGS,
+                        },
+                    ],
+                )?;
+
+                match pred {
+                    FPred::Oeq => {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::And_rm8_r8,
+                            outr.to_reg8(),
+                            tmpr.to_reg8(),
+                        ));
+                        self.asm
+                            .push_inst(IcedInst::with1(Code::Setnp_rm8, outr.to_reg8()));
+                        self.asm
+                            .push_inst(IcedInst::with1(Code::Sete_rm8, tmpr.to_reg8()));
+                    }
+                    FPred::Une => {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Or_rm8_r8,
+                            outr.to_reg8(),
+                            tmpr.to_reg8(),
+                        ));
+                        self.asm
+                            .push_inst(IcedInst::with1(Code::Setp_rm8, outr.to_reg8()));
+                        self.asm
+                            .push_inst(IcedInst::with1(Code::Setne_rm8, tmpr.to_reg8()));
+                    }
+                    _ => unreachable!(),
+                }
+                (lhsr, rhsr)
+            }
+            FPred::False | FPred::Ord | FPred::Uno | FPred::True => todo!(),
+            FPred::Ugt | FPred::Uge | FPred::Olt | FPred::Ole => unreachable!(),
+        };
+        self.asm.push_inst(match bitw {
+            64 => IcedInst::with2(Code::Ucomisd_xmm_xmmm64, lhsr.to_xmm(), rhsr.to_xmm()),
+            32 => IcedInst::with2(Code::Ucomiss_xmm_xmmm32, lhsr.to_xmm(), rhsr.to_xmm()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
     fn i_fdiv(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -2178,20 +2300,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }: &ICmp,
     ) -> Result<(), CompilationError> {
         let c = match pred {
-            Pred::Eq => Code::Sete_rm8,
-            Pred::Ne => Code::Setne_rm8,
-            Pred::Ugt => Code::Seta_rm8,
-            Pred::Uge => Code::Setae_rm8,
-            Pred::Ult => Code::Setb_rm8,
-            Pred::Ule => Code::Setbe_rm8,
-            Pred::Sgt => Code::Setg_rm8,
-            Pred::Sge => Code::Setge_rm8,
-            Pred::Slt => Code::Setl_rm8,
-            Pred::Sle => Code::Setle_rm8,
+            IPred::Eq => Code::Sete_rm8,
+            IPred::Ne => Code::Setne_rm8,
+            IPred::Ugt => Code::Seta_rm8,
+            IPred::Uge => Code::Setae_rm8,
+            IPred::Ult => Code::Setb_rm8,
+            IPred::Ule => Code::Setbe_rm8,
+            IPred::Sgt => Code::Setg_rm8,
+            IPred::Sge => Code::Setge_rm8,
+            IPred::Slt => Code::Setl_rm8,
+            IPred::Sle => Code::Setle_rm8,
         };
 
         let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred == &Pred::Eq {
+        let (imm, mut in_fill) = if pred == &IPred::Eq {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Zeroed)
         } else if pred.is_signed() {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
@@ -4031,6 +4153,167 @@ mod test {
     }
 
     #[test]
+    fn cg_fcmp() {
+        // double
+
+        codegen_and_test(
+            "
+               %0: double = arg [reg]
+               %1: double = arg [reg]
+               %2: i1 = fcmp oeq %0, %1
+               %3: i1 = fcmp ogt %0, %1
+               %4: i1 = fcmp oge %0, %1
+               %5: i1 = fcmp olt %0, %1
+               %6: i1 = fcmp ole %0, %1
+               %7: i1 = fcmp one %0, %1
+               %8: i1 = fcmp ueq %0, %1
+               %9: i1 = fcmp ugt %0, %1
+               %10: i1 = fcmp uge %0, %1
+               %11: i1 = fcmp ult %0, %1
+               %12: i1 = fcmp ule %0, %1
+               %13: i1 = fcmp une %0, %1
+               blackbox %2
+               blackbox %3
+               blackbox %4
+               blackbox %5
+               blackbox %6
+               blackbox %7
+               blackbox %8
+               blackbox %9
+               blackbox %10
+               blackbox %11
+               blackbox %12
+               blackbox %13
+               exit [%0, %1]
+            ",
+            &["
+               ...
+               ; %2: i1 = fcmp oeq %0, %1
+               ucomisd fp.128.x, fp.128.y
+               sete r.8.i
+               setnp r.8.j
+               and r.8.j, r.8.i
+               ; %3: i1 = fcmp ogt %0, %1
+               ucomisd fp.128.x, fp.128.y
+               seta r.8._
+               ; %4: i1 = fcmp oge %0, %1
+               ucomisd fp.128.x, fp.128.y
+               setae r.8._
+               ; %5: i1 = fcmp olt %0, %1
+               ucomisd fp.128.y, fp.128.x
+               seta r.8._
+               ; %6: i1 = fcmp ole %0, %1
+               ucomisd fp.128.y, fp.128.x
+               setae r.8._
+               ; %7: i1 = fcmp one %0, %1
+               ucomisd fp.128.x, fp.128.y
+               setne r.8._
+               ; %8: i1 = fcmp ueq %0, %1
+               ucomisd fp.128.x, fp.128.y
+               sete r.8._
+               ; %9: i1 = fcmp ugt %0, %1
+               ucomisd fp.128.y, fp.128.x
+               setb r.8._
+               ; %10: i1 = fcmp uge %0, %1
+               ucomisd fp.128.y, fp.128.x
+               setbe r.8._
+               ; %11: i1 = fcmp ult %0, %1
+               ucomisd fp.128.x, fp.128.y
+               setb r.8._
+               ; %12: i1 = fcmp ule %0, %1
+               ucomisd fp.128.x, fp.128.y
+               setbe r.8._
+               ; %13: i1 = fcmp une %0, %1
+               ucomisd fp.128.x, fp.128.y
+               setne r.8._
+               setp r.8._
+               or r.8._, r.8._
+               ; blackbox %2
+               ...
+            "],
+        );
+
+        // float
+
+        codegen_and_test(
+            "
+               %0: float = arg [reg]
+               %1: float = arg [reg]
+               %2: i1 = fcmp oeq %0, %1
+               %3: i1 = fcmp ogt %0, %1
+               %4: i1 = fcmp oge %0, %1
+               %5: i1 = fcmp olt %0, %1
+               %6: i1 = fcmp ole %0, %1
+               %7: i1 = fcmp one %0, %1
+               %8: i1 = fcmp ueq %0, %1
+               %9: i1 = fcmp ugt %0, %1
+               %10: i1 = fcmp uge %0, %1
+               %11: i1 = fcmp ult %0, %1
+               %12: i1 = fcmp ule %0, %1
+               %13: i1 = fcmp une %0, %1
+               blackbox %2
+               blackbox %3
+               blackbox %4
+               blackbox %5
+               blackbox %6
+               blackbox %7
+               blackbox %8
+               blackbox %9
+               blackbox %10
+               blackbox %11
+               blackbox %12
+               blackbox %13
+               exit [%0, %1]
+            ",
+            &["
+               ...
+               ; %2: i1 = fcmp oeq %0, %1
+               ucomiss fp.128.x, fp.128.y
+               sete r.8.i
+               setnp r.8.j
+               and r.8.j, r.8.i
+               ; %3: i1 = fcmp ogt %0, %1
+               ucomiss fp.128.x, fp.128.y
+               seta r.8._
+               ; %4: i1 = fcmp oge %0, %1
+               ucomiss fp.128.x, fp.128.y
+               setae r.8._
+               ; %5: i1 = fcmp olt %0, %1
+               ucomiss fp.128.y, fp.128.x
+               seta r.8._
+               ; %6: i1 = fcmp ole %0, %1
+               ucomiss fp.128.y, fp.128.x
+               setae r.8._
+               ; %7: i1 = fcmp one %0, %1
+               ucomiss fp.128.x, fp.128.y
+               setne r.8._
+               ; %8: i1 = fcmp ueq %0, %1
+               ucomiss fp.128.x, fp.128.y
+               sete r.8._
+               ; %9: i1 = fcmp ugt %0, %1
+               ucomiss fp.128.y, fp.128.x
+               setb r.8._
+               ; %10: i1 = fcmp uge %0, %1
+               ucomiss fp.128.y, fp.128.x
+               setbe r.8._
+               ; %11: i1 = fcmp ult %0, %1
+               ucomiss fp.128.x, fp.128.y
+               setb r.8._
+               ; %12: i1 = fcmp ule %0, %1
+               ucomiss fp.128.x, fp.128.y
+               setbe r.8._
+               ; %13: i1 = fcmp une %0, %1
+               ucomiss fp.128.x, fp.128.y
+               setne r.8._
+               setp r.8._
+               or r.8._, r.8._
+               ; blackbox %2
+               ...
+            "],
+        );
+    }
+
+    #[test]
     fn cg_fdiv() {
         codegen_and_test(
             "
@@ -4206,7 +4489,7 @@ mod test {
             "
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
-              %2: i1 = eq %0, %1
+              %2: i1 = icmp eq %0, %1
               guard true, %2, []
               exit [%0, %1]
             ",
@@ -4226,7 +4509,7 @@ mod test {
             "
               %0: i32 = arg [reg]
               %1: i32 = 0x14
-              %2: i1 = eq %0, %1
+              %2: i1 = icmp eq %0, %1
               guard true, %2, []
               exit [%0]
             ",
@@ -4246,7 +4529,7 @@ mod test {
             "
               %0: i8 = arg [reg]
               %1: i8 = arg [reg]
-              %2: i1 = eq %0, %1
+              %2: i1 = icmp eq %0, %1
               guard true, %2, []
               exit [%0, %1]
             ",
@@ -4269,7 +4552,7 @@ mod test {
             "
               %0: i8 = arg [reg]
               %1: i8 = arg [reg]
-              %2: i1 = sgt %0, %1
+              %2: i1 = icmp sgt %0, %1
               guard true, %2, []
               exit [%0, %1]
             ",
@@ -4292,7 +4575,7 @@ mod test {
             "
               %0: i8 = arg [reg]
               %1: i8 = arg [reg]
-              %2: i1 = ugt %0, %1
+              %2: i1 = icmp ugt %0, %1
               guard true, %2, []
               exit [%0, %1]
             ",
@@ -4318,7 +4601,7 @@ mod test {
             "
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
-              %2: i1 = eq %0, %1
+              %2: i1 = icmp eq %0, %1
               blackbox %2
               exit [%0, %1]
             ",

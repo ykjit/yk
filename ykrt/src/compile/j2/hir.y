@@ -86,6 +86,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "FADD" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FAdd { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FCMP" FPred "LOCAL" "," "LOCAL" {
+      Ok(AstInst::FCmp{ local: $1?.span(), ty: $3?, pred: $6?, lhs: $7?.span(), rhs: $9?.span() })
+    }
   | "LOCAL" ":" Ty "=" "FDIV" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FDiv { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
@@ -101,8 +104,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "GLOBAL" {
       Ok(AstInst::Global { local: $1?.span(), ty: $3?, name: $5?.span() })
     }
-  | "LOCAL" ":" Ty "=" Pred "LOCAL" "," "LOCAL" {
-      Ok(AstInst::ICmp{ local: $1?.span(), ty: $3?, pred: $5?, lhs: $6?.span(), rhs: $8?.span() })
+  | "LOCAL" ":" Ty "=" "ICMP" IPred "LOCAL" "," "LOCAL" {
+      Ok(AstInst::ICmp{ local: $1?.span(), ty: $3?, pred: $6?, lhs: $7?.span(), rhs: $9?.span() })
     }
   | "LOCAL" ":" Ty "=" "LOAD" "LOCAL" {
       Ok(AstInst::Load { local: $1?.span(), ty: $3?, ptr: $6?.span() })
@@ -168,6 +171,25 @@ Const -> Result<AstConst, Box<dyn Error>>:
   | "INT" { Ok(AstConst::Int($1?.span())) }
   ;
 
+FPred -> Result<FPred, Box<dyn Error>>:
+    "FALSE" { Ok(FPred::False) }
+  | "OEQ" { Ok(FPred::Oeq) }
+  | "OGT" { Ok(FPred::Ogt) }
+  | "OGE" { Ok(FPred::Oge) }
+  | "OLT" { Ok(FPred::Olt) }
+  | "OLE" { Ok(FPred::Ole) }
+  | "ONE" { Ok(FPred::One) }
+  | "ORD" { Ok(FPred::Ord) }
+  | "UEQ" { Ok(FPred::Ueq) }
+  | "UGT" { Ok(FPred::Ugt) }
+  | "UGE" { Ok(FPred::Uge) }
+  | "ULT" { Ok(FPred::Ult) }
+  | "ULE" { Ok(FPred::Ule) }
+  | "UNE" { Ok(FPred::Une) }
+  | "UNO" { Ok(FPred::Uno) }
+  | "TRUE" { Ok(FPred::True) }
+  ;
+
 Locals -> Result<Vec<Span>, Box<dyn Error>>:
     LocalsList { $1 }
   | { Ok(vec!()) }
@@ -178,17 +200,17 @@ LocalsList -> Result<Vec<Span>, Box<dyn Error>>:
   | "LOCAL" { Ok(vec![$1?.span()]) }
   ;
 
-Pred -> Result<Pred, Box<dyn Error>>:
-    "EQ" { Ok(Pred::Eq) }
-  | "NE" { Ok(Pred::Ne) }
-  | "UGT" { Ok(Pred::Ugt) }
-  | "UGE" { Ok(Pred::Uge) }
-  | "ULT" { Ok(Pred::Ult) }
-  | "ULE" { Ok(Pred::Ule) }
-  | "SGT" { Ok(Pred::Sgt) }
-  | "SGE" { Ok(Pred::Sge) }
-  | "SLT" { Ok(Pred::Slt) }
-  | "SLE" { Ok(Pred::Sle) }
+IPred -> Result<IPred, Box<dyn Error>>:
+    "EQ" { Ok(IPred::Eq) }
+  | "NE" { Ok(IPred::Ne) }
+  | "UGT" { Ok(IPred::Ugt) }
+  | "UGE" { Ok(IPred::Uge) }
+  | "ULT" { Ok(IPred::Ult) }
+  | "ULE" { Ok(IPred::Ule) }
+  | "SGT" { Ok(IPred::Sgt) }
+  | "SGE" { Ok(IPred::Sge) }
+  | "SLT" { Ok(IPred::Slt) }
+  | "SLE" { Ok(IPred::Sle) }
   ;
 
 Ty -> Result<AstTy, Box<dyn Error>>:
@@ -211,7 +233,7 @@ Unmatched -> ():
 
 %%
 
-use crate::compile::j2::{hir::Pred, hir_parser::*};
+use crate::compile::j2::{hir::IPred, hir_parser::*};
 use std::error::Error;
 
 fn flattenr<T>(lhs: Result<Vec<T>, Box<dyn Error>>, rhs: Result<T, Box<dyn Error>>)
