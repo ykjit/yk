@@ -2453,6 +2453,16 @@ mod test {
             todo!()
         }
 
+        fn i_xor(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Xor,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_zext(
             &mut self,
             _ra: &mut RegAlloc<Self>,

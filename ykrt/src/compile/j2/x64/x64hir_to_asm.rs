@@ -2875,6 +2875,45 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_xor(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Xor { tyidx: _, lhs, rhs }: &Xor,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, *lhs);
+        assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
+        let out_fill = match bitw {
+            32 | 64 => RegCnstrFill::Zeroed,
+            _ => RegCnstrFill::Undefined,
+        };
+        let [lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill,
+                    regs: &NORMAL_GP_REGS,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+        self.asm.push_inst(match bitw {
+            1..=32 => IcedInst::with2(Code::Xor_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+            x => todo!("{x}"),
+        });
+
+        Ok(())
+    }
+
     fn i_zext(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -5408,6 +5447,25 @@ mod test {
               mov rdi, rax
               ...
               ; call %2(%3)
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_xor() {
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = xor %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = xor %0, %1
+              xor r.32._, r.32._
               ...
             "],
         );
