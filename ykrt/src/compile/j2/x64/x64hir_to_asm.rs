@@ -2072,6 +2072,49 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_fptosi(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        FPToSI { tyidx, val }: &FPToSI,
+    ) -> Result<(), CompilationError> {
+        let [valr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: false,
+                },
+            ],
+        )?;
+
+        let src_ty = b.inst_ty(self.m, *val);
+        let dst_bitw = self.m.ty(*tyidx).bitw();
+        self.asm.push_inst(match (src_ty, dst_bitw) {
+            (Ty::Double, 32) => {
+                IcedInst::with2(Code::Cvttsd2si_r32_xmmm64, outr.to_reg32(), valr.to_xmm())
+            }
+            (Ty::Double, 64) => {
+                IcedInst::with2(Code::Cvttsd2si_r64_xmmm64, outr.to_reg64(), valr.to_xmm())
+            }
+            (Ty::Float, 32) => {
+                IcedInst::with2(Code::Cvttss2si_r32_xmmm32, outr.to_reg32(), valr.to_xmm())
+            }
+            x => todo!("{x:?}"),
+        });
+
+        Ok(())
+    }
+
     fn i_guard(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -4194,6 +4237,38 @@ mod test {
               ; blackbox %1
               ; exit [%0]
             "],
+        );
+    }
+
+    #[test]
+    fn cg_fptosi() {
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: float = arg [reg]
+              %2: i32 = fptosi %0
+              blackbox %2
+              %4: i64 = fptosi %0
+              blackbox %4
+              %6: i32 = fptosi %1
+              blackbox %6
+              exit [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: double = arg [Reg("fp.128.x")]
+              ; %1: float = arg [Reg("fp.128.y")]
+              ; %2: i32 = fptosi %0
+              cvttsd2si r.32._, fp.128.x
+              ; blackbox %2
+              ; %4: i64 = fptosi %0
+              cvttsd2si r.64._, fp.128.x
+              ; blackbox %4
+              ; %6: i32 = fptosi %1
+              cvttss2si r.32._, fp.128.y
+              ; blackbox %6
+              ; exit [%0, %1]
+            "#],
         );
     }
 
