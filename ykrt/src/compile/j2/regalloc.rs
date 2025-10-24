@@ -446,8 +446,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             dst_fill,
         } in ractions.distinct_copies.iter()
         {
-            be.copy_reg(*src_reg, *dst_reg)?;
             be.arrange_fill(*dst_reg, *bitw, *src_fill, *dst_fill);
+            be.copy_reg(*src_reg, *dst_reg)?;
         }
 
         for RegCopy {
@@ -2683,11 +2683,11 @@ mod test {
         "#,
             |_| true,
             &["
-          copy_reg from=GPR1 to=GPR0
           arrange_fill GPR0 bitw=8 from=Zeroed to=Undefined
+          copy_reg from=GPR1 to=GPR0
           alloc %1 GPR0 GPR1
-          copy_reg from=GPR0 to=GPR1
           arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
+          copy_reg from=GPR0 to=GPR1
           arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
         "],
         );
@@ -2725,8 +2725,8 @@ mod test {
             |_| true,
             &["
           alloc %3 GPR0 GPR1
-          copy_reg from=GPR1 to=GPR0
           arrange_fill GPR0 bitw=8 from=Zeroed to=Zeroed
+          copy_reg from=GPR1 to=GPR0
           arrange_fill GPR1 bitw=8 from=Zeroed to=Zeroed
           alloc %1 GPR0 GPR1
           const GPR1 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
@@ -2770,8 +2770,8 @@ mod test {
           arrange_fill GPR0 bitw=64 from=Zeroed to=Undefined
           alloc %2 GPR1 GPR0
           unspill stack_off=16 GPR0 Undefined bitw=64
-          copy_reg from=GPR0 to=GPR1
           arrange_fill GPR1 bitw=64 from=Undefined to=Zeroed
+          copy_reg from=GPR0 to=GPR1
           spill GPR0 Undefined stack_off=8 bitw=64
           spill GPR1 Undefined stack_off=16 bitw=64
         "],
