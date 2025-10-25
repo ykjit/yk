@@ -65,7 +65,7 @@ use crate::compile::j2::hir::Ty;
 use crate::compile::{
     CompilationError,
     j2::{
-        hir::{Block, BlockLikeT, Const, ConstKind, GuardRestoreIdx, Inst, InstIdx, Mod},
+        hir::{Block, BlockLikeT, Const, ConstKind, GuardRestoreIdx, Inst, InstIdx, Mod, ModKind},
         hir_to_asm::HirToAsmBackend,
     },
 };
@@ -177,6 +177,17 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         {
             for vloc in vlocs.iter() {
                 if let VarLoc::Reg(reg) = vloc {
+                    if let ModKind::Loop { .. } = self.m.kind {
+                        // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
+                        // for details), caller saved registers are potentially corrupted at the very start
+                        // of a loop trace.
+                        //
+                        // FIXME: This is a horrible hack and assumes that all [Block]s in a loop
+                        // trace are subject to the same restriction.
+                        if reg.is_caller_saved() {
+                            continue;
+                        }
+                    }
                     if !in_rstate.iidxs(*reg).is_empty() {
                         let bitw = self.b.inst_bitw(self.m, iidx);
                         if bitw > iidxs_maxbitw(self.m, self.b, in_rstate.iidxs(*reg)) {
@@ -1358,6 +1369,13 @@ pub(super) trait RegT: Clone + Copy + Debug + Display + PartialEq + Send + Sync 
     fn from_regidx(idx: Self::RegIdx) -> Self;
     /// What is this register's index?
     fn regidx(&self) -> Self::RegIdx;
+    /// Is this a caller saved register in this system's standard ABI?
+    ///
+    /// Note: a system might use multiple ABIs in different places. Currently this function is only
+    /// called for the "standard" ABI (e.g. the SysV x64 ABI on Linux/x64). If and when we need to
+    /// call it in other contexts, we may have to provide context to this function to allow it to
+    /// differentiate which ABI is in use.
+    fn is_caller_saved(&self) -> bool;
 
     /// For testing purposes, return an iterator-like object that can successively produce
     /// valid registers for this backend.
@@ -1801,6 +1819,10 @@ mod test {
 
         fn regidx(&self) -> Self::RegIdx {
             TestRegIdx::from(*self as usize)
+        }
+
+        fn is_caller_saved(&self) -> bool {
+            todo!()
         }
 
         fn iter_test_regs() -> impl TestRegIter<Self> {

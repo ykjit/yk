@@ -2939,6 +2939,10 @@ mod test {
             todo!()
         }
 
+        fn is_caller_saved(&self) -> bool {
+            todo!()
+        }
+
         fn iter_test_regs() -> impl TestRegIter<Self> {
             DummyRegTestIter {}
         }
