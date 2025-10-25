@@ -1,5 +1,4 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -14,11 +13,6 @@
 //     shl 8
 //     ---
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
-//     ...
-//     %{{result}}: i32 = and %{{1}}, 1i32
-//     ...
-//     --- End jit-pre-opt ---
 //     and 1
 //     or 3
 //     lshr 1

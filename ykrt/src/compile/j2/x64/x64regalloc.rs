@@ -237,6 +237,22 @@ impl RegT for Reg {
         RegIdx::from(*self as u8)
     }
 
+    #[cfg(target_os = "linux")]
+    fn is_caller_saved(&self) -> bool {
+        matches!(
+            self,
+            Reg::RAX
+                | Reg::RDI
+                | Reg::RSI
+                | Reg::RDX
+                | Reg::RCX
+                | Reg::R8
+                | Reg::R9
+                | Reg::R10
+                | Reg::R11
+        )
+    }
+
     #[cfg(test)]
     fn iter_test_regs() -> impl TestRegIter<Self> {
         X64TestRegIter::new()
