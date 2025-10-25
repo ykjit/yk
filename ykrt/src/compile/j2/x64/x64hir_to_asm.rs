@@ -2816,11 +2816,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }],
             )?;
 
-            self.asm.push_inst(match bitw {
-                32 => IcedInst::with1(Code::Neg_rm32, rhsr.to_reg32()),
-                64 => IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64()),
-                x => todo!("{x}"),
-            });
+            self.asm
+                .push_inst(IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64()));
         } else if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
             let [lhsr] = ra.alloc(
                 self,
@@ -2833,11 +2830,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }],
             )?;
 
-            self.asm.push_inst(match bitw {
-                32 => IcedInst::with2(Code::Sub_rm32_imm32, lhsr.to_reg32(), imm),
-                64 => IcedInst::with2(Code::Sub_rm64_imm32, lhsr.to_reg64(), imm),
-                x => todo!("{x}"),
-            });
+            self.asm
+                .push_inst(IcedInst::with2(Code::Sub_rm64_imm32, lhsr.to_reg64(), imm));
         } else {
             let [lhsr, rhsr] = ra.alloc(
                 self,
@@ -2858,11 +2852,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 ],
             )?;
 
-            self.asm.push_inst(match bitw {
-                32 => IcedInst::with2(Code::Sub_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-                64 => IcedInst::with2(Code::Sub_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-                x => todo!("{x}"),
-            });
+            self.asm.push_inst(IcedInst::with2(
+                Code::Sub_rm64_r64,
+                lhsr.to_reg64(),
+                rhsr.to_reg64(),
+            ));
         }
         Ok(())
     }
@@ -5430,7 +5424,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.32.x, r.32.y
+              sub r.64.x, r.64.y
               ...
             "],
         );
@@ -5445,7 +5439,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %1, %0
-              neg r.32._
+              neg r.64._
               ...
             "],
         );
@@ -5460,7 +5454,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.32.x, 0x20
+              sub r.64.x, 0x20
               ...
             "],
         );
@@ -5475,7 +5469,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.32.x, 0xFFFFFFFF
+              sub r.64.x, 0xFFFFFFFFFFFFFFFF
               ...
             "],
         );
