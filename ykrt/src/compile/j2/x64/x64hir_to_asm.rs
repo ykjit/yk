@@ -69,7 +69,7 @@ impl<'a> X64HirToAsm<'a> {
     pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>) -> Self {
         Self {
             m,
-            asm: Asm::new(),
+            asm: Asm::new(m),
             guards: IndexVec::new(),
         }
     }

@@ -22,17 +22,23 @@
 //! and then do the final machine code layout in reverse block order. This is invisible to
 //! everything outside this module.
 
-use crate::compile::CompilationError;
+use crate::compile::{
+    CompilationError,
+    j2::{
+        hir::{Mod, ModKind},
+        x64::x64regalloc::Reg,
+    },
+};
 use iced_x86::{Encoder, Instruction as Op};
 use index_vec::{IndexVec, index_vec};
-use libc::{MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap};
+use libc::{MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap, munmap};
 use std::{ffi::c_void, mem::replace};
 
 #[derive(Debug)]
 pub(super) struct Asm {
+    /// Where will this trace be stored in memory?
     buf: *mut u8,
-    /// We should use/resize this as needed!
-    #[allow(dead_code)]
+    /// How many bytes have we allocated to the buffer?
     buflen: usize,
     /// The blocks we are assembling. By definition, the first block will be the main body of the
     /// trace, and any subsequent blocks will be guard bodies.
@@ -50,9 +56,29 @@ pub(super) struct Asm {
 }
 
 impl Asm {
-    pub(super) fn new() -> Self {
-        // FIXME
-        let buflen = page_size::get() * 4;
+    pub(super) fn new(m: &Mod<Reg>) -> Self {
+        // We need to guesstimate how much space the compiled trace will need. There is no
+        // perfection here: if we guess too much we waste OS time and RAM, if we guess too little
+        // we may have to redo the whole compilation! The least worst option is therefore to guess
+        // too much and free memory afterwards.
+        //
+        // A quick measurement shows that each HIR instruction leads, on average, to about 8 bytes
+        // of assembled stuff. We will need to revisit this when guard bodies (etc.) are
+        // implemented, but it'll do for now.
+        //
+        // On that basis, we therefore over-guess that each HIR instruction needs 12 bytes of
+        // storage. We thus request that, and free what's unused at the end.
+        let num_hir_insts = match &m.kind {
+            ModKind::Loop { entry, inner, .. } => {
+                assert!(inner.is_none());
+                entry.insts_len()
+            }
+            ModKind::Side { entry, .. } => entry.insts_len(),
+            ModKind::Coupler { .. } => todo!(),
+            #[cfg(test)]
+            ModKind::Test { block, .. } => block.insts_len(),
+        };
+        let buflen = (num_hir_insts * 12).next_multiple_of(page_size::get());
         let buf = unsafe {
             mmap(
                 std::ptr::null_mut(),
@@ -244,8 +270,28 @@ impl Asm {
         }
 
         // Copy into the executable buffer.
+        if enc.len() > self.buflen {
+            // If we've ended up here, it really suggests that our `buflen` heuristic in [Asm::new]
+            // is too stingy. We _could_, though, restart the whole assembly process with a bigger
+            // buffer if we really wanted to.
+            todo!();
+        }
         unsafe {
             self.buf.copy_from_nonoverlapping(enc.as_ptr(), enc.len());
+        }
+
+        // If there's more than a page's worth of unused space in the buffer, return it to the OS.
+        let unused = self.buflen - enc.len().next_multiple_of(page_size::get());
+        if unused > 0 {
+            let rtn = unsafe {
+                munmap(
+                    self.buf.byte_add(self.buflen - unused) as *mut c_void,
+                    unused,
+                )
+            };
+            if rtn != 0 {
+                todo!();
+            }
         }
 
         let log = if log {
