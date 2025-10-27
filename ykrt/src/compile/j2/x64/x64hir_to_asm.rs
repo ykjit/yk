@@ -1692,6 +1692,40 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_ctpop(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        CtPop { tyidx: _, val }: &CtPop,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, iidx);
+        let [inr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+
+        self.asm.push_inst(match bitw {
+            32 => IcedInst::with2(Code::Popcnt_r32_rm32, outr.to_reg32(), inr.to_reg32()),
+            64 => IcedInst::with2(Code::Popcnt_r64_rm64, outr.to_reg64(), inr.to_reg64()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
     fn i_dynptradd(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -3888,6 +3922,39 @@ mod test {
               addss fp.128.x, fp.128.y
               ; blackbox %2
               ; exit []
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_ctpop() {
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = ctpop %0
+              exit [%1]
+            ",
+            &["
+              ...
+              ; %1: i32 = ctpop %0
+              popcnt r.32._, r.32.x
+              ; exit [%1]
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = ctpop %0
+              exit [%1]
+            ",
+            &["
+              ...
+              ; %1: i64 = ctpop %0
+              popcnt r.64._, r.64.x
+              ; exit [%1]
             "],
         );
     }

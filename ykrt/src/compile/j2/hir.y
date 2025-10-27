@@ -80,6 +80,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" Const {
        Ok(AstInst::Const { local: $1?.span(), ty: $3?, kind: $5? })
     }
+  | "LOCAL" ":" Ty "=" "CTPOP" "LOCAL" {
+      Ok(AstInst::CtPop { local: $1?.span(), ty: $3?, val: $6?.span() })
+    }
   | "LOCAL" ":" Ty "="  "DYNPTRADD" "LOCAL" "," "LOCAL" "," "INT" {
        Ok(AstInst::DynPtrAdd { local: $1?.span(), ty: $3?, ptr: $6?.span(), num_elems: $8?.span(), elem_size: $10?.span() })
     }
