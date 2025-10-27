@@ -38,7 +38,8 @@ use std::{ffi::c_void, mem::replace};
 pub(super) struct Asm {
     /// Where will this trace be stored in memory?
     buf: *mut u8,
-    /// How many bytes have we allocated to the buffer?
+    /// How many bytes have we allocated to the buffer? Note: this length is also used to determine
+    /// if calls can be represented as near calls or not.
     buflen: usize,
     /// The blocks we are assembling. By definition, the first block will be the main body of the
     /// trace, and any subsequent blocks will be guard bodies.
@@ -147,10 +148,15 @@ impl Asm {
     /// Is `addr` representable as an x64 near call (a signed 32 bit int) relative to where this
     /// trace will be stored in memory?
     pub(super) fn is_near_callable(&self, addr: usize) -> bool {
-        // FIXME: We don't really know how big the buffer will be at this point, or where this
-        // instruction will sit within it, so we have to be very conservative. We assume that the
-        // buffer can be 32MiB big
-        self.buf.addr().checked_signed_diff(addr).unwrap().abs() < 0x7dffffff
+        // At this point all we know about the trace is its lowest (`self.buf.addr(`)) and highest
+        // (`self.buf.addr() + self.buflen`) addresses. We need to make sure that `addr` is at most
+        // 2GiB away from the lowest or highest addresses.
+        let delta = if addr < self.buf.addr() {
+            self.buf.addr() + self.buflen - addr
+        } else {
+            addr - self.buf.addr()
+        };
+        delta < 0x80000000
     }
 
     /// Convert this semi-assembled trace into a fully assembled trace, performing relocations etc.
