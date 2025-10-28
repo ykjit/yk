@@ -1,19 +1,18 @@
-#![allow(static_mut_refs)]
-
 use std::os::raw::{c_int, c_void};
 
 use libc::{dlsym, free, malloc, pthread_create};
-use std::mem::MaybeUninit;
-use std::{ffi::CString, ptr::null_mut};
-
-// FIXME: Use mutex for SHADOW_STACKS.
+use parking_lot::Mutex;
+use std::{cell::RefCell, ffi::CString, ptr::null_mut};
+use ykaddr::addr::symbol_to_ptr;
 
 // The size of the shadow stack. This is the same size as the default shadow stack in ykllvm.
 const SHADOW_STACK_SIZE: usize = 1000000;
 
-static mut SHADOW_STACKS: ShadowStacks = ShadowStacks::new();
+static SHADOW_STACKS: Mutex<RefCell<ShadowStacks>> = Mutex::new(RefCell::new(ShadowStacks::new()));
 
-type ShadowStackPtr = *mut MaybeUninit<u8>;
+struct ShadowStackPtr(*mut c_void);
+unsafe impl Sync for ShadowStackPtr {}
+unsafe impl Send for ShadowStackPtr {}
 
 struct ShadowStacks {
     stacks: Vec<ShadowStackPtr>,
@@ -25,10 +24,8 @@ impl ShadowStacks {
     }
 
     fn register_current_thread(&mut self) {
-        let head = CString::new("shadowstack_0").unwrap();
-        let head_ptr = unsafe { dlsym(null_mut(), head.as_ptr()) as ShadowStackPtr };
-        assert!(!head_ptr.is_null());
-        self.stacks.push(head_ptr)
+        let head_ptr = symbol_to_ptr("shadowstack_0").unwrap();
+        self.stacks.push(ShadowStackPtr(head_ptr as *mut c_void))
     }
 }
 
@@ -39,17 +36,15 @@ struct Target {
 }
 
 pub fn yk_foreach_shadowstack(f: extern "C" fn(*mut c_void, *mut c_void)) {
-    unsafe {
-        for ptr in SHADOW_STACKS.stacks.iter() {
-            let end = ptr.wrapping_byte_add(SHADOW_STACK_SIZE);
-            f(ptr.cast() as *mut c_void, end as *mut c_void);
-        }
+    for ptr in SHADOW_STACKS.lock().borrow().stacks.iter() {
+        let end = ptr.0.wrapping_byte_add(SHADOW_STACK_SIZE);
+        f(ptr.0.cast() as *mut c_void, end as *mut c_void);
     }
 }
 
 // Called at program startup to register the shadowstack of the main thread.
 pub fn yk_init() {
-    unsafe { SHADOW_STACKS.register_current_thread() };
+    SHADOW_STACKS.lock().borrow_mut().register_current_thread();
 }
 
 /// Create a new shadowstack for each new pthread.
@@ -68,7 +63,7 @@ extern "C" fn wrap_thread_routine(tgt: *mut c_void) -> *mut c_void {
     unsafe {
         // Set shadowstack symbol with new allocated stack
         *(shadowstack_symbol_addr as *mut *mut c_void) = newsstack;
-        SHADOW_STACKS.register_current_thread();
+        SHADOW_STACKS.lock().borrow_mut().register_current_thread();
     }
     let ret = (tgt.func)(tgt.arg);
     unsafe { free(newsstack) };

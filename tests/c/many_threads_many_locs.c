@@ -1,5 +1,3 @@
-// ## segs with: tcache_thread_shutdown(): unaligned tcache chunk detected
-// ignore-if: true
 // Run-time:
 //   env-var: YKD_LOG=4
 //   env-var: YKD_SERIALISE_COMPILATION=1
