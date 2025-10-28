@@ -2173,6 +2173,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             expect,
             cond,
             entry_vars,
+            gridx,
             ..
         }: &Guard,
     ) -> Result<Self::Label, CompilationError> {
@@ -2191,9 +2192,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     clobber: false,
                 },
                 RegCnstr::KeepAlive {
-                    gridx: GuardRestoreIdx::from(
-                        self.m.guard_restores().len() - self.guards.len() - 1,
-                    ),
+                    gridx: *gridx,
                     iidxs: entry_vars,
                 },
             ],
