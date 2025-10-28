@@ -1397,17 +1397,66 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn i_ashr(
         &mut self,
-        _ra: &mut RegAlloc<Self>,
-        _b: &Block,
-        _iidx: InstIdx,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
         AShr {
             tyidx: _,
-            lhs: _,
-            rhs: _,
-            exact: _,
+            lhs,
+            rhs,
+            exact,
         }: &AShr,
     ) -> Result<(), CompilationError> {
-        todo!();
+        // We don't handle `exact` yet.
+        assert!(!*exact);
+
+        // LLVM defines that a poison value is computed if one shifts by >= the bit width of the
+        // first operand. This allows us to ignore a lot of seemingly necessary checks in the
+        // below. For example we get away with using the 8-bit register `cl` because we don't
+        // support any types bigger than 64 bits. If at runtime someone tries to shift a value
+        // bigger than `cl` can express, then that's their problem!
+        let bitw = b.inst_bitw(self.m, *lhs);
+        if let Some(imm) = self.zero_ext_op_for_imm8(b, *rhs) {
+            let [lhsr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Signed,
+                    out_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                }],
+            )?;
+            assert!(bitw <= 64);
+            self.asm
+                .push_inst(IcedInst::with2(Code::Sar_rm64_imm8, lhsr.to_reg64(), imm));
+        } else {
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Signed,
+                        out_fill: RegCnstrFill::Signed,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &[Reg::RCX],
+                        clobber: false,
+                    },
+                ],
+            )?;
+            assert!(bitw <= 64);
+            self.asm.push_inst(IcedInst::with2(
+                Code::Sar_rm64_CL,
+                lhsr.to_reg64(),
+                rhsr.to_reg8(),
+            ));
+        }
+        Ok(())
     }
 
     fn i_call(
@@ -2578,18 +2627,65 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn i_shl(
         &mut self,
-        _ra: &mut RegAlloc<Self>,
-        _b: &Block,
-        _iidx: InstIdx,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
         Shl {
             tyidx: _,
-            lhs: _,
-            rhs: _,
-            nuw: _,
-            nsw: _,
+            lhs,
+            rhs,
+            nuw,
+            nsw,
         }: &Shl,
     ) -> Result<(), CompilationError> {
-        todo!();
+        // We don't handle nuw or nsw yet.
+        assert!(!*nuw && !*nsw);
+
+        let bitw = b.inst_bitw(self.m, *lhs);
+        if let Some(imm) = self.zero_ext_op_for_imm8(b, *rhs) {
+            let out_fill = match bitw {
+                32 | 64 => RegCnstrFill::Zeroed,
+                _ => RegCnstrFill::Undefined,
+            };
+            let [lhsr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill,
+                    regs: &NORMAL_GP_REGS,
+                }],
+            )?;
+            self.asm.push_inst(match bitw {
+                32 => IcedInst::with2(Code::Shl_rm32_imm8, lhsr.to_reg32(), imm),
+                x => todo!("{x}"),
+            });
+        } else {
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Zeroed,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &[Reg::RCX],
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Shl_rm32_CL, lhsr.to_reg32(), rhsr.to_reg8()),
+                x => todo!("{x}"),
+            });
+        }
+        Ok(())
     }
 
     fn i_sitofp(
@@ -2720,13 +2816,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }],
             )?;
 
-            match bitw {
-                64 => {
-                    self.asm
-                        .push_inst(IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64()));
-                }
-                x => todo!("{x}"),
-            }
+            self.asm
+                .push_inst(IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64()));
         } else if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
             let [lhsr] = ra.alloc(
                 self,
@@ -2739,11 +2830,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }],
             )?;
 
-            self.asm.push_inst(match bitw {
-                32 => IcedInst::with2(Code::Sub_rm32_imm32, lhsr.to_reg32(), imm),
-                64 => IcedInst::with2(Code::Sub_rm64_imm32, lhsr.to_reg64(), imm),
-                x => todo!("{x}"),
-            });
+            self.asm
+                .push_inst(IcedInst::with2(Code::Sub_rm64_imm32, lhsr.to_reg64(), imm));
         } else {
             let [lhsr, rhsr] = ra.alloc(
                 self,
@@ -2764,11 +2852,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 ],
             )?;
 
-            self.asm.push_inst(match bitw {
-                32 => IcedInst::with2(Code::Sub_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-                64 => IcedInst::with2(Code::Sub_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-                x => todo!("{x}"),
-            });
+            self.asm.push_inst(IcedInst::with2(
+                Code::Sub_rm64_r64,
+                lhsr.to_reg64(),
+                rhsr.to_reg64(),
+            ));
         }
         Ok(())
     }
@@ -2872,6 +2960,45 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::EDX,
             IcedReg::EDX,
         ));
+        Ok(())
+    }
+
+    fn i_xor(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Xor { tyidx: _, lhs, rhs }: &Xor,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, *lhs);
+        assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
+        let out_fill = match bitw {
+            32 | 64 => RegCnstrFill::Zeroed,
+            _ => RegCnstrFill::Undefined,
+        };
+        let [lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill,
+                    regs: &NORMAL_GP_REGS,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+        self.asm.push_inst(match bitw {
+            1..=32 => IcedInst::with2(Code::Xor_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+            x => todo!("{x}"),
+        });
+
         Ok(())
     }
 
@@ -3470,6 +3597,46 @@ mod test {
               ...
               ; %2: i64 = and %0, %1
               and r.64._, 0xFFFFFFF
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_ashr() {
+        // Constant RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 3
+              %2: i32 = ashr %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i32 = ashr %0, %1
+              sar r.64._, 3
+              ...
+            "],
+        );
+
+        // Variable RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = ashr %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = ashr %0, %1
+              sar r.64.x, cl
               ...
             "],
         );
@@ -4698,6 +4865,46 @@ mod test {
     }
 
     #[test]
+    fn cg_lshr() {
+        // Constant RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 3
+              %2: i32 = lshr %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i32 = lshr %0, %1
+              shr r.32._, 3
+              ...
+            "],
+        );
+
+        // Variable RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = lshr %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = lshr %0, %1
+              shr r.32.x, cl
+              ...
+            "],
+        );
+    }
+
+    #[test]
     fn cg_mul() {
         // i8
         codegen_and_test(
@@ -4878,6 +5085,46 @@ mod test {
               cvtsi2sd fp.128._, r.64._
               ; blackbox %1
               ; exit [%0]
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_shl() {
+        // Constant RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 3
+              %2: i32 = shl %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i32 = shl %0, %1
+              shl r.32._, 3
+              ...
+            "],
+        );
+
+        // Variable RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = shl %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = shl %0, %1
+              shl r.32.x, cl
+              ...
             "],
         );
     }
@@ -5177,7 +5424,22 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.32.x, r.32.y
+              sub r.64.x, r.64.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 0
+              %2: i32 = sub %1, %0
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %2: i32 = sub %1, %0
+              neg r.64._
               ...
             "],
         );
@@ -5192,7 +5454,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.32.x, 0x20
+              sub r.64.x, 0x20
               ...
             "],
         );
@@ -5207,7 +5469,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.32.x, 0xFFFFFFFF
+              sub r.64.x, 0xFFFFFFFFFFFFFFFF
               ...
             "],
         );
@@ -5408,6 +5670,25 @@ mod test {
               mov rdi, rax
               ...
               ; call %2(%3)
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_xor() {
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = xor %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = xor %0, %1
+              xor r.32._, r.32._
               ...
             "],
         );
