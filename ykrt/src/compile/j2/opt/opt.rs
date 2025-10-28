@@ -120,7 +120,12 @@ impl OptT for Opt {
                     return Ok(*cond);
                 }
                 if *expect
-                    && let Inst::ICmp(ICmp { lhs, rhs, .. }) = &self.insts[*cond]
+                    && let Inst::ICmp(ICmp {
+                        lhs,
+                        rhs,
+                        pred: IPred::Eq,
+                        ..
+                    }) = &self.insts[*cond]
                     && let Inst::Const(_) = &self.insts[*rhs]
                 {
                     match &self.ranges[*lhs] {
@@ -130,7 +135,7 @@ impl OptT for Opt {
                 }
             }
             Inst::ICmp(ICmp {
-                pred: _,
+                pred: IPred::Eq,
                 lhs,
                 rhs,
                 samesign: _,
