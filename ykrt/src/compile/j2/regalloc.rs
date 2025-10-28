@@ -2132,6 +2132,16 @@ mod test {
             todo!()
         }
 
+        fn i_ctpop(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &crate::compile::j2::hir::CtPop,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_dynptradd(
             &mut self,
             _ra: &mut RegAlloc<Self>,

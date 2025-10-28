@@ -573,6 +573,7 @@ pub(super) enum Inst {
     BlackBox,
     Call,
     Const,
+    CtPop,
     DynPtrAdd,
     Exit,
     FAdd,
@@ -1089,6 +1090,50 @@ pub(super) enum ConstKind {
     Float(f32),
     Int(ArbBitInt),
     Ptr(usize),
+}
+
+/// Count with the number of set bits, with the same semantics as `llvm.ctpop.`.
+#[derive(Debug)]
+pub(super) struct CtPop {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+}
+
+impl InstT for CtPop {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            m.ty(self.tyidx).bitw(),
+            b.inst_bitw(m, self.val),
+            "%{iidx:?}: inconsistent bit widths for return type and val"
+        );
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.val);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            val: f(self.val),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("ctpop %{}", usize::from(self.val))
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
 }
 
 #[derive(Debug)]
@@ -3174,6 +3219,17 @@ mod test {
           %0: ptr = arg [reg]
           %1: i8 = 0
           call f %0(%1)
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: inconsistent bit widths")]
+    fn ctpop_type_consistency() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = ctpop %0
         ",
         );
     }
