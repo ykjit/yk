@@ -2598,7 +2598,49 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         match self.m.ty(*tyidx) {
             Ty::Double | Ty::Float => todo!(),
             Ty::Func(_) => todo!(),
-            Ty::Int(_) => todo!(),
+            Ty::Int(bitw) => {
+                let out_fill = if let 32 | 64 = bitw {
+                    RegCnstrFill::Zeroed
+                } else {
+                    RegCnstrFill::Undefined
+                };
+                let [condr, truer, falser] = ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *cond,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::InputOutput {
+                            in_iidx: *truev,
+                            in_fill: RegCnstrFill::Undefined,
+                            out_fill,
+                            regs: &NORMAL_GP_REGS,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: *falsev,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                    ],
+                )?;
+                self.asm.push_inst(match bitw {
+                    1..=32 => {
+                        IcedInst::with2(Code::Cmovae_r32_rm32, truer.to_reg32(), falser.to_reg32())
+                    }
+                    64 => {
+                        IcedInst::with2(Code::Cmovae_r64_rm64, truer.to_reg64(), falser.to_reg64())
+                    }
+                    x => todo!("{x}"),
+                });
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, condr.to_reg32(), 0));
+                Ok(())
+            }
             Ty::Ptr(addrspace) => {
                 assert_eq!(*addrspace, 0);
                 let [condr, truer, falser] = ra.alloc(
@@ -5062,6 +5104,61 @@ mod test {
 
     #[test]
     fn cg_select() {
+        // i1
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i1 = arg [reg]
+              %2: i1 = arg [reg]
+              %3: i1 = select %0, %1, %2
+              exit [%0, %3, %2]
+            ",
+            &["
+              ...
+              ; %3: i1 = select %0, %1, %2
+              bt r.32.x, 0
+              cmovae r.32.y, r.32.z
+              ...
+            "],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = arg [reg]
+              %3: i32 = select %0, %1, %2
+              exit [%0, %3, %2]
+            ",
+            &["
+              ...
+              ; %3: i32 = select %0, %1, %2
+              bt r.32.x, 0
+              cmovae r.32.y, r.32.z
+              ...
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = arg [reg]
+              %3: i64 = select %0, %1, %2
+              exit [%0, %3, %2]
+            ",
+            &["
+              ...
+              ; %3: i64 = select %0, %1, %2
+              bt r.32.x, 0
+              cmovae r.64.y, r.64.z
+              ...
+            "],
+        );
+
+        // ptr
         codegen_and_test(
             "
               %0: i1 = arg [reg]
