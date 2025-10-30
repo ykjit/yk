@@ -7,18 +7,6 @@
 //! the correct state for instruction *n+1*. This can be rather confusing!
 //!
 //!
-//! ## Merging of different sized values
-//!
-//! When the value from instruction M can be derived, possibly with the associated [RegFill], from
-//! the value from instruction N (where M > N), the register allocator can merge the two values
-//! into one register. In other words, the source of truth is always the value derived from the
-//! earliest instruction (i.e. that with the smallest [InstIdx]).
-//!
-//! For example if an `i1` is sign-extended to an `i64`, the latter can always be derived from the
-//! former by re-sign-extending the `i1`. Similarly, if an `i64` is truncated to an `i1`, the
-//! latter is trivially rederivable from the former.
-//!
-//!
 //! ## Register fills
 //!
 //! The allocator keeps track of register fill bits: i.e. the upper bits of a register that may not
@@ -27,18 +15,35 @@
 //! 64-bit signed subtraction: we will need to set sign-extend the upper 56 bits to get a correct
 //! result.
 //!
-//! There are two classes of register fills: [RegFill::Undefined] for "we don't know/care what are
-//! in the fill bits"; and [RegFill::Signed] and [RegFill::Zeroed] for "we know that/need the fill
-//! bits to be signed / zero extended". By tracking fills, we can avoid unnecessary sign / zero
-//! extension.
+//! [RegFill::Undefined] means "we don't care what the upper bits are set to"; [RegFill::Signed]
+//! and [RegFill::Zeroed] says "the upper bits must be signed / zero extended".
 //!
-//! [RegFill::Undefined] is by definition compatible with [RegFill::Signed] and [RegFill::Zeroed]:
-//! we can, for example, if they contain the same values but only differ in compatible fills. For
-//! clarity: [RegFill::Signed] and [RegFill::Signed] are not compatible with each other.
+//! By carefully tracking fills, we can avoid unnecessary sign / zero extension. Where possible,
+//! operations should aim to take in [RegFill::Undefined] and output [RegFill::Signed] or
+//! [RegFilled::Zeroed], as this requires the fewest explicit sign / zero extensions.
 //!
-//! Where possible, operations should aim to take in [RegFill::Undefined] and output
-//! [RegFill::Signed] or [RegFilled::Zeroed], as this requires the fewest explicit sign / zero
-//! extensions.
+//!
+//! ## Merging of different sized values
+//!
+//! When the value from instruction M can be cast from the value from instruction N (where the
+//! `iidx(M) > iidx(N)`), the register allocator may be able to merge the two values into one
+//! register.
+//!
+//! For example if an `i1` is sign-extended to an `i64`, the latter can always be derived from the
+//! former by re-sign-extending the `i1`. Similarly, if an `i64` is truncated to an `i1`, the
+//! latter is trivially rederivable from the former.
+//!
+//! The rules for what can be merged are somewhat subtle. For example consider:
+//!
+//! ```text
+//! %0: i64 = arg [reg]
+//! %1: i1 = trunc %0
+//! %2: i64 = zext %1
+//! ...
+//! ```
+//!
+//! `%0` and `%1` can be merged together; `%1` and `%2` can be merged together; but `%0` and `%2`
+//! cannot be merged together.
 //!
 //!
 //! ## Guard optimism
