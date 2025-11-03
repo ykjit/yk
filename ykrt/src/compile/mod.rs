@@ -16,9 +16,7 @@ use thiserror::Error;
 
 pub(crate) mod guard;
 pub(crate) use guard::{Guard, GuardId};
-#[cfg(jitc_j2)]
 pub mod j2;
-#[cfg(jitc_yk)]
 pub mod jitc_yk;
 
 /// A failure to compile a trace.
@@ -74,12 +72,10 @@ pub(crate) trait Compiler: Send + Sync {
 }
 
 pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
-    #[cfg(jitc_j2)]
     if std::env::var("YK_JITC").is_ok_and(|x| x == "j2") {
         return Ok(j2::J2::new()?);
     }
 
-    #[cfg(jitc_yk)]
     return Ok(jitc_yk::JITCYk::new()?);
 
     #[allow(unreachable_code)]
