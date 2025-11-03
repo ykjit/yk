@@ -436,6 +436,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     };
                     be.move_const(*reg, tmp_reg, max_bitw, *fill, kind)?;
                     continue 'a;
+                } else if let IState::StackOff(stack_off) = self.istates[iidx] {
+                    be.move_stackoff(*reg, stack_off)?;
+                    continue 'a;
                 }
             }
 
@@ -449,7 +452,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     stack_off
                 }
                 IState::Stack(stack_off) => stack_off,
-                IState::StackOff(_) => todo!(),
+                IState::StackOff(_) => unreachable!(),
             };
             be.unspill(stack_off, *reg, *fill, max_bitw)?;
         }
@@ -479,10 +482,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         for RegSpill { iidxs, reg } in ractions.spills.iter().rev() {
             for iidx in iidxs {
-                if let Inst::Const(_) = self.b.inst(*iidx) {
-                    // We don't need to spill constants.
+                if matches!(self.b.inst(*iidx), Inst::Const(_))
+                    || matches!(self.istates[*iidx], IState::StackOff(_))
+                {
+                    // We don't need to spill constants or `IState::StackOff`s.
                     continue;
                 }
+
                 let stack_off = match self.istates[*iidx] {
                     IState::None => {
                         let bitw = self.b.inst_bitw(self.m, *iidx);
@@ -492,7 +498,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         stack_off
                     }
                     IState::Stack(stack_off) => stack_off,
-                    IState::StackOff(_) => todo!(),
+                    IState::StackOff(_) => unreachable!(),
                 };
 
                 for gridx in self.rstates.gridxs(*reg) {
@@ -2056,6 +2062,14 @@ mod test {
                 "const {reg:?} tmp_reg={tmp_reg:?} tgt_bitw={tgt_bitw} fill={fill:?} {c:?}"
             ));
             Ok(())
+        }
+
+        fn move_stackoff(
+            &mut self,
+            _reg: Self::Reg,
+            _stack_off: u32,
+        ) -> Result<(), CompilationError> {
+            todo!();
         }
 
         fn arrange_fill(

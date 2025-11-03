@@ -655,6 +655,9 @@ pub(super) trait HirToAsmBackend {
         c: &ConstKind,
     ) -> Result<(), CompilationError>;
 
+    /// Move the [super::regalloc::VarLoc::StackOff] address `stack_off` into `reg`.
+    fn move_stackoff(&mut self, reg: Self::Reg, stack_off: u32) -> Result<(), CompilationError>;
+
     fn arrange_fill(&mut self, reg: Self::Reg, bitw: u32, src_fill: RegFill, dst_fill: RegFill);
     fn copy_reg(&mut self, from_reg: Self::Reg, to_reg: Self::Reg) -> Result<(), CompilationError>;
 

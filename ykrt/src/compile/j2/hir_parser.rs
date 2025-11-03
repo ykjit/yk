@@ -181,6 +181,13 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                             }
                             AstVLoc::AutoStack => todo!(),
                             AstVLoc::Stack(_span) => todo!(),
+                            AstVLoc::StackOff(span) => {
+                                let s = self.lexer.span_str(*span);
+                                let stack_off = s.parse::<u32>().unwrap_or_else(|e| {
+                                    self.err_span(*span, &format!("Invalid StackOff: {e}"))
+                                });
+                                VarLoc::StackOff(stack_off)
+                            }
                         })
                         .collect::<SmallVec<_>>();
                     entry_vlocs.push(VarLocs::new(vlocs));
@@ -1076,4 +1083,5 @@ enum AstVLoc {
     Reg(Span),
     AutoStack,
     Stack(Span),
+    StackOff(Span),
 }
