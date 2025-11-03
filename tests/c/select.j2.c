@@ -1,4 +1,4 @@
-// ignore-if: test "$YK_JITC" = "j2"
+// ignore-if: test "$YK_JITC" != "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -9,7 +9,11 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{13}}: i32 = %{{12}} ? 1i32 : 2i32
+//     %{{9}}: i1 = icmp eq ...
+//     %{{10}}: i64 = zext %{{9}}
+//     %{{11}}: i32 = 1
+//     %{{12}}: i32 = 2
+//     %{{13}}: i32 = select %9, %11, %12
 //     ...
 //     --- End jit-pre-opt ---
 //     3 2 3

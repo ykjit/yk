@@ -20,7 +20,7 @@
 //     yk-execution: deoptimise ...
 //     exit
 
-// Test ashr instructions with the exact keyword.
+// Test ashr instructions.
 
 #include <assert.h>
 #include <stdio.h>
