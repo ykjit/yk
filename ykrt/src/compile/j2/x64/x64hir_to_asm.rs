@@ -397,6 +397,16 @@ impl<'a> X64HirToAsm<'a> {
                         rhs,
                     ),
                 },
+                16 => match rmop {
+                    RegOrMemOp::Reg(reg) => {
+                        IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
+                    }
+                    RegOrMemOp::MemOp(reg, disp) => IcedInst::with2(
+                        Code::Cmp_rm16_imm16,
+                        MemoryOperand::with_base_displ(reg.to_reg64(), disp),
+                        rhs,
+                    ),
+                },
                 32 => match rmop {
                     RegOrMemOp::Reg(reg) => {
                         IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
@@ -2421,6 +2431,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             )?;
             self.asm.push_inst(match bitw {
                 1..=32 => IcedInst::with2(Code::Shr_rm32_imm8, lhsr.to_reg32(), imm),
+                33..=64 => IcedInst::with2(Code::Shr_rm64_imm8, lhsr.to_reg64(), imm),
                 x => todo!("{x}"),
             });
         } else {
@@ -4826,6 +4837,30 @@ mod test {
             "#],
         );
 
+        // i16
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i16 = load %0
+              %2: i16 = 7
+              %3: i1 = icmp ugt %1, %2
+              guard true, %3, []
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i16 = load %0
+              ; %2: i16 = 7
+              ; %3: i1 = icmp ugt %1, %2
+              ; guard true, %3, []
+              cmp word [r.64.x], 7
+              jbe l0
+              ; exit [%0]
+              ...
+            "#],
+        );
+
         // i32
         codegen_and_test(
             "
@@ -5210,6 +5245,23 @@ mod test {
               ...
               ; %2: i32 = lshr %0, %1
               shr r.32._, 3
+              ...
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 3
+              %2: i64 = lshr %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i64 = lshr %0, %1
+              shr r.64._, 3
               ...
             "],
         );
