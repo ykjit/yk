@@ -602,7 +602,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             } =>
                 !matches!(in_fill, RegCnstrFill::AnyOf(_))
                     && !matches!(out_fill, RegCnstrFill::AnyOf(_)),
-            RegCnstr::Output { out_fill, .. } => !matches!(out_fill, RegCnstrFill::AnyOf(_)),
+            RegCnstr::Output { out_fill, .. } | RegCnstr::Cast { out_fill, .. } =>
+                !matches!(out_fill, RegCnstrFill::AnyOf(_)),
             RegCnstr::Input { in_fill, .. } => !matches!(in_fill, RegCnstrFill::AnyOf(_)),
             RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } | RegCnstr::KeepAlive { .. } => true,
         }));
@@ -649,7 +650,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             cnstrs
                 .iter()
                 .filter(|x| match x {
-                    RegCnstr::InputOutput { .. } | RegCnstr::Output { .. } => true,
+                    RegCnstr::InputOutput { .. }
+                    | RegCnstr::Output { .. }
+                    | RegCnstr::Cast { .. } => true,
                     RegCnstr::Clobber { .. }
                     | RegCnstr::Input { .. }
                     | RegCnstr::Temp { .. }
@@ -659,10 +662,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 <= 1
         );
 
-        // `AnyOf` (currently) only makes sense in `out_fill`s.
+        // `AnyOf` (currently) only makes sense in `out_fill`s of non-`Cast`s.
         assert!(cnstrs.iter().all(|x| match x {
             RegCnstr::InputOutput { in_fill, .. } => !matches!(in_fill, RegCnstrFill::AnyOf(_)),
             RegCnstr::Input { in_fill, .. } => !matches!(in_fill, RegCnstrFill::AnyOf(_)),
+            RegCnstr::Cast { out_fill, .. } => !matches!(out_fill, RegCnstrFill::AnyOf(_)),
             RegCnstr::Output { .. }
             | RegCnstr::Clobber { .. }
             | RegCnstr::Temp { .. }
@@ -729,6 +733,46 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     rtn_fills.push(out_fill);
                     output_reg = Some(reg);
                 }
+                RegCnstr::Cast {
+                    in_iidx, out_fill, ..
+                } => {
+                    let out_fill = RegFill::from_regcnstrfill(out_fill);
+                    if n_out.iidxs(reg).contains(&iidx) {
+                        if n_out.iidxs(reg).len() == 1
+                            || n_out.fill(reg) == out_fill
+                            || n_out.fill(reg) == RegFill::Undefined
+                            || out_fill == RegFill::Undefined
+                        {
+                            n_out.set_fill_iidxs_gridxs(
+                                reg,
+                                out_fill,
+                                smallvec![iidx],
+                                smallvec![],
+                            );
+                            rtn_fills.push(out_fill);
+                            output_reg = Some(reg);
+                        } else {
+                            todo!()
+                        }
+                    } else if n_out.iidxs(reg).contains(in_iidx) {
+                        if n_out.iidxs(reg).len() == 1
+                            || n_out.fill(reg) == out_fill
+                            || n_out.fill(reg) == RegFill::Undefined
+                            || out_fill == RegFill::Undefined
+                        {
+                            n_out.iidxs_mut(reg).push(iidx);
+                            n_out.set_fill(reg, out_fill);
+                            rtn_fills.push(out_fill);
+                            output_reg = Some(reg);
+                        } else {
+                            todo!()
+                        }
+                    } else {
+                        n_out.set_fill_iidxs_gridxs(reg, out_fill, smallvec![iidx], smallvec![]);
+                        rtn_fills.push(out_fill);
+                        output_reg = Some(reg);
+                    }
+                }
                 RegCnstr::KeepAlive { .. } => {
                     rtn_fills.push(RegFill::Undefined);
                 }
@@ -781,10 +825,18 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 }
                 RegCnstr::InputOutput {
                     in_iidx, out_fill, ..
+                }
+                | RegCnstr::Cast {
+                    in_iidx, out_fill, ..
                 } => {
                     if let IState::Stack(stack_off) = self.istates[iidx] {
-                        let bitw = self.b.inst_bitw(self.m, iidx);
-                        be.spill(*reg, RegFill::from_regcnstrfill(out_fill), stack_off, bitw)?;
+                        let out_bitw = self.b.inst_bitw(self.m, iidx);
+                        be.spill(
+                            *reg,
+                            RegFill::from_regcnstrfill(out_fill),
+                            stack_off,
+                            out_bitw,
+                        )?;
                     }
                     self.is_used[*in_iidx] = iidx;
                 }
@@ -794,8 +846,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     can_be_same_as_input: _,
                 } => {
                     if let IState::Stack(stack_off) = self.istates[iidx] {
-                        let bitw = self.b.inst_bitw(self.m, iidx);
-                        be.spill(*reg, RegFill::from_regcnstrfill(out_fill), stack_off, bitw)?;
+                        let out_bitw = self.b.inst_bitw(self.m, iidx);
+                        be.spill(
+                            *reg,
+                            RegFill::from_regcnstrfill(out_fill),
+                            stack_off,
+                            out_bitw,
+                        )?;
                     }
                 }
                 RegCnstr::KeepAlive { .. } => (),
@@ -843,6 +900,16 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             smallvec![],
                         );
                     }
+                }
+                RegCnstr::Cast {
+                    in_iidx, out_fill, ..
+                } => {
+                    n_in.set_fill_iidxs_gridxs(
+                        reg,
+                        RegFill::from_regcnstrfill(out_fill),
+                        smallvec![*in_iidx],
+                        smallvec![],
+                    );
                 }
                 RegCnstr::KeepAlive { .. } => (),
             }
@@ -992,7 +1059,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 }
                 RegCnstr::Input { regs, .. }
                 | RegCnstr::InputOutput { regs, .. }
-                | RegCnstr::Output { regs, .. } => {
+                | RegCnstr::Output { regs, .. }
+                | RegCnstr::Cast { regs, .. } => {
                     if regs.len() == 1 {
                         // FIXME: We could in fact deal with some overlaps, but it'll be easier to
                         // do so if/when we see it in practise.
@@ -1034,7 +1102,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         find_alloc(&mut allocs, i, regs, *in_iidx);
                     }
                 }
-                RegCnstr::InputOutput { regs, in_iidx, .. } => {
+                RegCnstr::InputOutput { regs, in_iidx, .. }
+                | RegCnstr::Cast { regs, in_iidx, .. } => {
                     // In the worst case, it doesn't matter which way round we do this, but trying
                     // to put the vale in the output register makes it clearer when reading the
                     // generated assembly as to what's going on.
@@ -1085,7 +1154,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     can_be_same_as_input: false,
                     ..
                 }
-                | RegCnstr::Temp { regs } => {
+                | RegCnstr::Temp { regs }
+                | RegCnstr::Cast { regs, .. } => {
                     allocs[i] = Some(self.find_force_empty_reg(iidx, &allocs, regs));
                 }
                 RegCnstr::Output {
@@ -1495,6 +1565,15 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
         out_fill: RegCnstrFill,
         regs: &'a [Reg],
         can_be_same_as_input: bool,
+    },
+    /// Cast the value in `in_iidx` to have the fill `out_fill`, ensuring the value is in `regs`.
+    /// This is similar in effect to [Self::InputOutput] with the significant difference that the
+    /// register allocator is able to merge the results of some casts into the same register as
+    /// existing values. Note that `out_fill` cannot have the value [RegCnstrFill::AnyOf].
+    Cast {
+        in_iidx: InstIdx,
+        out_fill: RegCnstrFill,
+        regs: &'a [Reg],
     },
     /// A temporary register drawn from `regs` that the instruction will clobber.
     Temp { regs: &'a [Reg] },
@@ -2472,12 +2551,22 @@ mod test {
 
         fn i_trunc(
             &mut self,
-            _ra: &mut RegAlloc<Self>,
+            ra: &mut RegAlloc<Self>,
             _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Trunc,
+            iidx: InstIdx,
+            Trunc { val, .. }: &crate::compile::j2::hir::Trunc,
         ) -> Result<(), CompilationError> {
-            todo!()
+            let [reg] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::Cast {
+                    in_iidx: *val,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &GP_REGS,
+                }],
+            )?;
+            self.ra_log.push(format!("trunc %{iidx:?} {reg:?}"));
+            Ok(())
         }
 
         fn i_udiv(
@@ -2502,12 +2591,22 @@ mod test {
 
         fn i_zext(
             &mut self,
-            _ra: &mut RegAlloc<Self>,
+            ra: &mut RegAlloc<Self>,
             _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::ZExt,
+            iidx: InstIdx,
+            ZExt { val, .. }: &crate::compile::j2::hir::ZExt,
         ) -> Result<(), CompilationError> {
-            todo!()
+            let [reg] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::Cast {
+                    in_iidx: *val,
+                    out_fill: RegCnstrFill::Zeroed,
+                    regs: &GP_REGS,
+                }],
+            )?;
+            self.ra_log.push(format!("zext %{iidx:?} {reg:?}"));
+            Ok(())
         }
     }
 
@@ -2831,6 +2930,107 @@ mod test {
           copy_reg from=GPR0 to=GPR1
           spill GPR0 Undefined stack_off=8 bitw=64
           spill GPR1 Undefined stack_off=16 bitw=64
+        "],
+        );
+    }
+
+    #[test]
+    fn casts() {
+        // The main thing we're testing is whether we merge casts when we can, and don't when we
+        // shouldn't.
+
+        build_and_test(
+            r#"
+          %0: i64 = arg [reg]
+          %1: i32 = trunc %0
+          blackbox %1
+          exit [%0]
+        "#,
+            |_| true,
+            &["
+          unspill stack_off=8 GPR0 Undefined bitw=64
+          trunc %1 GPR0
+          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          spill GPR0 Undefined stack_off=8 bitw=64
+        "],
+        );
+
+        build_and_test(
+            r#"
+          %0: i64 = arg [reg]
+          %1: i32 = trunc %0
+          %2: i64 = zext %1
+          exit [%2]
+        "#,
+            |_| true,
+            &["
+          arrange_fill GPR0 bitw=64 from=Zeroed to=Undefined
+          zext %2 GPR0
+          arrange_fill GPR0 bitw=32 from=Undefined to=Zeroed
+          trunc %1 GPR0
+          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+        "],
+        );
+
+        build_and_test(
+            r#"
+          %0: i64 = arg [reg]
+          %1: i32 = trunc %0
+          %2: i16 = trunc %1
+          blackbox %2
+          exit [%0]
+        "#,
+            |_| true,
+            &["
+          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          trunc %2 GPR1
+          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR1 bitw=32 from=Undefined to=Undefined
+          trunc %1 GPR1
+          arrange_fill GPR1 bitw=64 from=Undefined to=Undefined
+          copy_reg from=GPR0 to=GPR1
+          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+        "],
+        );
+
+        build_and_test(
+            r#"
+          %0: i8 = arg [reg]
+          %1: i16 = zext %0
+          %2: i32 = zext %1
+          %3: i8 = trunc %2
+          exit [%3]
+        "#,
+            |_| true,
+            &["
+          arrange_fill GPR0 bitw=8 from=Undefined to=Undefined
+          trunc %3 GPR0
+          arrange_fill GPR0 bitw=32 from=Zeroed to=Undefined
+          zext %2 GPR0
+          arrange_fill GPR0 bitw=16 from=Zeroed to=Zeroed
+          zext %1 GPR0
+          arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
+        "],
+        );
+
+        build_and_test(
+            r#"
+          %0: i64 = arg [reg]
+          %1: i32 = trunc %0
+          %2: i64 = zext %1
+          blackbox %2
+          exit [%0]
+        "#,
+            |_| true,
+            &["
+          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          zext %2 GPR1
+          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR1 bitw=32 from=Undefined to=Zeroed
+          trunc %1 GPR1
+          arrange_fill GPR1 bitw=64 from=Undefined to=Undefined
+          copy_reg from=GPR0 to=GPR1
+          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
         "],
         );
     }

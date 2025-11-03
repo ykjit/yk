@@ -2981,9 +2981,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let [_] = ra.alloc(
             self,
             iidx,
-            [RegCnstr::InputOutput {
+            [RegCnstr::Cast {
                 in_iidx: *val,
-                in_fill: RegCnstrFill::Undefined,
                 out_fill: RegCnstrFill::Undefined,
                 regs: &NORMAL_GP_REGS,
             }],
@@ -3087,9 +3086,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let [_] = ra.alloc(
             self,
             iidx,
-            [RegCnstr::InputOutput {
+            [RegCnstr::Cast {
                 in_iidx: *val,
-                in_fill: RegCnstrFill::Zeroed,
                 out_fill: RegCnstrFill::Zeroed,
                 regs: &NORMAL_GP_REGS,
             }],
