@@ -397,6 +397,16 @@ impl<'a> X64HirToAsm<'a> {
                         rhs,
                     ),
                 },
+                16 => match rmop {
+                    RegOrMemOp::Reg(reg) => {
+                        IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
+                    }
+                    RegOrMemOp::MemOp(reg, disp) => IcedInst::with2(
+                        Code::Cmp_rm16_imm16,
+                        MemoryOperand::with_base_displ(reg.to_reg64(), disp),
+                        rhs,
+                    ),
+                },
                 32 => match rmop {
                     RegOrMemOp::Reg(reg) => {
                         IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
@@ -4821,6 +4831,30 @@ mod test {
               ; %3: i1 = icmp ugt %1, %2
               ; guard true, %3, []
               cmp byte [r.64.x], 7
+              jbe l0
+              ; exit [%0]
+              ...
+            "#],
+        );
+
+        // i16
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i16 = load %0
+              %2: i16 = 7
+              %3: i1 = icmp ugt %1, %2
+              guard true, %3, []
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i16 = load %0
+              ; %2: i16 = 7
+              ; %3: i1 = icmp ugt %1, %2
+              ; guard true, %3, []
+              cmp word [r.64.x], 7
               jbe l0
               ; exit [%0]
               ...
