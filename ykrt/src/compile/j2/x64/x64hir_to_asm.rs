@@ -2350,12 +2350,27 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn i_inttoptr(
         &mut self,
-        _ra: &mut RegAlloc<Self>,
+        ra: &mut RegAlloc<Self>,
         _b: &Block,
-        _iidx: InstIdx,
-        IntToPtr { tyidx: _, val: _ }: &IntToPtr,
+        iidx: InstIdx,
+        IntToPtr { tyidx, val }: &IntToPtr,
     ) -> Result<(), CompilationError> {
-        todo!();
+        assert!(self.m.ty(*tyidx).bitw() <= 64);
+        let out_fill = if self.m.ty(*tyidx).bitw() == 64 {
+            RegCnstrFill::Zeroed
+        } else {
+            RegCnstrFill::Undefined
+        };
+        let [_] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Cast {
+                in_iidx: *val,
+                out_fill,
+                regs: &NORMAL_GP_REGS,
+            }],
+        )?;
+        Ok(())
     }
 
     fn i_load(
@@ -2575,12 +2590,22 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn i_ptrtoint(
         &mut self,
-        _ra: &mut RegAlloc<Self>,
+        ra: &mut RegAlloc<Self>,
         _b: &Block,
-        _iidx: InstIdx,
-        PtrToInt { tyidx: _, val: _ }: &PtrToInt,
+        iidx: InstIdx,
+        PtrToInt { tyidx, val }: &PtrToInt,
     ) -> Result<(), CompilationError> {
-        todo!();
+        assert!(self.m.ty(*tyidx).bitw() <= 64);
+        let [_] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Cast {
+                in_iidx: *val,
+                out_fill: RegCnstrFill::Zeroed,
+                regs: &NORMAL_GP_REGS,
+            }],
+        )?;
+        Ok(())
     }
 
     fn i_select(
@@ -2981,9 +3006,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let [_] = ra.alloc(
             self,
             iidx,
-            [RegCnstr::InputOutput {
+            [RegCnstr::Cast {
                 in_iidx: *val,
-                in_fill: RegCnstrFill::Undefined,
                 out_fill: RegCnstrFill::Undefined,
                 regs: &NORMAL_GP_REGS,
             }],
@@ -3087,9 +3111,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let [_] = ra.alloc(
             self,
             iidx,
-            [RegCnstr::InputOutput {
+            [RegCnstr::Cast {
                 in_iidx: *val,
-                in_fill: RegCnstrFill::Zeroed,
                 out_fill: RegCnstrFill::Zeroed,
                 regs: &NORMAL_GP_REGS,
             }],
@@ -4749,6 +4772,42 @@ mod test {
     }
 
     #[test]
+    fn cg_inttoptr() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: ptr = inttoptr %0
+              blackbox %1
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i32 = arg [Reg("r.64.x")]
+              ......
+              mov r.32.x, r.32.x
+              ; %1: ptr = inttoptr %0
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: ptr = inttoptr %0
+              blackbox %1
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i64 = arg [Reg("r.64.x")]
+              ......
+              ; %1: ptr = inttoptr %0
+              ...
+            "#],
+        );
+    }
+
+    #[test]
     fn cg_load_float() {
         // double
         codegen_and_test(
@@ -5137,6 +5196,59 @@ mod test {
               lea r.64._, [r.64.x+1]
               ...
             "],
+        );
+    }
+
+    #[test]
+    fn cg_ptrtoint() {
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = ptrtoint %0
+              %2: ptr = inttoptr %1
+              exit [%2]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg ...
+              ; %1: i32 = ptrtoint %0
+              ; %2: ptr = inttoptr %1
+              ; exit [%2]
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = ptrtoint %0
+              %2: ptr = inttoptr %1
+              exit [%2]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg ...
+              ; %1: i64 = ptrtoint %0
+              ; %2: ptr = inttoptr %1
+              ; exit [%2]
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = ptrtoint %0
+              %2: i64 = zext %1
+              %3: ptr = inttoptr %2
+              exit [%3]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg ...
+              ; %1: i32 = ptrtoint %0
+              ; %2: i64 = zext %1
+              ; %3: ptr = inttoptr %2
+              ; exit [%3]
+            "#],
         );
     }
 
