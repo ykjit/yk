@@ -658,7 +658,10 @@ pub(super) trait HirToAsmBackend {
     /// Move the [super::regalloc::VarLoc::StackOff] address `stack_off` into `reg`.
     fn move_stackoff(&mut self, reg: Self::Reg, stack_off: u32) -> Result<(), CompilationError>;
 
-    fn arrange_fill(&mut self, reg: Self::Reg, bitw: u32, src_fill: RegFill, dst_fill: RegFill);
+    /// Adjust `dst_bitw` bits of `reg` from `src_fill` to `dst_fill`.
+    fn arrange_fill(&mut self, reg: Self::Reg, src_fill: RegFill, dst_bitw: u32, dst_fill: RegFill);
+
+    /// Copy `from_reg` to `to_reg`.
     fn copy_reg(&mut self, from_reg: Self::Reg, to_reg: Self::Reg) -> Result<(), CompilationError>;
 
     /// If the stack is currently at offset `stack_off`, return an aligned offset suitable for a

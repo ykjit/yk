@@ -465,7 +465,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             dst_fill,
         } in ractions.distinct_copies.iter()
         {
-            be.arrange_fill(*dst_reg, *bitw, *src_fill, *dst_fill);
+            be.arrange_fill(*dst_reg, *src_fill, *bitw, *dst_fill);
             be.copy_reg(*src_reg, *dst_reg)?;
         }
 
@@ -477,7 +477,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             dst_fill,
         } in ractions.self_copies.iter()
         {
-            be.arrange_fill(*dst_reg, *bitw, *src_fill, *dst_fill);
+            be.arrange_fill(*dst_reg, *src_fill, *bitw, *dst_fill);
         }
 
         for RegSpill { iidxs, reg } in ractions.spills.iter().rev() {
@@ -2075,12 +2075,12 @@ mod test {
         fn arrange_fill(
             &mut self,
             reg: Self::Reg,
-            bitw: u32,
             src_fill: RegFill,
+            dst_bitw: u32,
             dst_fill: RegFill,
         ) {
             self.ra_log.push(format!(
-                "arrange_fill {reg:?} bitw={bitw} from={src_fill:?} to={dst_fill:?}"
+                "arrange_fill {reg:?} from={src_fill:?} dst_bitw={dst_bitw} to={dst_fill:?}"
             ));
         }
 
@@ -2702,8 +2702,8 @@ mod test {
             |_| true,
             &["
           alloc %2 GPR0 GPR1
-          arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
-          arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
+          arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
+          arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
         "],
         );
     }
@@ -2853,12 +2853,12 @@ mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 bitw=8 from=Zeroed to=Undefined
+          arrange_fill GPR0 from=Zeroed dst_bitw=8 to=Undefined
           copy_reg from=GPR1 to=GPR0
           alloc %1 GPR0 GPR1
-          arrange_fill GPR1 bitw=8 from=Undefined to=Zeroed
+          arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
           copy_reg from=GPR0 to=GPR1
-          arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
+          arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
         "],
         );
     }
@@ -2895,9 +2895,9 @@ mod test {
             |_| true,
             &["
           alloc %3 GPR0 GPR1
-          arrange_fill GPR0 bitw=8 from=Zeroed to=Zeroed
+          arrange_fill GPR0 from=Zeroed dst_bitw=8 to=Zeroed
           copy_reg from=GPR1 to=GPR0
-          arrange_fill GPR1 bitw=8 from=Zeroed to=Zeroed
+          arrange_fill GPR1 from=Zeroed dst_bitw=8 to=Zeroed
           alloc %1 GPR0 GPR1
           const GPR1 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
           const GPR0 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
@@ -2937,10 +2937,10 @@ mod test {
             |_| true,
             &["
           unspill stack_off=8 GPR1 Undefined bitw=64
-          arrange_fill GPR0 bitw=64 from=Zeroed to=Undefined
+          arrange_fill GPR0 from=Zeroed dst_bitw=64 to=Undefined
           alloc %2 GPR1 GPR0
           unspill stack_off=16 GPR0 Undefined bitw=64
-          arrange_fill GPR1 bitw=64 from=Undefined to=Zeroed
+          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Zeroed
           copy_reg from=GPR0 to=GPR1
           spill GPR0 Undefined stack_off=8 bitw=64
           spill GPR1 Undefined stack_off=16 bitw=64
@@ -2964,7 +2964,7 @@ mod test {
             &["
           unspill stack_off=8 GPR0 Undefined bitw=64
           trunc %1 GPR0
-          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
           spill GPR0 Undefined stack_off=8 bitw=64
         "],
         );
@@ -2978,11 +2978,11 @@ mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 bitw=64 from=Zeroed to=Undefined
+          arrange_fill GPR0 from=Zeroed dst_bitw=64 to=Undefined
           zext %2 GPR0
-          arrange_fill GPR0 bitw=32 from=Undefined to=Zeroed
+          arrange_fill GPR0 from=Undefined dst_bitw=32 to=Zeroed
           trunc %1 GPR0
-          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
         "],
         );
 
@@ -2996,14 +2996,14 @@ mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
           trunc %2 GPR1
-          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
-          arrange_fill GPR1 bitw=32 from=Undefined to=Undefined
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
+          arrange_fill GPR1 from=Undefined dst_bitw=32 to=Undefined
           trunc %1 GPR1
-          arrange_fill GPR1 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
           copy_reg from=GPR0 to=GPR1
-          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
         "],
         );
 
@@ -3017,13 +3017,13 @@ mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 bitw=8 from=Undefined to=Undefined
+          arrange_fill GPR0 from=Undefined dst_bitw=8 to=Undefined
           trunc %3 GPR0
-          arrange_fill GPR0 bitw=32 from=Zeroed to=Undefined
+          arrange_fill GPR0 from=Zeroed dst_bitw=32 to=Undefined
           zext %2 GPR0
-          arrange_fill GPR0 bitw=16 from=Zeroed to=Zeroed
+          arrange_fill GPR0 from=Zeroed dst_bitw=16 to=Zeroed
           zext %1 GPR0
-          arrange_fill GPR0 bitw=8 from=Undefined to=Zeroed
+          arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
         "],
         );
 
@@ -3037,14 +3037,14 @@ mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
           zext %2 GPR1
-          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
-          arrange_fill GPR1 bitw=32 from=Undefined to=Zeroed
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
+          arrange_fill GPR1 from=Undefined dst_bitw=32 to=Zeroed
           trunc %1 GPR1
-          arrange_fill GPR1 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
           copy_reg from=GPR0 to=GPR1
-          arrange_fill GPR0 bitw=64 from=Undefined to=Undefined
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
         "],
         );
     }
