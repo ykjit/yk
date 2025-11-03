@@ -2399,7 +2399,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 iidx,
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Undefined,
+                    in_fill: RegCnstrFill::Zeroed,
                     out_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                 }],
@@ -4992,6 +4992,27 @@ mod test {
     #[test]
     fn cg_lshr() {
         // Constant RHS
+
+        // i16
+        codegen_and_test(
+            "
+              %0: i16 = arg [reg]
+              %1: i16 = 3
+              %2: i16 = lshr %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i16 = arg [Reg("r.64.x")]
+              ...
+              and r.32.x, 0xFFFF
+              ...
+              ; %2: i16 = lshr %0, %1
+              shr r.32.x, 3
+              ...
+            "#],
+        );
 
         // i32
         codegen_and_test(
