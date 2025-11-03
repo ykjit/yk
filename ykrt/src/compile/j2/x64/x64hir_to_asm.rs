@@ -4628,7 +4628,7 @@ mod test {
             ",
             &["
               ...
-              ; %2: i1 = eq %0, %1
+              ; %2: i1 = icmp eq %0, %1
               ; guard true, %2, []
               cmp r.32.x, r.32.y
               jne l0
@@ -4648,7 +4648,7 @@ mod test {
             ",
             &["
               ...
-              ; %2: i1 = eq %0, %1
+              ; %2: i1 = icmp eq %0, %1
               ; guard true, %2, []
               cmp r.32.x, 0x14
               jne l0
@@ -4672,7 +4672,7 @@ mod test {
               ; %1: i8 = arg [Reg("r.64.y")]
               and r.32.x, 0xFF
               and r.32.y, 0xFF
-              ; %2: i1 = eq %0, %1
+              ; %2: i1 = icmp eq %0, %1
               ; guard true, %2, []
               cmp r.32.x, r.32.y
               jne l0
@@ -4695,7 +4695,7 @@ mod test {
               ; %1: i8 = arg [Reg("r.64.y")]
               movsx r.64.x, r.8.x
               movsx r.64.y, r.8.y
-              ; %2: i1 = sgt %0, %1
+              ; %2: i1 = icmp sgt %0, %1
               ; guard true, %2, []
               cmp r.32.x, r.32.y
               jle l0
@@ -4718,7 +4718,7 @@ mod test {
               ; %1: i8 = arg [Reg("r.64.y")]
               and r.32.x, 0xFF
               and r.32.y, 0xFF
-              ; %2: i1 = ugt %0, %1
+              ; %2: i1 = icmp ugt %0, %1
               ; guard true, %2, []
               cmp r.32.x, r.32.y
               jbe l0
@@ -4740,7 +4740,7 @@ mod test {
             ",
             &["
               ...
-              ; %2: i1 = eq %0, %1
+              ; %2: i1 = icmp eq %0, %1
               cmp r.32.x, r.32.y
               sete r.8._
               ...

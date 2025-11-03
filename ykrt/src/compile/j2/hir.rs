@@ -1831,7 +1831,7 @@ impl InstT for ICmp {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
-            "{} %{}, %{}",
+            "icmp {} %{}, %{}",
             self.pred.to_str(),
             usize::from(self.lhs),
             usize::from(self.rhs)
