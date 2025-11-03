@@ -31,6 +31,8 @@
 //! fairly hard to generate the most efficient possible code: this sometimes requires jumping
 //! through a number of hoops!
 
+#[cfg(not(test))]
+use crate::aotsmp::AOT_STACKMAPS;
 use crate::{
     compile::{
         CompilationError,
@@ -2625,6 +2627,38 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 regs: &NORMAL_GP_REGS,
             }],
         )?;
+        Ok(())
+    }
+
+    fn i_return(
+        &mut self,
+        _ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        _iidx: InstIdx,
+        Return { safepoint }: &Return,
+    ) -> Result<(), CompilationError> {
+        #[cfg(not(test))]
+        let csrs = {
+            let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+            let (_, prologue) = aot_smaps.get(usize::try_from(safepoint.id).unwrap());
+            &prologue.csrs
+        };
+
+        #[cfg(test)]
+        let csrs = {
+            assert_eq!(safepoint.id, 0);
+            [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
+        };
+
+        self.asm.push_inst(Ok(IcedInst::with(Code::Retnq)));
+        self.asm
+            .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RBP));
+        for (reg, _) in csrs.iter().rev() {
+            self.asm.push_inst(IcedInst::with1(
+                Code::Pop_r64,
+                Reg::from_dwarf_reg(*reg).to_reg64(),
+            ));
+        }
         Ok(())
     }
 
@@ -5454,6 +5488,27 @@ mod test {
               ; %3: ptr = inttoptr %2
               ; exit [%3]
             "#],
+        );
+    }
+
+    #[test]
+    fn cg_return() {
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              return
+            ",
+            &["
+              ...
+              ; return
+              pop rbx
+              pop r12
+              pop r13
+              pop r14
+              pop r15
+              pop rbp
+              ret
+            "],
         );
     }
 

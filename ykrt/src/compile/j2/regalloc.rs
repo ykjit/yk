@@ -2483,6 +2483,16 @@ mod test {
             todo!()
         }
 
+        fn i_return(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Return,
+        ) -> Result<(), CompilationError> {
+            todo!();
+        }
+
         fn i_select(
             &mut self,
             _ra: &mut RegAlloc<Self>,
