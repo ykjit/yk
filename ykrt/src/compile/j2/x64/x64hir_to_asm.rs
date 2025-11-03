@@ -1057,6 +1057,15 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn move_stackoff(&mut self, reg: Self::Reg, stack_off: u32) -> Result<(), CompilationError> {
+        self.asm.push_inst(IcedInst::with2(
+            Code::Lea_r64_m,
+            reg.to_reg64(),
+            MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off)),
+        ));
+        Ok(())
+    }
+
     fn arrange_fill(&mut self, reg: Reg, bitw: u32, src_fill: RegFill, dst_fill: RegFill) {
         match (src_fill, dst_fill) {
             (RegFill::Undefined, RegFill::Undefined) => (),
@@ -3510,6 +3519,26 @@ mod test {
         assert_eq!(
             be.try_load_to_mem_op(b, InstIdx::from(14), InstIdx::from(13)),
             Some((InstIdx::from(0), 0))
+        );
+    }
+
+    #[test]
+    fn stackoff() {
+        codegen_and_test(
+            "
+              %0: ptr = arg [stackoff 32]
+              %1: i8 = load %0
+              blackbox %1
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %0: ptr = arg [StackOff(32)]
+              lea r.64.x, [rbp-0x20]
+              ; %1: i8 = load %0
+              movzx r.32._, byte [r.64.x]
+              ...
+            "],
         );
     }
 

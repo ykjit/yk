@@ -234,6 +234,7 @@ VLoc -> Result<AstVLoc, Box<dyn Error>>:
   | "REG" "STRING" { Ok(AstVLoc::Reg($2?.span())) }
   | "STACK" { Ok(AstVLoc::AutoStack) }
   | "STACK" "INT" { Ok(AstVLoc::Stack($2?.span())) }
+  | "STACKOFF" "INT" { Ok(AstVLoc::StackOff($2?.span())) }
   ;
 
 Unmatched -> ():
