@@ -1066,15 +1066,15 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn arrange_fill(&mut self, reg: Reg, bitw: u32, src_fill: RegFill, dst_fill: RegFill) {
+    fn arrange_fill(&mut self, reg: Reg, src_fill: RegFill, dst_bitw: u32, dst_fill: RegFill) {
         match (src_fill, dst_fill) {
             (RegFill::Undefined, RegFill::Undefined) => (),
-            (RegFill::Undefined | RegFill::Signed, RegFill::Zeroed) => match bitw {
+            (RegFill::Undefined | RegFill::Signed, RegFill::Zeroed) => match dst_bitw {
                 1..=31 => {
                     self.asm.push_inst(IcedInst::with2(
                         Code::And_rm32_imm32,
                         reg.to_reg32(),
-                        ((1u64 << bitw) - 1) as i32,
+                        ((1u64 << dst_bitw) - 1) as i32,
                     ));
                 }
                 32 => {
@@ -1089,7 +1089,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             },
             (RegFill::Zeroed, RegFill::Undefined) => (),
             (RegFill::Zeroed, RegFill::Zeroed) => (),
-            (RegFill::Undefined | RegFill::Zeroed, RegFill::Signed) => match bitw {
+            (RegFill::Undefined | RegFill::Zeroed, RegFill::Signed) => match dst_bitw {
                 1 => {
                     self.asm
                         .push_inst(IcedInst::with1(Code::Neg_rm64, reg.to_reg64()));
