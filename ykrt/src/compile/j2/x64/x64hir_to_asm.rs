@@ -4749,6 +4749,130 @@ mod test {
               ...
             "#],
         );
+
+        // ICmp optimisation with loads
+
+        // i32
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = load %0
+              %3: i1 = icmp ugt %2, %1
+              guard true, %3, []
+              exit [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i32 = arg [Reg("r.64.y")]
+              ; %2: i32 = load %0
+              ; %3: i1 = icmp ugt %2, %1
+              ; guard true, %3, []
+              cmp [r.32.x], r.32.y
+              jbe l0
+              ; exit [%0, %1]
+              ...
+            "#],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = load %0
+              %3: i1 = icmp ugt %2, %1
+              guard true, %3, []
+              exit [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i64 = arg [Reg("r.64.y")]
+              ; %2: i64 = load %0
+              ; %3: i1 = icmp ugt %2, %1
+              ; guard true, %3, []
+              cmp [r.64.x], r.64.y
+              jbe l0
+              ; exit [%0, %1]
+              ...
+            "#],
+        );
+
+        // ICmp optimisation with loads and constants
+
+        // i8
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i8 = load %0
+              %2: i8 = 7
+              %3: i1 = icmp ugt %1, %2
+              guard true, %3, []
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i8 = load %0
+              ; %2: i8 = 7
+              ; %3: i1 = icmp ugt %1, %2
+              ; guard true, %3, []
+              cmp byte [r.64.x], 7
+              jbe l0
+              ; exit [%0]
+              ...
+            "#],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = load %0
+              %2: i32 = 7
+              %3: i1 = icmp ugt %1, %2
+              guard true, %3, []
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i32 = load %0
+              ; %2: i32 = 7
+              ; %3: i1 = icmp ugt %1, %2
+              ; guard true, %3, []
+              cmp dword [r.64.x], 7
+              jbe l0
+              ; exit [%0]
+              ...
+            "#],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = load %0
+              %2: i64 = 7
+              %3: i1 = icmp ugt %1, %2
+              guard true, %3, []
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i64 = load %0
+              ; %2: i64 = 7
+              ; %3: i1 = icmp ugt %1, %2
+              ; guard true, %3, []
+              cmp qword [r.64.x], 7
+              jbe l0
+              ; exit [%0]
+              ...
+            "#],
+        );
     }
 
     #[test]
