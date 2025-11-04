@@ -29,10 +29,13 @@ use crate::compile::{
         x64::x64regalloc::Reg,
     },
 };
-use iced_x86::{Encoder, Instruction as Op};
+use iced_x86::{Code, Encoder, Instruction as Op};
 use index_vec::{IndexVec, index_vec};
 use libc::{MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap, munmap};
 use std::{ffi::c_void, mem::replace};
+
+/// We guarantee to align the start of blocks to `BLOCK_ALIGNMENT` bytes.
+pub(super) static BLOCK_ALIGNMENT: usize = 16;
 
 #[derive(Debug)]
 pub(super) struct Asm {
@@ -173,12 +176,19 @@ impl Asm {
         // need for labels and relocations.
         let mut enc = Encoder::new(64);
         let base = u64::try_from(self.buf.addr()).unwrap();
-        let mut off = 0;
+        let mut off: u64 = 0;
         let mut offs = Vec::new();
         let mut blk_offs = IndexVec::with_capacity(self.blocks.len());
         assert!(self.insts.is_empty());
         for b in self.blocks.iter_mut() {
             blk_offs.push(offs.len());
+            // Ensure the start of the block is properly aligned.
+            while !off.is_multiple_of(u64::try_from(BLOCK_ALIGNMENT).unwrap()) {
+                let ip = base + off;
+                let lenb = enc.encode(&Op::with(Code::Nopd), ip).unwrap();
+                off += u64::try_from(lenb).unwrap();
+            }
+
             for (opidx, inst) in b.iter_mut_enumerated().rev() {
                 let ip = base + off;
                 inst.set_ip(ip);
@@ -192,15 +202,15 @@ impl Asm {
                 {
                     inst.set_near_branch64(ip);
                 }
-                offs.push(off);
                 let lenb = enc
                     .encode(inst, ip)
                     .unwrap_or_else(|e| panic!("At machine {opidx:?} {inst:?}: {e:?}"));
+                offs.push((off, lenb));
                 off += u64::try_from(lenb).unwrap();
             }
         }
         // Relocations in the final instruction need to know the offset of the "next" instruction.
-        offs.push(off);
+        offs.push((off, 0));
 
         // We now have the information we need to create label offsets.
         let label_offs = labels
@@ -208,7 +218,7 @@ impl Asm {
             .map(|label| {
                 let (bidx, opidx) = self.labels[*label].unwrap();
                 let off = usize::from(blk_offs[bidx] + self.blocks[bidx].len() - opidx);
-                usize::try_from(offs[off]).unwrap()
+                usize::try_from(offs[off].0).unwrap()
             })
             .collect::<Vec<_>>();
 
@@ -216,8 +226,8 @@ impl Asm {
         let mut enc = enc.take_buffer();
         for (bidx, opidx, reloc) in self.relocs.iter().cloned() {
             let inst_off = usize::from(blk_offs[bidx] + self.blocks[bidx].len() - opidx - 1);
-            let inst_boff = usize::try_from(offs[inst_off]).unwrap();
-            let next_ip_boff = offs[inst_off + 1];
+            let inst_boff = usize::try_from(offs[inst_off].0).unwrap();
+            let next_ip_boff = u64::try_from(inst_boff + offs[inst_off].1).unwrap();
             match reloc {
                 RelocKind::BranchWithAddr(_) | RelocKind::BranchWithLabel(_) => {
                     let patch_boff = if enc[inst_boff] == 0xe9 {
@@ -248,7 +258,7 @@ impl Asm {
                             let to_inst_off = usize::from(
                                 blk_offs[lab_bidx] + self.blocks[lab_bidx].len() - lab_opidx,
                             );
-                            let to_boff = offs[to_inst_off];
+                            let to_boff = offs[to_inst_off].0;
                             let diff =
                                 i32::try_from(to_boff.checked_signed_diff(next_ip_boff).unwrap())
                                     .unwrap();
