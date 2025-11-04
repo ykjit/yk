@@ -42,7 +42,7 @@ use crate::{
             hir_to_asm::HirToAsmBackend,
             regalloc::{AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
             x64::{
-                asm::{Asm, LabelIdx, RelocKind},
+                asm::{Asm, BLOCK_ALIGNMENT, LabelIdx, RelocKind},
                 x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, Reg},
             },
         },
@@ -56,6 +56,7 @@ use index_vec::IndexVec;
 use smallvec::{SmallVec, smallvec};
 use std::{
     assert_matches::{assert_matches, debug_assert_matches},
+    collections::HashMap,
     ffi::c_void,
     sync::Arc,
 };
@@ -64,6 +65,9 @@ use std::{
 pub(in crate::compile::j2) struct X64HirToAsm<'a> {
     m: &'a Mod<Reg>,
     asm: Asm,
+    /// The data section: we map any given (align, byte sequence) pair to [LabelIdx]s, which will
+    /// eventually be output as their own pseudo-block.
+    data_sec: HashMap<Vec<u8>, (u32, LabelIdx)>,
     guards: IndexVec<GuardRestoreIdx, IntermediateGuard>,
 }
 
@@ -72,8 +76,33 @@ impl<'a> X64HirToAsm<'a> {
         Self {
             m,
             asm: Asm::new(m),
+            data_sec: HashMap::new(),
             guards: IndexVec::new(),
         }
+    }
+
+    /// Return a [LabelIdx] for `data`, ensuring that it is aligned to at least `align` bytes.
+    /// Note: this function can cache `data` i.e. calling it twice with equivalent `data` can lead
+    /// to the same [LabelIdx] being returned.
+    ///
+    /// # Panics
+    ///
+    /// If `align` is not a power of 2.
+    fn push_data(&mut self, align: u32, data: &[u8]) -> LabelIdx {
+        assert!(align.is_power_of_two());
+        if let Some((cur_align, lidx)) = self.data_sec.get(data) {
+            let lidx = *lidx;
+            if align > *cur_align {
+                // Higher alignment requirements take precedence.
+                self.data_sec.get_mut(data).unwrap().0 = align;
+            }
+            return lidx;
+        }
+
+        assert!(!data.is_empty() && data.len() <= 16);
+        let lidx = self.asm.mk_label();
+        self.data_sec.insert(data.to_owned(), (align, lidx));
+        lidx
     }
 
     /// If `iidx` represents a zero-extended const which can safely be represented as an `imm8`
@@ -313,7 +342,7 @@ impl<'a> X64HirToAsm<'a> {
             let label = self.asm.mk_label();
             self.asm.push_reloc(
                 IcedInst::with_branch(c, 0),
-                RelocKind::BranchWithLabel(label),
+                RelocKind::RipRelativeWithLabel(label),
             );
             self.i_icmp_const(bitw, rmop, imm);
             Ok(label)
@@ -371,7 +400,7 @@ impl<'a> X64HirToAsm<'a> {
             let label = self.asm.mk_label();
             self.asm.push_reloc(
                 IcedInst::with_branch(c, 0),
-                RelocKind::BranchWithLabel(label),
+                RelocKind::RipRelativeWithLabel(label),
             );
             self.i_icmp_reg(bitw, rmop, rhsr);
             Ok(label)
@@ -843,7 +872,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm.attach_label(dummy_label);
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::BranchWithLabel(dummy_label),
+            RelocKind::RipRelativeWithLabel(dummy_label),
         );
         self.asm.attach_label(patch_label);
 
@@ -879,7 +908,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     }
 
     fn build_exe(
-        self,
+        mut self,
         log: bool,
         labels: &[Self::Label],
     ) -> Result<
@@ -891,6 +920,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ),
         CompilationError,
     > {
+        // Push the data section as its own block. This rests on the assumption that the start of
+        // each block is aligned.
+        let mut data_off = BLOCK_ALIGNMENT;
+        for (data, (align, lidx)) in self.data_sec.into_iter() {
+            if !data_off.is_multiple_of(usize::try_from(align).unwrap()) {
+                todo!();
+            }
+            self.asm.push_inst(IcedInst::with_declare_byte(&data));
+            self.asm.attach_label(lidx);
+            data_off += data.len();
+        }
+        self.asm.block_completed();
+
         // Merge all labels into one vec as that's what `asm.into_exe` prefers.
         let all_labels = labels
             .iter()
@@ -901,6 +943,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             )
             .cloned()
             .collect::<Vec<_>>();
+
         let (buf, log, mut label_offs) = self.asm.into_exe(log, all_labels.as_slice())?;
 
         // Demerge the label offsets.
@@ -951,7 +994,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let label = self.asm.mk_label();
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::BranchWithLabel(label),
+            RelocKind::RipRelativeWithLabel(label),
         );
         Ok(label)
     }
@@ -2276,7 +2319,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             } else {
                 IcedInst::with_branch(Code::Jb_rel32_64, 0)
             },
-            RelocKind::BranchWithLabel(label),
+            RelocKind::RipRelativeWithLabel(label),
         );
         self.asm
             .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, cndr.to_reg32(), 0));
@@ -3129,6 +3172,87 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::EDX,
             IcedReg::EDX,
         ));
+        Ok(())
+    }
+
+    fn i_uitofp(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        UIToFP { tyidx, val, nneg }: &UIToFP,
+    ) -> Result<(), CompilationError> {
+        // We don't support `nneg` yet.
+        assert!(!*nneg);
+        let [srcr, tgtr, tmpr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    can_be_same_as_input: false,
+                },
+                RegCnstr::Temp {
+                    regs: &ALL_XMM_REGS,
+                },
+            ],
+        )?;
+
+        match self.m.ty(*tyidx) {
+            Ty::Double => {
+                // We generate similar code to LLVM in X86ISelLowering. Note: this is non-strict
+                // floating point: it produces -0.0 instead of +0.0!
+                let c0_lidx =
+                    self.push_data(8, &[0, 0, 48, 67, 0, 0, 48, 69, 0, 0, 0, 0, 0, 0, 0, 0]);
+                let c1_lidx =
+                    self.push_data(8, &[0, 0, 0, 0, 0, 0, 48, 67, 0, 0, 0, 0, 0, 0, 48, 69]);
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Addsd_xmm_xmmm64,
+                    tgtr.to_xmm(),
+                    tmpr.to_xmm(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Unpckhpd_xmm_xmmm128,
+                    tgtr.to_xmm(),
+                    tmpr.to_xmm(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movapd_xmmm128_xmm,
+                    tgtr.to_xmm(),
+                    tmpr.to_xmm(),
+                ));
+                self.asm.push_reloc(
+                    IcedInst::with2(
+                        Code::Subpd_xmm_xmmm128,
+                        tmpr.to_xmm(),
+                        MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                    ),
+                    RelocKind::RipRelativeWithLabel(c1_lidx),
+                );
+                self.asm.push_reloc(
+                    IcedInst::with2(
+                        Code::Punpckldq_xmm_xmmm128,
+                        tmpr.to_xmm(),
+                        MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                    ),
+                    RelocKind::RipRelativeWithLabel(c0_lidx),
+                );
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movq_xmm_rm64,
+                    tmpr.to_xmm(),
+                    srcr.to_reg64(),
+                ));
+            }
+            Ty::Float => todo!(),
+            _ => unreachable!(),
+        }
         Ok(())
     }
 
@@ -6413,6 +6537,56 @@ mod test {
               ; call %2(%3)
               ...
             "],
+        );
+    }
+
+    #[test]
+    fn cg_uitofp() {
+        // double
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: double = uitofp %0
+              blackbox %1
+              exit [%0]
+            ",
+            &[
+                r#"
+              ...
+              ; %0: i64 = arg [Reg("r.64.x")]
+              ; %1: double = uitofp %0
+              movq fp.128.x, r.64.x
+              punpckldq fp.128.x, l0
+              subpd fp.128.x, l1
+              movapd fp.128.y, fp.128.x
+              unpckhpd fp.128.y, fp.128.x
+              addsd fp.128.y, fp.128.x
+              ; blackbox %1
+              ; exit [%0]
+              ; l0
+              db 0, 0, 0x30, 0x43, 0, 0, 0x30, 0x45, 0, 0, 0, 0, 0, 0, 0, 0
+              ; l1
+              db 0, 0, 0, 0, 0, 0, 0x30, 0x43, 0, 0, 0, 0, 0, 0, 0x30, 0x45
+            "#,
+                r#"
+              ...
+              ; %0: i64 = arg [Reg("r.64.x")]
+              ; %1: double = uitofp %0
+              movq fp.128.x, r.64.x
+              punpckldq fp.128.x, l0
+              subpd fp.128.x, l1
+              movapd fp.128.y, fp.128.x
+              unpckhpd fp.128.y, fp.128.x
+              addsd fp.128.y, fp.128.x
+              ; blackbox %1
+              ; exit [%0]
+              ; l1
+              db 0, 0, 0, 0, 0, 0, 0x30, 0x43, 0, 0, 0, 0, 0, 0, 0x30, 0x45
+              ; l0
+              db 0, 0, 0x30, 0x43, 0, 0, 0x30, 0x45, 0, 0, 0, 0, 0, 0, 0, 0
+            "#,
+            ],
         );
     }
 

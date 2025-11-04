@@ -192,15 +192,18 @@ impl Asm {
             for (opidx, inst) in b.iter_mut_enumerated().rev() {
                 let ip = base + off;
                 inst.set_ip(ip);
-                // At this point we don't necessarily know where branch and jump operations
-                // should go to: if they have an address of 0, we know we'll be relocating the
-                // operation later. However, icedx86 will (rightfully) complain about address 0,
-                // so we stuff in a dummy jump address (to the operation itself) which we'll
-                // patch a little below.
+                // At this point we don't necessarily know where
+                // branch/jump/other-memory-displacement operations should go to: if they have an
+                // address of 0, we know we'll be relocating the operation later. However, icedx86
+                // will (rightfully) complain about address 0, so we stuff in a dummy jump address
+                // (to the operation itself) which we'll patch a little below.
                 if (inst.is_call_near() || inst.is_jmp_near() || inst.is_jcc_near())
                     && inst.near_branch64() == 0
                 {
                     inst.set_near_branch64(ip);
+                }
+                if inst.is_ip_rel_memory_operand() && inst.memory_displacement64() == 0 {
+                    inst.set_memory_displacement64(ip);
                 }
                 let lenb = enc
                     .encode(inst, ip)
@@ -229,7 +232,7 @@ impl Asm {
             let inst_boff = usize::try_from(offs[inst_off].0).unwrap();
             let next_ip_boff = u64::try_from(inst_boff + offs[inst_off].1).unwrap();
             match reloc {
-                RelocKind::BranchWithAddr(_) | RelocKind::BranchWithLabel(_) => {
+                RelocKind::BranchWithAddr(_) | RelocKind::RipRelativeWithLabel(_) => {
                     let patch_boff = if enc[inst_boff] == 0xe9 {
                         inst_boff + 1 // JMP
                     } else if enc[inst_boff] == 0x0F
@@ -237,8 +240,13 @@ impl Asm {
                         && enc[inst_boff + 1] <= 0x08F
                     {
                         inst_boff + 2 // JCC
+                    } else if enc[inst_boff] == 0x66
+                        && enc[inst_boff + 1] == 0x0F
+                        && (enc[inst_boff + 2] >= 0x5C && enc[inst_boff + 2] <= 0x62)
+                    {
+                        inst_boff + 4 // PUNPCKLDQ / SUBPD
                     } else {
-                        todo!("{:?}", &enc[inst_boff..inst_boff + 2])
+                        todo!("{:X?}", &enc[inst_boff..inst_boff + 3])
                     };
 
                     let addr = match reloc {
@@ -253,7 +261,7 @@ impl Asm {
                             enc[patch_boff..patch_boff + 4].copy_from_slice(&diff.to_le_bytes());
                             u64::try_from(addr).unwrap()
                         }
-                        RelocKind::BranchWithLabel(lidx) => {
+                        RelocKind::RipRelativeWithLabel(lidx) => {
                             let (lab_bidx, lab_opidx) = self.labels[lidx].unwrap();
                             let to_inst_off = usize::from(
                                 blk_offs[lab_bidx] + self.blocks[lab_bidx].len() - lab_opidx,
@@ -346,7 +354,7 @@ impl Asm {
                     let mut inst_s = String::new();
                     fmtr.format(&inst, &mut inst_s);
                     if relocs_iter.peek().map(|(x, y, _)| (*x, *y)) == Some((bidx, opidx))
-                        && let RelocKind::BranchWithLabel(lidx) = relocs_iter.next().unwrap().2
+                        && let RelocKind::RipRelativeWithLabel(lidx) = relocs_iter.next().unwrap().2
                     {
                         inst_s.replace_range(
                             inst_s.rfind(' ').unwrap()..,
@@ -372,8 +380,10 @@ impl Asm {
 pub(super) enum RelocKind {
     /// A relative branch to the address at `usize`.
     BranchWithAddr(usize),
-    /// A branch to the label at [LabelIdx].
-    BranchWithLabel(LabelIdx),
+    /// An instruction refering to the label at [LabelIdx] relative to RIP. Using this requires
+    /// teaching `into_exe` about the specific encoding and the offset of the address in the
+    /// instruction. Instructions supported are: JMP, JCC, PUNPCKLDQ, and SUBPD.
+    RipRelativeWithLabel(LabelIdx),
     /// A near call to the address at `usize`. That this is possible should have been validated
     /// with [Asm::near_callable], or an exception will ensue.
     NearCallWithAddr(usize),

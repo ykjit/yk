@@ -603,6 +603,7 @@ pub(super) enum Inst {
     ThreadLocal,
     Trunc,
     UDiv,
+    UIToFP,
     Xor,
     ZExt,
 }
@@ -2857,6 +2858,58 @@ impl InstT for UDiv {
     }
 }
 
+/// Cast an unsigned integer to floating point with the same semantics as LLVM's `uitofp`.
+#[derive(Debug)]
+pub(super) struct UIToFP {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+    pub nneg: bool,
+}
+
+impl InstT for UIToFP {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_matches!(
+            m.ty(self.tyidx),
+            Ty::Double | Ty::Float,
+            "%{iidx:?}: return type is not a floating point type"
+        );
+
+        assert_matches!(
+            b.inst(self.val).ty(m),
+            Ty::Int(_),
+            "%{iidx:?}: val is not an integer"
+        );
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.val);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            val: f(self.val),
+            nneg: self.nneg,
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("uitofp %{}", usize::from(self.val))
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
+}
+
 /// `^` with normal LLVM semantics.
 #[derive(Debug)]
 pub(super) struct Xor {
@@ -3742,6 +3795,28 @@ mod test {
           %0: i8 = arg [reg]
           %1: i8 = arg [reg]
           %2: i16 = udiv %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: return type is not a floating point type")]
+    fn uitofp_must_return_floating_point() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i32 = arg [reg]
+          %1: ptr = uitofp %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: val is not an integer")]
+    fn uitofp_input_must_take_integer() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: ptr = arg [reg]
+          %1: double = uitofp %0
         ",
         );
     }
