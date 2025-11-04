@@ -1,18 +1,19 @@
-// ignore-if: test "$YK_JITC" = "j2"
+// ignore-if: test "$YK_JITC" != "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     ...
-//     %{{8}}: ptr = lookup_global @shadowstack_0
-//     %{{9}}: ptr = load %{{8}}
+//     %{{7}}: ptr = threadlocal shadowstack_0
+//     %{{8}}: ptr = load %{{7}}
 //     ...
-//     %{{14}}: ptr = ptr_add %{{_}}, 8
+//     %{{12}}: ptr = ptradd %{{_}}, 8
 //     ...
-//     %{{18}}: i32 = mul %{{17}}, 2i32
-//     %{{19}}: ptr = load %{{14}}
-//     *%{{19}} = %{{18}}
+//     %{{16}}: i32 = 2
+//     %{{17}}: i32 = mul %{{_}}, %{{16}}
+//     %{{18}}: ptr = load %{{12}}
+//     store %{{17}}, %{{18}}
 //     ...
 //     Run trace in a thread.
 //     ...
