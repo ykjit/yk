@@ -636,9 +636,11 @@ impl<'a> X64HirToAsm<'a> {
         }: &Store,
     ) -> Result<(), CompilationError> {
         assert_matches!(b.inst_ty(self.m, *val), Ty::Int(_) | Ty::Ptr(0));
+
+        let val_bitw = b.inst_bitw(self.m, *val);
         let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
         if let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
-            && let Some(_rhs) = self.sign_ext_op_for_imm32(b, *rhs)
+            && let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs)
             && let Inst::Load(Load {
                 ptr: load_ptr,
                 is_volatile: false,
@@ -648,14 +650,28 @@ impl<'a> X64HirToAsm<'a> {
             let (load_ptr, load_off) = self
                 .flatten_ptradd_chain(b, *load_ptr)
                 .unwrap_or((*load_ptr, 0));
-            if (ptr, off) == (load_ptr, load_off)
-                && !b.heap_effects_on(*lhs, load_ptr + 1..iidx - 1)
-            {
-                // OPT!
+            if (ptr, off) == (load_ptr, load_off) && !b.heap_effects_on(*lhs, *lhs + 1..iidx) {
+                let [ptrr] = ra.alloc(
+                    self,
+                    iidx,
+                    [RegCnstr::Input {
+                        in_iidx: ptr,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    }],
+                )?;
+                let memop = MemoryOperand::with_base_displ(ptrr.to_reg64(), off);
+                self.asm.push_inst(match val_bitw {
+                    8 => IcedInst::with2(Code::Add_rm8_imm8, memop, imm),
+                    32 => IcedInst::with2(Code::Add_rm32_imm32, memop, imm),
+                    64 => IcedInst::with2(Code::Add_rm64_imm32, memop, imm),
+                    x => todo!("{x}"),
+                });
+                return Ok(());
             }
         }
 
-        let val_bitw = b.inst_bitw(self.m, *val);
         if let Some(imm) = self.sign_ext_op_for_imm32(b, *val) {
             let [ptrr] = ra.alloc(
                 self,
@@ -5981,6 +5997,158 @@ mod test {
               mov [r.64.x+8], r.8.y
               ...
             "],
+        );
+
+        // add-load-store optimisation
+
+        // i8
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i8 = load %0
+              %2: i8 = 42
+              %3: i8 = add %1, %2
+              store %3, %0
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i8 = load %0
+              ; %2: i8 = 42
+              ; %3: i8 = add %1, %2
+              ; store %3, %0
+              add byte [r.64.x], 0x2A
+              ; exit [%0]
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              extern f()
+
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i8 = load %0
+              %3: i8 = 42
+              %4: i8 = add %2, %3
+              call f %1()
+              store %4, %0
+              exit [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i8 = load %0
+              movzx r.32.x, byte [r.64.y]
+              ; %3: i8 = 42
+              ; %4: i8 = add %2, %3
+              add r.32.x, 0x2A
+              ; call %1()
+              call r.64._
+              ; store %4, %0
+              mov [r.64.y], r.8.x
+              ; exit [%0, %1]
+            "#],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = load %0
+              %2: i32 = 42
+              %3: i32 = add %1, %2
+              store %3, %0
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i32 = load %0
+              ; %2: i32 = 42
+              ; %3: i32 = add %1, %2
+              ; store %3, %0
+              add dword [r.64.x], 0x2A
+              ; exit [%0]
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              extern f()
+
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i32 = load %0
+              %3: i32 = 42
+              %4: i32 = add %2, %3
+              call f %1()
+              store %4, %0
+              exit [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i32 = load %0
+              mov r.32.x, [r.64.y]
+              ; %3: i32 = 42
+              ; %4: i32 = add %2, %3
+              add r.32.x, 0x2A
+              ; call %1()
+              call r.64._
+              ; store %4, %0
+              mov [r.64.y], r.32.x
+              ; exit [%0, %1]
+            "#],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = load %0
+              %2: i64 = 42
+              %3: i64 = add %1, %2
+              store %3, %0
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i64 = load %0
+              ; %2: i64 = 42
+              ; %3: i64 = add %1, %2
+              ; store %3, %0
+              add qword [r.64.x], 0x2A
+              ; exit [%0]
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              extern f()
+
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i64 = load %0
+              %3: i64 = 42
+              %4: i64 = add %2, %3
+              call f %1()
+              store %4, %0
+              exit [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = load %0
+              mov r.64.x, [r.64.y]
+              ; %3: i64 = 42
+              ; %4: i64 = add %2, %3
+              add r.64.x, 0x2A
+              ; call %1()
+              call r.64._
+              ; store %4, %0
+              mov [r.64.y], r.64.x
+              ; exit [%0, %1]
+            "#],
         );
     }
 
