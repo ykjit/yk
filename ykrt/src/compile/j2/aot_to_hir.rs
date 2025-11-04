@@ -198,34 +198,44 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             BuildModKind::Loop { .. } => None,
             BuildModKind::Side { prev_bid, .. } => Some(*prev_bid),
         };
+
+        // If we encounter a return in a side-trace, [early_return] will be set to true, and no
+        // further processing of the trace should occur.
+        let mut early_return = false;
         while let Some(ta) = self.ta_iter.next() {
             if let Some(bid) = self.ta_to_bid(&ta?) {
-                self.p_block(prev_bid, bid)?;
+                if self.p_block(prev_bid, bid)? {
+                    // We encountered an early return.
+                    early_return = true;
+                    break;
+                }
                 prev_bid = Some(bid);
             }
         }
 
         assert_eq!(self.promotions_off, self.promotions.len());
 
-        assert_eq!(self.frames.len(), 1);
-        let exit_safepoint = match &bmk {
-            BuildModKind::Coupler => todo!(),
-            BuildModKind::Loop { entry_safepoint } => entry_safepoint,
-            BuildModKind::Side { tgt_ctr, .. } => match &tgt_ctr.kind {
-                J2CompiledTraceKind::Loop {
-                    entry_safepoint, ..
-                } => entry_safepoint,
-                J2CompiledTraceKind::Side { .. } => todo!(),
-                #[cfg(test)]
-                J2CompiledTraceKind::Test => unreachable!(),
-            },
-        };
-        let exit_vars = exit_safepoint
-            .lives
-            .iter()
-            .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
-            .collect::<Vec<_>>();
-        self.opt.push_inst(hir::Inst::Exit(hir::Exit(exit_vars)))?;
+        if !early_return {
+            assert_eq!(self.frames.len(), 1);
+            let exit_safepoint = match &bmk {
+                BuildModKind::Coupler => todo!(),
+                BuildModKind::Loop { entry_safepoint } => entry_safepoint,
+                BuildModKind::Side { tgt_ctr, .. } => match &tgt_ctr.kind {
+                    J2CompiledTraceKind::Loop {
+                        entry_safepoint, ..
+                    } => entry_safepoint,
+                    J2CompiledTraceKind::Side { .. } => todo!(),
+                    #[cfg(test)]
+                    J2CompiledTraceKind::Test => unreachable!(),
+                },
+            };
+            let exit_vars = exit_safepoint
+                .lives
+                .iter()
+                .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
+                .collect::<Vec<_>>();
+            self.opt.push_inst(hir::Inst::Exit(hir::Exit(exit_vars)))?;
+        }
 
         let (entry, tys) = self.opt.build();
         let mk = match bmk {
@@ -298,6 +308,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         guard_safepoint: &'static DeoptSafepoint,
         switch: Option<hir::Switch>,
     ) -> Result<(), CompilationError> {
+        self.frames.last_mut().unwrap().call_safepoint = Some(guard_safepoint);
         let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
         for (
             i,
@@ -730,11 +741,13 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         }
     }
 
+    /// Returns `true` if an early return was encountered: parent code should stop examining the
+    /// trace at this point.
     fn p_block(
         &mut self,
         prev_bid: Option<BBlockId>,
         bid: BBlockId,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<bool, CompilationError> {
         let blk = self.am.bblock(&bid);
         for (i, inst) in blk.insts.iter().enumerate() {
             let iid = InstId::new(bid.funcidx(), bid.bbidx(), BBlockInstIdx::new(i));
@@ -758,7 +771,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 Inst::Phi { .. } => self.p_phi(iid, prev_bid.unwrap().bbidx(), bid, inst)?,
                 Inst::Promote { .. } => self.p_promote(iid, bid, inst)?,
                 Inst::PtrAdd { .. } => self.p_ptradd(iid, inst)?,
-                Inst::Ret { .. } => self.p_ret(iid, inst)?,
+                Inst::Ret { .. } => {
+                    if self.p_ret(iid, inst)? {
+                        // We encountered an early return in a side-trace.
+                        return Ok(true);
+                    }
+                }
                 Inst::Select { .. } => self.p_select(iid, inst)?,
                 Inst::Store { .. } => self.p_store(iid, inst)?,
                 Inst::Switch { .. } => self.p_switch(iid, bid, inst, None)?,
@@ -768,7 +786,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 } => todo!(),
             }
         }
-        Ok(())
+        Ok(false)
     }
 
     fn p_binop(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
@@ -1405,7 +1423,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         Ok(())
     }
 
-    fn p_ret(&mut self, _iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+    /// Return `true` if this is an early return that should stop examining the trace further.
+    fn p_ret(&mut self, _iid: InstId, inst: &Inst) -> Result<bool, CompilationError> {
         let Inst::Ret { val } = inst else { panic!() };
 
         let val = match val {
@@ -1420,11 +1439,20 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             if let Some(val_iidx) = val {
                 last_frame.set_local(frame.call_iid.unwrap(), val_iidx);
             }
+            Ok(false)
         } else {
-            todo!();
+            if let BuildKind::Side { .. } = self.bkind {
+                todo!();
+            }
+            // We've returned out of the function that started tracing. Stop processing any
+            // remaining blocks and emit a return instruction that naturally returns from a
+            // compiled trace into the interpreter.
+            let safepoint = frame.call_safepoint.unwrap();
+            // We currently don't support passing values back during early returns.
+            assert!(val.is_none());
+            self.opt.push_inst(hir::Return { safepoint }.into())?;
+            Ok(true)
         }
-
-        Ok(())
     }
 
     fn p_select(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {

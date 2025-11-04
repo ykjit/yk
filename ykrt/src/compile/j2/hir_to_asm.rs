@@ -472,6 +472,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_ptrtoint(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::Return(x) => {
+                    self.be.i_return(&mut ra, b, iidx, x)?;
+                }
                 Inst::Select(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_select(&mut ra, b, iidx, x)?;
@@ -918,6 +921,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &PtrToInt,
+    ) -> Result<(), CompilationError>;
+
+    fn i_return(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &Return,
     ) -> Result<(), CompilationError>;
 
     fn i_select(

@@ -592,6 +592,7 @@ pub(super) enum Inst {
     Mul,
     PtrAdd,
     PtrToInt,
+    Return,
     Select,
     SExt,
     Shl,
@@ -2269,6 +2270,40 @@ impl InstT for PtrToInt {
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
         m.ty(self.tyidx)
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct Return {
+    pub safepoint: &'static DeoptSafepoint,
+}
+
+impl InstT for Return {
+    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
+
+    fn iter_iidxs<F>(&self, _f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+    }
+
+    fn map_iidxs<F>(self, _f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            safepoint: self.safepoint,
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        "return".to_owned()
+    }
+
+    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
+        &Ty::Void
     }
 }
 

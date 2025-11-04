@@ -134,6 +134,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "PTRTOINT" "LOCAL" {
       Ok(AstInst::PtrToInt { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
+  | "RETURN" {
+      Ok(AstInst::Return)
+    }
   | "LOCAL" ":" Ty "=" "SELECT" "LOCAL" "," "LOCAL" "," "LOCAL" {
        Ok(AstInst::Select { local: $1?.span(), ty: $3?, cond: $6?.span(), truev: $8?.span(), falsev: $10?.span() })
     }
