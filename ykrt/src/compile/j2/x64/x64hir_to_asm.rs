@@ -2675,6 +2675,16 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 Reg::from_dwarf_reg(*reg).to_reg64(),
             ));
         }
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            i32::try_from(csrs.len() * 8).unwrap(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_rm64,
+            IcedReg::RSP,
+            IcedReg::RBP,
+        ));
         Ok(())
     }
 
@@ -5517,6 +5527,8 @@ mod test {
             &["
               ...
               ; return
+              mov rsp, rbp
+              sub rsp, 0x28
               pop rbx
               pop r12
               pop r13
