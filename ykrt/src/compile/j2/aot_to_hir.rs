@@ -40,7 +40,6 @@ use std::{
     ffi::{CString, c_void},
     iter::Peekable,
     marker::PhantomData,
-    ptr,
     sync::Arc,
 };
 
@@ -72,7 +71,7 @@ pub(super) struct AotToHir<Reg: RegT> {
     /// Initially set to `None` until we find the locations for this trace's arguments.
     frames: Vec<Frame>,
     /// Cache dlsym() lookups.
-    thread_locals_cache: HashMap<String, *const c_void>,
+    dlsym_cache: HashMap<String, Option<*const c_void>>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
     addr_name_map: Option<HashMap<usize, String>>,
     /// The JIT IR this struct builds.
@@ -91,7 +90,10 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         _debug_strs: Vec<String>,
     ) -> Self {
         let globals = {
-            let ptr = name_to_addr(GLOBAL_PTR_ARRAY_SYM).unwrap() as *const *const ();
+            let cn = CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap();
+            let ptr = unsafe { libc::dlsym(std::ptr::null_mut(), cn.as_c_str().as_ptr()) }
+                as *const *const ();
+            assert!(!ptr.is_null());
             unsafe { std::slice::from_raw_parts(ptr, am.global_decls_len()) }
         };
 
@@ -114,7 +116,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             opt,
             guard_restores: IndexVec::new(),
             frames: Vec::new(),
-            thread_locals_cache: HashMap::new(),
+            dlsym_cache: HashMap::new(),
             addr_name_map: should_log_any_ir().then_some(HashMap::new()),
             phantom: PhantomData,
         }
@@ -289,6 +291,19 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         m.assert_well_formed();
 
         Ok(m)
+    }
+
+    /// Convert a name to an address: this is effectively a caching front-end to [libc::dlsym].
+    fn dlsym(&mut self, sym: &str) -> Option<*const c_void> {
+        if let Some(x) = self.dlsym_cache.get(sym) {
+            return *x;
+        }
+        let cn = CString::new(sym).unwrap();
+        let ptr =
+            unsafe { libc::dlsym(std::ptr::null_mut(), cn.as_c_str().as_ptr()) } as *const c_void;
+        let r = if ptr.is_null() { None } else { Some(ptr) };
+        self.dlsym_cache.insert(sym.to_owned(), r);
+        r
     }
 
     fn peek_next_bbid(&mut self) -> Option<BBlockId> {
@@ -714,14 +729,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             Operand::Global(gidx) => {
                 let gl = self.am.global_decl(*gidx);
                 let (addr, inst) = if gl.is_threadlocal() {
-                    let addr = if let Some(addr) = self.thread_locals_cache.get(gl.name()) {
-                        *addr
-                    } else {
-                        let sym = CString::new(gl.name()).unwrap();
-                        let addr = unsafe { libc::dlsym(ptr::null_mut(), sym.as_ptr()) };
-                        self.thread_locals_cache.insert(gl.name().to_owned(), addr);
-                        addr
-                    };
+                    let addr = self.dlsym(gl.name()).unwrap();
                     assert!(!addr.is_null());
                     (
                         addr.addr(),
@@ -739,7 +747,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
             Operand::Func(fidx) => {
                 let func = self.am.func(*fidx);
-                let addr = name_to_addr(func.name())?;
+                let addr = self.dlsym(func.name()).unwrap().addr();
                 self.addr_name_map
                     .as_mut()
                     .map(|x| x.insert(addr, func.name().to_owned()));
@@ -991,7 +999,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
 
             // Handle user-level functions.
-            let addr = name_to_addr(func.name())?;
+            let addr = self.dlsym(func.name()).unwrap().addr();
             self.addr_name_map
                 .as_mut()
                 .map(|x| x.insert(addr, func.name().to_owned()));
@@ -1719,16 +1727,5 @@ impl Iterator for TraceActionIterator {
         self.ta_iter
             .next()
             .map(|x| x.map_err(|e| CompilationError::General(e.to_string())))
-    }
-}
-
-/// Convert a name to an address: this is effectively a simple front-end to [libc::dlsym].
-fn name_to_addr(n: &str) -> Result<usize, CompilationError> {
-    let Ok(cn) = CString::new(n) else { todo!() };
-    let rtn = unsafe { libc::dlsym(std::ptr::null_mut(), cn.as_c_str().as_ptr()) };
-    if !rtn.is_null() {
-        Ok(rtn.addr())
-    } else {
-        todo!("{n}")
     }
 }
