@@ -1,4 +1,4 @@
-// ignore-if: test "$YK_JITC" = "j2"
+// ignore-if: test "$YK_JITC" != "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=jit-pre-opt
@@ -9,14 +9,15 @@
 //     1
 //     return
 //     yk-tracing: stop-tracing
+//     --- Begin jit-pre-opt ---
 //     ...
-//     return [safepoint: ...
+//     return
+//     --- End jit-pre-opt ---
 //     ...
 //     2
 //     yk-execution: enter-jit-code
 //     1
 //     return
-//     yk-execution: return ...
 //     exit
 
 // Check that traces that left the interpreter loop during tracing emit a
