@@ -137,6 +137,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "RETURN" {
       Ok(AstInst::Return)
     }
+  | "LOCAL" ":" Ty "=" "SDIV" "LOCAL" "," "LOCAL" {
+       Ok(AstInst::SDiv { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
   | "LOCAL" ":" Ty "=" "SELECT" "LOCAL" "," "LOCAL" "," "LOCAL" {
        Ok(AstInst::Select { local: $1?.span(), ty: $3?, cond: $6?.span(), truev: $8?.span(), falsev: $10?.span() })
     }

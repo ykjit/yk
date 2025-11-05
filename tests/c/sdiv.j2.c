@@ -1,4 +1,4 @@
-// ignore-if: test "$YK_JITC" = "j2"
+// ignore-if: test "$YK_JITC" != "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
@@ -18,13 +18,17 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i16 = sdiv %{{_}}, 3i16
+//     %{{12}}: i16 = 3
+//     %{{_}}: i16 = sdiv %{{_}}, %{{12}}
 //     ...
-//     %{{_}}: i32 = sdiv %{{_}}, 3i32
+//     %{{15}}: i32 = 3
+//     %{{_}}: i32 = sdiv %{{_}}, %{{15}}
 //     ...
-//     %{{_}}: i64 = sdiv %{{_}}, 3i64
+//     %{{18}}: i64 = 3
+//     %{{_}}: i64 = sdiv %{{_}}, %{{18}}
 //     ...
-//     %{{_}}: i8 = sdiv %{{_}}, 3i8
+//     %{{21}}: i8 = 3
+//     %{{_}}: i8 = sdiv %{{_}}, %{{21}}
 //     ...
 //     --- End jit-pre-opt ---
 //     sdiv1 -10922

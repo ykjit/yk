@@ -593,6 +593,7 @@ pub(super) enum Inst {
     PtrAdd,
     PtrToInt,
     Return,
+    SDiv,
     Select,
     SExt,
     Shl,
@@ -2308,6 +2309,68 @@ impl InstT for Return {
     }
 }
 
+/// Return the quotient from signed division with the same semantics as LLVM's `sdiv`.
+#[derive(Debug)]
+pub(super) struct SDiv {
+    pub tyidx: TyIdx,
+    /// What LLVM calls `op1`.
+    pub lhs: InstIdx,
+    /// What LLVM calls `op2`.
+    pub rhs: InstIdx,
+    pub exact: bool,
+}
+
+impl InstT for SDiv {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert!(
+            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
+                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            "%{iidx:?}: inconsistent return / lhs / rhs types"
+        );
+    }
+
+    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.lhs);
+        f(self.rhs);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            lhs: f(self.lhs),
+            rhs: f(self.rhs),
+            exact: self.exact,
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "sdiv %{}, %{}",
+            usize::from(self.lhs),
+            usize::from(self.rhs)
+        )
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct Select {
     pub tyidx: TyIdx,
@@ -3598,6 +3661,30 @@ mod test {
             "
           %0: ptr = arg [reg]
           %1: ptr = ptrtoint %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn sdiv_type_consistency1() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: float = arg [reg]
+          %1: double = arg [reg]
+          %2: float = sdiv %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn sdiv_type_consistency2() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: float = arg [reg]
+          %1: float = arg [reg]
+          %2: double = sdiv %0, %1
         ",
         );
     }
