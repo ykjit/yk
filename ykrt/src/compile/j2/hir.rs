@@ -3631,6 +3631,28 @@ mod test {
     }
 
     #[test]
+    #[should_panic(expected = "%1: return type is not a floating point type")]
+    fn sitofp_must_return_floating_point() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i32 = arg [reg]
+          %1: ptr = sitofp %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: val is not an integer")]
+    fn sitofp_input_must_take_integer() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: ptr = arg [reg]
+          %1: double = sitofp %0
+        ",
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
     fn srem_type_consistency1() {
         str_to_mod::<DummyReg>(
