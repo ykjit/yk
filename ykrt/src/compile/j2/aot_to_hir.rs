@@ -798,8 +798,13 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 Inst::Switch { .. } => self.p_switch(iid, bid, inst, None)?,
                 Inst::Unimplemented {
                     tyidx: _,
-                    llvm_inst_str: _,
-                } => todo!(),
+                    llvm_inst_str,
+                } => {
+                    return Err(CompilationError::General(format!(
+                        "Unimplemented: '{}'",
+                        llvm_inst_str.trim()
+                    )));
+                }
             }
         }
         Ok(false)
