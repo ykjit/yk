@@ -1091,15 +1091,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         }
                     } else {
                         assert_eq!(tgt_fill, RegFill::Signed);
-                        match tgt_bitw {
-                            32 => {
-                                if let Some(x) = x.to_sign_ext_i32() {
-                                    IcedInst::with2(Code::Mov_rm64_imm32, reg.to_reg64(), x)
-                                } else {
-                                    todo!();
-                                }
-                            }
-                            x => todo!("{x}"),
+                        if let Some(x) = x.to_sign_ext_i32() {
+                            IcedInst::with2(Code::Mov_rm64_imm32, reg.to_reg64(), x)
+                        } else {
+                            todo!();
                         }
                     },
                 );
@@ -2731,6 +2726,49 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_sdiv(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        SDiv {
+            tyidx,
+            lhs,
+            rhs,
+            exact,
+        }: &SDiv,
+    ) -> Result<(), CompilationError> {
+        // We don't currently support `exact`.
+        assert!(!*exact);
+        let bitw = self.m.ty(*tyidx).bitw();
+        let [_lhsr, rhsr, _] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Signed,
+                    out_fill: RegCnstrFill::Signed,
+                    regs: &[Reg::RAX],
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Clobber { reg: Reg::RDX },
+            ],
+        )?;
+        assert_ne!(rhsr, Reg::RAX);
+        assert_ne!(rhsr, Reg::RDX);
+        assert!(bitw > 0 && bitw <= 64);
+        self.asm
+            .push_inst(IcedInst::with1(Code::Idiv_rm64, rhsr.to_reg64()));
+        self.asm.push_inst(Ok(IcedInst::with(Code::Cqo)));
+        Ok(())
+    }
+
     fn i_select(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -4288,6 +4326,32 @@ mod test {
     fn cg_const() {
         // Integers
 
+        // i8
+        codegen_and_test(
+            "
+              %0: i8 = 0xFF
+              %1: i8 = 0xAB
+              %2: i8 = add %0, %1
+              %3: i8 = add %1, %0
+              blackbox %2
+              blackbox %3
+              exit []
+            ",
+            &["
+              ...
+              ; %0: i8 = 255
+              mov r.32.x, 0xFF
+              ; %1: i8 = 171
+              mov r.32.y, 0xAB
+              ; %2: i8 = add %0, %1
+              add r.32.x, 0xFFFFFFAB
+              ; %3: i8 = add %1, %0
+              add r.32.y, 0xFFFFFFFF
+              ...
+            "],
+        );
+
+        // i32
         codegen_and_test(
             "
               %0: i32 = 0xFFFFFFFF
@@ -4308,6 +4372,7 @@ mod test {
             "],
         );
 
+        // i64
         codegen_and_test(
             "
               %0: i64 = 0xFFFFFFFF
