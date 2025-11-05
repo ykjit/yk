@@ -668,6 +668,14 @@ impl<'a> X64HirToAsm<'a> {
 
         let val_bitw = b.inst_bitw(self.m, *val);
         let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
+
+        // Try to optimise load-add-const-store sequences such as:
+        // ```
+        // %85: i64 = load %44
+        // %87: i64 = 79
+        // %88: i64 = add %_, %87
+        // store %88, %44
+        // ```
         if let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
             && let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs)
             && let Inst::Load(Load {
@@ -692,7 +700,14 @@ impl<'a> X64HirToAsm<'a> {
                 )?;
                 let memop = MemoryOperand::with_base_displ(ptrr.to_reg64(), off);
                 self.asm.push_inst(match val_bitw {
-                    8 => IcedInst::with2(Code::Add_rm8_imm8, memop, imm),
+                    8 => {
+                        assert_eq!(i32::from(i8::try_from(imm).unwrap()), imm);
+                        IcedInst::with2(Code::Add_rm8_imm8, memop, imm)
+                    }
+                    16 => {
+                        assert_eq!(i32::from(i16::try_from(imm).unwrap()), imm);
+                        IcedInst::with2(Code::Add_rm16_imm16, memop, imm)
+                    }
                     32 => IcedInst::with2(Code::Add_rm32_imm32, memop, imm),
                     64 => IcedInst::with2(Code::Add_rm64_imm32, memop, imm),
                     x => todo!("{x}"),
@@ -6200,7 +6215,7 @@ mod test {
             "],
         );
 
-        // add-load-store optimisation
+        // load-add-const-store optimisation
 
         // i8
         codegen_and_test(
@@ -6248,6 +6263,56 @@ mod test {
               call r.64._
               ; store %4, %0
               mov [r.64.y], r.8.x
+              ; exit [%0, %1]
+            "#],
+        );
+
+        // i16
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i16 = load %0
+              %2: i16 = 42
+              %3: i16 = add %1, %2
+              store %3, %0
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %1: i16 = load %0
+              ; %2: i16 = 42
+              ; %3: i16 = add %1, %2
+              ; store %3, %0
+              add word [r.64.x], 0x2A
+              ; exit [%0]
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              extern f()
+
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i16 = load %0
+              %3: i16 = 42
+              %4: i16 = add %2, %3
+              call f %1()
+              store %4, %0
+              exit [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i16 = load %0
+              movzx r.32.x, word [r.64.y]
+              ; %3: i16 = 42
+              ; %4: i16 = add %2, %3
+              add r.32.x, 0x2A
+              ; call %1()
+              call r.64._
+              ; store %4, %0
+              mov [r.64.y], r.16.x
               ; exit [%0, %1]
             "#],
         );
