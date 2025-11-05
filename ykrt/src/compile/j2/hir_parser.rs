@@ -718,6 +718,19 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
+                AstInst::UIToFP { local, ty, val } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let val = self.p_local(val);
+                    self.insts.push(
+                        UIToFP {
+                            tyidx,
+                            val,
+                            nneg: false,
+                        }
+                        .into(),
+                    );
+                }
                 AstInst::Xor {
                     local,
                     ty,
@@ -1063,6 +1076,11 @@ enum AstInst {
         rhs: Span,
     },
     Trunc {
+        local: Span,
+        ty: AstTy,
+        val: Span,
+    },
+    UIToFP {
         local: Span,
         ty: AstTy,
         val: Span,

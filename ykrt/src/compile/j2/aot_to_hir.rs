@@ -1170,7 +1170,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             CastKind::BitCast => todo!(),
             CastKind::PtrToInt => hir::PtrToInt { tyidx, val }.into(),
             CastKind::IntToPtr => hir::IntToPtr { tyidx, val }.into(),
-            CastKind::UIToFP => todo!(),
+            CastKind::UIToFP => hir::UIToFP {
+                tyidx,
+                val,
+                nneg: false,
+            }
+            .into(),
         };
         self.push_inst_and_link_local(iid, hinst).map(|_| ())
     }

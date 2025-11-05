@@ -2603,6 +2603,16 @@ mod test {
             todo!()
         }
 
+        fn i_uitofp(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &UIToFP,
+        ) -> Result<(), CompilationError> {
+            todo!();
+        }
+
         fn i_xor(
             &mut self,
             _ra: &mut RegAlloc<Self>,
