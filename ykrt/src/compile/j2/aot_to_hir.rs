@@ -737,7 +737,15 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     .map(|x| x.insert(addr, gl.name().to_owned()));
                 inst
             }
-            Operand::Func(_fidx) => todo!(),
+            Operand::Func(fidx) => {
+                let func = self.am.func(*fidx);
+                let addr = name_to_addr(func.name())?;
+                self.addr_name_map
+                    .as_mut()
+                    .map(|x| x.insert(addr, func.name().to_owned()));
+                let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
+                self.const_to_iidx(tyidx, hir::ConstKind::Ptr(addr))
+            }
         }
     }
 
