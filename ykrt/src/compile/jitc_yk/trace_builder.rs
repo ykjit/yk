@@ -394,7 +394,7 @@ impl TraceBuilder {
                     self.handle_extractvalue(bid, iidx, op, tyidx, indices)
                 }
                 _ => Err(CompilationError::General(format!(
-                    "unimplemented: {inst:?}"
+                    "Unimplemented: {inst:?}"
                 ))),
             }?;
         }
