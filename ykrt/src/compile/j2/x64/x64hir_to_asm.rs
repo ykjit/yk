@@ -5790,6 +5790,26 @@ mod test {
     }
 
     #[test]
+    fn cg_sdiv() {
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = sdiv %0, %1
+              exit [%2, %2]
+            ",
+            &["
+              ...
+              ; %2: i64 = sdiv %0, %1
+              cqo
+              idiv r.64.x
+              ...
+            "],
+        );
+    }
+
+    #[test]
     fn cg_select() {
         // i1
         codegen_and_test(
