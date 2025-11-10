@@ -2543,6 +2543,16 @@ mod test {
             todo!();
         }
 
+        fn i_smax(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SMax,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_srem(
             &mut self,
             _ra: &mut RegAlloc<Self>,

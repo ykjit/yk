@@ -152,6 +152,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "SITOFP" "LOCAL" {
       Ok(AstInst::SIToFP { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
+  | "LOCAL" ":" Ty "=" "SMAX" "LOCAL" "," "LOCAL" {
+       Ok(AstInst::SMax { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
   | "LOCAL" ":" Ty "=" "SREM" "LOCAL" "," "LOCAL" {
        Ok(AstInst::SRem { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
