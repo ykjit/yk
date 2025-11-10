@@ -659,6 +659,18 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let val = self.p_local(val);
                     self.insts.push(SIToFP { tyidx, val }.into());
                 }
+                AstInst::SMax {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(SMax { tyidx, lhs, rhs }.into());
+                }
                 AstInst::SRem {
                     local,
                     ty,
@@ -1084,6 +1096,12 @@ enum AstInst {
         local: Span,
         ty: AstTy,
         val: Span,
+    },
+    SMax {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
     },
     SRem {
         local: Span,
