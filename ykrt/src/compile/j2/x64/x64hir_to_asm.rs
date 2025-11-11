@@ -2610,32 +2610,53 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
-        let out_fill = match bitw {
-            32 | 64 => RegCnstrFill::Zeroed,
-            _ => RegCnstrFill::Undefined,
-        };
-        let [lhsr, rhsr] = ra.alloc(
-            self,
-            iidx,
-            [
-                RegCnstr::InputOutput {
+        if let Some(imm) = self.zero_ext_op_for_imm32(b, bitw, *rhs) {
+            let out_fill = match bitw {
+                32 | 64 => RegCnstrFill::Zeroed,
+                _ => RegCnstrFill::Undefined,
+            };
+            let [lhsr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Undefined,
                     out_fill,
                     regs: &NORMAL_GP_REGS,
-                },
-                RegCnstr::Input {
-                    in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-            ],
-        )?;
-        self.asm.push_inst(match bitw {
-            1..=32 => IcedInst::with2(Code::Or_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-            x => todo!("{x}"),
-        });
+                }],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Or_rm32_imm32, lhsr.to_reg32(), imm),
+                x => todo!("{x}"),
+            });
+        } else {
+            let out_fill = match bitw {
+                32 | 64 => RegCnstrFill::Zeroed,
+                _ => RegCnstrFill::Undefined,
+            };
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        out_fill,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Or_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                x => todo!("{x}"),
+            });
+        }
 
         Ok(())
     }
@@ -5679,6 +5700,58 @@ mod test {
 
     #[test]
     fn cg_or() {
+        // Constant RHS
+
+        // i8
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 3
+              %2: i8 = or %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i8 = or %0, %1
+              or r.32._, 3
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = -1
+              %2: i8 = or %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i8 = or %0, %1
+              or r.32._, 0xFF
+              ...
+            "],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 3
+              %2: i32 = or %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i32 = or %0, %1
+              or r.32._, 3
+              ...
+            "],
+        );
+
         // i32
         codegen_and_test(
             "
