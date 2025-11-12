@@ -1545,7 +1545,7 @@ impl<Reg: Display> Display for VarLoc<Reg> {
 pub(super) enum RegCnstr<'a, Reg: RegT> {
     /// This instruction clobbers `reg`.
     Clobber { reg: Reg },
-    /// Make sure that `op` is loaded into a register drawn from `regs`, with its upper bits
+    /// Make sure that `in_iidx` is loaded into a register drawn from `regs`, with its upper bits
     /// matching fill `in_fill`. If `clobber` is true, then the value in the register will be
     /// treated as clobbered on exit.
     Input {
@@ -1554,9 +1554,9 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
         regs: &'a [Reg],
         clobber: bool,
     },
-    /// Make sure that `op` is loaded into a register drawn from `regs`, with its upper bits
-    /// matching fill `in_fill`; the result of the instruction will be in the same register
-    /// with its upper bits matching fill `out_fill`.
+    /// Make sure that `in_iidx` is loaded into a register drawn from `regs`, with its upper bits
+    /// matching fill `in_fill`; the result of the instruction will be in the same register with
+    /// its upper bits matching fill `out_fill`.
     InputOutput {
         in_iidx: InstIdx,
         in_fill: RegCnstrFill,
@@ -1574,8 +1574,9 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
     },
     /// Cast the value in `in_iidx` to have the fill `out_fill`, ensuring the value is in `regs`.
     /// This is similar in effect to [Self::InputOutput] with the significant difference that the
-    /// register allocator is able to merge the results of some casts into the same register as
-    /// existing values. Note that `out_fill` cannot have the value [RegCnstrFill::AnyOf].
+    /// register allocator can sometimes merge the results of casts into the same register as
+    /// existing values. Note that setting `out_fill` to [RegCnstrFill::AnyOf] will lead to
+    /// undefined behaviour.
     Cast {
         in_iidx: InstIdx,
         out_fill: RegCnstrFill,
