@@ -1118,7 +1118,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     Inst::Call { callee, .. } => {
                         let func = self.am.func(*callee);
                         if func.is_idempotent() {
-                            todo!();
+                            let Ty::Func(fty) = self.am.type_(func.tyidx()) else {
+                                panic!()
+                            };
+                            self.promotions_off +=
+                                usize::try_from(self.am.type_(fty.ret_ty()).bytew()).unwrap();
                         }
                     }
                     Inst::Promote { tyidx, .. } => {
