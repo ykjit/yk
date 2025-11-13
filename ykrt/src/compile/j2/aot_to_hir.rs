@@ -1091,7 +1091,10 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         loop {
             let ta = {
                 let Some(Ok(ta)) = self.ta_iter.peek() else {
-                    panic!()
+                    return Err(CompilationError::General(
+                "irregular control flow detected (trace ended with outline successor pending)"
+                    .into(),
+            ));
                 };
                 ta.to_owned()
             };
