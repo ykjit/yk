@@ -1066,13 +1066,15 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         Ok(())
     }
 
-    fn outline_until(&mut self, bid: BBlockId) -> Result<(), CompilationError> {
+    /// Outline until the successor block to `bid` is encountered. Returns `Err` if irregular
+    /// control flow is detected.
+    fn outline_until(&mut self, cur_bid: BBlockId) -> Result<(), CompilationError> {
         // Now we skip over all the blocks in this call.
-        let next_bid = match self.am.bblock(&bid).insts().last().unwrap() {
+        let next_bid = match self.am.bblock(&cur_bid).insts().last().unwrap() {
             Inst::Br { succ } => {
                 // We can only stop outlining when we see the successor block and we are not in
                 // the middle of recursion.
-                BBlockId::new(bid.funcidx(), *succ)
+                BBlockId::new(cur_bid.funcidx(), *succ)
             }
             Inst::CondBr { .. } => {
                 // Currently, the successor of a call is always an unconditional branch due to
@@ -1092,7 +1094,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 ta.to_owned()
             };
             let cnd_bid = self.ta_to_bid(&ta).unwrap();
-            if cnd_bid.funcidx() == bid.funcidx() {
+            if cnd_bid.funcidx() == cur_bid.funcidx() {
                 if cnd_bid.is_entry() {
                     recurse += 1;
                 } else if self.am.bblock(&cnd_bid).is_return() {
