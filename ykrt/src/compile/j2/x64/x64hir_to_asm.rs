@@ -2541,6 +2541,54 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_memcpy(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        MemCpy {
+            dst,
+            src,
+            len,
+            volatile: _,
+        }: &MemCpy,
+    ) -> Result<(), CompilationError> {
+        let [Reg::RDI, Reg::RSI, Reg::RCX] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *dst,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &[Reg::RDI],
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *src,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &[Reg::RSI],
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *len,
+                    in_fill: if b.inst_bitw(self.m, *len) == 32 {
+                        RegCnstrFill::Zeroed
+                    } else {
+                        assert_eq!(b.inst_bitw(self.m, *len), 64);
+                        RegCnstrFill::Undefined
+                    },
+                    regs: &[Reg::RCX],
+                    clobber: true,
+                },
+            ],
+        )?
+        else {
+            panic!()
+        };
+        self.asm.push_inst(IcedInst::with_rep_movsb(64));
+        Ok(())
+    }
+
     fn i_mul(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -5640,6 +5688,45 @@ mod test {
               ...
               ; %2: i32 = lshr %0, %1
               shr r.32.x, cl
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_memcpy() {
+        // i32
+        codegen_and_test(
+            r#"
+              %0: ptr = arg [reg "rdi"]
+              %1: ptr = arg [reg "rsi"]
+              %2: i32 = arg [reg "rcx"]
+              memcpy %0, %1, %2, true
+              exit [%0, %1, %2]
+            "#,
+            &["
+              ...
+              mov ecx, ecx
+              ...
+              ; memcpy %0, %1, %2, true
+              rep movsb
+              ...
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            r#"
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i64 = arg [reg]
+              memcpy %0, %1, %2, true
+              exit [%0, %1, %2]
+            "#,
+            &["
+              ...
+              ; memcpy %0, %1, %2, true
+              rep movsb
               ...
             "],
         );

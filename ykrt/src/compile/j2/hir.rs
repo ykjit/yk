@@ -588,8 +588,9 @@ pub(super) enum Inst {
     IntToPtr,
     Load,
     LShr,
-    Or,
+    MemCpy,
     Mul,
+    Or,
     PtrAdd,
     PtrToInt,
     Return,
@@ -2034,6 +2035,73 @@ impl InstT for LShr {
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
         m.ty(self.tyidx)
+    }
+}
+
+/// `memcpy` with the same semantics as LLVM's `llvm.memcpy`.
+#[derive(Debug)]
+pub(super) struct MemCpy {
+    pub dst: InstIdx,
+    pub src: InstIdx,
+    pub len: InstIdx,
+    pub volatile: bool,
+}
+
+impl InstT for MemCpy {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert!(
+            b.inst(self.dst).ty(m) == b.inst(self.src).ty(m),
+            "%{iidx:?}: inconsistent dst / src types"
+        );
+        assert_matches!(
+            b.inst(self.len).ty(m),
+            &Ty::Int(32 | 64),
+            "%{iidx:?}: len has wrong type"
+        );
+    }
+
+    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.dst);
+        f(self.src);
+        f(self.len);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            dst: f(self.dst),
+            src: f(self.src),
+            len: f(self.len),
+            volatile: self.volatile,
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "memcpy %{}, %{}, %{}, {}",
+            usize::from(self.dst),
+            usize::from(self.src),
+            usize::from(self.len),
+            if self.volatile { "true" } else { "false" }
+        )
+    }
+
+    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
+        &Ty::Void
     }
 }
 
@@ -3651,6 +3719,32 @@ mod test {
           %0: i8 = arg [reg]
           %1: i8 = arg [reg]
           %2: i16 = lshr %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%3: inconsistent dst / src types")]
+    fn memcpy_type_consistency() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i64 = arg [reg]
+          memcpy %0, %1, %2, true
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%3: len has wrong type")]
+    fn memcpy_len_type() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: ptr = arg [reg]
+          %1: ptr = arg [reg]
+          %2: i8 = arg [reg]
+          memcpy %0, %1, %2, true
         ",
         );
     }

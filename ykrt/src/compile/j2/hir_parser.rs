@@ -504,6 +504,25 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
+                AstInst::MemCpy {
+                    dst,
+                    src,
+                    len,
+                    volatile,
+                } => {
+                    let dst = self.p_local(dst);
+                    let src = self.p_local(src);
+                    let len = self.p_local(len);
+                    self.insts.push(
+                        MemCpy {
+                            dst,
+                            src,
+                            len,
+                            volatile,
+                        }
+                        .into(),
+                    );
+                }
                 AstInst::Mul {
                     local,
                     ty,
@@ -1043,6 +1062,12 @@ enum AstInst {
         ty: AstTy,
         lhs: Span,
         rhs: Span,
+    },
+    MemCpy {
+        dst: Span,
+        src: Span,
+        len: Span,
+        volatile: bool,
     },
     Mul {
         local: Span,
