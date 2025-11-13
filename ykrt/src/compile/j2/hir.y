@@ -134,6 +134,12 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "PTRTOINT" "LOCAL" {
       Ok(AstInst::PtrToInt { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
+  | "MEMCPY" "LOCAL" "," "LOCAL" "," "LOCAL" "," "FALSE" {
+      Ok(AstInst::MemCpy { dst: $2?.span(), src: $4?.span(), len: $6?.span(), volatile: false })
+    }
+  | "MEMCPY" "LOCAL" "," "LOCAL" "," "LOCAL" "," "TRUE" {
+      Ok(AstInst::MemCpy { dst: $2?.span(), src: $4?.span(), len: $6?.span(), volatile: true })
+    }
   | "RETURN" {
       Ok(AstInst::Return)
     }

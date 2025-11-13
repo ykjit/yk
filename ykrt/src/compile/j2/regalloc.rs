@@ -2443,6 +2443,16 @@ mod test {
             todo!()
         }
 
+        fn i_memcpy(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &MemCpy,
+        ) -> Result<(), CompilationError> {
+            todo!();
+        }
+
         fn i_mul(
             &mut self,
             _ra: &mut RegAlloc<Self>,
