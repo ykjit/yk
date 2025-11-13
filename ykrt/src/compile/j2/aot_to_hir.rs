@@ -205,13 +205,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         // further processing of the trace should occur.
         let mut early_return = false;
         while let Some(ta) = self.ta_iter.next() {
-            if let Some(bid) = self.ta_to_bid(&ta?) {
-                if self.p_block(prev_bid, bid)? {
+            if let Some(cnd_bid) = self.ta_to_bid(&ta?) {
+                self.check_correct_successor(prev_bid, cnd_bid)?;
+                if self.p_block(prev_bid, cnd_bid)? {
                     // We encountered an early return.
                     early_return = true;
                     break;
                 }
-                prev_bid = Some(bid);
+                prev_bid = Some(cnd_bid);
             }
         }
 
@@ -1085,6 +1086,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
             _ => panic!(),
         };
+        let mut prev_bid = None;
         let mut recurse = 0;
         loop {
             let ta = {
@@ -1094,6 +1096,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 ta.to_owned()
             };
             let cnd_bid = self.ta_to_bid(&ta).unwrap();
+            self.check_correct_successor(prev_bid, cnd_bid)?;
             if cnd_bid.funcidx() == cur_bid.funcidx() {
                 if cnd_bid.is_entry() {
                     recurse += 1;
@@ -1123,7 +1126,29 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
             }
 
+            prev_bid = Some(cnd_bid);
             self.ta_iter.next();
+        }
+        Ok(())
+    }
+
+    /// Check that `cnd_bid` is a successor `prev_bid` returning `Err` otherwise. If `prev_bid` is
+    /// `None`, this function returns `Ok` by definition.
+    fn check_correct_successor(
+        &self,
+        prev_bid: Option<BBlockId>,
+        cnd_bid: BBlockId,
+    ) -> Result<(), CompilationError> {
+        if let Some(prev_bid) = prev_bid {
+            if !cnd_bid.static_intraprocedural_successor_of(&prev_bid, self.am)
+                && !cnd_bid.is_entry()
+                && !self.am.bblock(&prev_bid).is_return()
+            {
+                // longjmp, or similar, has occurred.
+                return Err(CompilationError::General(
+                    "irregular control flow detected (unexpected successor)".into(),
+                ));
+            }
         }
         Ok(())
     }
