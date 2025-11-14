@@ -176,6 +176,8 @@ pub fn mk_compiler(
         "-Wall",
         // Some tests are multi-threaded via the pthread API.
         "-pthread",
+        // Some tests need the maths library.
+        "-lm",
         // The input and output files.
         "-o",
         exe.to_str().unwrap(),

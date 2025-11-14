@@ -95,6 +95,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "FDIV" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FDiv { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FLOOR" "LOCAL" {
+      Ok(AstInst::Floor { local: $1?.span(), ty: $3?, val: $6?.span() })
+    }
   | "LOCAL" ":" Ty "=" "FMUL" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FMul { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }

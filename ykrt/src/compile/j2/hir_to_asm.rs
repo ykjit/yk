@@ -373,6 +373,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_fdiv(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::Floor(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_floor(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::FMul(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fmul(&mut ra, b, iidx, x)?;
@@ -832,6 +837,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &FDiv,
+    ) -> Result<(), CompilationError>;
+
+    fn i_floor(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &Floor,
     ) -> Result<(), CompilationError>;
 
     fn i_fmul(

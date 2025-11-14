@@ -2141,6 +2141,44 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_floor(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        Floor { tyidx, val }: &Floor,
+    ) -> Result<(), CompilationError> {
+        let [valr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+        self.asm.push_inst(match self.m.ty(*tyidx) {
+            Ty::Float => todo!(),
+            Ty::Double => IcedInst::with3(
+                Code::Roundsd_xmm_xmmm64_imm8,
+                outr.to_xmm(),
+                valr.to_xmm(),
+                1,
+            ),
+            _ => panic!(),
+        });
+
+        Ok(())
+    }
+
     fn i_fmul(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -4884,6 +4922,24 @@ mod test {
               ...
               ; %2: double = fdiv %0, %1
               divsd fp.128.x, fp.128.y
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_floor() {
+        // double
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: double = floor %0
+              exit [%1]
+            ",
+            &["
+              ...
+              ; %1: double = floor %0
+              roundsd fp.128._, fp.128._, 1
               ...
             "],
         );

@@ -579,6 +579,7 @@ pub(super) enum Inst {
     FAdd,
     FCmp,
     FDiv,
+    Floor,
     FMul,
     FSub,
     FPExt,
@@ -1456,6 +1457,56 @@ impl InstT for FDiv {
             usize::from(self.lhs),
             usize::from(self.rhs)
         )
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
+}
+
+/// Floor with the same semantics as `llvm.floor.`.
+#[derive(Debug)]
+pub(super) struct Floor {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+}
+
+impl InstT for Floor {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            m.ty(self.tyidx),
+            b.inst(self.val).ty(m),
+            "%{iidx:?}: inconsistent types for return type and val"
+        );
+
+        assert_matches!(
+            m.ty(self.tyidx),
+            Ty::Float | Ty::Double,
+            "%{iidx:?}: float / double required"
+        );
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.val);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            val: f(self.val),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("floor %{}", usize::from(self.val))
     }
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
@@ -3591,6 +3642,28 @@ mod test {
           %0: float = arg [reg]
           %1: float = arg [reg]
           %2: double = fdiv %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: inconsistent types for return type and val")]
+    fn floor_type_consistency1() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: float = arg [reg]
+          %1: double = floor %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: float / double required")]
+    fn floor_type_consistency2() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i32 = arg [reg]
+          %1: i32 = floor %0
         ",
         );
     }
