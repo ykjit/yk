@@ -448,6 +448,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 IState::None => {
                     let stack_off = be.align_spill(self.stack_off, max_bitw);
                     self.stack_off = stack_off;
+                    assert_eq!(self.istates[unspill_iidx], IState::None);
                     self.istates[unspill_iidx] = IState::Stack(stack_off);
                     stack_off
                 }
@@ -583,6 +584,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
             let bitw = self.b.inst_bitw(self.m, *iidx);
             self.stack_off = be.align_spill(self.stack_off, bitw);
+            assert_eq!(self.istates[*iidx], IState::None);
             self.istates[*iidx] = IState::Stack(self.stack_off);
             be.spill(reg, self.rstates.fill(reg), self.stack_off, bitw)?;
         }
