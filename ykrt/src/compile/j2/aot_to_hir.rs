@@ -52,6 +52,11 @@ pub(super) struct AotToHir<Reg: RegT> {
     am: &'static Module,
     hl: Arc<Mutex<HotLocation>>,
     ta_iter: Peekable<TraceActionIterator>,
+    /// What was the previous [BBlockId] fully processed by [TraceActionIterator]? Note: this is a
+    /// bit more subtle than "the value before the most recent `next`". It really means "the last
+    /// value before `p_block` or equivalent fully ran". As that suggests, this is rather fragile:
+    /// there must be, and we should aim to find soon, a better way to do this.
+    prev_bid: Option<BBlockId>,
     trid: TraceId,
     bkind: BuildKind,
     /// The data passed to successive calls to `yk_promote`. Note: some of this may have been
@@ -108,6 +113,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             am,
             hl,
             ta_iter: TraceActionIterator::new(ta_iter).peekable(),
+            prev_bid: None,
             trid,
             bkind,
             promotions,
@@ -167,6 +173,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     .unwrap();
                 let src_gridx = hir::GuardRestoreIdx::from(usize::from(*src_gid));
                 let prev_bid = src_ctr.bid(src_gridx);
+                self.prev_bid = Some(prev_bid);
                 let tgt_ctr = Arc::clone(tgt_ctr)
                     .as_any()
                     .downcast::<J2CompiledTrace<Reg>>()
@@ -195,7 +202,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
         };
 
-        let mut prev_bid = match &bmk {
+        self.prev_bid = match &bmk {
             BuildModKind::Coupler => todo!(),
             BuildModKind::Loop { .. } => None,
             BuildModKind::Side { prev_bid, .. } => Some(*prev_bid),
@@ -206,13 +213,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let mut early_return = false;
         while let Some(ta) = self.ta_iter.next() {
             if let Some(cnd_bid) = self.ta_to_bid(&ta?) {
-                self.check_correct_successor(prev_bid, cnd_bid)?;
-                if self.p_block(prev_bid, cnd_bid)? {
+                self.check_correct_successor(cnd_bid)?;
+                let old_prev_bid = self.prev_bid;
+                self.prev_bid = Some(cnd_bid);
+                if self.p_block(old_prev_bid, cnd_bid)? {
                     // We encountered an early return.
                     early_return = true;
+                    self.prev_bid = Some(cnd_bid);
                     break;
                 }
-                prev_bid = Some(cnd_bid);
+                self.prev_bid = Some(cnd_bid);
             }
         }
 
@@ -1071,7 +1081,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     /// control flow is detected.
     fn outline_until(&mut self, cur_bid: BBlockId) -> Result<(), CompilationError> {
         // Now we skip over all the blocks in this call.
-        let next_bid = match self.am.bblock(&cur_bid).insts().last().unwrap() {
+        let tgt_bid = match self.am.bblock(&cur_bid).insts().last().unwrap() {
             Inst::Br { succ } => {
                 // We can only stop outlining when we see the successor block and we are not in
                 // the middle of recursion.
@@ -1086,7 +1096,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
             _ => panic!(),
         };
-        let mut prev_bid = None;
         let mut recurse = 0;
         loop {
             let ta = {
@@ -1099,16 +1108,18 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 ta.to_owned()
             };
             let cnd_bid = self.ta_to_bid(&ta).unwrap();
-            self.check_correct_successor(prev_bid, cnd_bid)?;
-            if cnd_bid.funcidx() == cur_bid.funcidx() {
+            self.check_correct_successor(cnd_bid)?;
+
+            if cnd_bid.funcidx() == tgt_bid.funcidx() {
                 if cnd_bid.is_entry() {
+                    assert!(!self.am.bblock(&cnd_bid).is_return());
                     recurse += 1;
                 } else if self.am.bblock(&cnd_bid).is_return() {
                     assert!(recurse > 0);
                     recurse -= 1;
                 }
 
-                if recurse == 0 && cnd_bid == next_bid {
+                if recurse == 0 && cnd_bid == tgt_bid {
                     break;
                 }
             }
@@ -1133,7 +1144,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
             }
 
-            prev_bid = Some(cnd_bid);
+            self.prev_bid = Some(cnd_bid);
             self.ta_iter.next();
         }
         Ok(())
@@ -1141,21 +1152,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
     /// Check that `cnd_bid` is a successor `prev_bid` returning `Err` otherwise. If `prev_bid` is
     /// `None`, this function returns `Ok` by definition.
-    fn check_correct_successor(
-        &self,
-        prev_bid: Option<BBlockId>,
-        cnd_bid: BBlockId,
-    ) -> Result<(), CompilationError> {
-        if let Some(prev_bid) = prev_bid {
-            if !cnd_bid.static_intraprocedural_successor_of(&prev_bid, self.am)
-                && !cnd_bid.is_entry()
-                && !self.am.bblock(&prev_bid).is_return()
-            {
-                // longjmp, or similar, has occurred.
-                return Err(CompilationError::General(
-                    "irregular control flow detected (unexpected successor)".into(),
-                ));
-            }
+    fn check_correct_successor(&self, cnd_bid: BBlockId) -> Result<(), CompilationError> {
+        if let Some(prev_bid) = self.prev_bid
+            && !cnd_bid.static_intraprocedural_successor_of(&prev_bid, self.am)
+            && !cnd_bid.is_entry()
+            && !self.am.bblock(&prev_bid).is_return()
+        {
+            // longjmp, or similar, has occurred.
+            return Err(CompilationError::General(
+                "irregular control flow detected (unexpected successor)".into(),
+            ));
         }
         Ok(())
     }
