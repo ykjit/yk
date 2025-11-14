@@ -79,9 +79,8 @@ impl TryFrom<Reg> for DeoptGpReg {
 /// The order of these is relied upon by the code which pops registers from the stack.
 #[derive(Clone, Copy, Debug, EnumCount, FromRepr, PartialEq)]
 #[repr(u8)]
-#[allow(dead_code)]
 enum DeoptFpReg {
-    XMM0,
+    XMM0 = 0,
     XMM1,
     XMM2,
     XMM3,
@@ -97,6 +96,38 @@ enum DeoptFpReg {
     XMM13,
     XMM14,
     XMM15,
+}
+
+impl DeoptFpReg {
+    fn idx(&self) -> usize {
+        usize::from(*self as u8)
+    }
+}
+
+impl TryFrom<Reg> for DeoptFpReg {
+    type Error = ();
+
+    fn try_from(reg: Reg) -> Result<Self, Self::Error> {
+        match reg {
+            Reg::XMM0 => Ok(Self::XMM0),
+            Reg::XMM1 => Ok(Self::XMM1),
+            Reg::XMM2 => Ok(Self::XMM2),
+            Reg::XMM3 => Ok(Self::XMM3),
+            Reg::XMM4 => Ok(Self::XMM4),
+            Reg::XMM5 => Ok(Self::XMM5),
+            Reg::XMM6 => Ok(Self::XMM6),
+            Reg::XMM7 => Ok(Self::XMM7),
+            Reg::XMM8 => Ok(Self::XMM8),
+            Reg::XMM9 => Ok(Self::XMM9),
+            Reg::XMM10 => Ok(Self::XMM10),
+            Reg::XMM11 => Ok(Self::XMM11),
+            Reg::XMM12 => Ok(Self::XMM12),
+            Reg::XMM13 => Ok(Self::XMM13),
+            Reg::XMM14 => Ok(Self::XMM14),
+            Reg::XMM15 => Ok(Self::XMM15),
+            _ => Err(()),
+        }
+    }
 }
 
 thread_local! {
@@ -150,12 +181,13 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     let mut prev_faddr = faddr;
     // The length of the previous frame on the stack.
     let mut prev_flen;
-    // The values we will (eventually...) put into general purpose registers.
+    // The values we will (eventually...) put into registers.
     let mut gp_regs = [0; DeoptGpReg::COUNT];
+    let mut fp_regs = [0; DeoptFpReg::COUNT];
 
     // The size of the buffer we'll need. To make the "is there enough space left?" calculation
     // below easier, we account for the size of the FP & GP registers here.
-    let mut deoptlen = DeoptGpReg::COUNT * 8;
+    let mut deoptlen = DeoptGpReg::COUNT * 8 + DeoptFpReg::COUNT * 8;
 
     // Deal with the control point frame: this is special because we are adjusting a frame that
     // already exists, rather than creating one from scratch.
@@ -166,7 +198,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             // Update RBP to represent this frame's address.
             gp_regs[DeoptGpReg::RBP.idx()] = prev_faddr as u64;
         }
-        reconstruct(&frame.vars, &mut gp_regs, faddr, faddr);
+        reconstruct(&frame.vars, &mut gp_regs, &mut fp_regs, faddr, faddr);
         deoptlen += 8;
         rsp = unsafe { rsp.sub(8) };
         unsafe { (rsp as *mut u64).write(smap.offset) }
@@ -232,7 +264,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             }
         }
 
-        reconstruct(&frame.vars, &mut gp_regs, faddr, rbp);
+        reconstruct(&frame.vars, &mut gp_regs, &mut fp_regs, faddr, rbp);
 
         // Advance RSP
         rsp = unsafe { rbp.byte_sub(usize::try_from(smap.size).unwrap()) };
@@ -250,6 +282,10 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         rsp = unsafe { rsp.sub(8) };
         unsafe { (rsp as *mut u64).write(*v) }
     }
+    for v in fp_regs.iter() {
+        rsp = unsafe { rsp.sub(8) };
+        unsafe { (rsp as *mut u64).write(*v) }
+    }
 
     let fdst = {
         let (smap, prologue) =
@@ -263,6 +299,14 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
 
     mt.guard_failure(ctr, gid, faddr as *mut c_void);
 
+    // In an ideal world, the following assertion would go inside `replace_stack`, but as a naked
+    // function, it can only contain a single `asm` statement.
+    //
+    // Ensure that we're pushing a 16-byte aligned value to the stack so that the `memcpy` call
+    // works as expected. Note: we will pop an 8 -- but not 16! -- byte aligned amount of data from
+    // the stack, and `ret` will pop another 8 bytes, ensuring that we continue execution with a
+    // 16-byte aligned stack.
+    assert_eq!(deoptlen % 16, 0);
     unsafe { __yk_j2_replace_stack(fdst, stkptr.byte_add(stklen).byte_sub(deoptlen), deoptlen) };
 }
 
@@ -271,6 +315,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
 fn reconstruct(
     varlocs: &[(InstId, u32, VarLocs<Reg>, VarLocs<Reg>)],
     gp_regs: &mut [u64; DeoptGpReg::COUNT],
+    fp_regs: &mut [u64; DeoptFpReg::COUNT],
     srcaddr: *const u8,
     tgtaddr: *mut u8,
 ) {
@@ -303,7 +348,14 @@ fn reconstruct(
                             (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u64).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(reg) => gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = v,
+                        VarLoc::Reg(reg) => {
+                            if reg.is_gp() {
+                                gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = v;
+                            } else {
+                                assert!(reg.is_fp());
+                                fp_regs[DeoptFpReg::try_from(*reg).unwrap().idx()] = v;
+                            }
+                        }
                         VarLoc::Const(_) => (),
                     }
                 }
@@ -330,7 +382,12 @@ fn reconstruct(
                         },
                         VarLoc::StackOff(_) => todo!(),
                         VarLoc::Reg(reg) => {
-                            gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = u64::from(v)
+                            if reg.is_gp() {
+                                gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = u64::from(v);
+                            } else {
+                                assert!(reg.is_fp());
+                                fp_regs[DeoptFpReg::try_from(*reg).unwrap().idx()] = u64::from(v);
+                            }
                         }
                         VarLoc::Const(_) => (),
                     }
@@ -358,6 +415,7 @@ fn reconstruct(
                         },
                         VarLoc::StackOff(_) => todo!(),
                         VarLoc::Reg(reg) => {
+                            assert!(reg.is_gp());
                             gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = u64::from(v)
                         }
                         VarLoc::Const(_const_kind) => todo!(),
@@ -385,21 +443,38 @@ unsafe extern "C" fn __yk_j2_replace_stack(dst: *mut u8, src: *const u8, len: us
         "mov rdi, rsp",
         "call memcpy",
         // Recover live registers.
-        "pop r15",
-        "pop r14",
-        "pop r13",
-        "pop r12",
-        "pop r11",
-        "pop r10",
-        "pop r9",
-        "pop r8",
-        "pop rdi",
-        "pop rsi",
-        "pop rbp",
-        "pop rbx",
-        "pop rdx",
-        "pop rcx",
-        "pop rax",
+        "mov rax, [rsp+240]",
+        "mov rcx, [rsp+232]",
+        "mov rdx, [rsp+224]",
+        "mov rbx, [rsp+216]",
+        "mov rbp, [rsp+208]",
+        "mov rsi, [rsp+200]",
+        "mov rdi, [rsp+192]",
+        "mov r8, [rsp+184]",
+        "mov r9, [rsp+176]",
+        "mov r10, [rsp+168]",
+        "mov r11, [rsp+160]",
+        "mov r12, [rsp+152]",
+        "mov r13, [rsp+144]",
+        "mov r14, [rsp+136]",
+        "mov r15, [rsp+128]",
+        "movsd xmm0, [rsp+120]",
+        "movsd xmm1, [rsp+112]",
+        "movsd xmm2, [rsp+104]",
+        "movsd xmm3, [rsp+96]",
+        "movsd xmm4, [rsp+88]",
+        "movsd xmm5, [rsp+80]",
+        "movsd xmm6, [rsp+72]",
+        "movsd xmm7, [rsp+64]",
+        "movsd xmm8, [rsp+56]",
+        "movsd xmm9, [rsp+48]",
+        "movsd xmm10, [rsp+40]",
+        "movsd xmm11, [rsp+32]",
+        "movsd xmm12, [rsp+24]",
+        "movsd xmm13, [rsp+16]",
+        "movsd xmm14, [rsp+8]",
+        "movsd xmm15, [rsp]",
+        "add rsp, 248",
         "ret",
     )
 }
