@@ -513,6 +513,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_smax(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::SMin(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_smin(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::SRem(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_srem(&mut ra, b, iidx, x)?;
@@ -1016,6 +1021,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &SMax,
+    ) -> Result<(), CompilationError>;
+
+    fn i_smin(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &SMin,
     ) -> Result<(), CompilationError>;
 
     fn i_srem(

@@ -1245,6 +1245,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
             }
+            "smin" => {
+                let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let fty = self.opt.func_ty(ftyidx);
+                let hinst = hir::SMin {
+                    tyidx: fty.rtn_tyidx,
+                    lhs,
+                    rhs,
+                };
+                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+            }
             n => todo!("{name} ('{n}')"),
         }
     }

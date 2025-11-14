@@ -3157,6 +3157,51 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_smin(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        SMin { tyidx, lhs, rhs }: &SMin,
+    ) -> Result<(), CompilationError> {
+        let bitw = self.m.ty(*tyidx).bitw();
+        let [lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Signed,
+                    out_fill: RegCnstrFill::Signed,
+                    regs: &[Reg::RAX],
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+
+        match bitw {
+            64 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmovg_r64_rm64,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmp_rm64_r64,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                ));
+            }
+            x => todo!("{x}"),
+        }
+        Ok(())
+    }
+
     fn i_srem(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -6248,6 +6293,26 @@ mod test {
               ; %2: i64 = smax %0, %1
               cmp r.64.x, r.64.y
               cmovl r.64.x, r.64.y
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_smin() {
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = smin %0, %1
+              exit [%2, %2]
+            ",
+            &["
+              ...
+              ; %2: i64 = smin %0, %1
+              cmp r.64.x, r.64.y
+              cmovg r.64.x, r.64.y
               ...
             "],
         );

@@ -601,6 +601,7 @@ pub(super) enum Inst {
     Shl,
     SIToFP,
     SMax,
+    SMin,
     SRem,
     Store,
     Sub,
@@ -2786,6 +2787,76 @@ impl InstT for SMax {
     }
 }
 
+/// Return the signed maximum of two values, with the same semantics as LLVM's `llvm.smin`.
+#[derive(Debug)]
+pub(super) struct SMin {
+    pub tyidx: TyIdx,
+    /// What LLVM calls `op1`.
+    pub lhs: InstIdx,
+    /// What LLVM calls `op2`.
+    pub rhs: InstIdx,
+}
+
+impl InstT for SMin {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert!(
+            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
+                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            "%{iidx:?}: inconsistent return / lhs / rhs types"
+        );
+    }
+
+    /// Canonicalise to favour references to constants on the RHS.
+    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
+    where
+        Self: Sized,
+    {
+        if matches!(b.inst(self.lhs), Inst::Const(_)) && !matches!(b.inst(self.rhs), Inst::Const(_))
+        {
+            Self {
+                tyidx: self.tyidx,
+                lhs: self.rhs,
+                rhs: self.lhs,
+            }
+        } else {
+            self
+        }
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.lhs);
+        f(self.rhs);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            lhs: f(self.lhs),
+            rhs: f(self.rhs),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "smin %{}, %{}",
+            usize::from(self.lhs),
+            usize::from(self.rhs)
+        )
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
+}
+
 /// Return the remainder from signed division with the same semantics as LLVM's `srem`.
 #[derive(Debug)]
 pub(super) struct SRem {
@@ -4050,6 +4121,30 @@ mod test {
           %0: i8 = arg [reg]
           %1: i8 = arg [reg]
           %2: i16 = smax %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn smin_type_consistency1() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i16 = smin %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn smin_type_consistency2() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i16 = smin %0, %1
         ",
         );
     }
