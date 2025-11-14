@@ -575,7 +575,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     ) -> Result<(), CompilationError> {
         for iidx in self.rstates.iidxs(reg) {
             // We don't need to spill things that are already spilt, or constants.
-            if matches!(&self.istates[*iidx], IState::Stack(_))
+            if matches!(&self.istates[*iidx], IState::Stack(_) | IState::StackOff(_))
                 || matches!(self.b.inst(*iidx), Inst::Const(_))
             {
                 continue;
