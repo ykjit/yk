@@ -85,6 +85,17 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
             J2CompiledTraceKind::Test => todo!(),
         }
     }
+
+    /// Return the size of the stack of the entry block. This is used by side-traces to set the
+    /// stack pointer to the right value just before jumping to a loop / coupler trace.
+    pub(super) fn entry_stack_off(&self) -> u32 {
+        match self.kind {
+            J2CompiledTraceKind::Loop { stack_off, .. } => stack_off,
+            J2CompiledTraceKind::Side { .. } => todo!(),
+            #[cfg(test)]
+            J2CompiledTraceKind::Test => todo!(),
+        }
+    }
 }
 
 impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {

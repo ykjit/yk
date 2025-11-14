@@ -1033,6 +1033,16 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
             RelocKind::BranchWithAddr(addr.addr()),
         );
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            i32::try_from(ctr.entry_stack_off().next_multiple_of(16)).unwrap(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_rm64,
+            IcedReg::RSP,
+            IcedReg::RBP,
+        ));
         Ok(())
     }
 
