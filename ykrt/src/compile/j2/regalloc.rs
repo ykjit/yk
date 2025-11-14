@@ -2564,6 +2564,16 @@ mod test {
             todo!()
         }
 
+        fn i_smin(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SMin,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
         fn i_srem(
             &mut self,
             _ra: &mut RegAlloc<Self>,
