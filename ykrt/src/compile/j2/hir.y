@@ -53,11 +53,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "EXIT" "[" Locals "]" {
       Ok(AstInst::Exit { locals: $3? })
     }
-  | "GUARD" "FALSE" "," "LOCAL" "," "[" Locals "]" {
-       Ok(AstInst::Guard { expect: false, cond: $4?.span(), entry_vars: $7? })
-    }
-  | "GUARD" "TRUE" "," "LOCAL" "," "[" Locals "]" {
-      Ok(AstInst::Guard { expect: true, cond: $4?.span(), entry_vars: $7? })
+  | "GUARD" Bool "," "LOCAL" "," "[" Locals "]" {
+       Ok(AstInst::Guard { expect: $2?, cond: $4?.span(), entry_vars: $7? })
     }
   | "LOCAL" ":" Ty "=" "CALL" "ID" "LOCAL" "(" Locals ")" {
       Ok(AstInst::Call { local: Some($1?.span()), ty: Some($3?), extern_: $6?.span(), tgt: $7?.span(), args: $9? })
@@ -137,17 +134,11 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "PTRTOINT" "LOCAL" {
       Ok(AstInst::PtrToInt { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
-  | "MEMCPY" "LOCAL" "," "LOCAL" "," "LOCAL" "," "FALSE" {
-      Ok(AstInst::MemCpy { dst: $2?.span(), src: $4?.span(), len: $6?.span(), volatile: false })
+  | "MEMCPY" "LOCAL" "," "LOCAL" "," "LOCAL" "," Bool {
+      Ok(AstInst::MemCpy { dst: $2?.span(), src: $4?.span(), len: $6?.span(), volatile: $8? })
     }
-  | "MEMCPY" "LOCAL" "," "LOCAL" "," "LOCAL" "," "TRUE" {
-      Ok(AstInst::MemCpy { dst: $2?.span(), src: $4?.span(), len: $6?.span(), volatile: true })
-    }
-  | "MEMSET" "LOCAL" "," "LOCAL" "," "LOCAL" "," "FALSE" {
-      Ok(AstInst::MemSet { dst: $2?.span(), val: $4?.span(), len: $6?.span(), volatile: false })
-    }
-  | "MEMSET" "LOCAL" "," "LOCAL" "," "LOCAL" "," "TRUE" {
-      Ok(AstInst::MemSet { dst: $2?.span(), val: $4?.span(), len: $6?.span(), volatile: true })
+  | "MEMSET" "LOCAL" "," "LOCAL" "," "LOCAL" "," Bool {
+      Ok(AstInst::MemSet { dst: $2?.span(), val: $4?.span(), len: $6?.span(), volatile: $8? })
     }
   | "RETURN" {
       Ok(AstInst::Return)
@@ -202,6 +193,11 @@ Inst -> Result<AstInst, Box<dyn Error>>:
 ArgList -> Result<Vec<AstVLoc>, Box<dyn Error>>:
     ArgList "," VLoc { flattenr($1, $3) }
   | VLoc { Ok(vec![$1?]) }
+  ;
+
+Bool -> Result<bool, Box<dyn Error>>:
+    "TRUE" { Ok(true) }
+  | "FALSE" { Ok(false) }
   ;
 
 Const -> Result<AstConst, Box<dyn Error>>:
