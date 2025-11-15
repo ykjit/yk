@@ -41,7 +41,7 @@ pub fn main() {
     // change.
     println!("cargo::rerun-if-changed=src/compile/j2/hir.l");
     println!("cargo::rerun-if-changed=src/compile/j2/hir.y");
-    CTLexerBuilder::<DefaultLexerTypes<u8>>::new_with_lexemet()
+    CTLexerBuilder::<DefaultLexerTypes<u16>>::new_with_lexemet()
         .lrpar_config(|ctp| {
             ctp.yacckind(YaccKind::Grmtools)
                 .grammar_in_src_dir("compile/j2/hir.y")

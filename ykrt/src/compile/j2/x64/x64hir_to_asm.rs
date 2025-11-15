@@ -2627,6 +2627,54 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_memset(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        MemSet {
+            dst,
+            val,
+            len,
+            volatile: _,
+        }: &MemSet,
+    ) -> Result<(), CompilationError> {
+        let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *dst,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &[Reg::RDI],
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &[Reg::RAX],
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *len,
+                    in_fill: if b.inst_bitw(self.m, *len) == 32 {
+                        RegCnstrFill::Zeroed
+                    } else {
+                        assert_eq!(b.inst_bitw(self.m, *len), 64);
+                        RegCnstrFill::Undefined
+                    },
+                    regs: &[Reg::RCX],
+                    clobber: true,
+                },
+            ],
+        )?
+        else {
+            panic!()
+        };
+        self.asm.push_inst(IcedInst::with_rep_stosb(64));
+        Ok(())
+    }
+
     fn i_mul(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -5828,6 +5876,45 @@ mod test {
               ...
               ; memcpy %0, %1, %2, true
               rep movsb
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_memset() {
+        // i32
+        codegen_and_test(
+            r#"
+              %0: ptr = arg [reg "rdi"]
+              %1: i8 = arg [reg "rax"]
+              %2: i32 = arg [reg "rcx"]
+              memset %0, %1, %2, true
+              exit [%0, %1, %2]
+            "#,
+            &["
+              ...
+              mov ecx, ecx
+              ...
+              ; memset %0, %1, %2, true
+              rep stosb
+              ...
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            r#"
+              %0: ptr = arg [reg]
+              %1: i8 = arg [reg]
+              %2: i64 = arg [reg]
+              memset %0, %1, %2, true
+              exit [%0, %1, %2]
+            "#,
+            &["
+              ...
+              ; memset %0, %1, %2, true
+              rep stosb
               ...
             "],
         );

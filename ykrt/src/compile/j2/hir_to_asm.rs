@@ -460,6 +460,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 Inst::MemCpy(x) => {
                     self.be.i_memcpy(&mut ra, b, iidx, x)?;
                 }
+                Inst::MemSet(x) => {
+                    self.be.i_memset(&mut ra, b, iidx, x)?;
+                }
                 Inst::Mul(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_mul(&mut ra, b, iidx, x)?;
@@ -933,6 +936,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &MemCpy,
+    ) -> Result<(), CompilationError>;
+
+    fn i_memset(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &MemSet,
     ) -> Result<(), CompilationError>;
 
     fn i_mul(

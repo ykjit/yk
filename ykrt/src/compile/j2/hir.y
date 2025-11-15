@@ -143,6 +143,12 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "MEMCPY" "LOCAL" "," "LOCAL" "," "LOCAL" "," "TRUE" {
       Ok(AstInst::MemCpy { dst: $2?.span(), src: $4?.span(), len: $6?.span(), volatile: true })
     }
+  | "MEMSET" "LOCAL" "," "LOCAL" "," "LOCAL" "," "FALSE" {
+      Ok(AstInst::MemSet { dst: $2?.span(), val: $4?.span(), len: $6?.span(), volatile: false })
+    }
+  | "MEMSET" "LOCAL" "," "LOCAL" "," "LOCAL" "," "TRUE" {
+      Ok(AstInst::MemSet { dst: $2?.span(), val: $4?.span(), len: $6?.span(), volatile: true })
+    }
   | "RETURN" {
       Ok(AstInst::Return)
     }

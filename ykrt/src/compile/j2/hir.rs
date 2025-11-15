@@ -590,6 +590,7 @@ pub(super) enum Inst {
     Load,
     LShr,
     MemCpy,
+    MemSet,
     Mul,
     Or,
     PtrAdd,
@@ -2147,6 +2148,79 @@ impl InstT for MemCpy {
             "memcpy %{}, %{}, %{}, {}",
             usize::from(self.dst),
             usize::from(self.src),
+            usize::from(self.len),
+            if self.volatile { "true" } else { "false" }
+        )
+    }
+
+    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
+        &Ty::Void
+    }
+}
+
+/// `memcpy` with the same semantics as LLVM's `llvm.memcpy`.
+#[derive(Debug)]
+pub(super) struct MemSet {
+    pub dst: InstIdx,
+    pub val: InstIdx,
+    pub len: InstIdx,
+    pub volatile: bool,
+}
+
+impl InstT for MemSet {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_matches!(
+            b.inst(self.dst).ty(m),
+            &Ty::Ptr(_),
+            "%{iidx:?}: dst has wrong type"
+        );
+        assert_matches!(
+            b.inst(self.val).ty(m),
+            &Ty::Int(8),
+            "%{iidx:?}: val has wrong type"
+        );
+        assert_matches!(
+            b.inst(self.len).ty(m),
+            &Ty::Int(32 | 64),
+            "%{iidx:?}: len has wrong type"
+        );
+    }
+
+    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.dst);
+        f(self.val);
+        f(self.len);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            dst: f(self.dst),
+            val: f(self.val),
+            len: f(self.len),
+            volatile: self.volatile,
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "memset %{}, %{}, %{}, {}",
+            usize::from(self.dst),
+            usize::from(self.val),
             usize::from(self.len),
             if self.volatile { "true" } else { "false" }
         )
@@ -3889,6 +3963,45 @@ mod test {
           %1: ptr = arg [reg]
           %2: i8 = arg [reg]
           memcpy %0, %1, %2, true
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%3: dst has wrong type")]
+    fn memset_dst_type() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i32 = arg [reg]
+          memset %0, %1, %2, true
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%3: val has wrong type")]
+    fn memset_val_type() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: ptr = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i32 = arg [reg]
+          memset %0, %1, %2, true
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%3: len has wrong type")]
+    fn memset_len_type() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = arg [reg]
+          memset %0, %1, %2, true
         ",
         );
     }

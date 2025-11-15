@@ -2464,6 +2464,16 @@ mod test {
             todo!();
         }
 
+        fn i_memset(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &MemSet,
+        ) -> Result<(), CompilationError> {
+            todo!();
+        }
+
         fn i_mul(
             &mut self,
             _ra: &mut RegAlloc<Self>,
