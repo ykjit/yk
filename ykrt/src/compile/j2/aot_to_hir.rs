@@ -1235,6 +1235,27 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
             }
+            "memset" => {
+                let [dst, val, len, volatile]: [hir::InstIdx; 4] =
+                    jargs.into_vec().try_into().unwrap();
+                let volatile = if let hir::Inst::Const(hir::Const {
+                    kind: hir::ConstKind::Int(x),
+                    ..
+                }) = self.opt.inst(volatile)
+                {
+                    assert_eq!(x.bitw(), 1);
+                    x.to_zero_ext_u8().unwrap() == 1
+                } else {
+                    panic!()
+                };
+                let hinst = hir::MemSet {
+                    dst,
+                    val,
+                    len,
+                    volatile,
+                };
+                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+            }
             "smax" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let fty = self.opt.func_ty(ftyidx);
