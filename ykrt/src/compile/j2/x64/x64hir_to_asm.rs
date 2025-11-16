@@ -3028,11 +3028,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         assert!(!*nuw && !*nsw);
 
         let bitw = b.inst_bitw(self.m, *lhs);
+        let out_fill = match bitw {
+            32 | 64 => RegCnstrFill::Zeroed,
+            _ => RegCnstrFill::Undefined,
+        };
         if let Some(imm) = self.zero_ext_op_for_imm8(b, *rhs) {
-            let out_fill = match bitw {
-                32 | 64 => RegCnstrFill::Zeroed,
-                _ => RegCnstrFill::Undefined,
-            };
             let [lhsr] = ra.alloc(
                 self,
                 iidx,
@@ -3055,8 +3055,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
-                        in_fill: RegCnstrFill::Zeroed,
-                        out_fill: RegCnstrFill::Zeroed,
+                        in_fill: RegCnstrFill::Undefined,
+                        out_fill,
                         regs: &NORMAL_GP_REGS,
                     },
                     RegCnstr::Input {
@@ -6343,6 +6343,26 @@ mod test {
               ; %2: i32 = shl %0, %1
               shl r.32.x, cl
               ...
+            "],
+        );
+
+        // Zero extension out fill
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 0xFF
+              %2: i32 = shl %0, %1
+              %3: i64 = zext %2
+              %4: i32 = trunc %3
+              exit [%4]
+            ",
+            &["
+              ...
+              ; %2: i32 = shl %0, %1
+              shl r.32._, 0xFF
+              ; %3: i64 = zext %2
+              ; %4: i32 = trunc %3
+              ; exit [%4]
             "],
         );
     }
