@@ -3139,21 +3139,17 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             ],
         )?;
 
-        match bitw {
-            64 => {
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Cmovl_r64_rm64,
-                    lhsr.to_reg64(),
-                    rhsr.to_reg64(),
-                ));
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Cmp_rm64_r64,
-                    lhsr.to_reg64(),
-                    rhsr.to_reg64(),
-                ));
-            }
-            x => todo!("{x}"),
-        }
+        assert!(bitw <= 64);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Cmovl_r64_rm64,
+            lhsr.to_reg64(),
+            rhsr.to_reg64(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Cmp_rm64_r64,
+            lhsr.to_reg64(),
+            rhsr.to_reg64(),
+        ));
         Ok(())
     }
 
@@ -3184,21 +3180,17 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             ],
         )?;
 
-        match bitw {
-            64 => {
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Cmovg_r64_rm64,
-                    lhsr.to_reg64(),
-                    rhsr.to_reg64(),
-                ));
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Cmp_rm64_r64,
-                    lhsr.to_reg64(),
-                    rhsr.to_reg64(),
-                ));
-            }
-            x => todo!("{x}"),
-        }
+        assert!(bitw <= 64);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Cmovg_r64_rm64,
+            lhsr.to_reg64(),
+            rhsr.to_reg64(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Cmp_rm64_r64,
+            lhsr.to_reg64(),
+            rhsr.to_reg64(),
+        ));
         Ok(())
     }
 
@@ -6280,6 +6272,27 @@ mod test {
 
     #[test]
     fn cg_smax() {
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = smax %0, %1
+              exit [%2, %2]
+            ",
+            &["
+              ...
+              movsxd r.64.x, r.32._
+              ...
+              movsxd r.64.y, r.32._
+              ...
+              ; %2: i32 = smax %0, %1
+              cmp r.64.x, r.64.y
+              cmovl r.64.x, r.64.y
+              ...
+            "],
+        );
+
         // i64
         codegen_and_test(
             "
@@ -6300,6 +6313,27 @@ mod test {
 
     #[test]
     fn cg_smin() {
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = smin %0, %1
+              exit [%2, %2]
+            ",
+            &["
+              ...
+              movsxd r.64.x, r.32._
+              ...
+              movsxd r.64.y, r.32._
+              ...
+              ; %2: i32 = smin %0, %1
+              cmp r.64.x, r.64.y
+              cmovg r.64.x, r.64.y
+              ...
+            "],
+        );
+
         // i64
         codegen_and_test(
             "
