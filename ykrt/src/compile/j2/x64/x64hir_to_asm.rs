@@ -1476,7 +1476,29 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 x => todo!("{x}"),
             });
         } else {
-            todo!();
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        out_fill,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::And_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                64 => IcedInst::with2(Code::And_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+                x => todo!("{x}"),
+            });
         }
 
         Ok(())
@@ -4156,6 +4178,8 @@ mod test {
 
     #[test]
     fn cg_and() {
+        // Constant RHS
+
         // i32
         codegen_and_test(
             "
@@ -4184,6 +4208,40 @@ mod test {
               ...
               ; %2: i64 = and %0, %1
               and r.64._, 0xFFFFFFF
+              ...
+            "],
+        );
+
+        // Variable RHS
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = and %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = and %0, %1
+              and r.32.x, r.32.y
+              ...
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = and %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i64 = and %0, %1
+              and r.64.x, r.64.y
               ...
             "],
         );
