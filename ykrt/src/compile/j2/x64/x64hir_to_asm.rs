@@ -2573,6 +2573,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             )?;
             self.asm.push_inst(match bitw {
                 1..=32 => IcedInst::with2(Code::Shr_rm32_CL, lhsr.to_reg32(), rhsr.to_reg8()),
+                64 => IcedInst::with2(Code::Shr_rm64_CL, lhsr.to_reg64(), rhsr.to_reg8()),
                 x => todo!("{x}"),
             });
         }
@@ -5777,6 +5778,22 @@ mod test {
 
         // Variable RHS
 
+        // i8
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
+              %2: i8 = lshr %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i8 = lshr %0, %1
+              shr r.32.x, cl
+              ...
+            "],
+        );
+
         // i32
         codegen_and_test(
             "
@@ -5789,6 +5806,22 @@ mod test {
               ...
               ; %2: i32 = lshr %0, %1
               shr r.32.x, cl
+              ...
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = lshr %0, %1
+              exit [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i64 = lshr %0, %1
+              shr r.64.x, cl
               ...
             "],
         );
