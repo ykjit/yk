@@ -70,6 +70,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let base_stack_off = u32::try_from({
                     let (smap, prologue) = aot_smaps.get(0);
                     if prologue.hasfp {
+                        // FIXME: This needs porting! https://github.com/ykjit/yk/issues/1936
+                        #[cfg(not(target_arch = "x86_64"))]
+                        panic!();
                         // The frame size includes RBP, but we only want to include the
                         // local variables.
                         smap.size - 8
