@@ -1108,6 +1108,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         assert_eq!(tgt_fill, RegFill::Signed);
                         if let Some(x) = x.to_sign_ext_i32() {
                             IcedInst::with2(Code::Mov_rm64_imm32, reg.to_reg64(), x)
+                        } else if let Some(x) = x.to_sign_ext_i64() {
+                            IcedInst::with2(Code::Mov_r64_imm64, reg.to_reg64(), x)
                         } else {
                             todo!();
                         }
@@ -1358,23 +1360,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             ],
         )?;
 
-        match bitw {
-            64 => {
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Cmovl_r64_rm64,
-                    ior.to_reg64(),
-                    tmpr.to_reg64(),
-                ));
-                self.asm
-                    .push_inst(IcedInst::with1(Code::Neg_rm64, ior.to_reg64()));
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Mov_r64_rm64,
-                    tmpr.to_reg64(),
-                    ior.to_reg64(),
-                ));
-            }
-            x => todo!("{x}"),
-        }
+        assert!(bitw <= 64);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Cmovl_r64_rm64,
+            ior.to_reg64(),
+            tmpr.to_reg64(),
+        ));
+        self.asm
+            .push_inst(IcedInst::with1(Code::Neg_rm64, ior.to_reg64()));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_rm64,
+            tmpr.to_reg64(),
+            ior.to_reg64(),
+        ));
         Ok(())
     }
 
@@ -4021,6 +4019,23 @@ mod test {
 
     #[test]
     fn cg_abs() {
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = abs %0
+              exit [%1]
+            ",
+            &["
+              ...
+              ; %1: i32 = abs %0, false
+              mov r.64.x, r.64.y
+              neg r.64.y
+              cmovl r.64.y, r.64.x
+              ...
+            "],
+        );
+
         // i64
         codegen_and_test(
             "
@@ -4625,6 +4640,28 @@ mod test {
             "],
         );
 
+        // Signed i32
+        codegen_and_test(
+            "
+              %0: i32 = 0
+              %1: i32 = abs %0
+              blackbox %1
+              %3: i32 = 0xFFFFFFFF
+              %4: i32 = abs %3
+              blackbox %4
+              exit []
+            ",
+            &["
+              ...
+              ; %0: i32 = 0
+              mov r.64._, 0
+              ...
+              ; %3: i32 = 4294967295
+              mov r.64._, 0xFFFFFFFFFFFFFFFF
+              ...
+            "],
+        );
+
         // i64
         codegen_and_test(
             "
@@ -4664,6 +4701,40 @@ mod test {
               add r.64.x, 0xFFFFFFFFFFFFFFFE
               ; blackbox %2
               ; exit []
+            "],
+        );
+
+        // Signed i64
+        codegen_and_test(
+            "
+              %0: i64 = 0
+              %1: i64 = abs %0
+              blackbox %1
+              %3: i64 = 0xFFFFFFFF
+              %4: i64 = abs %3
+              blackbox %4
+              %6: i64 = 0xFFFFFFFFFFFFFFFF
+              %7: i64 = abs %6
+              blackbox %7
+              %9: i64 = 0x1010101010101010
+              %10: i64 = abs %9
+              blackbox %10
+              exit []
+            ",
+            &["
+              ...
+              ; %0: i64 = 0
+              mov r.64._, 0
+              ...
+              ; %3: i64 = 4294967295
+              mov r.64._, 0xFFFFFFFF
+              ...
+              ; %6: i64 = 18446744073709551615
+              mov r.64._, 0xFFFFFFFFFFFFFFFF
+              ...
+              ; %9: i64 = 1157442765409226768
+              mov r.64._, 0x1010101010101010
+              ...
             "],
         );
 
