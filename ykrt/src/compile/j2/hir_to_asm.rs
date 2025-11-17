@@ -361,7 +361,14 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             block: _,
                         } => false,
                     };
-                    ra.set_exit_vlocs(is_loop, iidx, exit_vars, exit_vlocs);
+                    ra.set_exit_vlocs(
+                        &mut self.be,
+                        is_loop,
+                        entry_vlocs,
+                        iidx,
+                        exit_vars,
+                        exit_vlocs,
+                    )?;
                 }
                 Inst::FAdd(x) => {
                     if ra.is_used(iidx) {
@@ -732,6 +739,15 @@ pub(super) trait HirToAsmBackend {
         out_fill: RegFill,
         bitw: u32,
     ) -> Result<(), CompilationError>;
+
+    /// Move a value of `bitw` on the stack from `src_stack_off` to `dst_stack_off` using `tmp_reg`.
+    fn move_stack_val(
+        &mut self,
+        bitw: u32,
+        src_stack_off: u32,
+        dst_stack_off: u32,
+        tmp_reg: Self::Reg,
+    );
 
     /// Produce code for the backwards jump that finishes a loop trace.
     fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError>;
