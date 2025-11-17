@@ -125,16 +125,18 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 src_gridx,
                 tgt_ctr,
             } => {
-                let stack_off = src_ctr.guard_stack_off(*src_gridx);
+                let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
                 self.be.sidetrace_end(tgt_ctr)?;
                 // Assemble the body
                 let exit_vlocs = tgt_ctr.entry_vlocs();
                 let (guards, body_ra) =
-                    self.p_block(entry, stack_off, entry_vlocs, exit_vlocs, true, logging)?;
+                    self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, true, logging)?;
                 let body_stack_off = body_ra.stack_off();
-                self.be.body_completed(None, body_stack_off - stack_off);
+                self.be.body_completed(None, body_stack_off - src_stack_off);
                 self.asm_guards(entry, guards, body_ra)?;
-                let modkind = J2CompiledTraceKind::Side { stack_off };
+                let modkind = J2CompiledTraceKind::Side {
+                    stack_off: body_stack_off,
+                };
                 let (buf, guards, log, _) = self.be.build_exe(logging, &[])?;
                 (buf, guards, log, modkind)
             }
