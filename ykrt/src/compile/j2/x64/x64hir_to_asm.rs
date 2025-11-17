@@ -1033,6 +1033,16 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
             RelocKind::BranchWithAddr(addr.addr()),
         );
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            i32::try_from(ctr.entry_stack_off().next_multiple_of(16)).unwrap(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_rm64,
+            IcedReg::RSP,
+            IcedReg::RBP,
+        ));
         Ok(())
     }
 
@@ -1330,6 +1340,42 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             });
         }
         Ok(())
+    }
+
+    fn move_stack_val(
+        &mut self,
+        bitw: u32,
+        src_stack_off: u32,
+        dst_stack_off: u32,
+        tmpr: Self::Reg,
+    ) {
+        match bitw {
+            64 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm64_r64,
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(dst_stack_off)),
+                    tmpr.to_reg64(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r64_rm64,
+                    tmpr.to_reg64(),
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(src_stack_off)),
+                ));
+            }
+            32 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm32_r32,
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(dst_stack_off)),
+                    tmpr.to_reg32(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r32_rm32,
+                    tmpr.to_reg32(),
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(src_stack_off)),
+                ));
+            }
+            x => todo!("{x}"),
+        }
     }
 
     fn i_abs(
@@ -4030,7 +4076,7 @@ mod test {
             ",
             &["
               ...
-              ; %0: ptr = arg [StackOff(32)]
+              ; %0: ptr = arg [StackOff(0x20)]
               lea r.64.x, [rbp-0x20]
               ; %1: i8 = load %0
               movzx r.32._, byte [r.64.x]

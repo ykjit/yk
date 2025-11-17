@@ -393,6 +393,35 @@ fn reconstruct(
                     }
                 }
             }
+            9..=16 => {
+                let v = match fromvloc {
+                    VarLoc::Stack(off) => unsafe {
+                        (srcaddr.byte_sub(usize::try_from(*off).unwrap()) as *const u16).read()
+                    },
+                    VarLoc::StackOff(_) => todo!(),
+                    VarLoc::Reg(_) => todo!(),
+                    VarLoc::Const(ConstKind::Double(_)) => unreachable!(),
+                    VarLoc::Const(ConstKind::Float(_)) => unreachable!(),
+                    VarLoc::Const(ConstKind::Int(x)) => x.to_zero_ext_u16().unwrap(),
+                    VarLoc::Const(ConstKind::Ptr(_)) => unreachable!(),
+                };
+
+                for vloc in tovlocs.iter() {
+                    match vloc {
+                        VarLoc::Stack(off) => unsafe {
+                            // FIXME: We don't know if we're overwriting a value deopt
+                            // needs to later read!
+                            (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u16).write(v);
+                        },
+                        VarLoc::StackOff(_) => todo!(),
+                        VarLoc::Reg(reg) => {
+                            assert!(reg.is_gp());
+                            gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = u64::from(v)
+                        }
+                        VarLoc::Const(_const_kind) => todo!(),
+                    }
+                }
+            }
             1..=8 => {
                 let v = match fromvloc {
                     VarLoc::Stack(off) => unsafe {

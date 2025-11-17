@@ -70,6 +70,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let base_stack_off = u32::try_from({
                     let (smap, prologue) = aot_smaps.get(0);
                     if prologue.hasfp {
+                        // FIXME: This needs porting! https://github.com/ykjit/yk/issues/1936
+                        #[cfg(not(target_arch = "x86_64"))]
+                        panic!();
                         // The frame size includes RBP, but we only want to include the
                         // local variables.
                         smap.size - 8
@@ -122,16 +125,18 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 src_gridx,
                 tgt_ctr,
             } => {
-                let stack_off = src_ctr.guard_stack_off(*src_gridx);
+                let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
                 self.be.sidetrace_end(tgt_ctr)?;
                 // Assemble the body
                 let exit_vlocs = tgt_ctr.entry_vlocs();
                 let (guards, body_ra) =
-                    self.p_block(entry, stack_off, entry_vlocs, exit_vlocs, true, logging)?;
+                    self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, true, logging)?;
                 let body_stack_off = body_ra.stack_off();
-                self.be.body_completed(None, body_stack_off - stack_off);
+                self.be.body_completed(None, body_stack_off - src_stack_off);
                 self.asm_guards(entry, guards, body_ra)?;
-                let modkind = J2CompiledTraceKind::Side { stack_off };
+                let modkind = J2CompiledTraceKind::Side {
+                    stack_off: body_stack_off,
+                };
                 let (buf, guards, log, _) = self.be.build_exe(logging, &[])?;
                 (buf, guards, log, modkind)
             }
@@ -356,7 +361,14 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             block: _,
                         } => false,
                     };
-                    ra.set_exit_vlocs(is_loop, iidx, exit_vars, exit_vlocs);
+                    ra.set_exit_vlocs(
+                        &mut self.be,
+                        is_loop,
+                        entry_vlocs,
+                        iidx,
+                        exit_vars,
+                        exit_vlocs,
+                    )?;
                 }
                 Inst::FAdd(x) => {
                     if ra.is_used(iidx) {
@@ -727,6 +739,15 @@ pub(super) trait HirToAsmBackend {
         out_fill: RegFill,
         bitw: u32,
     ) -> Result<(), CompilationError>;
+
+    /// Move a value of `bitw` on the stack from `src_stack_off` to `dst_stack_off` using `tmp_reg`.
+    fn move_stack_val(
+        &mut self,
+        bitw: u32,
+        src_stack_off: u32,
+        dst_stack_off: u32,
+        tmp_reg: Self::Reg,
+    );
 
     /// Produce code for the backwards jump that finishes a loop trace.
     fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError>;

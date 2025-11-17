@@ -239,12 +239,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// Set the [VarLocs] of a [super::hir::Exit] instruction.
     pub(super) fn set_exit_vlocs(
         &mut self,
+        be: &mut AB,
         is_loop: bool,
+        all_entry_vlocs: &[VarLocs<AB::Reg>],
         exit_iidx: InstIdx,
-        exit_vars: &[InstIdx],
-        exit_vlocs: &[VarLocs<AB::Reg>],
-    ) {
-        assert_eq!(exit_vars.len(), exit_vlocs.len());
+        all_exit_vars: &[InstIdx],
+        all_exit_vlocs: &[VarLocs<AB::Reg>],
+    ) -> Result<(), CompilationError> {
+        assert_eq!(all_exit_vars.len(), all_exit_vlocs.len());
 
         // At a trace's exit, we potentially have to shuffle the stack around. In most cases we
         // have to "move" a value to/from the same stack location, but not always. Consider a trace
@@ -267,19 +269,95 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // is that we calculate all the moves, and then perform them in a safe order where "safe"
         // might require us to spill extra values or use temporary registers.
 
+        // Always obtaining a temporary register is bad, and this approach is particularly bad: it
+        // could fail to find a candidate register!
+        let tmp_reg = self
+            .rstates
+            .iter()
+            .find_map(|(reg, rstate)| {
+                if rstate.iidxs.is_empty() {
+                    Some(reg)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Push constants into registers as the very last thing (these registers are excellent
+        // "temporary" candidates, so do them last).
+        for (iidx, exit_vlocs) in all_exit_vars.iter().zip(all_exit_vlocs.iter()) {
+            if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
+                for vloc in exit_vlocs.iter() {
+                    let bitw = self.b.inst_bitw(self.m, *iidx);
+                    match vloc {
+                        VarLoc::Stack(_) => (),
+                        VarLoc::StackOff(_) => todo!(),
+                        VarLoc::Reg(reg) => {
+                            be.move_const(*reg, None, bitw, RegFill::Zeroed, kind)?;
+                        }
+                        VarLoc::Const(_) => (),
+                    }
+                }
+            }
+        }
+
+        // Push constants into the stack as the penultimate thing (these may require up to two
+        // temporary registers).
+        for (iidx, exit_vlocs) in all_exit_vars.iter().zip(all_exit_vlocs.iter()) {
+            if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
+                for vloc in exit_vlocs.iter() {
+                    let bitw = self.b.inst_bitw(self.m, *iidx);
+                    match vloc {
+                        VarLoc::Stack(stack_off) => {
+                            if let IState::Stack(spill_stack_off) = self.istates[*iidx]
+                                && *stack_off == spill_stack_off
+                            {
+                                continue;
+                            }
+                            be.spill(tmp_reg, RegFill::Zeroed, *stack_off, bitw)?;
+                            be.move_const(tmp_reg, None, bitw, RegFill::Zeroed, kind)?;
+                        }
+                        VarLoc::StackOff(_) => todo!(),
+                        VarLoc::Reg(_) => (),
+                        VarLoc::Const(_) => (),
+                    }
+                }
+            }
+        }
+
         let mut moves = Vec::new();
-        for (iidx, vlocs) in exit_vars.iter().zip(exit_vlocs.iter()) {
+        for (iidx, exit_vlocs) in all_exit_vars.iter().zip(all_exit_vlocs.iter()) {
+            if let Inst::Const(_) = self.b.inst(*iidx) {
+                // We handled these above.
+                continue;
+            }
             self.is_used[*iidx] = exit_iidx;
             let bitw = self.b.inst_bitw(self.m, *iidx);
-            for vloc in vlocs.iter() {
+            for vloc in exit_vlocs.iter() {
+                if exit_vlocs
+                    .iter()
+                    .any(|vloc| matches!(vloc, VarLoc::Const(_)))
+                {
+                    todo!();
+                }
                 match vloc {
-                    VarLoc::Stack(to_stack_off) => match self.istates[*iidx] {
-                        IState::None => (),
-                        IState::Stack(from_stack_off) => {
-                            moves.push((bitw, from_stack_off, *to_stack_off));
+                    VarLoc::Stack(to_stack_off) => {
+                        if usize::from(*iidx) < all_entry_vlocs.len()
+                            && let Some(VarLoc::Stack(from_stack_off)) = all_entry_vlocs
+                                [usize::from(*iidx)]
+                            .iter()
+                            .find(|vloc| matches!(vloc, VarLoc::Stack(_)))
+                        {
+                            moves.push((bitw, *from_stack_off, *to_stack_off));
+                            continue;
                         }
-                        IState::StackOff(_) => todo!(),
-                    },
+
+                        let tmp_stack_off = be.align_spill(self.stack_off, bitw);
+                        self.stack_off = tmp_stack_off;
+                        assert_eq!(self.istates[*iidx], IState::None);
+                        self.istates[*iidx] = IState::Stack(tmp_stack_off);
+                        moves.push((bitw, tmp_stack_off, *to_stack_off));
+                    }
                     VarLoc::StackOff(stack_off) => {
                         if is_loop {
                             assert_eq!(self.istates[*iidx], IState::StackOff(*stack_off));
@@ -298,12 +376,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         moves.sort_unstable_by_key(|x| x.1);
-        for (_bitw, from_stack_off, to_stack_off) in moves.iter() {
+        for (bitw, from_stack_off, to_stack_off) in moves.into_iter() {
             if from_stack_off == to_stack_off {
                 continue;
             }
-            todo!();
+            be.move_stack_val(bitw, from_stack_off, to_stack_off, tmp_reg);
         }
+
+        Ok(())
     }
 
     /// Topologically sort `ractions.distinct_copies`, breaking cycles as necessary, such that no
@@ -448,6 +528,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 IState::None => {
                     let stack_off = be.align_spill(self.stack_off, max_bitw);
                     self.stack_off = stack_off;
+                    assert_eq!(self.istates[unspill_iidx], IState::None);
                     self.istates[unspill_iidx] = IState::Stack(stack_off);
                     stack_off
                 }
@@ -575,7 +656,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     ) -> Result<(), CompilationError> {
         for iidx in self.rstates.iidxs(reg) {
             // We don't need to spill things that are already spilt, or constants.
-            if matches!(&self.istates[*iidx], IState::Stack(_))
+            if matches!(&self.istates[*iidx], IState::Stack(_) | IState::StackOff(_))
                 || matches!(self.b.inst(*iidx), Inst::Const(_))
             {
                 continue;
@@ -583,6 +664,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
             let bitw = self.b.inst_bitw(self.m, *iidx);
             self.stack_off = be.align_spill(self.stack_off, bitw);
+            assert_eq!(self.istates[*iidx], IState::None);
             self.istates[*iidx] = IState::Stack(self.stack_off);
             be.spill(reg, self.rstates.fill(reg), self.stack_off, bitw)?;
         }
@@ -1525,14 +1607,14 @@ pub(super) enum VarLoc<Reg> {
 impl<Reg: Display> Display for VarLoc<Reg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            VarLoc::Stack(x) => write!(f, "Stack({x})"),
-            VarLoc::StackOff(x) => write!(f, "StackOff({x})"),
+            VarLoc::Stack(x) => write!(f, "Stack(0x{x:X})"),
+            VarLoc::StackOff(x) => write!(f, "StackOff(0x{x:X})"),
             VarLoc::Reg(x) => write!(f, "Reg(\"{x}\")"),
             VarLoc::Const(x) => match x {
                 ConstKind::Double(x) => write!(f, "{x}"),
                 ConstKind::Float(x) => write!(f, "{x}"),
                 ConstKind::Int(x) => write!(f, "{x}"),
-                ConstKind::Ptr(_) => todo!(),
+                ConstKind::Ptr(x) => write!(f, "0x{x:X}"),
             },
         }
     }
@@ -2123,6 +2205,16 @@ mod test {
                 "unspill stack_off={stack_off} {reg:?} {out_fill:?} bitw={bitw}"
             ));
             Ok(())
+        }
+
+        fn move_stack_val(
+            &mut self,
+            _bitw: u32,
+            _src_stack_off: u32,
+            _dst_stack_off: u32,
+            _reg: Self::Reg,
+        ) {
+            todo!()
         }
 
         fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError> {
