@@ -33,7 +33,7 @@ use std::{collections::HashMap, ffi::CString, marker::PhantomData};
 
 lrlex_mod!("compile/j2/hir.l");
 lrpar_mod!("compile/j2/hir.y");
-type StorageT = u16;
+type StorageT = u8;
 
 /// In unit test mode, there are are no [DeoptSafepoint]s, since we're running as a normal Rust
 /// binary, not a ykllvm compiled C program. If we want to use a [DeoptSafepoint] in tests, we have
