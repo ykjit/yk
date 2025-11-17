@@ -1607,14 +1607,14 @@ pub(super) enum VarLoc<Reg> {
 impl<Reg: Display> Display for VarLoc<Reg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            VarLoc::Stack(x) => write!(f, "Stack({x})"),
-            VarLoc::StackOff(x) => write!(f, "StackOff({x})"),
+            VarLoc::Stack(x) => write!(f, "Stack(0x{x:X})"),
+            VarLoc::StackOff(x) => write!(f, "StackOff(0x{x:X})"),
             VarLoc::Reg(x) => write!(f, "Reg(\"{x}\")"),
             VarLoc::Const(x) => match x {
                 ConstKind::Double(x) => write!(f, "{x}"),
                 ConstKind::Float(x) => write!(f, "{x}"),
                 ConstKind::Int(x) => write!(f, "{x}"),
-                ConstKind::Ptr(_) => todo!(),
+                ConstKind::Ptr(x) => write!(f, "0x{x:X}"),
             },
         }
     }

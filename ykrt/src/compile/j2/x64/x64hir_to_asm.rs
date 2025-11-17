@@ -4076,7 +4076,7 @@ mod test {
             ",
             &["
               ...
-              ; %0: ptr = arg [StackOff(32)]
+              ; %0: ptr = arg [StackOff(0x20)]
               lea r.64.x, [rbp-0x20]
               ; %1: i8 = load %0
               movzx r.32._, byte [r.64.x]
