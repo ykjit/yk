@@ -789,7 +789,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 Inst::DebugStr { .. } => todo!(),
                 Inst::ExtractValue { .. } => todo!(),
                 Inst::FCmp { .. } => self.p_fcmp(iid, inst)?,
-                Inst::FNeg { val: _ } => todo!(),
+                Inst::FNeg { .. } => self.p_fneg(iid, inst)?,
                 Inst::ICmp { .. } => self.p_icmp(iid, inst)?,
                 Inst::IndirectCall { .. } => self.p_icall(iid, bid, inst)?,
                 Inst::InsertValue { .. } => todo!(),
@@ -1384,6 +1384,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             FloatPredicate::True => hir::FPred::True,
         };
         self.push_inst_and_link_local(iid, hir::FCmp { pred, lhs, rhs }.into())
+            .map(|_| ())
+    }
+
+    fn p_fneg(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::FNeg { val } = inst else { panic!() };
+        let tyidx = self.p_ty(val.type_(self.am))?;
+        let val = self.p_operand(val)?;
+        self.push_inst_and_link_local(iid, hir::FNeg { tyidx, val }.into())
             .map(|_| ())
     }
 

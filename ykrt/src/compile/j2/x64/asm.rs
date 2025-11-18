@@ -233,6 +233,9 @@ impl Asm {
             let next_ip_boff = u64::try_from(inst_boff + offs[inst_off].1).unwrap();
             match reloc {
                 RelocKind::BranchWithAddr(_) | RelocKind::RipRelativeWithLabel(_) => {
+                    // We now have a not-very-nice hack where we examine the instruction to see
+                    // which part of it we write the relocation to.
+                    #[allow(clippy::if_same_then_else)]
                     let patch_boff = if enc[inst_boff] == 0xe9 {
                         inst_boff + 1 // JMP
                     } else if enc[inst_boff] == 0x0F
@@ -245,6 +248,11 @@ impl Asm {
                         && (enc[inst_boff + 2] >= 0x5C && enc[inst_boff + 2] <= 0x62)
                     {
                         inst_boff + 4 // PUNPCKLDQ / SUBPD
+                    } else if (enc[inst_boff] == 0xF2 || enc[inst_boff] == 0xF3)
+                        && enc[inst_boff + 1] == 0x0F
+                        && enc[inst_boff + 2] == 0x10
+                    {
+                        inst_boff + 4 // MOVSD / MOVSS
                     } else {
                         todo!("{:X?}", &enc[inst_boff..inst_boff + 3])
                     };
@@ -382,7 +390,7 @@ pub(super) enum RelocKind {
     BranchWithAddr(usize),
     /// An instruction refering to the label at [LabelIdx] relative to RIP. Using this requires
     /// teaching `into_exe` about the specific encoding and the offset of the address in the
-    /// instruction. Instructions supported are: JMP, JCC, PUNPCKLDQ, and SUBPD.
+    /// instruction. Instructions supported are: JMP, JCC, MOVSD, MOVSS, PUNPCKLDQ, and SUBPD.
     RipRelativeWithLabel(LabelIdx),
     /// A near call to the address at `usize`. That this is possible should have been validated
     /// with [Asm::near_callable], or an exception will ensue.

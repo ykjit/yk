@@ -395,6 +395,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_fmul(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::FNeg(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fneg(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::FSub(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fsub(&mut ra, b, iidx, x)?;
@@ -882,6 +887,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &FMul,
+    ) -> Result<(), CompilationError>;
+
+    fn i_fneg(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FNeg,
     ) -> Result<(), CompilationError>;
 
     fn i_fsub(
