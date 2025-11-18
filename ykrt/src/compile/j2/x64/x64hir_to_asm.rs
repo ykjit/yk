@@ -939,8 +939,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         // each block is aligned.
         let mut data_off = BLOCK_ALIGNMENT;
         for (data, (align, lidx)) in self.data_sec.into_iter() {
-            if !data_off.is_multiple_of(usize::try_from(align).unwrap()) {
-                todo!();
+            let align = usize::try_from(align).unwrap();
+            if !data_off.is_multiple_of(align) {
+                let pad_len = data_off.next_multiple_of(align) - data_off;
+                self.asm
+                    .push_inst(IcedInst::with_declare_byte(&vec![0u8; pad_len]));
             }
             self.asm.push_inst(IcedInst::with_declare_byte(&data));
             self.asm.attach_label(lidx);
@@ -2272,6 +2275,67 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             Ty::Float => IcedInst::with2(Code::Mulss_xmm_xmmm32, lhsr.to_xmm(), rhsr.to_xmm()),
             _ => panic!(),
         });
+
+        Ok(())
+    }
+
+    fn i_fneg(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        FNeg { tyidx, val }: &FNeg,
+    ) -> Result<(), CompilationError> {
+        let [outr, tmpr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                },
+                RegCnstr::Temp {
+                    regs: &ALL_XMM_REGS,
+                },
+            ],
+        )?;
+        match self.m.ty(*tyidx) {
+            Ty::Double => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Xorpd_xmm_xmmm128,
+                    outr.to_xmm(),
+                    tmpr.to_xmm(),
+                ));
+                let lidx = self.push_data(8, &[0, 0, 0, 0, 0, 0, 0, 0x80]);
+                self.asm.push_reloc(
+                    IcedInst::with2(
+                        Code::Movsd_xmm_xmmm64,
+                        tmpr.to_xmm(),
+                        MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                    ),
+                    RelocKind::RipRelativeWithLabel(lidx),
+                );
+            }
+            Ty::Float => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Xorps_xmm_xmmm128,
+                    outr.to_xmm(),
+                    tmpr.to_xmm(),
+                ));
+                let lidx = self.push_data(4, &[0, 0, 0, 0x80]);
+                self.asm.push_reloc(
+                    IcedInst::with2(
+                        Code::Movss_xmm_xmmm32,
+                        tmpr.to_xmm(),
+                        MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                    ),
+                    RelocKind::RipRelativeWithLabel(lidx),
+                );
+            }
+            _ => panic!(),
+        }
 
         Ok(())
     }
@@ -5256,6 +5320,45 @@ mod test {
               ; %2: double = fmul %0, %1
               mulsd fp.128.x, fp.128.y
               ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_fneg() {
+        // float
+        codegen_and_test(
+            "
+              %0: float = arg [reg]
+              %1: float = fneg %0
+              exit [%1]
+            ",
+            &["
+              ...
+              ; %1: float = fneg %0
+              movss fp.128.x, l0
+              xorps fp.128.y, fp.128.x
+              ; exit [%1]
+              ; l0
+              db 0, 0, 0, 0x80
+            "],
+        );
+
+        // double
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: double = fneg %0
+              exit [%1]
+            ",
+            &["
+              ...
+              ; %1: double = fneg %0
+              movsd fp.128.x, l0
+              xorpd fp.128.y, fp.128.x
+              ; exit [%1]
+              ; l0
+              db 0, 0, 0, 0, 0, 0, 0, 0x80
             "],
         );
     }

@@ -2403,6 +2403,16 @@ mod test {
             todo!();
         }
 
+        fn i_fneg(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FNeg,
+        ) -> Result<(), CompilationError> {
+            todo!();
+        }
+
         fn i_fmul(
             &mut self,
             _ra: &mut RegAlloc<Self>,

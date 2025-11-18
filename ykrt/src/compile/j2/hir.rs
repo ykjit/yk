@@ -581,6 +581,7 @@ pub(super) enum Inst {
     FDiv,
     Floor,
     FMul,
+    FNeg,
     FSub,
     FPExt,
     FPToSI,
@@ -1569,6 +1570,58 @@ impl InstT for FMul {
             usize::from(self.lhs),
             usize::from(self.rhs)
         )
+    }
+
+    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
+        m.ty(self.tyidx)
+    }
+}
+
+/// Floating point negation with the same semantics as LLVM's `fneg`.
+#[derive(Debug)]
+pub(super) struct FNeg {
+    pub tyidx: TyIdx,
+    /// What LLVM calls `op1`.
+    pub val: InstIdx,
+}
+
+impl InstT for FNeg {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            *m.ty(self.tyidx),
+            *b.inst(self.val).ty(m),
+            "%{iidx:?}: inconsistent return / val types"
+        );
+    }
+
+    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    fn iter_iidxs<F>(&self, f: F)
+    where
+        F: Fn(InstIdx),
+        Self: Sized,
+    {
+        f(self.val);
+    }
+
+    fn map_iidxs<F>(self, f: F) -> Self
+    where
+        F: Fn(InstIdx) -> InstIdx,
+        Self: Sized,
+    {
+        Self {
+            tyidx: self.tyidx,
+            val: f(self.val),
+        }
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("fneg %{}", usize::from(self.val),)
     }
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
@@ -3833,6 +3886,17 @@ mod test {
           %0: float = arg [reg]
           %1: float = arg [reg]
           %2: double = fmul %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: inconsistent return / val types")]
+    fn fneg_type_consistency() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: float = arg [reg]
+          %1: double = fneg %0
         ",
         );
     }
