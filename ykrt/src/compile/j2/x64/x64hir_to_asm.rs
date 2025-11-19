@@ -3082,7 +3082,55 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }: &Select,
     ) -> Result<(), CompilationError> {
         match self.m.ty(*tyidx) {
-            Ty::Double | Ty::Float => todo!(),
+            Ty::Double | Ty::Float => {
+                let [condr, outr, falser] = ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *cond,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::InputOutput {
+                            in_iidx: *truev,
+                            in_fill: RegCnstrFill::Undefined,
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: &ALL_XMM_REGS,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: *falsev,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &ALL_XMM_REGS,
+                            clobber: false,
+                        },
+                    ],
+                )?;
+                match self.m.ty(*tyidx) {
+                    Ty::Double => {
+                        let end_lidx = self.asm.mk_label();
+                        self.asm.attach_label(end_lidx);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Movsd_xmmm64_xmm,
+                            outr.to_xmm(),
+                            falser.to_xmm(),
+                        ));
+                        self.asm.push_reloc(
+                            IcedInst::with_branch(Code::Jb_rel32_64, 0),
+                            RelocKind::RipRelativeWithLabel(end_lidx),
+                        );
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Bt_rm32_imm8,
+                            condr.to_reg32(),
+                            0,
+                        ));
+                    }
+                    Ty::Float => todo!(),
+                    _ => unreachable!(),
+                }
+                Ok(())
+            }
             Ty::Func(_) => todo!(),
             Ty::Int(bitw) => {
                 let out_fill = if let 32 | 64 = bitw {
@@ -6518,6 +6566,30 @@ mod test {
 
     #[test]
     fn cg_select() {
+        // double
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: double = arg [reg]
+              %2: double = arg [reg]
+              %3: double = select %0, %1, %2
+              %4: double = fneg %3
+              exit [%0, %3, %4]
+            ",
+            &[r#"
+              ...
+              ; %1: double = arg [Reg("fp.128.x")]
+              ; %2: double = arg [Reg("fp.128.y")]
+              ...
+              ; %3: double = select %0, %1, %2
+              bt r.32._, 0
+              jb l1
+              movsd fp.128.x, fp.128._
+              ; l1
+              ...
+            "#],
+        );
+
         // i1
         codegen_and_test(
             "
