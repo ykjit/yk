@@ -259,9 +259,7 @@ impl<'a> X64HirToAsm<'a> {
         };
 
         let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred == &IPred::Eq {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Zeroed)
-        } else if pred.is_signed() {
+        let (imm, mut in_fill) = if pred.is_signed() {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
         } else {
             (
@@ -2528,9 +2526,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         };
 
         let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred == &IPred::Eq {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Zeroed)
-        } else if pred.is_signed() {
+        let (imm, mut in_fill) = if pred.is_signed() {
             (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
         } else {
             (
@@ -5571,6 +5567,27 @@ mod test {
         // Icmp-const optimisation
         codegen_and_test(
             "
+              %0: i16 = arg [reg]
+              %1: i16 = 0xFEDC
+              %2: i1 = icmp eq %0, %1
+              guard true, %2, []
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i16 = arg [Reg("r.64.x")]
+              and r.32.x, 0xFFFF
+              ; %1: i16 = 65244
+              ; %2: i1 = icmp eq %0, %1
+              ; guard true, %2, []
+              cmp r.32.x, 0xFEDC
+              jne l0
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
               %0: i32 = arg [reg]
               %1: i32 = 0x14
               %2: i1 = icmp eq %0, %1
@@ -5809,6 +5826,28 @@ mod test {
 
     #[test]
     fn cg_icmp() {
+        codegen_and_test(
+            "
+              %0: i16 = arg [reg]
+              %1: i16 = 0xFEDC
+              %2: i1 = icmp eq %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i16 = arg [Reg("r.64.x")]
+              and r.32.x, 0xFFFF
+              ; %1: i16 = 65244
+              ; %2: i1 = icmp eq %0, %1
+              cmp r.32.x, 0xFEDC
+              sete r.8._
+              ; blackbox %2
+              ; exit [%0]
+              ...
+            "#],
+        );
+
         codegen_and_test(
             "
               %0: i32 = arg [reg]
