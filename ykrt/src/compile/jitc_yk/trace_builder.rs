@@ -247,12 +247,19 @@ impl TraceBuilder {
     }
 
     /// Walk over a traced AOT block, translating the constituent instructions into the JIT module.
+    ///
+    /// When all is well:
+    ///
+    ///  - Returns `Ok(Some(new_prevbb))` if the block was terminated by a `ret` and tracebuilder's
+    ///    `prevbid` needs to be updated as a result.
+    ///
+    ///  - Returns `Ok(None)` for all other block terminators.
     fn process_block(
         &mut self,
         bid: &aot_ir::BBlockId,
         prevbb: &Option<aot_ir::BBlockId>,
         nextbb: Option<aot_ir::BBlockId>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<Option<Option<BBlockId>>, CompilationError> {
         // We have already checked this (and aborted building the trace) at the time we encountered
         // an `Inst::Ret` that would make the frame stack empty.
         assert!(!self.frames.is_empty());
@@ -320,7 +327,22 @@ impl TraceBuilder {
                     val,
                     dest_tyidx,
                 } => self.handle_cast(bid, iidx, cast_kind, val, dest_tyidx),
-                aot_ir::Inst::Ret { val } => self.handle_ret(bid, iidx, val),
+                aot_ir::Inst::Ret { val } => {
+                    let retframe = self.handle_ret(bid, iidx, val)?;
+                    // In the case of a `ret` terminator, we need to communicate back to the caller
+                    // the block that should become the new `prevbid` going forward.
+                    //
+                    // This is nasty.
+                    let ret_prevbb: Option<Option<BBlockId>> =
+                        if let Some(ref ci) = retframe.callinst {
+                            Some(Some(BBlockId::new(ci.funcidx(), ci.bbidx())))
+                        } else {
+                            Some(None)
+                        };
+                    // Early return OK because `ret` is a terminator and there can be no further
+                    // instructions in the block.
+                    return Ok(ret_prevbb);
+                }
                 aot_ir::Inst::Switch {
                     test_val,
                     default_dest,
@@ -398,7 +420,7 @@ impl TraceBuilder {
                 ))),
             }?;
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Link the AOT IR to the last instruction pushed into the JIT IR.
@@ -748,21 +770,23 @@ impl TraceBuilder {
         Ok(())
     }
 
+    /// If all is well, returns `Some(frame)`, where `frame` is the frame we just returned from.
     fn handle_ret(
         &mut self,
         _bid: &aot_ir::BBlockId,
         _aot_inst_idx: usize,
         val: &Option<aot_ir::Operand>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<InlinedFrame, CompilationError> {
         // If this `unwrap` fails, it means that early return detection in `mt.rs` is not working
         // as expected.
         let frame = self.frames.pop().unwrap();
         if !self.frames.is_empty() {
             if let Some(val) = val {
                 let op = self.handle_operand(val)?;
-                self.local_map.insert(frame.callinst.unwrap(), op);
+                self.local_map
+                    .insert(frame.callinst.as_ref().unwrap().clone(), op);
             }
-            Ok(())
+            Ok(frame)
         } else {
             if let TraceKind::Sidetrace(_) = self.jit_mod.tracekind() {
                 // Even though we currently catch side-traces that leave the main interpreter loop
@@ -784,7 +808,7 @@ impl TraceBuilder {
             assert!(val.is_none());
             self.jit_mod.push(jit_ir::Inst::Return(safepoint.id))?;
             self.finish_early = true;
-            Ok(())
+            Ok(frame)
         }
     }
 
@@ -1758,7 +1782,7 @@ impl TraceBuilder {
                     // In order to emit guards for conditional branches we need to peek at the next
                     // block.
                     let nextbb = trace_iter.peek().and_then(|x| self.lookup_aot_block(x));
-                    self.process_block(&bid, &prev_bid, nextbb)?;
+                    let ret_prevbb = self.process_block(&bid, &prev_bid, nextbb)?;
                     if self.cp_block.as_ref() == Some(&bid) {
                         // When using the hardware tracer we will see two control point
                         // blocks here. We must only process one of them. The simplest way
@@ -1777,7 +1801,12 @@ impl TraceBuilder {
                             _ => panic!(),
                         }
                     }
-                    prev_bid = Some(bid);
+                    // If the block was terminated with a `ret` we have to update `prev_bid`.
+                    if let Some(ret_prevbb) = ret_prevbb {
+                        prev_bid = ret_prevbb;
+                    } else {
+                        prev_bid = Some(bid);
+                    }
                     prev_mappable_bid = Some(bid);
                 }
                 None => {
