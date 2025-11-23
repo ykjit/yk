@@ -30,7 +30,12 @@ use crate::{
     trace::AOTTraceIterator,
 };
 use parking_lot::Mutex;
-use std::{error::Error, sync::Arc};
+use std::{
+    collections::HashMap,
+    error::Error,
+    ffi::{CString, c_void},
+    sync::Arc,
+};
 
 #[derive(Debug)]
 pub(super) struct J2;
@@ -117,3 +122,8 @@ impl Compiler for J2 {
         hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt)
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+struct SyncSafePtr<T>(T);
+unsafe impl<T> Send for SyncSafePtr<T> {}
+unsafe impl<T> Sync for SyncSafePtr<T> {}

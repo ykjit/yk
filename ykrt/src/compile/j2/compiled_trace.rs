@@ -3,6 +3,7 @@ use crate::{
         CompiledTrace,
         guard::{Guard, GuardId},
         j2::{
+            SyncSafePtr,
             hir::{GuardRestoreIdx, Switch},
             regalloc::{RegT, VarLocs},
         },
@@ -260,8 +261,3 @@ pub(super) struct DeoptFrame<Reg: RegT> {
     /// memory/performance trade-off or not.
     pub vars: Vec<(InstId, u32, VarLocs<Reg>, VarLocs<Reg>)>,
 }
-
-#[derive(Debug)]
-struct SyncSafePtr<T>(T);
-unsafe impl<T> Send for SyncSafePtr<T> {}
-unsafe impl<T> Sync for SyncSafePtr<T> {}
