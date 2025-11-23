@@ -44,7 +44,7 @@ pub(crate) enum CompilationError {
 pub(crate) trait Compiler: Send + Sync {
     /// Compile a mapped root trace into machine code.
     fn root_compile(
-        &self,
+        self: Arc<Self>,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,
@@ -57,7 +57,7 @@ pub(crate) trait Compiler: Send + Sync {
 
     /// Compile a guard trace into machine code.
     fn sidetrace_compile(
-        &self,
+        self: Arc<Self>,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,

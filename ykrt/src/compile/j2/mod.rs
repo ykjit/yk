@@ -48,7 +48,7 @@ impl J2 {
 
 impl Compiler for J2 {
     fn root_compile(
-        &self,
+        self: Arc<Self>,
         mt: Arc<MT>,
         ta_iter: Box<dyn AOTTraceIterator>,
         trid: TraceId,
@@ -85,7 +85,7 @@ impl Compiler for J2 {
     }
 
     fn sidetrace_compile(
-        &self,
+        self: Arc<Self>,
         mt: Arc<MT>,
         ta_iter: Box<dyn AOTTraceIterator>,
         trid: TraceId,

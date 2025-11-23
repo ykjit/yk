@@ -190,7 +190,7 @@ impl<Register: Send + Sync + 'static> JITCYk<Register> {
 
 impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
     fn root_compile(
-        &self,
+        self: Arc<Self>,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,
@@ -214,7 +214,7 @@ impl<Register: Send + Sync + 'static> Compiler for JITCYk<Register> {
     }
 
     fn sidetrace_compile(
-        &self,
+        self: Arc<Self>,
         mt: Arc<MT>,
         aottrace_iter: Box<dyn AOTTraceIterator>,
         ctrid: TraceId,
