@@ -31,18 +31,70 @@ use crate::{
 };
 use parking_lot::Mutex;
 use std::{
+    cell::RefCell,
     collections::HashMap,
     error::Error,
     ffi::{CString, c_void},
     sync::Arc,
 };
 
+thread_local! {
+    /// A cache of dlsym results for this thread. The global dlsym cache is held in
+    /// [J2::dlsym_cache].
+    static THREAD_DLSYM_CACHE: RefCell<HashMap<String, Option<SyncSafePtr<*const c_void>>>> = RefCell::new(HashMap::new());
+}
+
 #[derive(Debug)]
-pub(super) struct J2;
+pub(super) struct J2 {
+    /// Cache non-thread-local dlsym() lookups.
+    global_dlsym_cache: Mutex<HashMap<String, Option<SyncSafePtr<*const c_void>>>>,
+}
 
 impl J2 {
     pub(super) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
-        Ok(Arc::new(Self))
+        Ok(Arc::new(Self {
+            global_dlsym_cache: Mutex::new(HashMap::new()),
+        }))
+    }
+
+    /// Convert a symbol name to an address. This is a caching front-end to [libc::dlsym].
+    /// `is_thread_local` must be set to `true` if `symbol` is a thread-local, or an undefined
+    /// address will be returned.
+    fn dlsym(&self, symbol: &str, is_thread_local: bool) -> Option<SyncSafePtr<*const c_void>> {
+        THREAD_DLSYM_CACHE.with_borrow_mut(|b| {
+            if let Some(x) = b.get(symbol) {
+                // The optimal case: we have cached `symbol` in this thread's cache.
+                return *x;
+            }
+
+            fn dlsym(symbol: &str) -> Option<SyncSafePtr<*const c_void>> {
+                let cn = CString::new(symbol).unwrap();
+                let ptr = unsafe { libc::dlsym(std::ptr::null_mut(), cn.as_c_str().as_ptr()) }
+                    as *const c_void;
+                if ptr.is_null() {
+                    None
+                } else {
+                    Some(SyncSafePtr(ptr))
+                }
+            }
+
+            // Lookup `symbol` either as a thread-local or in the global cache.
+            let ptr = if is_thread_local {
+                dlsym(symbol)
+            } else {
+                // If `symbol` is not thread-local we can try the global cache, inserting a value
+                // for `symbol` if it's not already present.
+                *self
+                    .global_dlsym_cache
+                    .lock()
+                    .entry(symbol.to_owned())
+                    .or_insert_with(|| dlsym(symbol))
+            };
+
+            // Cache `symbol` in this thread.
+            b.insert(symbol.to_owned(), ptr);
+            ptr
+        })
     }
 }
 
@@ -68,6 +120,7 @@ impl Compiler for J2 {
 
         let hm = AotToHir::new(
             &mt,
+            &self,
             &AOT_MOD,
             Arc::clone(&hl),
             ta_iter,
@@ -102,6 +155,7 @@ impl Compiler for J2 {
 
         let hm = AotToHir::new(
             &mt,
+            &self,
             &AOT_MOD,
             Arc::clone(&hl),
             ta_iter,
