@@ -1,17 +1,17 @@
 // ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=jit-post-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
 //     foo 7
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin jit-post-opt ---
 //     ...
-//     %{{1}}: i32 = icall %{{2}}(%{{3}})
+//     %{{1}}: i32 = icall 0x...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End jit-post-opt ---
 //     foo 6
 //     yk-execution: enter-jit-code
 //     foo 5
@@ -19,7 +19,10 @@
 //     yk-execution: deoptimise ...
 //     exit
 
-// Check that indirect calls work.
+// Check that an indirect call whose callee isn't marked `yk_indirect_inline`
+// is outlined in the trace (even if the callee pointer is promoted).
+//
+// To have it inlined, the calle would need to be marked `yk_indirect_inline`.
 
 #include <assert.h>
 #include <stdio.h>
@@ -43,7 +46,8 @@ int main(int argc, char **argv) {
   NOOPT_VAL(fn);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    int x = fn(i);
+    int (*fp)(int) = yk_promote((void *) fn);
+    int x = fp(i);
     fprintf(stderr, "foo %d\n", x);
     i--;
   }
