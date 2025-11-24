@@ -11,6 +11,7 @@
 //! iterates from the last to the first instruction in a trace.
 
 mod aot_to_hir;
+mod codebuf;
 mod compiled_trace;
 mod hir;
 #[cfg(test)]
@@ -23,7 +24,8 @@ mod x64;
 
 use crate::{
     compile::{
-        CompilationError, CompiledTrace, Compiler, GuardId, TraceEndFrame, jitc_yk::AOT_MOD,
+        CompilationError, CompiledTrace, Compiler, GuardId, TraceEndFrame, j2::codebuf::CodeBuf,
+        jitc_yk::AOT_MOD,
     },
     location::HotLocation,
     mt::{MT, TraceId},
@@ -132,7 +134,10 @@ impl Compiler for J2 {
         .build()?;
 
         #[cfg(target_arch = "x86_64")]
-        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm);
+        let minlen = x64::x64hir_to_asm::X64HirToAsm::codebuf_minlen(&hm);
+        let buf = CodeBuf::new(minlen);
+        #[cfg(target_arch = "x86_64")]
+        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf);
 
         hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt)
     }
@@ -171,7 +176,10 @@ impl Compiler for J2 {
         .build()?;
 
         #[cfg(target_arch = "x86_64")]
-        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm);
+        let minlen = x64::x64hir_to_asm::X64HirToAsm::codebuf_minlen(&hm);
+        let buf = CodeBuf::new(minlen);
+        #[cfg(target_arch = "x86_64")]
+        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf);
 
         hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt)
     }
