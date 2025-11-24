@@ -31,6 +31,7 @@ use crate::{
     compile::{
         CompilationError, CompiledTrace,
         j2::{
+            codebuf::ExeCodeBuf,
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
             hir::*,
             regalloc::{RegAlloc, RegFill, RegT, SnapshotIdx, VarLocs},
@@ -664,7 +665,7 @@ pub(super) trait HirToAsmBackend {
         labels: &[Self::Label],
     ) -> Result<
         (
-            *mut c_void,
+            ExeCodeBuf,
             IndexVec<GuardRestoreIdx, J2CompiledGuard<Self::Reg>>,
             Option<String>,
             Vec<usize>,

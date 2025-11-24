@@ -37,6 +37,7 @@ use crate::{
     compile::{
         CompilationError,
         j2::{
+            codebuf::{CodeBufInProgress, ExeCodeBuf},
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
             hir::*,
             hir_to_asm::HirToAsmBackend,
@@ -72,10 +73,35 @@ pub(in crate::compile::j2) struct X64HirToAsm<'a> {
 }
 
 impl<'a> X64HirToAsm<'a> {
-    pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>) -> Self {
+    pub(in crate::compile::j2) fn codebuf_minlen(m: &Mod<Reg>) -> usize {
+        // We need to guesstimate how much space the compiled trace will need. There is no
+        // perfection here: if we guess too much we waste OS time and RAM, if we guess too little
+        // we may have to redo the whole compilation! The least worst option is therefore to guess
+        // too much and free memory afterwards.
+        //
+        // A quick measurement shows that each HIR instruction leads, on average, to about 8 bytes
+        // of assembled stuff. We will need to revisit this when guard bodies (etc.) are
+        // implemented, but it'll do for now.
+        //
+        // On that basis, we therefore over-guess that each HIR instruction needs 12 bytes of
+        // storage. We thus request that, and free what's unused at the end.
+        let num_hir_insts = match &m.kind {
+            ModKind::Loop { entry, inner, .. } => {
+                assert!(inner.is_none());
+                entry.insts_len()
+            }
+            ModKind::Side { entry, .. } => entry.insts_len(),
+            ModKind::Coupler { .. } => todo!(),
+            #[cfg(test)]
+            ModKind::Test { block, .. } => block.insts_len(),
+        };
+        num_hir_insts * 12
+    }
+
+    pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>, buf: CodeBufInProgress) -> Self {
         Self {
             m,
-            asm: Asm::new(m),
+            asm: Asm::new(buf),
             data_sec: HashMap::new(),
             guards: IndexVec::new(),
         }
@@ -926,7 +952,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         labels: &[Self::Label],
     ) -> Result<
         (
-            *mut c_void,
+            ExeCodeBuf,
             IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
             Option<String>,
             Vec<usize>,
@@ -3821,6 +3847,7 @@ mod test {
     use super::X64HirToAsm;
     use crate::{
         compile::j2::{
+            codebuf::CodeBufInProgress,
             hir::{InstIdx, Mod, ModKind},
             hir_parser::str_to_mod,
             hir_to_asm::HirToAsm,
@@ -4007,7 +4034,7 @@ mod test {
             #[cfg(feature = "ykd")]
             debug_str: None,
         }));
-        let be = X64HirToAsm::new(&m);
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
         let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
 
         let mut failures = Vec::new();
@@ -4040,7 +4067,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m);
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
 
         assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(0)), Some(0));
         assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(1)), Some(0xFF));
@@ -4077,7 +4104,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m);
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
 
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(6)), Some(0));
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(7)), Some(-1));
@@ -4137,7 +4164,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m);
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
 
         assert_eq!(
             be.try_load_to_mem_op(b, InstIdx::from(3), InstIdx::from(1)),
