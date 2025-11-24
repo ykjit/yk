@@ -19,6 +19,7 @@ use crate::{
     compile::{
         CompilationError, CompiledTrace, GuardId,
         j2::{
+            J2,
             compiled_trace::{J2CompiledTrace, J2CompiledTraceKind},
             hir::{self, GuardRestore, GuardRestoreIdx},
             opt::{OptT, noopt::NoOpt, opt::Opt},
@@ -35,11 +36,7 @@ use index_vec::IndexVec;
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
 use std::{
-    assert_matches::assert_matches,
-    collections::HashMap,
-    ffi::{CString, c_void},
-    iter::Peekable,
-    marker::PhantomData,
+    assert_matches::assert_matches, collections::HashMap, iter::Peekable, marker::PhantomData,
     sync::Arc,
 };
 
@@ -48,6 +45,7 @@ const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
 pub(super) struct AotToHir<Reg: RegT> {
     mt: Arc<MT>,
+    j2: Arc<J2>,
     /// The AOT IR.
     am: &'static Module,
     hl: Arc<Mutex<HotLocation>>,
@@ -75,8 +73,6 @@ pub(super) struct AotToHir<Reg: RegT> {
     guard_restores: IndexVec<GuardRestoreIdx, GuardRestore>,
     /// Initially set to `None` until we find the locations for this trace's arguments.
     frames: Vec<Frame>,
-    /// Cache dlsym() lookups.
-    dlsym_cache: HashMap<String, Option<*const c_void>>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
     addr_name_map: Option<HashMap<usize, String>>,
     /// The JIT IR this struct builds.
@@ -86,6 +82,7 @@ pub(super) struct AotToHir<Reg: RegT> {
 impl<Reg: RegT + 'static> AotToHir<Reg> {
     pub(super) fn new(
         mt: &Arc<MT>,
+        j2: &Arc<J2>,
         am: &'static Module,
         hl: Arc<Mutex<HotLocation>>,
         ta_iter: Box<dyn crate::trace::AOTTraceIterator>,
@@ -95,9 +92,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         _debug_strs: Vec<String>,
     ) -> Self {
         let globals = {
-            let cn = CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap();
-            let ptr = unsafe { libc::dlsym(std::ptr::null_mut(), cn.as_c_str().as_ptr()) }
-                as *const *const ();
+            let ptr = j2.dlsym(GLOBAL_PTR_ARRAY_SYM, false).unwrap().0 as *const *const ();
             assert!(!ptr.is_null());
             unsafe { std::slice::from_raw_parts(ptr, am.global_decls_len()) }
         };
@@ -110,6 +105,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         Self {
             mt: Arc::clone(mt),
+            j2: Arc::clone(j2),
             am,
             hl,
             ta_iter: TraceActionIterator::new(ta_iter).peekable(),
@@ -122,7 +118,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             opt,
             guard_restores: IndexVec::new(),
             frames: Vec::new(),
-            dlsym_cache: HashMap::new(),
             addr_name_map: should_log_any_ir().then_some(HashMap::new()),
             phantom: PhantomData,
         }
@@ -302,19 +297,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         m.assert_well_formed();
 
         Ok(m)
-    }
-
-    /// Convert a name to an address: this is effectively a caching front-end to [libc::dlsym].
-    fn dlsym(&mut self, sym: &str) -> Option<*const c_void> {
-        if let Some(x) = self.dlsym_cache.get(sym) {
-            return *x;
-        }
-        let cn = CString::new(sym).unwrap();
-        let ptr =
-            unsafe { libc::dlsym(std::ptr::null_mut(), cn.as_c_str().as_ptr()) } as *const c_void;
-        let r = if ptr.is_null() { None } else { Some(ptr) };
-        self.dlsym_cache.insert(sym.to_owned(), r);
-        r
     }
 
     fn peek_next_bbid(&mut self) -> Option<BBlockId> {
@@ -740,7 +722,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             Operand::Global(gidx) => {
                 let gl = self.am.global_decl(*gidx);
                 let (addr, inst) = if gl.is_threadlocal() {
-                    let addr = self.dlsym(gl.name()).unwrap();
+                    let addr = self.j2.dlsym(gl.name(), true).unwrap().0;
                     assert!(!addr.is_null());
                     (
                         addr.addr(),
@@ -758,7 +740,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
             Operand::Func(fidx) => {
                 let func = self.am.func(*fidx);
-                let addr = self.dlsym(func.name()).unwrap().addr();
+                let addr = self.j2.dlsym(func.name(), false).unwrap().0.addr();
                 self.addr_name_map
                     .as_mut()
                     .map(|x| x.insert(addr, func.name().to_owned()));
@@ -1021,7 +1003,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
 
             // Handle user-level functions.
-            let addr = self.dlsym(func.name()).unwrap().addr();
+            let addr = self.j2.dlsym(func.name(), false).unwrap().0.addr();
             self.addr_name_map
                 .as_mut()
                 .map(|x| x.insert(addr, func.name().to_owned()));
