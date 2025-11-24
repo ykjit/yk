@@ -3,7 +3,7 @@ use crate::{
         CompiledTrace,
         guard::{Guard, GuardId},
         j2::{
-            SyncSafePtr,
+            codebuf::ExeCodeBuf,
             hir::{GuardRestoreIdx, Switch},
             regalloc::{RegT, VarLocs},
         },
@@ -27,7 +27,7 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     pub mt: Arc<MT>,
     pub trid: TraceId,
     pub hl: Weak<Mutex<HotLocation>>,
-    exe: SyncSafePtr<*mut c_void>,
+    codebuf: ExeCodeBuf,
     pub guard_restores: IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
     pub kind: J2CompiledTraceKind<Reg>,
 }
@@ -37,7 +37,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         mt: Arc<MT>,
         trid: TraceId,
         hl: Weak<Mutex<HotLocation>>,
-        exe: *mut c_void,
+        codebuf: ExeCodeBuf,
         guards: IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
         kind: J2CompiledTraceKind<Reg>,
     ) -> Self {
@@ -45,7 +45,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
             mt,
             trid,
             hl,
-            exe: SyncSafePtr(exe),
+            codebuf,
             guard_restores: guards,
             kind,
         }
@@ -73,7 +73,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
     }
 
     pub(super) fn exe(&self) -> *mut c_void {
-        self.exe.0
+        self.codebuf.as_ptr() as *mut c_void
     }
 
     pub(super) fn guard_stack_off(&self, gridx: GuardRestoreIdx) -> u32 {
@@ -124,8 +124,8 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
         let gridx = GuardRestoreIdx::from(usize::from(gid));
         let patch_off = usize::try_from(self.guard_restores[gridx].patch_off()).unwrap();
 
-        let patch_addr = unsafe { self.exe.0.byte_add(patch_off) };
-        assert_eq!(unsafe { (patch_addr as *const u8).read() }, 0xE9);
+        let patch_addr = unsafe { self.codebuf.as_ptr().byte_add(patch_off) };
+        assert_eq!(unsafe { patch_addr.read() }, 0xE9);
         let patch_addr = unsafe { patch_addr.byte_add(1) };
         let next_ip = patch_addr.addr() + 4;
         let diff = i32::try_from(tgt.addr().checked_signed_diff(next_ip).unwrap()).unwrap();
@@ -134,8 +134,8 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
         }
     }
 
-    fn entry(&self) -> *const std::ffi::c_void {
-        self.exe.0
+    fn entry(&self) -> *const c_void {
+        self.codebuf.as_ptr() as *const c_void
     }
 
     fn entry_sp_off(&self) -> usize {

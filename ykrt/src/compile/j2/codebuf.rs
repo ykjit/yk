@@ -1,18 +1,27 @@
-//! An executable code buffer.
+//! Support for code buffers.
+//!
+//! When creating a code buffer, one starts with [CodeBufInProgress]: this allocates memory, but
+//! does not require anything meaningful to have been written into it. When code has actually been
+//! generated, [CodeBufInProgress::into_execodebuf] turns a [CodeBufInProgress] into a
+//! [ExeCodeBuf]. An [ExeCodeBuf] is complete and executable as-is: although it might be patched,
+//! the quantity of memory it contains will not change.
 
-use libc::{MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap, munmap};
+use crate::compile::j2::SyncSafePtr;
+use libc::{
+    MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap, mprotect, munmap,
+};
 use std::ffi::c_void;
 
-/// An executable code buffer.
+/// A code buffer that does backing memory allocated but no actual code stored in it.
 #[derive(Debug)]
-pub(super) struct CodeBuf {
-    /// Where will this trace be stored in memory?
+pub(super) struct CodeBufInProgress {
+    /// A pointer to the beginning of the `mmap`ed buffer.
     buf: *mut u8,
     /// How many bytes have we allocated to the buffer?
     len: usize,
 }
 
-impl CodeBuf {
+impl CodeBufInProgress {
     /// Create a new code buffer with a size at least `len` bytes big.
     pub fn new(len: usize) -> Self {
         let len = len.next_multiple_of(page_size::get());
@@ -20,7 +29,7 @@ impl CodeBuf {
             mmap(
                 std::ptr::null_mut(),
                 len,
-                PROT_READ | PROT_WRITE | PROT_EXEC,
+                PROT_READ | PROT_WRITE,
                 MAP_ANON | MAP_PRIVATE,
                 -1,
                 0,
@@ -46,8 +55,8 @@ impl CodeBuf {
         self.len
     }
 
-    /// Copy `other_len` bytes from `other` into `self`.
-    pub unsafe fn copy_into(&mut self, other: *const u8, other_len: usize) {
+    /// Copy `other_len` bytes from `other` into `self` and produce an [ExeCodeBuf].
+    pub unsafe fn into_execodebuf(self, other: *const u8, other_len: usize) -> ExeCodeBuf {
         assert!(other_len <= self.len);
         unsafe {
             self.buf.copy_from_nonoverlapping(other, other_len);
@@ -62,5 +71,41 @@ impl CodeBuf {
                 todo!();
             }
         }
+
+        let used = other_len.next_multiple_of(page_size::get());
+        // FIXME: should be `WRITE`.
+        unsafe {
+            mprotect(
+                self.buf as *mut c_void,
+                used,
+                PROT_EXEC | PROT_READ | PROT_WRITE,
+            );
+        }
+        ExeCodeBuf {
+            buf: SyncSafePtr(self.buf),
+            len: used,
+        }
+    }
+}
+
+/// An executable code buffer.
+#[derive(Debug)]
+pub(super) struct ExeCodeBuf {
+    /// A pointer to the beginning of the `mmap`ed buffer.
+    buf: SyncSafePtr<*mut u8>,
+    /// How many bytes have we allocated to the buffer?
+    len: usize,
+}
+
+impl ExeCodeBuf {
+    /// Get a raw pointer to the start of the executable code buffer.
+    pub fn as_ptr(&self) -> *const u8 {
+        self.buf.0
+    }
+
+    /// Return the size of this buffer in bytes.
+    #[allow(unused)]
+    pub fn len(&self) -> usize {
+        self.len
     }
 }

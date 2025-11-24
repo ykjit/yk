@@ -24,8 +24,8 @@ mod x64;
 
 use crate::{
     compile::{
-        CompilationError, CompiledTrace, Compiler, GuardId, TraceEndFrame, j2::codebuf::CodeBuf,
-        jitc_yk::AOT_MOD,
+        CompilationError, CompiledTrace, Compiler, GuardId, TraceEndFrame,
+        j2::codebuf::CodeBufInProgress, jitc_yk::AOT_MOD,
     },
     location::HotLocation,
     mt::{MT, TraceId},
@@ -135,7 +135,7 @@ impl Compiler for J2 {
 
         #[cfg(target_arch = "x86_64")]
         let minlen = x64::x64hir_to_asm::X64HirToAsm::codebuf_minlen(&hm);
-        let buf = CodeBuf::new(minlen);
+        let buf = CodeBufInProgress::new(minlen);
         #[cfg(target_arch = "x86_64")]
         let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf);
 
@@ -177,7 +177,7 @@ impl Compiler for J2 {
 
         #[cfg(target_arch = "x86_64")]
         let minlen = x64::x64hir_to_asm::X64HirToAsm::codebuf_minlen(&hm);
-        let buf = CodeBuf::new(minlen);
+        let buf = CodeBufInProgress::new(minlen);
         #[cfg(target_arch = "x86_64")]
         let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf);
 

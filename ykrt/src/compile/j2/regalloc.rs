@@ -1892,7 +1892,7 @@ mod test {
     use super::*;
     use crate::{
         compile::{
-            j2::{hir::Mod, hir::*, hir_parser::str_to_mod, hir_to_asm::*},
+            j2::{codebuf::ExeCodeBuf, hir::Mod, hir::*, hir_parser::str_to_mod, hir_to_asm::*},
             jitc_yk::aot_ir,
         },
         location::{HotLocation, HotLocationKind},
@@ -2093,7 +2093,7 @@ mod test {
             _labels: &[Self::Label],
         ) -> Result<
             (
-                *mut std::ffi::c_void,
+                ExeCodeBuf,
                 IndexVec<
                     GuardRestoreIdx,
                     crate::compile::j2::compiled_trace::J2CompiledGuard<Self::Reg>,

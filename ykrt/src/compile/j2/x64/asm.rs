@@ -22,17 +22,20 @@
 //! and then do the final machine code layout in reverse block order. This is invisible to
 //! everything outside this module.
 
-use crate::compile::{CompilationError, j2::codebuf::CodeBuf};
+use crate::compile::{
+    CompilationError,
+    j2::codebuf::{CodeBufInProgress, ExeCodeBuf},
+};
 use iced_x86::{Code, Encoder, Instruction as Op};
 use index_vec::{IndexVec, index_vec};
-use std::{ffi::c_void, mem::replace};
+use std::mem::replace;
 
 /// We guarantee to align the start of blocks to `BLOCK_ALIGNMENT` bytes.
 pub(super) static BLOCK_ALIGNMENT: usize = 16;
 
 #[derive(Debug)]
 pub(super) struct Asm {
-    buf: CodeBuf,
+    buf: CodeBufInProgress,
     /// The blocks we are assembling. By definition, the first block will be the main body of the
     /// trace, and any subsequent blocks will be guard bodies.
     blocks: IndexVec<BlockIdx, IndexVec<OpIdx, Op>>,
@@ -49,9 +52,9 @@ pub(super) struct Asm {
 }
 
 impl Asm {
-    pub(super) fn new(buf: CodeBuf) -> Self {
+    pub(super) fn new(buf: CodeBufInProgress) -> Self {
         Asm {
-            buf: buf,
+            buf,
             blocks: index_vec![],
             insts: index_vec![],
             labels: index_vec![],
@@ -124,7 +127,7 @@ impl Asm {
         mut self,
         log: bool,
         labels: &[LabelIdx],
-    ) -> Result<(*mut c_void, Option<String>, Vec<usize>), CompilationError> {
+    ) -> Result<(ExeCodeBuf, Option<String>, Vec<usize>), CompilationError> {
         // Convert the operations into a byte sequence, recording byte offsets as we go, which we
         // need for labels and relocations.
         let mut enc = Encoder::new(64);
@@ -262,9 +265,7 @@ impl Asm {
             todo!();
         }
 
-        unsafe {
-            self.buf.copy_into(enc.as_ptr(), enc.len());
-        }
+        let exe = unsafe { self.buf.into_execodebuf(enc.as_ptr(), enc.len()) };
 
         let log = if log {
             // When we're replacing labels below, we'll be iterating over blocks in order 0..n but
@@ -319,7 +320,7 @@ impl Asm {
             None
         };
 
-        Ok((self.buf.as_ptr() as *mut c_void, log, label_offs))
+        Ok((exe, log, label_offs))
     }
 }
 

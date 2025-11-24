@@ -37,7 +37,7 @@ use crate::{
     compile::{
         CompilationError,
         j2::{
-            codebuf::CodeBuf,
+            codebuf::{CodeBufInProgress, ExeCodeBuf},
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
             hir::*,
             hir_to_asm::HirToAsmBackend,
@@ -98,7 +98,7 @@ impl<'a> X64HirToAsm<'a> {
         num_hir_insts * 12
     }
 
-    pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>, buf: CodeBuf) -> Self {
+    pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>, buf: CodeBufInProgress) -> Self {
         Self {
             m,
             asm: Asm::new(buf),
@@ -952,7 +952,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         labels: &[Self::Label],
     ) -> Result<
         (
-            *mut c_void,
+            ExeCodeBuf,
             IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
             Option<String>,
             Vec<usize>,
@@ -3847,7 +3847,7 @@ mod test {
     use super::X64HirToAsm;
     use crate::{
         compile::j2::{
-            codebuf::CodeBuf,
+            codebuf::CodeBufInProgress,
             hir::{InstIdx, Mod, ModKind},
             hir_parser::str_to_mod,
             hir_to_asm::HirToAsm,
@@ -4034,7 +4034,7 @@ mod test {
             #[cfg(feature = "ykd")]
             debug_str: None,
         }));
-        let be = X64HirToAsm::new(&m, CodeBuf::new(4096));
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
         let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
 
         let mut failures = Vec::new();
@@ -4067,7 +4067,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBuf::new(4096));
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
 
         assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(0)), Some(0));
         assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(1)), Some(0xFF));
@@ -4104,7 +4104,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBuf::new(4096));
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
 
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(6)), Some(0));
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(7)), Some(-1));
@@ -4164,7 +4164,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBuf::new(4096));
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
 
         assert_eq!(
             be.try_load_to_mem_op(b, InstIdx::from(3), InstIdx::from(1)),
