@@ -123,15 +123,15 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     fn patch_guard(&self, gid: GuardId, tgt: *const std::ffi::c_void) {
         let gridx = GuardRestoreIdx::from(usize::from(gid));
         let patch_off = usize::try_from(self.guard_restores[gridx].patch_off()).unwrap();
-
-        let patch_addr = unsafe { self.codebuf.as_ptr().byte_add(patch_off) };
-        assert_eq!(unsafe { patch_addr.read() }, 0xE9);
-        let patch_addr = unsafe { patch_addr.byte_add(1) };
-        let next_ip = patch_addr.addr() + 4;
-        let diff = i32::try_from(tgt.addr().checked_signed_diff(next_ip).unwrap()).unwrap();
-        unsafe {
-            (patch_addr as *mut u32).write(diff.cast_unsigned());
-        }
+        self.codebuf.patch(patch_off, 5, |patch_addr| {
+            assert_eq!(unsafe { patch_addr.read() }, 0xE9);
+            let patch_addr = unsafe { patch_addr.byte_add(1) };
+            let next_ip = patch_addr.addr() + 4;
+            let diff = i32::try_from(tgt.addr().checked_signed_diff(next_ip).unwrap()).unwrap();
+            unsafe {
+                (patch_addr as *mut u32).write(diff.cast_unsigned());
+            }
+        });
     }
 
     fn entry(&self) -> *const c_void {
