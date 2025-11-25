@@ -8,8 +8,10 @@
 
 use crate::compile::j2::SyncSafePtr;
 use libc::{
-    MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap, mprotect, munmap,
+    __errno_location, MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap,
+    mprotect, munmap,
 };
+use parking_lot::Mutex;
 use std::ffi::c_void;
 
 /// A code buffer that does backing memory allocated but no actual code stored in it.
@@ -73,17 +75,13 @@ impl CodeBufInProgress {
         }
 
         let used = other_len.next_multiple_of(page_size::get());
-        // FIXME: should be `WRITE`.
-        unsafe {
-            mprotect(
-                self.buf as *mut c_void,
-                used,
-                PROT_EXEC | PROT_READ | PROT_WRITE,
-            );
+        if unsafe { mprotect(self.buf as *mut c_void, used, PROT_EXEC | PROT_READ) } == -1 {
+            todo!();
         }
         ExeCodeBuf {
             buf: SyncSafePtr(self.buf),
             len: used,
+            patch_lock: Mutex::new(()),
         }
     }
 }
@@ -95,6 +93,11 @@ pub(super) struct ExeCodeBuf {
     buf: SyncSafePtr<*mut u8>,
     /// How many bytes have we allocated to the buffer?
     len: usize,
+    /// This lock is used during patching: it is a simple way of ensuring that we don't race with
+    /// another thread when `mprotect`ing page permissions. Note: this works because we assume that
+    /// each [ExeCodeBuf] has allocated its own page. If we start sharing traces within pages, a
+    /// semi-global lock will be needed.
+    patch_lock: Mutex<()>,
 }
 
 impl ExeCodeBuf {
@@ -107,5 +110,34 @@ impl ExeCodeBuf {
     #[allow(unused)]
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    /// Patch part of the executable code. The address `patch_off...patch_off + len` bytes from the
+    /// start of the buffer will be temporarily marked writable, at which point `f` will be called
+    /// with the concrete address starting at `patch_off`. When `f` has completed, the executable
+    /// buffer will have writable permissions removed.
+    pub fn patch<F>(&self, patch_off: usize, len: usize, f: F)
+    where
+        F: FnOnce(*mut u8),
+    {
+        let patch_ptr = unsafe { self.buf.0.byte_add(patch_off) };
+        // mprotect requires a page-aligned address so round `patch_ptr` down.
+        let page_ptr = ((patch_ptr.addr() / page_size::get()) * page_size::get()) as *mut u8;
+        let page_len = patch_off + len - (page_ptr.addr() - self.buf.0.addr());
+        let _lk = self.patch_lock.lock();
+        if unsafe {
+            mprotect(
+                page_ptr as *mut c_void,
+                page_len,
+                PROT_EXEC | PROT_READ | PROT_WRITE,
+            )
+        } == -1
+        {
+            todo!("{}", unsafe { *__errno_location() });
+        }
+        f(patch_ptr);
+        if unsafe { mprotect(page_ptr as *mut c_void, page_len, PROT_EXEC | PROT_READ) } == -1 {
+            todo!("{}", unsafe { *__errno_location() });
+        }
     }
 }
