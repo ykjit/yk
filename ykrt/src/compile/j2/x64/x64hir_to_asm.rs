@@ -4034,7 +4034,7 @@ mod test {
             #[cfg(feature = "ykd")]
             debug_str: None,
         }));
-        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
         let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
 
         let mut failures = Vec::new();
@@ -4067,7 +4067,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
 
         assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(0)), Some(0));
         assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(1)), Some(0xFF));
@@ -4104,7 +4104,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
 
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(6)), Some(0));
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(7)), Some(-1));
@@ -4164,7 +4164,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBufInProgress::new(4096));
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
 
         assert_eq!(
             be.try_load_to_mem_op(b, InstIdx::from(3), InstIdx::from(1)),

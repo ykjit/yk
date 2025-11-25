@@ -7,10 +7,9 @@
 //! the quantity of memory it contains will not change.
 
 use crate::compile::j2::SyncSafePtr;
-use libc::{
-    __errno_location, MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap,
-    mprotect, munmap,
-};
+use libc::{__errno_location, PROT_EXEC, PROT_READ, PROT_WRITE, mprotect, munmap};
+#[cfg(test)]
+use libc::{MAP_ANON, MAP_FAILED, MAP_PRIVATE, mmap};
 use parking_lot::Mutex;
 use std::ffi::c_void;
 
@@ -25,8 +24,13 @@ pub(super) struct CodeBufInProgress {
 
 impl CodeBufInProgress {
     /// Create a new code buffer with a size at least `len` bytes big.
-    pub fn new(len: usize) -> Self {
-        let len = len.next_multiple_of(page_size::get());
+    pub fn new(buf: *mut u8, len: usize) -> Self {
+        Self { buf, len }
+    }
+
+    #[cfg(test)]
+    pub fn new_testing() -> Self {
+        let len = page_size::get();
         let buf = unsafe {
             mmap(
                 std::ptr::null_mut(),
