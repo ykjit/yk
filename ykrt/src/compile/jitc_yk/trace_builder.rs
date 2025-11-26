@@ -264,6 +264,12 @@ impl TraceBuilder {
         // an `Inst::Ret` that would make the frame stack empty.
         assert!(!self.frames.is_empty());
 
+        // `prevbb` is tracked per-frame, so if there is a previous basic block, then it must be
+        // from the same function as we are in now.
+        if let Some(prevbb) = prevbb {
+            assert_eq!(prevbb.funcidx(), bid.funcidx());
+        }
+
         // unwrap safe: can't trace a block not in the AOT module.
         let blk = self.aot_mod.bblock(bid);
 
@@ -284,7 +290,14 @@ impl TraceBuilder {
                 } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.insts.last().unwrap();
-                    self.handle_call(inst, bid, iidx, callee, args, safepoint.as_ref(), nextinst)
+                    self.handle_call(inst, bid, iidx, callee, args, safepoint.as_ref(), nextinst)?;
+                    // `prevbb` is per-frame, therefore when we enter a new (traceable) function,
+                    // there is no previous block.
+                    if !self.aot_mod.func(*callee).is_declaration() {
+                        return Ok(Some(None));
+                    } else {
+                        Ok(())
+                    }
                 }
                 aot_ir::Inst::IndirectCall {
                     ftyidx,
@@ -363,22 +376,13 @@ impl TraceBuilder {
                     incoming_bbs,
                     incoming_vals,
                     ..
-                } => {
-                    assert_eq!(
-                        prevbb.as_ref().map(|x| x.funcidx()),
-                        Some(bid.funcidx()),
-                        "{:?} {:?}",
-                        self.jit_mod.ctrid(),
-                        self.jit_mod.insts_len()
-                    );
-                    self.handle_phi(
-                        bid,
-                        iidx,
-                        &prevbb.as_ref().unwrap().bbidx(),
-                        incoming_bbs,
-                        incoming_vals,
-                    )
-                }
+                } => self.handle_phi(
+                    bid,
+                    iidx,
+                    &prevbb.as_ref().unwrap().bbidx(),
+                    incoming_bbs,
+                    incoming_vals,
+                ),
                 aot_ir::Inst::Select {
                     cond,
                     trueval,
@@ -1755,7 +1759,6 @@ impl TraceBuilder {
                             // process promoted values to make sure we've processed all promotion
                             // data and haven't messed up the mapping.
                             self.process_promotions_and_debug_strs_only(&bid)?;
-                            prev_bid = Some(bid);
                             prev_mappable_bid = Some(bid);
                             continue;
                         }
