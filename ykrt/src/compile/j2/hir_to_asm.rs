@@ -11,20 +11,43 @@
 //! instructions into a guard body. Because of this, the mechanism for assembling a trace is that
 //! we first process the trace's main body and then process guard bodies.
 //!
-//! To keep things simple, this module makes the following assumptions about the machine code which
-//! is generated:
 //!
-//!   1. Code generation is performed backwards.
-//!   2. Loop traces are of the form:
-//!      ```text
-//!      <adjust stack pointer>
-//!      start_label:
-//!      <body of loop>
-//!      jmp start_label
-//!      <guard body n>
-//!      ...
-//!      <guard body 1>
-//!      ```
+//! ## Loop traces
+//!
+//! Loop traces are of the form:
+//!
+//! ```text
+//! <stack adjustment>
+//! iter0_label:
+//! <instrs for first iteration of the loop>
+//! iter1_label:
+//! <instrs for the first peeled iteration of the loop>
+//! jmp iter1_label
+//! <guard body n>
+//! ...
+//! <guard body 1>
+//! call __yk_j2_deopt
+//! <data>
+//! ```
+//!
+//! If peeling has not occurred, there will be no difference between `iter0_label` and
+//! `iter1_label`.
+//!
+//!
+//! ## Side traces
+//!
+//! Side traces are of the form:
+//!
+//! ```text
+//! <instrs>
+//! <stack adjustment for tgt_ctr>
+//! jmp tgt_ctr.iter0_label
+//! <guard body n>
+//! ...
+//! <guard body 1>
+//! call __yk_j2_deopt
+//! <data>
+//! ```
 
 use crate::{
     aotsmp::AOT_STACKMAPS,
