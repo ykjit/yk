@@ -1390,7 +1390,7 @@ impl<'a> Assemble<'a> {
                         },
                         GPConstraint::Input {
                             op: rhs,
-                            in_ext: RegExtension::SignExtended,
+                            in_ext: RegExtension::ZeroExtended,
                             force_reg: None,
                             clobber_reg: false,
                         },
@@ -5403,7 +5403,7 @@ mod tests {
                 ; %4: i16 = udiv %0, %1
                 mov r.64.a, r.64._
                 and eax, 0xffff
-                movsx r.64.b, r.16.b
+                and r.32.b, 0xffff
                 xor rdx, rdx
                 div r.64.b
                 ; %5: i32 = udiv %2, %3
