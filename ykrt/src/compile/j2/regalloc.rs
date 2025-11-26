@@ -2217,16 +2217,20 @@ mod test {
             todo!()
         }
 
-        fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError> {
+        fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError> {
             todo!()
         }
 
-        fn sidetrace_end(
+        fn loop_trace_start(&mut self, _iter0_label: Self::Label, _stack_off: u32) {}
+
+        fn side_trace_end(
             &mut self,
             _ctr: &std::sync::Arc<crate::compile::j2::compiled_trace::J2CompiledTrace<Self::Reg>>,
         ) -> Result<(), CompilationError> {
             todo!()
         }
+
+        fn side_trace_start(&mut self, _stack_off: u32) {}
 
         fn guard_end(
             &mut self,
@@ -2248,8 +2252,6 @@ mod test {
             _switch: Option<crate::compile::j2::hir::Switch>,
         ) {
         }
-
-        fn body_completed(&mut self, _label: Option<Self::Label>, _stack_off: u32) {}
 
         fn i_abs(
             &mut self,
