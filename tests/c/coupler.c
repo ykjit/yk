@@ -1,3 +1,4 @@
+// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_LOG=4
@@ -31,7 +32,7 @@
 //     1
 //     exit
 
-// Test connector trace creation.
+// Test coupler traces.
 
 #include <assert.h>
 #include <stdio.h>
