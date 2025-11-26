@@ -115,7 +115,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .collect::<Vec<_>>();
 
                 // Create the backwards jump at the end of a loop trace.
-                let loop_label = self.be.loop_backwards_jump()?;
+                let loop_label = self.be.loop_end()?;
 
                 // Assemble the body
                 let (guards, body_ra) = self.p_block(
@@ -781,7 +781,7 @@ pub(super) trait HirToAsmBackend {
     // The functions called at the end of traces.
 
     /// Produce code for the backwards jump that finishes a loop trace.
-    fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError>;
+    fn loop_end(&mut self) -> Result<Self::Label, CompilationError>;
     /// Produce code for the jump to `tgt_ctr` at the end of a side-trace.
     fn sidetrace_end(
         &mut self,

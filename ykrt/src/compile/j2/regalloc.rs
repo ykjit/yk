@@ -2217,7 +2217,7 @@ mod test {
             todo!()
         }
 
-        fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError> {
+        fn loop_end(&mut self) -> Result<Self::Label, CompilationError> {
             todo!()
         }
 

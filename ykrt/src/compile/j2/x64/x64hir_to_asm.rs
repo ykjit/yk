@@ -1278,7 +1278,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
-    fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError> {
+    fn loop_end(&mut self) -> Result<Self::Label, CompilationError> {
         let label = self.asm.mk_label();
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
