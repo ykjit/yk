@@ -31,7 +31,7 @@
 //     1
 //     exit
 
-// Test connector trace creation.
+// Test coupler traces.
 
 #include <assert.h>
 #include <stdio.h>
