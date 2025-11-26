@@ -2228,7 +2228,9 @@ mod test {
             todo!()
         }
 
-        fn body_completed(&mut self, _label: Option<Self::Label>, _stack_off: u32) {}
+        fn loop_trace_start(&mut self, _iter0_label: Self::Label, _stack_off: u32) {}
+
+        fn side_trace_start(&mut self, _stack_off: u32) {}
 
         fn guard_end(
             &mut self,

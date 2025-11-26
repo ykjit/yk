@@ -1319,11 +1319,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn body_completed(&mut self, label: Option<Self::Label>, stack_off: u32) {
+    fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32) {
         let stack_off = i32::try_from(stack_off).unwrap();
-        if let Some(label) = label {
-            self.asm.attach_label(label);
-        }
+        self.asm.attach_label(iter0_label);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            stack_off.next_multiple_of(16),
+        ));
+        self.asm.block_completed();
+    }
+
+    fn side_trace_start(&mut self, stack_off: u32) {
+        let stack_off = i32::try_from(stack_off).unwrap();
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,
             IcedReg::RSP,

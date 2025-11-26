@@ -115,7 +115,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .collect::<Vec<_>>();
 
                 // Create the backwards jump at the end of a loop trace.
-                let loop_label = self.be.loop_end()?;
+                let iter0_label = self.be.loop_end()?;
 
                 // Assemble the body
                 let (guards, body_ra) = self.p_block(
@@ -128,9 +128,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 )?;
                 let entry_stack_off = body_ra.stack_off();
                 self.be
-                    .body_completed(Some(loop_label.clone()), entry_stack_off - base_stack_off);
+                    .loop_trace_start(iter0_label.clone(), entry_stack_off - base_stack_off);
                 self.asm_guards(entry, guards, body_ra)?;
-                let (buf, guards, log, label_offs) = self.be.build_exe(logging, &[loop_label])?;
+                let (buf, guards, log, label_offs) = self.be.build_exe(logging, &[iter0_label])?;
                 let [sidetrace_off] = &*label_offs else {
                     panic!()
                 };
@@ -156,12 +156,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let (guards, body_ra) =
                     self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, true, logging)?;
                 let body_stack_off = body_ra.stack_off();
-                self.be.body_completed(None, body_stack_off - src_stack_off);
+                self.be.side_trace_start(body_stack_off - src_stack_off);
                 self.asm_guards(entry, guards, body_ra)?;
                 let modkind = J2CompiledTraceKind::Side {
                     stack_off: body_stack_off,
                 };
-                let (buf, guards, log, _) = self.be.build_exe(logging, &[])?;
+                let (buf, guards, log, labels) = self.be.build_exe(logging, &[])?;
+                assert!(labels.is_empty());
                 (buf, guards, log, modkind)
             }
             ModKind::Coupler { .. } => todo!(),
@@ -198,7 +199,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 // Assemble the body
                 let (guards, body_ra) =
                     self.p_block(block, 0, entry_vlocs, entry_vlocs, true, true)?;
-                self.be.body_completed(None, 0);
+                self.be.side_trace_start(0);
 
                 // Guards
                 for (gd, _grestore) in guards.into_iter().rev().zip(self.m.guard_restores()) {
@@ -790,10 +791,13 @@ pub(super) trait HirToAsmBackend {
 
     // The functions called at the start of traces.
 
-    /// The current body of a trace has been completed and has consumed `stack_off` additional
-    /// bytes of stack space. If `label` is `Some`, it will be attached to the first instruction
-    /// after the stack is adjusted.
-    fn body_completed(&mut self, label: Option<Self::Label>, stack_off: u32);
+    /// The current body of a loop trace has been completed and has consumed `stack_off` additional
+    /// bytes of stack space. `iter0_label` must be attached to the first instruction after the
+    /// stack is adjusted.
+    fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32);
+    /// The current body of a sidetrace trace has been completed and has consumed `stack_off` additional
+    /// bytes of stack space.
+    fn side_trace_start(&mut self, stack_off: u32);
 
     // Functions for guards.
 
