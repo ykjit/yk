@@ -86,12 +86,12 @@ impl<'a> X64HirToAsm<'a> {
         // On that basis, we therefore over-guess that each HIR instruction needs 12 bytes of
         // storage. We thus request that, and free what's unused at the end.
         let num_hir_insts = match &m.kind {
+            ModKind::Coupler { entry, .. } => entry.insts_len(),
             ModKind::Loop { entry, inner, .. } => {
                 assert!(inner.is_none());
                 entry.insts_len()
             }
             ModKind::Side { entry, .. } => entry.insts_len(),
-            ModKind::Coupler { .. } => todo!(),
             #[cfg(test)]
             ModKind::Test { block, .. } => block.insts_len(),
         };
@@ -1278,6 +1278,26 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
+    fn coupler_trace_end(
+        &mut self,
+        tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
+    ) -> Result<(), CompilationError> {
+        self.side_trace_end(tgt_ctr)
+    }
+
+    fn coupler_trace_start(&mut self, stack_off: u32) -> Result<Self::Label, CompilationError> {
+        let stack_off = i32::try_from(stack_off).unwrap();
+        let label = self.asm.mk_label();
+        self.asm.attach_label(label);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            stack_off.next_multiple_of(16),
+        ));
+        self.asm.block_completed();
+        Ok(label)
+    }
+
     fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32) {
         let stack_off = i32::try_from(stack_off).unwrap();
         self.asm.attach_label(iter0_label);
@@ -1303,12 +1323,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
         let addr = match &ctr.kind {
-            J2CompiledTraceKind::Loop {
-                entry_safepoint: _,
-                entry_vlocs: _,
-                stack_off: _,
-                sidetrace_off,
-            } => unsafe { ctr.exe().byte_add(*sidetrace_off) },
+            J2CompiledTraceKind::Coupler { sidetrace_off, .. }
+            | J2CompiledTraceKind::Loop { sidetrace_off, .. } => unsafe {
+                ctr.exe().byte_add(*sidetrace_off)
+            },
             J2CompiledTraceKind::Side { .. } => todo!(),
             #[cfg(test)]
             J2CompiledTraceKind::Test => unreachable!(),

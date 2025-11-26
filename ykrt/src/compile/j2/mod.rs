@@ -174,7 +174,7 @@ impl Compiler for J2 {
         _endframe: TraceEndFrame,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let kind = match coupler {
-            Some(_x) => todo!(),
+            Some(tgt_ctr) => aot_to_hir::BuildKind::Coupler { tgt_ctr },
             None => aot_to_hir::BuildKind::Loop,
         };
 

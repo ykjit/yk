@@ -12,6 +12,22 @@
 //! we first process the trace's main body and then process guard bodies.
 //!
 //!
+//! ## Coupler traces
+//!
+//! Coupler traces are of the form:
+//!
+//! ```text
+//! <stack adjustment>
+//! iter0_label:
+//! <instrs>
+//! jmp tgt_ctr.iter0_label
+//! <guard body n>
+//! ...
+//! <guard body 1>
+//! call __yk_j2_deopt
+//! <data>
+//! ```
+//!
 //! ## Loop traces
 //!
 //! Loop traces are of the form:
@@ -40,7 +56,7 @@
 //!
 //! ```text
 //! <instrs>
-//! <stack adjustment for tgt_ctr>
+//! <stack adjustment>
 //! jmp tgt_ctr.iter0_label
 //! <guard body n>
 //! ...
@@ -84,6 +100,65 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     pub(super) fn build(mut self, mt: Arc<MT>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let logging = should_log_ir(IRPhase::Asm);
         let (buf, guards, log, modkind) = match &self.m.kind {
+            ModKind::Coupler {
+                entry_safepoint,
+                entry,
+                tgt_ctr,
+            } => {
+                let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+                // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
+                let base_stack_off = u32::try_from({
+                    let (smap, prologue) = aot_smaps.get(0);
+                    if prologue.hasfp {
+                        // FIXME: This needs porting! https://github.com/ykjit/yk/issues/1936
+                        #[cfg(not(target_arch = "x86_64"))]
+                        panic!();
+                        // The frame size includes RBP, but we only want to include the
+                        // local variables.
+                        smap.size - 8
+                    } else {
+                        smap.size
+                    }
+                })
+                .unwrap();
+
+                let (rec, _) = aot_smaps.get(usize::try_from(entry_safepoint.id).unwrap());
+                let entry_vlocs = rec
+                    .live_vals
+                    .iter()
+                    .map(|smap| AB::smp_to_vloc(smap))
+                    .collect::<Vec<_>>();
+                let exit_vlocs = tgt_ctr.entry_vlocs();
+
+                // Create the backwards jump at the end of a loop trace.
+                self.be.coupler_trace_end(tgt_ctr)?;
+
+                // Assemble the body
+                let (guards, body_ra) = self.p_block(
+                    entry,
+                    base_stack_off,
+                    &entry_vlocs,
+                    exit_vlocs,
+                    true,
+                    logging,
+                )?;
+                let entry_stack_off = body_ra.stack_off();
+                let instrs_label = self
+                    .be
+                    .coupler_trace_start(entry_stack_off - base_stack_off)?;
+                self.asm_guards(entry, guards, body_ra)?;
+                let (buf, guards, log, label_offs) = self.be.build_exe(logging, &[instrs_label])?;
+                let [sidetrace_off] = &*label_offs else {
+                    panic!()
+                };
+                let modkind = J2CompiledTraceKind::Coupler {
+                    entry_vlocs,
+                    entry_safepoint,
+                    stack_off: entry_stack_off,
+                    sidetrace_off: *sidetrace_off,
+                };
+                (buf, guards, log, modkind)
+            }
             ModKind::Loop {
                 entry_safepoint,
                 entry,
@@ -165,7 +240,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 assert!(labels.is_empty());
                 (buf, guards, log, modkind)
             }
-            ModKind::Coupler { .. } => todo!(),
             #[cfg(test)]
             ModKind::Test { .. } => panic!(),
         };
@@ -779,6 +853,17 @@ pub(super) trait HirToAsmBackend {
         tmp_reg: Self::Reg,
     );
 
+    // The functions called for coupler traces.
+
+    /// Produce code for the jump to `tgt_ctr` at the end of a coupler trace.
+    fn coupler_trace_end(
+        &mut self,
+        tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
+    ) -> Result<(), CompilationError>;
+    /// The current body of a coupler trace has been completed and has consumed `stack_off`
+    /// additional bytes of stack space.
+    fn coupler_trace_start(&mut self, stack_off: u32) -> Result<Self::Label, CompilationError>;
+
     // The functions called for loop traces.
 
     /// Produce code for the backwards jump that finishes a loop trace.
@@ -790,10 +875,10 @@ pub(super) trait HirToAsmBackend {
 
     // The functions called for side traces.
 
-    /// Produce code for the jump to `tgt_ctr` at the end of a side-trace.
+    /// Produce code for the jump to `tgt_ctr` at the end of a side trace.
     fn side_trace_end(
         &mut self,
-        ctr: &Arc<J2CompiledTrace<Self::Reg>>,
+        tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError>;
     /// The current body of a sidetrace trace has been completed and has consumed `stack_off` additional
     /// bytes of stack space.

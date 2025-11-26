@@ -204,19 +204,9 @@ impl<Reg: RegT> Mod<Reg> {
     #[allow(dead_code)]
     pub(super) fn assert_well_formed(&self) {
         match &self.kind {
-            ModKind::Loop {
-                entry_safepoint: _,
-                entry: _,
-                inner: _,
-            } => todo!(),
-            ModKind::Side {
-                entry_vlocs: _,
-                entry: _,
-                src_ctr: _,
-                src_gridx: _,
-                tgt_ctr: _,
-            } => todo!(),
-            ModKind::Coupler { entry: _ } => todo!(),
+            ModKind::Coupler { .. } => todo!(),
+            ModKind::Loop { .. } => todo!(),
+            ModKind::Side { .. } => todo!(),
             #[cfg(test)]
             ModKind::Test { entry_vlocs, block } => {
                 block.assert_well_formed(self, entry_vlocs, entry_vlocs);
@@ -232,9 +222,9 @@ impl<Reg: RegT> Mod<Reg> {
 impl<Reg: RegT> Display for Mod<Reg> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match &self.kind {
+            ModKind::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
             ModKind::Loop { entry, .. } => write!(f, "{}", entry.to_string(self)),
             ModKind::Side { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            ModKind::Coupler { entry: _ } => todo!(),
             #[cfg(test)]
             ModKind::Test { block, .. } => write!(f, "{}", block.to_string(self)),
         }
@@ -256,6 +246,11 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
 /// The kind of a module.
 #[derive(Debug)]
 pub(super) enum ModKind<Reg: RegT> {
+    Coupler {
+        entry_safepoint: &'static DeoptSafepoint,
+        entry: Block,
+        tgt_ctr: Arc<J2CompiledTrace<Reg>>,
+    },
     Loop {
         entry_safepoint: &'static DeoptSafepoint,
         entry: Block,
@@ -268,8 +263,6 @@ pub(super) enum ModKind<Reg: RegT> {
         src_gridx: GuardRestoreIdx,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,
     },
-    #[allow(dead_code)]
-    Coupler { entry: Block },
     /// A test module: this creates a non-executable block that doesn't jump to another trace.
     /// It is suitable for pretty printing.
     #[cfg(test)]

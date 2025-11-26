@@ -135,8 +135,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         // Process the start of the trace.
         let bmk = match &self.bkind {
-            BuildKind::Coupler => todo!(),
-            BuildKind::Loop => {
+            BuildKind::Coupler { .. } | BuildKind::Loop => {
                 // The control point call will be found in the immediate predecessor of first block
                 // we see. That means we first see a `MappedAOTBlock` with index `bb`...
                 let Some(Ok(TraceAction::MappedAOTBBlock { funcidx, bbidx })) = self.ta_iter.peek()
@@ -155,7 +154,20 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     self.ta_iter.peek(),
                     Some(&Ok(TraceAction::MappedAOTBBlock { .. }))
                 );
-                BuildModKind::Loop { entry_safepoint }
+                match &self.bkind {
+                    BuildKind::Coupler { tgt_ctr } => {
+                        let tgt_ctr = Arc::clone(tgt_ctr)
+                            .as_any()
+                            .downcast::<J2CompiledTrace<Reg>>()
+                            .unwrap();
+                        BuildModKind::Coupler {
+                            entry_safepoint,
+                            tgt_ctr,
+                        }
+                    }
+                    BuildKind::Loop => BuildModKind::Loop { entry_safepoint },
+                    _ => unreachable!(),
+                }
             }
             BuildKind::Side {
                 src_ctr,
@@ -198,8 +210,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         };
 
         self.prev_bid = match &bmk {
-            BuildModKind::Coupler => todo!(),
-            BuildModKind::Loop { .. } => None,
+            BuildModKind::Coupler { .. } | BuildModKind::Loop { .. } => None,
             BuildModKind::Side { prev_bid, .. } => Some(*prev_bid),
         };
 
@@ -221,21 +232,24 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
         }
 
-        assert_eq!(self.promotions_off, self.promotions.len());
-
         if !early_return {
+            assert_eq!(self.promotions_off, self.promotions.len());
             assert_eq!(self.frames.len(), 1);
             let exit_safepoint = match &bmk {
-                BuildModKind::Coupler => todo!(),
                 BuildModKind::Loop { entry_safepoint } => entry_safepoint,
-                BuildModKind::Side { tgt_ctr, .. } => match &tgt_ctr.kind {
-                    J2CompiledTraceKind::Loop {
-                        entry_safepoint, ..
-                    } => entry_safepoint,
-                    J2CompiledTraceKind::Side { .. } => todo!(),
-                    #[cfg(test)]
-                    J2CompiledTraceKind::Test => unreachable!(),
-                },
+                BuildModKind::Coupler { tgt_ctr, .. } | BuildModKind::Side { tgt_ctr, .. } => {
+                    match &tgt_ctr.kind {
+                        J2CompiledTraceKind::Coupler {
+                            entry_safepoint, ..
+                        }
+                        | J2CompiledTraceKind::Loop {
+                            entry_safepoint, ..
+                        } => entry_safepoint,
+                        J2CompiledTraceKind::Side { .. } => todo!(),
+                        #[cfg(test)]
+                        J2CompiledTraceKind::Test => unreachable!(),
+                    }
+                }
             };
             let exit_vars = exit_safepoint
                 .lives
@@ -247,7 +261,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         let (entry, tys) = self.opt.build();
         let mk = match bmk {
-            BuildModKind::Coupler => todo!(),
+            BuildModKind::Coupler {
+                entry_safepoint,
+                tgt_ctr,
+            } => hir::ModKind::Coupler {
+                entry_safepoint,
+                entry,
+                tgt_ctr,
+            },
             BuildModKind::Loop { entry_safepoint } => hir::ModKind::Loop {
                 entry_safepoint,
                 entry,
@@ -1574,9 +1595,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
             Ok(false)
         } else {
-            if let BuildKind::Side { .. } = self.bkind {
-                todo!();
-            }
             // We've returned out of the function that started tracing. Stop processing any
             // remaining blocks and emit a return instruction that naturally returns from a
             // compiled trace into the interpreter.
@@ -1763,8 +1781,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
 /// The information needed to build a HIR trace.
 pub(super) enum BuildKind {
-    #[allow(unused)]
-    Coupler,
+    Coupler {
+        tgt_ctr: Arc<dyn CompiledTrace>,
+    },
     Loop,
     Side {
         src_ctr: Arc<dyn CompiledTrace>,
@@ -1777,8 +1796,10 @@ pub(super) enum BuildKind {
 /// up some intermediate state that isn't present in [BuildKind] but which is needed by
 /// [hir::ModKind], while keeping the latter enum simple.
 enum BuildModKind<Reg: RegT> {
-    #[allow(unused)]
-    Coupler,
+    Coupler {
+        entry_safepoint: &'static DeoptSafepoint,
+        tgt_ctr: Arc<J2CompiledTrace<Reg>>,
+    },
     Loop {
         entry_safepoint: &'static DeoptSafepoint,
     },

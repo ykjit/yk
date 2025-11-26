@@ -182,7 +182,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         {
             for vloc in vlocs.iter() {
                 if let VarLoc::Reg(reg) = vloc {
-                    if let ModKind::Loop { .. } = self.m.kind {
+                    if let ModKind::Coupler { .. } | ModKind::Loop { .. } = self.m.kind {
                         // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
                         // for details), caller saved registers are potentially corrupted at the very start
                         // of a loop trace.
@@ -1892,7 +1892,10 @@ mod test {
     use super::*;
     use crate::{
         compile::{
-            j2::{codebuf::ExeCodeBuf, hir::Mod, hir::*, hir_parser::str_to_mod, hir_to_asm::*},
+            j2::{
+                codebuf::ExeCodeBuf, compiled_trace::J2CompiledTrace, hir::Mod, hir::*,
+                hir_parser::str_to_mod, hir_to_asm::*,
+            },
             jitc_yk::aot_ir,
         },
         location::{HotLocation, HotLocationKind},
@@ -2217,6 +2220,20 @@ mod test {
             todo!()
         }
 
+        fn coupler_trace_end(
+            &mut self,
+            _tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn coupler_trace_start(
+            &mut self,
+            _stack_off: u32,
+        ) -> Result<Self::Label, CompilationError> {
+            todo!();
+        }
+
         fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError> {
             todo!()
         }
@@ -2225,7 +2242,7 @@ mod test {
 
         fn side_trace_end(
             &mut self,
-            _ctr: &std::sync::Arc<crate::compile::j2::compiled_trace::J2CompiledTrace<Self::Reg>>,
+            _ctr: &std::sync::Arc<J2CompiledTrace<Self::Reg>>,
         ) -> Result<(), CompilationError> {
             todo!()
         }

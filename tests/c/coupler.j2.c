@@ -1,4 +1,4 @@
-// ignore-if: test "$YK_JITC" = "j2"
+// ignore-if: test "$YK_JITC" != "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_LOG=4
@@ -9,7 +9,6 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //       ...
-//       header_end ...
 //     --- End jit-pre-opt ---
 //     5
 //     yk-tracing: start-tracing
@@ -17,7 +16,6 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //       ...
-//       connector ...
 //     --- End jit-pre-opt ---
 //     3
 //     yk-execution: enter-jit-code
@@ -27,7 +25,6 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //       ...
-//       sidetrace_end ...
 //     --- End jit-pre-opt ---
 //     1
 //     exit
