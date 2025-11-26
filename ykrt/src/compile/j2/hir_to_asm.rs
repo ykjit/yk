@@ -115,7 +115,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .collect::<Vec<_>>();
 
                 // Create the backwards jump at the end of a loop trace.
-                let iter0_label = self.be.loop_end()?;
+                let iter0_label = self.be.loop_trace_end()?;
 
                 // Assemble the body
                 let (guards, body_ra) = self.p_block(
@@ -150,7 +150,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 tgt_ctr,
             } => {
                 let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
-                self.be.sidetrace_end(tgt_ctr)?;
+                self.be.side_trace_end(tgt_ctr)?;
                 // Assemble the body
                 let exit_vlocs = tgt_ctr.entry_vlocs();
                 let (guards, body_ra) =
@@ -779,22 +779,22 @@ pub(super) trait HirToAsmBackend {
         tmp_reg: Self::Reg,
     );
 
-    // The functions called at the end of traces.
+    // The functions called for loop traces.
 
     /// Produce code for the backwards jump that finishes a loop trace.
-    fn loop_end(&mut self) -> Result<Self::Label, CompilationError>;
-    /// Produce code for the jump to `tgt_ctr` at the end of a side-trace.
-    fn sidetrace_end(
-        &mut self,
-        ctr: &Arc<J2CompiledTrace<Self::Reg>>,
-    ) -> Result<(), CompilationError>;
-
-    // The functions called at the start of traces.
-
+    fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError>;
     /// The current body of a loop trace has been completed and has consumed `stack_off` additional
     /// bytes of stack space. `iter0_label` must be attached to the first instruction after the
     /// stack is adjusted.
     fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32);
+
+    // The functions called for side traces.
+
+    /// Produce code for the jump to `tgt_ctr` at the end of a side-trace.
+    fn side_trace_end(
+        &mut self,
+        ctr: &Arc<J2CompiledTrace<Self::Reg>>,
+    ) -> Result<(), CompilationError>;
     /// The current body of a sidetrace trace has been completed and has consumed `stack_off` additional
     /// bytes of stack space.
     fn side_trace_start(&mut self, stack_off: u32);

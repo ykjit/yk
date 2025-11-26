@@ -1278,7 +1278,18 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
-    fn loop_end(&mut self) -> Result<Self::Label, CompilationError> {
+    fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32) {
+        let stack_off = i32::try_from(stack_off).unwrap();
+        self.asm.attach_label(iter0_label);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            stack_off.next_multiple_of(16),
+        ));
+        self.asm.block_completed();
+    }
+
+    fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError> {
         let label = self.asm.mk_label();
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
@@ -1287,7 +1298,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(label)
     }
 
-    fn sidetrace_end(
+    fn side_trace_end(
         &mut self,
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
@@ -1317,17 +1328,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RBP,
         ));
         Ok(())
-    }
-
-    fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32) {
-        let stack_off = i32::try_from(stack_off).unwrap();
-        self.asm.attach_label(iter0_label);
-        self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
-            IcedReg::RSP,
-            stack_off.next_multiple_of(16),
-        ));
-        self.asm.block_completed();
     }
 
     fn side_trace_start(&mut self, stack_off: u32) {
