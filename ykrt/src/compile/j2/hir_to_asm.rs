@@ -778,14 +778,24 @@ pub(super) trait HirToAsmBackend {
         tmp_reg: Self::Reg,
     );
 
+    // The functions called at the end of traces.
+
     /// Produce code for the backwards jump that finishes a loop trace.
     fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError>;
-
     /// Produce code for the jump to `tgt_ctr` at the end of a side-trace.
     fn sidetrace_end(
         &mut self,
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError>;
+
+    // The functions called at the start of traces.
+
+    /// The current body of a trace has been completed and has consumed `stack_off` additional
+    /// bytes of stack space. If `label` is `Some`, it will be attached to the first instruction
+    /// after the stack is adjusted.
+    fn body_completed(&mut self, label: Option<Self::Label>, stack_off: u32);
+
+    // Functions for guards.
 
     /// Produce code for the end of a guard: return a label for the instruction to be patched when
     /// a side-trace is produced.
@@ -812,10 +822,7 @@ pub(super) trait HirToAsmBackend {
         switch: Option<Switch>,
     );
 
-    /// The current body of a trace has been completed and has consumed `stack_off` additional
-    /// bytes of stack space. If `label` is `Some`, it will be attached to the first instruction
-    /// after the stack is adjusted.
-    fn body_completed(&mut self, label: Option<Self::Label>, stack_off: u32);
+    // Functions for each HIR instruction.
 
     fn i_abs(
         &mut self,

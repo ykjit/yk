@@ -860,92 +860,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
-    fn body_completed(&mut self, label: Option<Self::Label>, stack_off: u32) {
-        let stack_off = i32::try_from(stack_off).unwrap();
-        if let Some(label) = label {
-            self.asm.attach_label(label);
-        }
-        self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
-            IcedReg::RSP,
-            stack_off.next_multiple_of(16),
-        ));
-        self.asm.block_completed();
-    }
-
-    #[allow(clippy::fn_to_numeric_cast)]
-    fn guard_end(
-        &mut self,
-        _ra: &mut RegAlloc<Self>,
-        _b: &Block,
-        trid: TraceId,
-        gridx: GuardRestoreIdx,
-    ) -> Result<LabelIdx, CompilationError> {
-        self.asm
-            .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_r64_imm64,
-            IcedReg::RAX,
-            // This cast is fine on x64, and this module will only be compiled on that platform.
-            super::deopt::__yk_j2_deopt as i64,
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_r32_imm32,
-            IcedReg::EDX,
-            i32::try_from(usize::from(gridx)).unwrap(),
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_r64_imm64,
-            IcedReg::RSI,
-            trid.as_u64().cast_signed(),
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_rm64_r64,
-            IcedReg::RDI,
-            IcedReg::RBP,
-        ));
-
-        // This is the "dummy" jump that we will modify if a side-trace is created.
-        let patch_label = self.asm.mk_label();
-        let dummy_label = self.asm.mk_label();
-        self.asm.attach_label(dummy_label);
-        self.asm.push_reloc(
-            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::RipRelativeWithLabel(dummy_label),
-        );
-        self.asm.attach_label(patch_label);
-
-        Ok(patch_label)
-    }
-
-    fn guard_completed(
-        &mut self,
-        entry_label: Self::Label,
-        patch_label: Self::Label,
-        extra_stack_len: u32,
-        bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 1]>,
-        switch: Option<Switch>,
-    ) {
-        let stack_off = i32::try_from(extra_stack_len).unwrap();
-        self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
-            IcedReg::RSP,
-            stack_off.next_multiple_of(16),
-        ));
-
-        self.asm.attach_label(entry_label);
-        self.asm.block_completed();
-
-        self.guards.push(IntermediateGuard {
-            patch_label,
-            bid,
-            deopt_frames,
-            extra_stack_len,
-            switch,
-        });
-    }
-
     fn build_exe(
         mut self,
         log: bool,
@@ -1030,47 +944,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn log(&mut self, s: String) {
         self.asm.log(s);
-    }
-
-    fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError> {
-        let label = self.asm.mk_label();
-        self.asm.push_reloc(
-            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::RipRelativeWithLabel(label),
-        );
-        Ok(label)
-    }
-
-    fn sidetrace_end(
-        &mut self,
-        ctr: &Arc<J2CompiledTrace<Self::Reg>>,
-    ) -> Result<(), CompilationError> {
-        let addr = match &ctr.kind {
-            J2CompiledTraceKind::Loop {
-                entry_safepoint: _,
-                entry_vlocs: _,
-                stack_off: _,
-                sidetrace_off,
-            } => unsafe { ctr.exe().byte_add(*sidetrace_off) },
-            J2CompiledTraceKind::Side { .. } => todo!(),
-            #[cfg(test)]
-            J2CompiledTraceKind::Test => unreachable!(),
-        };
-        self.asm.push_reloc(
-            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::BranchWithAddr(addr.addr()),
-        );
-        self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
-            IcedReg::RSP,
-            i32::try_from(ctr.entry_stack_off().next_multiple_of(16)).unwrap(),
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_r64_rm64,
-            IcedReg::RSP,
-            IcedReg::RBP,
-        ));
-        Ok(())
     }
 
     fn const_needs_tmp_reg(&self, _reg: Reg, c: &ConstKind) -> Option<impl Iterator<Item = Reg>> {
@@ -1403,6 +1276,133 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             }
             x => todo!("{x}"),
         }
+    }
+
+    fn loop_backwards_jump(&mut self) -> Result<Self::Label, CompilationError> {
+        let label = self.asm.mk_label();
+        self.asm.push_reloc(
+            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
+            RelocKind::RipRelativeWithLabel(label),
+        );
+        Ok(label)
+    }
+
+    fn sidetrace_end(
+        &mut self,
+        ctr: &Arc<J2CompiledTrace<Self::Reg>>,
+    ) -> Result<(), CompilationError> {
+        let addr = match &ctr.kind {
+            J2CompiledTraceKind::Loop {
+                entry_safepoint: _,
+                entry_vlocs: _,
+                stack_off: _,
+                sidetrace_off,
+            } => unsafe { ctr.exe().byte_add(*sidetrace_off) },
+            J2CompiledTraceKind::Side { .. } => todo!(),
+            #[cfg(test)]
+            J2CompiledTraceKind::Test => unreachable!(),
+        };
+        self.asm.push_reloc(
+            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
+            RelocKind::BranchWithAddr(addr.addr()),
+        );
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            i32::try_from(ctr.entry_stack_off().next_multiple_of(16)).unwrap(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_rm64,
+            IcedReg::RSP,
+            IcedReg::RBP,
+        ));
+        Ok(())
+    }
+
+    fn body_completed(&mut self, label: Option<Self::Label>, stack_off: u32) {
+        let stack_off = i32::try_from(stack_off).unwrap();
+        if let Some(label) = label {
+            self.asm.attach_label(label);
+        }
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            stack_off.next_multiple_of(16),
+        ));
+        self.asm.block_completed();
+    }
+
+    #[allow(clippy::fn_to_numeric_cast)]
+    fn guard_end(
+        &mut self,
+        _ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        trid: TraceId,
+        gridx: GuardRestoreIdx,
+    ) -> Result<LabelIdx, CompilationError> {
+        self.asm
+            .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_imm64,
+            IcedReg::RAX,
+            // This cast is fine on x64, and this module will only be compiled on that platform.
+            super::deopt::__yk_j2_deopt as i64,
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r32_imm32,
+            IcedReg::EDX,
+            i32::try_from(usize::from(gridx)).unwrap(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_imm64,
+            IcedReg::RSI,
+            trid.as_u64().cast_signed(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_rm64_r64,
+            IcedReg::RDI,
+            IcedReg::RBP,
+        ));
+
+        // This is the "dummy" jump that we will modify if a side-trace is created.
+        let patch_label = self.asm.mk_label();
+        let dummy_label = self.asm.mk_label();
+        self.asm.attach_label(dummy_label);
+        self.asm.push_reloc(
+            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
+            RelocKind::RipRelativeWithLabel(dummy_label),
+        );
+        self.asm.attach_label(patch_label);
+
+        Ok(patch_label)
+    }
+
+    fn guard_completed(
+        &mut self,
+        entry_label: Self::Label,
+        patch_label: Self::Label,
+        extra_stack_len: u32,
+        bid: aot_ir::BBlockId,
+        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 1]>,
+        switch: Option<Switch>,
+    ) {
+        let stack_off = i32::try_from(extra_stack_len).unwrap();
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            stack_off.next_multiple_of(16),
+        ));
+
+        self.asm.attach_label(entry_label);
+        self.asm.block_completed();
+
+        self.guards.push(IntermediateGuard {
+            patch_label,
+            bid,
+            deopt_frames,
+            extra_stack_len,
+            switch,
+        });
     }
 
     fn i_abs(

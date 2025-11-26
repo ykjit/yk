@@ -2228,6 +2228,8 @@ mod test {
             todo!()
         }
 
+        fn body_completed(&mut self, _label: Option<Self::Label>, _stack_off: u32) {}
+
         fn guard_end(
             &mut self,
             _ra: &mut RegAlloc<Self>,
@@ -2248,8 +2250,6 @@ mod test {
             _switch: Option<crate::compile::j2::hir::Switch>,
         ) {
         }
-
-        fn body_completed(&mut self, _label: Option<Self::Label>, _stack_off: u32) {}
 
         fn i_abs(
             &mut self,
