@@ -309,7 +309,12 @@ impl TraceBuilder {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_indirectcall(
                         inst, bid, iidx, ftyidx, callop, args, nextinst, safepoint,
-                    )
+                    )?;
+                    // FIXME: This `return` assumes that the indirect callee is traceable. If it
+                    // isn't, we shouldn't update the previous block (like in the `Inst::Call` case
+                    // above), but we (currently) have no way of knowing if the (dynamic) callee is
+                    // traceable. At least an assertion will fail if/when we encounter this.
+                    return Ok(Some(None));
                 }
                 aot_ir::Inst::Store { tgt, val, volatile } => {
                     self.handle_store(bid, iidx, tgt, val, *volatile)

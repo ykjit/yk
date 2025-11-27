@@ -1490,6 +1490,7 @@ pub(crate) struct Func {
 
 const FUNCFLAG_OUTLINE: u8 = 1;
 const FUNCFLAG_IDEMPOTENT: u8 = 1 << 1;
+const FUNCFLAG_INDIRECT_INLINE: u8 = 1 << 2;
 
 impl Func {
     pub(crate) fn is_declaration(&self) -> bool {
@@ -1502,6 +1503,10 @@ impl Func {
 
     pub(crate) fn is_idempotent(&self) -> bool {
         self.flags & FUNCFLAG_IDEMPOTENT != 0
+    }
+
+    pub(crate) fn is_indirect_inline(&self) -> bool {
+        self.flags & FUNCFLAG_INDIRECT_INLINE != 0
     }
 
     /// Return the [BBlock] at the specified index.
@@ -1569,6 +1574,9 @@ impl fmt::Display for DisplayableFunc<'_> {
             }
             if self.func_.is_outline() {
                 attrs.push("yk_outline");
+            }
+            if self.func_.is_indirect_inline() {
+                attrs.push("yk_indirect_inline");
             }
             let attrs = if !attrs.is_empty() {
                 &format!("#[{}]\n", attrs.join(", "))
