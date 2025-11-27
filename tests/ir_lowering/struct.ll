@@ -7,6 +7,7 @@
 ;         %0_1: {0: i32, 64: i64} = insert_val %0_0, 100i32
 ;         ret
 ;     }
+;     ...
 
 ; Check that a structure type lowers correctly.
 

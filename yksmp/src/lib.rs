@@ -173,6 +173,10 @@ impl StackMapParser<'_> {
             for mut r in records.drain(..) {
                 // Calculate the absolute offset for this record in the binary.
                 r.offset += f.addr;
+                // `u64::MAX` means that LLVM doesn't know the size of the frame statically. This
+                // happens when there is an `alloca` instruction in a non-entry
+                // block. We can't work with such frames.
+                assert_ne!(f.stack_size, u64::MAX);
                 r.size = f.stack_size;
                 let idx = usize::try_from(r.id).unwrap();
                 all_records[idx] = (r, i);
