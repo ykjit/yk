@@ -34,6 +34,12 @@ fn main() {
             // We don't use yk-config here, as we are testing one very specific functionality that
             // requires only one special flag.
             let mut compiler = Command::new(ykllvm_bin("clang"));
+            let md = env::var("CARGO_MANIFEST_DIR").unwrap();
+            let profile = full_cargo_profile();
+            let ykcapi_path = [&md, "..", "target", &profile, "deps"]
+                .iter()
+                .collect::<PathBuf>();
+            let ykcapi_linkdir = format!("-L{}", ykcapi_path.to_str().unwrap());
             compiler.args([
                 "-flto",
                 "-fuse-ld=lld",
@@ -41,11 +47,13 @@ fn main() {
                 "-o",
                 exe.to_str().unwrap(),
                 "-Wl,-mllvm=--yk-embed-ir",
+                // The serialiser now assumes that we are doing software tracing.
+                "-Wl,--mllvm=--yk-basicblock-tracer",
+                // Link libykcapi so that the tests inherit the necessary software tracing symbols.
+                &ykcapi_linkdir,
+                "-lykcapi",
                 p.to_str().unwrap(),
             ]);
-
-            let md = env::var("CARGO_MANIFEST_DIR").unwrap();
-            let profile = full_cargo_profile();
             let dumper_path = [&md, "..", "target", &profile, "dump_ir"]
                 .iter()
                 .collect::<PathBuf>();

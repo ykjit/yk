@@ -17,10 +17,9 @@ thread_local! {
     static BASIC_BLOCKS: RefCell<Vec<TracingBBlock>> = const { RefCell::new(vec![]) };
 }
 
-/// If the current thread is tracing, records the specified basicblock into the software tracing
-/// buffer.
+/// Records the specified basic block into the software tracing buffer.
 ///
-/// If the current thread is not tracing, it does nothing.
+/// This must only be called if the current thread is tracing.
 ///
 /// # Arguments
 /// * `function_index` - The index of the function to which the basic block belongs.
@@ -28,14 +27,13 @@ thread_local! {
 #[cfg(tracer_swt)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_trace_basicblock(function_index: usize, block_index: usize) {
-    if MTThread::is_tracing() {
-        BASIC_BLOCKS.with(|v| {
-            v.borrow_mut().push(TracingBBlock {
-                function_index,
-                block_index,
-            });
-        })
-    }
+    debug_assert!(MTThread::is_tracing());
+    BASIC_BLOCKS.with(|v| {
+        v.borrow_mut().push(TracingBBlock {
+            function_index,
+            block_index,
+        });
+    })
 }
 
 pub(crate) struct SWTracer {}

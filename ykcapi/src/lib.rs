@@ -71,11 +71,29 @@ pub extern "C" fn __ykrt_control_point(
     // FIXME: We could get rid of this entire function if we pass the frame's base pointer into the
     // control point from the interpreter.
     std::arch::naked_asm!(
-        // Pass the interpreter frame's base pointer via the 4th argument register.
-        "sub rsp, 8",   // Alignment
-        "mov rcx, rbp", // Pass interpreter frame's base pointer via 4th argument register.
+        "sub rsp, 8", // Alignment
+        // Push the callee-save registers to the stack. This is required so that traces can read
+        // live variables from them.
+        "push rbp",
+        "push rbx",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+        // Pass interpreter frame's base pointer via 4th argument register.
+        "mov rcx, rbp",
+        // Do the call
         "call __ykrt_control_point_real",
-        "add rsp, 8",
+        // Restore callee-save registers.
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop rbx",
+        "pop rbp",
+        "add rsp, 8", // Alignment.
+        // NOTE! If the control point determined that a trace needs to be executed, then the return
+        // address has been overwritten and this `ret` will jump to the trace's entry point!
         "ret",
     );
 }

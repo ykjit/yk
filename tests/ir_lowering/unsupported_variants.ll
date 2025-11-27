@@ -2,49 +2,48 @@
 ;   stdout:
 ;     ...
 ;     func main(...
-;       bb0:
+;       bb{{_}}:
 ;         ...
-;         %{{_}}: ?ty<<8 x ptr>> = unimplemented <<  %{{4}} = getelementptr i32, <8 x ptr> %{{1}}, i32 1>>
+;         %{{_}}: ?ty<<8 x ptr>> = unimplemented <<  %{{4}} = getelementptr i32, <8 x ptr> %{{1}}, i32 1, ...
 ;         %{{_}}: ptr = unimplemented <<  %{{_}} = getelementptr [8 x i8], ptr %{{_}}, i512 %{{_}}>>
-;         br bb1
-;       bb1:
-;         %{{_}}: ptr = unimplemented <<  %{{6}} = alloca inalloca i32, align 4>>
+;         br bb{{_}}
+;       bb{{_}}:
+;         %{{_}}: ptr = unimplemented <<  %{{6}} = alloca inalloca i32, align 4, ...
 ;         %{{_}}: ptr = unimplemented <<  %{{7}} = alloca i32, align 4, addrspace(4)>>
 ;         %{{_}}: ptr = unimplemented <<  %{{8}} = alloca i32, i32 %2, align 4>>
-;         br bb2
-;      bb2:
-;         %{{_}}: float = unimplemented <<  %{{13}} = fadd nnan float %{{3}}, %{{3}}>>
+;         br bb{{_}}
+;      bb{{_}}:
+;         %{{_}}: float = unimplemented <<  %{{13}} = fadd nnan float %{{3}}, %{{3}}, ...
 ;         %{{_}}: ?ty<<4 x i32>> = unimplemented <<  %{{15}} = add <4 x i32> %{{44}}, %{{44}}>>
-;         br bb3
-;      bb3:
-;         %{{_}}: i32 = unimplemented <<  %{{17}} = call i32 @f(i32 swiftself 5) <note: swiftself param attr>>>
+;         br bb{{_}}
+;      bb{{_}}:
+;         %{{_}}: i32 = unimplemented <<  %{{17}} = call i32 @f(i32 swiftself 5), !yk-swt-bb-purpose !4 <note: swiftself param attr>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{18}} = call inreg i32 @f(i32 5) <note: inreg ret attr>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{19}} = call i32 @f(i32 5) #{{0}} <note: alignstack(8) fn attr>>>
 ;         %{{_}}: float = unimplemented <<  %{{20}} = call nnan float @g() <note: fastmath>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{21}} = call ghccc i32 @f(i32 5) <note: cconv>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{22}} = call i32 @f(i32 5) [ "kcfi"(i32 1234) ] <note: bundles>>>
 ;         %{{_}}: ptr = unimplemented <<  %{{23}} = call addrspace(6) ptr @p() <note: addrspace>>>
-;         br bb4
-;      bb4:
-;         %{{_}}: ?ty<<8 x i8>> = unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>>>
+;         br bb{{_}}
+;      bb{{_}}:
+;         %{{_}}: ?ty<<8 x i8>> = unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>, ...
 ;         %{{_}}: ?ty<<4 x i64>> = unimplemented <<  %{{_}} = sext <4 x i32> %{{_}} to <4 x i64>>>
 ;         %{{_}}: ?ty<<4 x i64>> = unimplemented <<  %{{_}} = zext <4 x i32> %{{_}} to <4 x i64>>>
 ;         %{{_}}: ?ty<<4 x i8>> = unimplemented <<  %{{_}} = trunc <4 x i32> %{{_}} to <4 x i8>>>
-;         br bb5
-;     bb5:
-;         %{{_}}: ?ty<<4 x i1>> = unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer>>
-;         br bb6
-;     bb6:
+;         br bb{{_}}
+;     bb{{_}}:
+;         %{{_}}: ?ty<<4 x i1>> = unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer, ...
+;         br bb{{_}}
+;     bb{{_}}:
 ;         %{{_}}: i32 = load %0_0
 ;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4 <note: addrspace>>>
 ;         %{{_}}: i32 = load %0_0
 ;         br ...
 ;         ...
-;     bb10:
 ;       %{{_}}: float = unimplemented <<  %{{_}} = phi nnan float...
-;       br bb11
-;     bb11:
-;       unimplemented <<  store atomic i32 0, ptr %0 release, align 4>>
+;       br bb{{_}}
+;     bb{{_}}:
+;       unimplemented <<  store atomic i32 0, ptr %0 release, align 4, ...
 ;       unimplemented <<  store i32 0, ptr addrspace(10) %5, align 4 <note: addrspace>>>
 ;       unimplemented <<  store i32 0, ptr %0, align 2>>
 ;       ret
