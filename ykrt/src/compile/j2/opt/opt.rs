@@ -130,7 +130,11 @@ impl OptT for Opt {
                 {
                     match &self.ranges[*lhs] {
                         Range::Unknown => self.ranges[*lhs] = Range::Equivalent(*rhs),
-                        Range::Equivalent(_) => todo!(),
+                        Range::Equivalent(x) => {
+                            if x != rhs {
+                                todo!("{x:?} {rhs:?}");
+                            }
+                        }
                     }
                 }
             }

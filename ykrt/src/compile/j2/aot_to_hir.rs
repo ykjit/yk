@@ -216,22 +216,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         // If we encounter a return in a side-trace, [early_return] will be set to true, and no
         // further processing of the trace should occur.
-        let mut early_return = false;
-        while let Some(ta) = self.ta_iter.next() {
-            if let Some(cnd_bid) = self.ta_to_bid(&ta?) {
-                self.check_correct_successor(cnd_bid)?;
-                let old_prev_bid = self.prev_bid;
-                self.prev_bid = Some(cnd_bid);
-                if self.p_block(old_prev_bid, cnd_bid)? {
-                    // We encountered an early return.
-                    early_return = true;
-                    self.prev_bid = Some(cnd_bid);
-                    break;
-                }
-                self.prev_bid = Some(cnd_bid);
-            }
-        }
-
+        let early_return = self.p_blocks()?;
         if !early_return {
             assert_eq!(self.promotions_off, self.promotions.len());
             assert_eq!(self.frames.len(), 1);
@@ -328,37 +313,42 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             .and_then(|x| self.ta_to_bid(&x))
     }
 
+    fn next_pc(&self, pc: InstId) -> InstId {
+        InstId::new(
+            pc.funcidx(),
+            pc.bbidx(),
+            BBlockInstIdx::new(usize::from(pc.iidx()) + 1),
+        )
+    }
+
     fn push_guard(
         &mut self,
         bid: BBlockId,
-        _iid: InstId,
+        iid: InstId,
         expect_true: bool,
         cond_iidx: hir::InstIdx,
         guard_safepoint: &'static DeoptSafepoint,
         switch: Option<hir::Switch>,
     ) -> Result<(), CompilationError> {
-        self.frames.last_mut().unwrap().call_safepoint = Some(guard_safepoint);
+        self.frames.last_mut().unwrap().pc_safepoint = Some(guard_safepoint);
         let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
         for (
             i,
             frame @ Frame {
-                call_iid,
-                func,
-                call_safepoint,
-                ..
+                pc, pc_safepoint, ..
             },
         ) in self.frames.iter().enumerate()
         {
-            let safepoint = if i + 1 < self.frames.len() {
-                call_safepoint.unwrap()
+            let pc_safepoint = pc_safepoint.unwrap();
+            let pc = if i + 1 < self.frames.len() {
+                pc.clone().unwrap()
             } else {
-                guard_safepoint
+                iid.clone()
             };
             deopt_frames.push(hir::Frame {
-                safepoint,
-                call_iid: call_iid.to_owned(),
-                func: *func,
-                exit_vars: safepoint
+                pc,
+                pc_safepoint,
+                exit_vars: pc_safepoint
                     .lives
                     .iter()
                     .map(|x| frame.get_local(&*self.opt, &x.to_inst_id()))
@@ -571,19 +561,21 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         cp_bid: &BBlockId,
     ) -> Result<&'static DeoptSafepoint, CompilationError> {
         let cp_blk = self.am.bblock(cp_bid);
-        let inst = cp_blk
-            .insts
-            .iter()
-            .find(|x| x.is_control_point(self.am))
-            .unwrap();
-        let safepoint = inst.safepoint().unwrap();
+        let cp_iidx = BBlockInstIdx::new(
+            cp_blk
+                .insts
+                .iter()
+                .position(|x| x.is_control_point(self.am))
+                .unwrap(),
+        );
+        let safepoint = cp_blk.insts[cp_iidx].safepoint().unwrap();
         assert!(self.frames.is_empty());
         self.frames.push(Frame {
-            call_iid: None,
-            func: cp_bid.funcidx(),
-            call_safepoint: None,
             args: SmallVec::new(),
             locals: HashMap::new(),
+            pc: Some(InstId::new(cp_bid.funcidx(), cp_bid.bbidx(), cp_iidx)),
+            pc_safepoint: None,
+            prev_pc: None,
         });
 
         for op in safepoint.lives.iter() {
@@ -605,7 +597,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let dframes = src_ctr.deopt_frames(src_gridx);
         let mut entry_vars = Vec::new();
         for dframe in dframes {
-            assert_eq!(dframe.vars.len(), dframe.safepoint.lives.len());
+            assert_eq!(dframe.vars.len(), dframe.pc_safepoint.lives.len());
             let mut locals = HashMap::with_capacity(dframe.vars.len());
             for (iid, _bitw, fromvlocs, _tovlocs) in &dframe.vars {
                 let tyidx = self.p_ty(self.am.inst(iid).def_type(self.am).unwrap())?;
@@ -622,14 +614,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 entry_vars.push(fromvlocs.clone());
             }
             self.frames.push(Frame {
-                call_iid: dframe.call_iid.clone(),
-                func: dframe.func,
-                call_safepoint: Some(dframe.safepoint),
                 // aot_ir::Arg instructions come at the start of functions; by definition any frame
                 // we're encountering will be past that point, so we can get away with pretending
                 // there aren't any AOT arguments for any of the frames.
                 args: smallvec![],
                 locals,
+                pc: Some(dframe.pc.clone()),
+                pc_safepoint: Some(dframe.pc_safepoint),
+                prev_pc: None,
             });
         }
         Ok(entry_vars)
@@ -773,43 +765,78 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
     /// Returns `true` if an early return was encountered: parent code should stop examining the
     /// trace at this point.
-    fn p_block(
-        &mut self,
-        prev_bid: Option<BBlockId>,
-        bid: BBlockId,
-    ) -> Result<bool, CompilationError> {
-        let blk = self.am.bblock(&bid);
-        for (i, inst) in blk.insts.iter().enumerate() {
-            let iid = InstId::new(bid.funcidx(), bid.bbidx(), BBlockInstIdx::new(i));
+    fn p_blocks(&mut self) -> Result<bool, CompilationError> {
+        loop {
+            let (pc, bid, blk) = {
+                let mut pc = self.frames.last().unwrap().pc.clone().unwrap();
+                let bid = BBlockId::new(pc.funcidx(), pc.bbidx());
+                let mut blk = self.am.bblock(&bid);
+                if usize::from(pc.iidx()) == blk.insts.len() {
+                    let Some(ta) = self.ta_iter.next() else {
+                        return Ok(false);
+                    };
+                    let cnd_bid = self.ta_to_bid(&ta?).unwrap();
+                    blk = self.am.bblock(&cnd_bid);
+                    let mut iidx = 0;
+                    pc = InstId::new(cnd_bid.funcidx(), cnd_bid.bbidx(), BBlockInstIdx::new(iidx));
+                    self.frames.last_mut().unwrap().pc = Some(pc.clone());
+                    while iidx < blk.insts.len() {
+                        let inst = &blk.insts[BBlockInstIdx::new(iidx)];
+                        if let Inst::Phi { .. } = inst {
+                            self.p_phi(pc, bid.bbidx(), cnd_bid, inst)?;
+                            iidx += 1;
+                            pc = InstId::new(
+                                cnd_bid.funcidx(),
+                                cnd_bid.bbidx(),
+                                BBlockInstIdx::new(iidx),
+                            );
+                            self.frames.last_mut().unwrap().pc = Some(pc.clone());
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                (pc, bid, blk)
+            };
+
+            let inst = &blk.insts[pc.iidx()];
             match inst {
                 Inst::Nop => todo!(),
                 Inst::Alloca { .. } => todo!(),
-                Inst::BinaryOp { .. } => self.p_binop(iid, inst)?,
+                Inst::BinaryOp { .. } => self.p_binop(pc.clone(), inst)?,
                 Inst::Br { .. } => (),
-                Inst::Call { .. } => self.p_call(iid, bid, inst)?,
-                Inst::Cast { .. } => self.p_cast(iid, inst)?,
-                Inst::CondBr { .. } => self.p_condbr(iid, bid, inst)?,
+                Inst::Call { .. } => {
+                    if self.p_call(pc.clone(), bid, inst)? {
+                        continue;
+                    }
+                }
+                Inst::Cast { .. } => self.p_cast(pc.clone(), inst)?,
+                Inst::CondBr { .. } => self.p_condbr(pc.clone(), bid, inst)?,
                 Inst::DebugStr { .. } => todo!(),
                 Inst::ExtractValue { .. } => todo!(),
-                Inst::FCmp { .. } => self.p_fcmp(iid, inst)?,
-                Inst::FNeg { .. } => self.p_fneg(iid, inst)?,
-                Inst::ICmp { .. } => self.p_icmp(iid, inst)?,
-                Inst::IndirectCall { .. } => self.p_icall(iid, bid, inst)?,
+                Inst::FCmp { .. } => self.p_fcmp(pc.clone(), inst)?,
+                Inst::FNeg { .. } => self.p_fneg(pc.clone(), inst)?,
+                Inst::ICmp { .. } => self.p_icmp(pc.clone(), inst)?,
+                Inst::IndirectCall { .. } => {
+                    if self.p_icall(pc.clone(), bid, inst)? {
+                        continue;
+                    }
+                }
                 Inst::InsertValue { .. } => todo!(),
-                Inst::Load { .. } => self.p_load(iid, inst)?,
-                Inst::LoadArg { .. } => self.p_loadarg(iid, inst)?,
-                Inst::Phi { .. } => self.p_phi(iid, prev_bid.unwrap().bbidx(), bid, inst)?,
-                Inst::Promote { .. } => self.p_promote(iid, bid, inst)?,
-                Inst::PtrAdd { .. } => self.p_ptradd(iid, inst)?,
+                Inst::Load { .. } => self.p_load(pc.clone(), inst)?,
+                Inst::LoadArg { .. } => self.p_loadarg(pc.clone(), inst)?,
+                Inst::Phi { .. } => unreachable!(),
+                Inst::Promote { .. } => self.p_promote(pc.clone(), bid, inst)?,
+                Inst::PtrAdd { .. } => self.p_ptradd(pc.clone(), inst)?,
                 Inst::Ret { .. } => {
-                    if self.p_ret(iid, inst)? {
+                    if self.p_ret(pc.clone(), inst)? {
                         // We encountered an early return in a side-trace.
                         return Ok(true);
                     }
                 }
-                Inst::Select { .. } => self.p_select(iid, inst)?,
-                Inst::Store { .. } => self.p_store(iid, inst)?,
-                Inst::Switch { .. } => self.p_switch(iid, bid, inst, None)?,
+                Inst::Select { .. } => self.p_select(pc.clone(), inst)?,
+                Inst::Store { .. } => self.p_store(pc.clone(), inst)?,
+                Inst::Switch { .. } => self.p_switch(pc.clone(), bid, inst, None)?,
                 Inst::Unimplemented {
                     tyidx: _,
                     llvm_inst_str,
@@ -820,8 +847,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     )));
                 }
             }
+
+            let frame = self.frames.last_mut().unwrap();
+            let pc = frame.pc.clone().unwrap();
+            frame.prev_pc = Some(pc.clone());
+            frame.pc = Some(InstId::new(
+                pc.funcidx(),
+                pc.bbidx(),
+                BBlockInstIdx::new(usize::from(pc.iidx()) + 1),
+            ));
         }
-        Ok(false)
     }
 
     fn p_binop(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
@@ -951,7 +986,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         iid: InstId,
         bid: BBlockId,
         inst: &'static Inst,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<bool, CompilationError> {
         let Inst::Call {
             callee,
             args,
@@ -963,14 +998,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         // Ignore control point, or LLVM debug, calls.
         if inst.is_control_point(self.am) || inst.is_debug_call(self.am) {
-            return Ok(());
+            return Ok(false);
         }
 
         let func = self.am.func(*callee);
         // Ignore calls the software tracer makes to record blocks.
         #[cfg(tracer_swt)]
         if func.name() == "__yk_trace_basicblock" {
-            return Ok(());
+            return Ok(false);
         }
 
         let mut jargs = SmallVec::with_capacity(args.len());
@@ -988,7 +1023,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             {
                 let const_iidx = self.promotion_data_to_const(self.am.type_(fty.ret_ty()))?;
                 self.frames.last_mut().unwrap().set_local(iid, const_iidx);
-                return self.outline_until(bid);
+                self.outline_until(bid)?;
+                return Ok(false);
             }
             self.promotions_off += usize::try_from(self.am.type_(fty.ret_ty()).bytew()).unwrap();
         }
@@ -998,17 +1034,26 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             // FIXME: We currently don't handle va_start
             && !func.contains_call_to(self.am, "llvm.va_start")
             // Is this a recursive call?
-            && !self.frames.iter().any(|f| f.func == *callee)
+            && !self.frames.iter().any(|f| f.pc.as_ref().unwrap().funcidx() == *callee)
         {
             // Inlinable call.
-            self.frames.last_mut().unwrap().call_safepoint = Some(safepoint.as_ref().unwrap());
+            self.frames.last_mut().unwrap().pc_safepoint = Some(safepoint.as_ref().unwrap());
             self.frames.push(Frame {
-                call_iid: Some(iid),
-                func: *callee,
-                call_safepoint: None,
                 args: jargs,
                 locals: HashMap::new(),
+                pc: Some(InstId::new(
+                    *callee,
+                    BBlockIdx::new(0),
+                    BBlockInstIdx::new(0),
+                )),
+                pc_safepoint: None,
+                prev_pc: None,
             });
+            let next_ta = &self.ta_iter.next().unwrap()?;
+            let next_bid = self.ta_to_bid(next_ta).unwrap();
+            assert_eq!(next_bid.funcidx(), *callee);
+            assert_eq!(next_bid.bbidx(), BBlockIdx::new(0));
+            Ok(true)
         } else {
             // Non-inlinable call. These come in two distinct flavours:
             //   1. LLVM intrinsics. We handle each of these individually.
@@ -1020,7 +1065,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
             // Handle LLVM intrinsics.
             if func.name().starts_with("llvm.") {
-                return self.p_llvm_intrinsic(iid, ftyidx, func.name(), jargs);
+                self.p_llvm_intrinsic(iid, ftyidx, func.name(), jargs)?;
+                return Ok(false);
             }
 
             // Handle user-level functions.
@@ -1040,8 +1086,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 .into(),
             )?;
             self.outline_until(bid)?;
+            Ok(false)
         }
-        Ok(())
     }
 
     fn p_icall(
@@ -1049,7 +1095,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         iid: InstId,
         bid: BBlockId,
         inst: &'static Inst,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<bool, CompilationError> {
         let Inst::IndirectCall {
             ftyidx,
             callop,
@@ -1076,8 +1122,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             .into(),
         )?;
         self.outline_until(bid)?;
-
-        Ok(())
+        Ok(false)
     }
 
     /// Outline until the successor block to `bid` is encountered. Returns `Err` if irregular
@@ -1099,6 +1144,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
             _ => panic!(),
         };
+
+        let mut prev_bid = cur_bid;
         let mut recurse = 0;
         loop {
             let ta = {
@@ -1111,7 +1158,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 ta.to_owned()
             };
             let cnd_bid = self.ta_to_bid(&ta).unwrap();
-            self.check_correct_successor(cnd_bid)?;
+            self.check_correct_successor(prev_bid, cnd_bid)?;
 
             if cnd_bid.funcidx() == tgt_bid.funcidx() {
                 if cnd_bid.is_entry() {
@@ -1147,17 +1194,19 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
             }
 
-            self.prev_bid = Some(cnd_bid);
+            prev_bid = cnd_bid;
             self.ta_iter.next();
         }
         Ok(())
     }
 
-    /// Check that `cnd_bid` is a successor `prev_bid` returning `Err` otherwise. If `prev_bid` is
-    /// `None`, this function returns `Ok` by definition.
-    fn check_correct_successor(&self, cnd_bid: BBlockId) -> Result<(), CompilationError> {
-        if let Some(prev_bid) = self.prev_bid
-            && !cnd_bid.static_intraprocedural_successor_of(&prev_bid, self.am)
+    /// Check that `cnd_bid` is a successor to `prev_bid` returning `Err` otherwise.
+    fn check_correct_successor(
+        &self,
+        prev_bid: BBlockId,
+        cnd_bid: BBlockId,
+    ) -> Result<(), CompilationError> {
+        if !cnd_bid.static_intraprocedural_successor_of(&prev_bid, self.am)
             && !cnd_bid.is_entry()
             && !self.am.bblock(&prev_bid).is_return()
         {
@@ -1337,19 +1386,19 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             panic!()
         };
 
-        let next_bb = self.peek_next_bbid().unwrap();
+        let next_bid = self.peek_next_bbid().unwrap();
         assert_eq!(
-            next_bb.funcidx(),
+            next_bid.funcidx(),
             iid.funcidx(),
             "Control flow has diverged"
         );
-        assert!(next_bb.bbidx() == *true_bb || next_bb.bbidx() == *false_bb);
+        assert!(next_bid.bbidx() == *true_bb || next_bid.bbidx() == *false_bb);
 
         let cond_iidx = self.p_operand(cond)?;
         self.push_guard(
             bid,
-            iid,
-            next_bb.bbidx() == *true_bb,
+            self.next_pc(iid),
+            next_bid.bbidx() == *true_bb,
             cond_iidx,
             safepoint,
             None,
@@ -1520,7 +1569,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
             .into(),
         )?;
-        self.push_guard(bid, iid.clone(), true, icmp, safepoint, None)
+        self.push_guard(bid, self.next_pc(iid.clone()), true, icmp, safepoint, None)
     }
 
     fn p_ptradd(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
@@ -1588,17 +1637,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         let frame = self.frames.pop().unwrap();
         if !self.frames.is_empty() {
-            let last_frame = self.frames.last_mut().unwrap();
-            last_frame.call_safepoint = None;
             if let Some(val_iidx) = val {
-                last_frame.set_local(frame.call_iid.unwrap(), val_iidx);
+                let frame = self.frames.last_mut().unwrap();
+                frame.set_local(frame.pc.clone().unwrap(), val_iidx);
             }
             Ok(false)
         } else {
             // We've returned out of the function that started tracing. Stop processing any
             // remaining blocks and emit a return instruction that naturally returns from a
             // compiled trace into the interpreter.
-            let safepoint = frame.call_safepoint.unwrap();
+            let safepoint = frame.pc_safepoint.unwrap();
             // We currently don't support passing values back during early returns.
             assert!(val.is_none());
             self.opt.push_inst(hir::Return { safepoint }.into())?;
@@ -1815,17 +1863,14 @@ enum BuildModKind<Reg: RegT> {
 /// An inlined frame.
 #[derive(Debug)]
 struct Frame {
-    /// If this is an inlined frame (i.e. for all but the bottom frame), this is the [InstId] of
-    /// the call instruction. This is used to link the return value when the inlined frame is
-    /// popped.
-    call_iid: Option<InstId>,
-    func: FuncIdx,
     /// This frame's arguments. This is not mutated after frame creation.
     args: SmallVec<[hir::InstIdx; 1]>,
+    locals: HashMap<InstId, hir::InstIdx>,
+    pc: Option<InstId>,
     /// The current safepoint for this frame. This has no initial value at frame entry, and is
     /// updated at every call site.
-    call_safepoint: Option<&'static DeoptSafepoint>,
-    locals: HashMap<InstId, hir::InstIdx>,
+    pc_safepoint: Option<&'static DeoptSafepoint>,
+    prev_pc: Option<InstId>,
 }
 
 impl Frame {

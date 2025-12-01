@@ -466,7 +466,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         .unwrap()
                         .0,
                 );
-                println!("{break_reg:?} {:?}", ractions.distinct_copies);
 
                 ractions.spills.push(RegSpill {
                     iidxs: self.rstates.iidxs(break_reg).clone(),
