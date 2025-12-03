@@ -113,7 +113,7 @@ impl J2 {
             };
 
             if is_near {
-                *lk = SyncSafePtr(buf);
+                *lk = SyncSafePtr(unsafe { buf.byte_add(len) });
                 return CodeBufInProgress::new(buf as *mut u8, len);
             }
 
