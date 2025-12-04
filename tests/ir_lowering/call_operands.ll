@@ -6,8 +6,7 @@
 ;         call f(1i32, 2i32, 3i32) [safepoint: 1i64, ()]
 ;         ret 0i32
 ;     }
-;
-;     func llvm.experimental.stackmap(%arg0: i64, %arg1: i32, ...);
+;     ...
 
 ; Check a call instruction lowers and prints correctly.
 ;

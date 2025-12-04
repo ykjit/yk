@@ -18,11 +18,14 @@ use crate::{
     mt::{MT, TraceId},
     trace::{AOTTraceIterator, TraceAction},
 };
+use smallvec::SmallVec;
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
 
 /// Caller-saved registers in DWARF notation.
 static CALLER_CLOBBER_REG: [u16; 9] = [0, 1, 2, 4, 5, 8, 9, 10, 11];
+/// Registers which contain the arguments to the control point.
+static CTRL_POINT_ARG_REGS: [u16; 2] = [4, 5];
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {
@@ -172,23 +175,42 @@ impl TraceBuilder {
                 todo!("Deal with multi register locations");
             }
 
-            // Rewrite registers to their spill locations. We need to do this as we no longer
-            // push/pop registers around the control point to reduce its overhead. We know that
-            // for every live variable in a caller-saved register there must exist a spill offset
-            // in that location's extras.
+            // Rewrite caller-save registers to their saved locations. We need to do this as we no
+            // longer push/pop registers around the control point to reduce its overhead.
+            //
+            // For every *non-argument* caller-save register either the register is saved to the
+            // stack (as a spill) or it is saved to another register.
+            //
+            // Note that the first two argument registers, although caller-save, aren't necessarily
+            // saved. This is because the control point takes two arguments which themselves could
+            // be described as live variables by the stackmap.
             let loc = match &var[0] {
                 yksmp::Location::Register(reg, size, v) => {
                     let mut newloc = None;
-                    for offset in v {
-                        if *offset < 0 {
-                            newloc = Some(yksmp::Location::Indirect(6, i32::from(*offset), *size));
-                            break;
+                    for extra in v {
+                        if *extra >= 0 {
+                            let extra = u16::try_from(*extra).unwrap();
+                            assert!(
+                                !CALLER_CLOBBER_REG.contains(&extra)
+                                    || CTRL_POINT_ARG_REGS.contains(&extra)
+                            );
+                            newloc = Some(yksmp::Location::Register(extra, *size, SmallVec::new()));
+                            break; // Stop now, a register save is the best-case scenario.
+                        } else if *extra < 0 && newloc.is_none() {
+                            newloc = Some(yksmp::Location::Indirect(6, i32::from(*extra), *size));
+                            // No `break`. Keep trying, in case we find the value in a register,
+                            // which is preferable.
                         }
                     }
+                    // If `reg` was caller-save, then we must have found a saved copy, or it
+                    // wasn't saved because the value is also being passed as an argument.
+                    assert!(
+                        !CALLER_CLOBBER_REG.contains(reg)
+                            || newloc.is_some()
+                            || CTRL_POINT_ARG_REGS.contains(reg)
+                    );
                     if let Some(loc) = newloc {
                         loc
-                    } else if CALLER_CLOBBER_REG.contains(reg) {
-                        panic!("No spill offset for caller-saved register.")
                     } else {
                         var[0].clone()
                     }
