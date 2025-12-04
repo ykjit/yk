@@ -136,6 +136,7 @@ impl ArbBitInt {
     }
 
     /// Sign extend the underlying value and, if it is representable as an `isize`, return it.
+    #[allow(dead_code)]
     pub(crate) fn to_sign_ext_isize(&self) -> Option<isize> {
         assert_eq!(
             usize::try_from(isize::BITS).unwrap(),

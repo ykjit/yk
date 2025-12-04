@@ -241,7 +241,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 .iter()
                 .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
                 .collect::<Vec<_>>();
-            self.opt.push_inst(hir::Inst::Exit(hir::Exit(exit_vars)))?;
+            self.opt.feed(hir::Inst::Exit(hir::Exit(exit_vars)))?;
         }
 
         let (entry, tys) = self.opt.build();
@@ -392,7 +392,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         };
 
         // We now try pushing the guard instruction...
-        let iidx = self.opt.push_inst(hinst.into())?;
+        let iidx = self.opt.feed(hinst.into())?;
         // ...but if it turned into a non-guard then it means the guard was optimised away and we
         // should remove the corresponding [GuardRestore].
         match self.opt.inst(iidx) {
@@ -419,7 +419,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         iid: InstId,
         inst: hir::Inst,
     ) -> Result<hir::InstIdx, CompilationError> {
-        let iidx = self.opt.push_inst(inst)?;
+        let iidx = self.opt.feed(inst)?;
         self.frames.last_mut().unwrap().set_local(iid, iidx);
         Ok(iidx)
     }
@@ -431,7 +431,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     ) -> Result<hir::InstIdx, CompilationError> {
         // We could, if we want, do some sort of caching for constants so that we don't end up with
         // as many duplicate instructions.
-        self.opt.push_inst(hir::Const { tyidx, kind }.into())
+        self.opt.feed(hir::Const { tyidx, kind }.into())
     }
 
     /// Translate a [TraceAction] to a [BBlockId]. If `ta` is not a mappable block, this will
@@ -533,7 +533,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 hir::ConstKind::Float(_) => todo!(),
                 hir::ConstKind::Int(x) => {
                     let tyidx = self.opt.push_ty(hir::Ty::Int(x.bitw()))?;
-                    self.opt.push_inst(
+                    self.opt.feed(
                         hir::Const {
                             tyidx,
                             kind: kind.clone(),
@@ -543,7 +543,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
                 hir::ConstKind::Ptr(_) => {
                     let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
-                    self.opt.push_inst(
+                    self.opt.feed(
                         hir::Const {
                             tyidx,
                             kind: kind.clone(),
@@ -608,7 +608,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     assert_eq!(fromvlocs.len(), 1);
                     self.vloc_to_const(fromvlocs.iter().nth(0).unwrap())?
                 } else {
-                    self.opt.push_inst(hir::Arg { tyidx }.into())?
+                    self.opt.feed(hir::Arg { tyidx }.into())?
                 };
                 locals.insert(iid.clone(), iidx);
                 entry_vars.push(fromvlocs.clone());
@@ -737,10 +737,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 let (addr, inst) = if gl.is_threadlocal() {
                     let addr = self.j2.dlsym(gl.name(), true).unwrap().0;
                     assert!(!addr.is_null());
-                    (
-                        addr.addr(),
-                        self.opt.push_inst(hir::ThreadLocal(addr).into()),
-                    )
+                    (addr.addr(), self.opt.feed(hir::ThreadLocal(addr).into()))
                 } else {
                     let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
                     let addr = self.globals[usize::from(*gidx)].addr();
@@ -1560,7 +1557,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let _bitw = self.opt.inst_bitw(&*self.opt, val_iidx);
         let const_iidx = self.promotion_data_to_const(self.am.type_(*tyidx))?;
 
-        let icmp = self.opt.push_inst(
+        let icmp = self.opt.feed(
             hir::ICmp {
                 pred: hir::IPred::Eq,
                 lhs: val_iidx,
@@ -1585,7 +1582,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         };
         let mut ptr = self.p_operand(ptr)?;
         if *const_off != 0 {
-            ptr = self.opt.push_inst(
+            ptr = self.opt.feed(
                 hir::PtrAdd {
                     ptr,
                     // LLVM only allows 32 bit offsets, so this should never fail.
@@ -1612,7 +1609,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let elem_size = u32::try_from(*elem_size).map_err(|_| {
                 CompilationError::LimitExceeded("PtrAdd elem_size doesn't fit in u32".into())
             })?;
-            ptr = self.opt.push_inst(
+            ptr = self.opt.feed(
                 hir::DynPtrAdd {
                     ptr,
                     num_elems,
@@ -1649,7 +1646,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let safepoint = frame.pc_safepoint.unwrap();
             // We currently don't support passing values back during early returns.
             assert!(val.is_none());
-            self.opt.push_inst(hir::Return { safepoint }.into())?;
+            self.opt.feed(hir::Return { safepoint }.into())?;
             Ok(true)
         }
     }
@@ -1767,7 +1764,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     tyidx,
                     hir::ConstKind::Int(ArbBitInt::from_u64(bitw, check_vals[0])),
                 )?;
-                self.opt.push_inst(
+                self.opt.feed(
                     hir::ICmp {
                         pred: hir::IPred::Eq,
                         lhs: val_iidx,
@@ -1784,7 +1781,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             for v in &check_vals[1..] {
                 let const_iidx =
                     self.const_to_iidx(tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(bitw, *v)))?;
-                let next_icmp = self.opt.push_inst(
+                let next_icmp = self.opt.feed(
                     hir::ICmp {
                         pred: hir::IPred::Eq,
                         lhs: val_iidx,
@@ -1793,7 +1790,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     }
                     .into(),
                 )?;
-                icmp = self.opt.push_inst(
+                icmp = self.opt.feed(
                     hir::Or {
                         tyidx: i1_tyidx,
                         lhs: icmp,

@@ -1887,7 +1887,7 @@ impl Iterator for MaxBitIter {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use super::*;
     use crate::{
         compile::{
@@ -1965,7 +1965,7 @@ mod test {
 
     #[derive(Copy, Clone, Debug, Display, EnumCount, FromRepr, PartialEq)]
     #[repr(u8)]
-    enum TestReg {
+    pub(crate) enum TestReg {
         GPR0,
         GPR1,
         GPR2,
@@ -2016,7 +2016,7 @@ mod test {
     }
 
     index_vec::define_index_type! {
-        pub(super) struct TestRegIdx = u8;
+        pub(crate) struct TestRegIdx = u8;
     }
 
     struct TestRegTestIter<Reg> {
