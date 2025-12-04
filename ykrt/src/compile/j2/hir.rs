@@ -3478,12 +3478,10 @@ impl InstT for ZExt {
 /// Information about a guard necessary for deopt and side-tracing.
 #[derive(Clone, Debug)]
 pub(super) struct Frame {
-    pub safepoint: &'static aot_ir::DeoptSafepoint,
-    /// If this is an inlined frame (i.e. for all but the bottom frame), this is the [InstId] of
-    /// the call instruction. This is used to link the return value when the inlined frame is
-    /// popped.
-    pub call_iid: Option<aot_ir::InstId>,
-    pub func: aot_ir::FuncIdx,
+    pub pc: aot_ir::InstId,
+    /// The current safepoint for this frame. This has no initial value at frame entry, and is
+    /// updated at every call site.
+    pub pc_safepoint: &'static DeoptSafepoint,
     /// One [InstIdx] for each live variable in `safepoint.lives`, stored in order relative to
     /// `safepoint.lives`.
     pub exit_vars: Vec<InstIdx>,

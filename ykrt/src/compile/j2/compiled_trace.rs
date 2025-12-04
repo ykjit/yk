@@ -271,12 +271,8 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
 /// The information about a frame necessary for deopt and side-tracing.
 #[derive(Debug)]
 pub(super) struct DeoptFrame<Reg: RegT> {
-    pub safepoint: &'static DeoptSafepoint,
-    /// If this is an inlined frame (i.e. for all but the bottom frame), this is the [InstId] of
-    /// the call instruction. This is used to link the return value when the inlined frame is
-    /// popped.
-    pub call_iid: Option<aot_ir::InstId>,
-    pub func: aot_ir::FuncIdx,
+    pub pc: InstId,
+    pub pc_safepoint: &'static DeoptSafepoint,
     /// The information necessary for deopt and side-tracing: in a sense we precalculate this from
     /// `self.vars` to (a) avoid us having to carry around a [hir::Module] (b) optimise how much we
     /// need to read/write. It's currently unclear whether doing this is a good trade

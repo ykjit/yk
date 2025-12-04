@@ -330,21 +330,19 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 .iter()
                 .map(
                     |Frame {
-                         safepoint,
-                         call_iid,
-                         func,
+                         pc,
+                         pc_safepoint,
                          exit_vars,
                      }| {
-                        let smap = aot_smaps.get(usize::try_from(safepoint.id).unwrap()).0;
-                        assert_eq!(exit_vars.len(), safepoint.lives.len());
+                        let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
+                        assert_eq!(exit_vars.len(), pc_safepoint.lives.len());
                         assert_eq!(exit_vars.len(), smap.live_vals.len());
                         DeoptFrame {
-                            safepoint,
-                            call_iid: call_iid.to_owned(),
-                            func: *func,
+                            pc: pc.clone(),
+                            pc_safepoint,
                             vars: exit_vars
                                 .iter()
-                                .zip(safepoint.lives.iter().zip(smap.live_vals.iter()))
+                                .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
                                 .map(|(iidx, (aot_op, smap_loc))| {
                                     let fromvlocs = ra.varlocs_for_deopt(*iidx);
                                     let mut tovlocs = AB::smp_to_vloc(smap_loc);
