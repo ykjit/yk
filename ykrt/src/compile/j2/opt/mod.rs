@@ -6,6 +6,7 @@ use index_vec::IndexVec;
 pub(super) mod noopt;
 #[allow(clippy::module_inception)]
 pub(super) mod opt;
+mod strength_fold;
 
 /// An optimiser. By definition this operates on one [Block] at a time, so it is both [ModLikeT]
 /// and [BlockLikeT].
@@ -42,10 +43,10 @@ pub(super) trait OptT: ModLikeT + BlockLikeT {
     /// If `iidx` is greater than the number of instructions the optimiser currently holds.
     fn map_iidx(&self, iidx: InstIdx) -> InstIdx;
 
-    /// Push an instruction and return an [InstIdx]. The returned [InstIdx] may refer to a
-    /// previously inserted instruction, as an optimiser might prove that `inst` is unneeded.
-    /// That previously inserted instruction may not even be of the same kind as `inst`!
-    fn push_inst(&mut self, inst: Inst) -> Result<InstIdx, CompilationError>;
+    /// Feed an instruction into the optimiser and return an [InstIdx]. The returned [InstIdx] may
+    /// refer to a previously inserted instruction, as an optimiser might prove that `inst` is
+    /// unneeded. That previously inserted instruction may not even be of the same kind as `inst`!
+    fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError>;
 
     /// Push a type [ty]. This type may be cached, and thus the [TyIdx] returned may not
     /// monotonically increase.

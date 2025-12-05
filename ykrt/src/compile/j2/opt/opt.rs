@@ -4,24 +4,32 @@
 
 use crate::compile::{
     CompilationError,
-    j2::{hir::*, opt::OptT},
-    jitc_yk::arbbitint::ArbBitInt,
+    j2::{
+        hir::*,
+        opt::{OptT, strength_fold::strength_fold},
+    },
 };
 use index_vec::*;
 
 pub(in crate::compile::j2) struct Opt {
-    insts: IndexVec<InstIdx, Inst>,
-    ranges: IndexVec<InstIdx, Range>,
+    instkits: IndexVec<InstIdx, InstKit>,
     tys: IndexVec<TyIdx, Ty>,
 }
 
 impl Opt {
     pub(in crate::compile::j2) fn new() -> Self {
         Self {
-            insts: IndexVec::new(),
-            ranges: IndexVec::new(),
+            instkits: IndexVec::new(),
             tys: IndexVec::new(),
         }
+    }
+
+    /// Push `inst` into this optimisation module.
+    pub(super) fn push_inst(&mut self, inst: Inst) -> InstIdx {
+        self.instkits.push(InstKit {
+            inst,
+            range: Range::Unknown,
+        })
     }
 }
 
@@ -37,13 +45,22 @@ impl ModLikeT for Opt {
 
 impl BlockLikeT for Opt {
     fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[usize::from(idx)]
+        &self.instkits[usize::from(idx)].inst
     }
 }
 
 impl OptT for Opt {
     fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>) {
-        (Block { insts: self.insts }, self.tys)
+        (
+            Block {
+                insts: self
+                    .instkits
+                    .into_iter()
+                    .map(|x| x.inst)
+                    .collect::<IndexVec<_, _>>(),
+            },
+            self.tys,
+        )
     }
 
     fn peel(self) -> (Block, Block) {
@@ -51,208 +68,21 @@ impl OptT for Opt {
     }
 
     fn map_iidx(&self, iidx: InstIdx) -> InstIdx {
-        match self.ranges[iidx] {
+        match self.instkits[iidx].range {
             Range::Unknown => iidx,
             Range::Equivalent(other) => other,
         }
     }
 
-    /// This can be called recursively.
-    fn push_inst(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
+    fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         let inst = inst
             .map_iidxs(|iidx| self.map_iidx(iidx))
             .canonicalise(self, self);
 
-        match &inst {
-            Inst::And(And { tyidx, lhs, rhs }) => {
-                if let (
-                    Inst::Const(Const { kind: lhs_kind, .. }),
-                    Inst::Const(Const { kind: rhs_kind, .. }),
-                ) = (&self.insts[*lhs], &self.insts[*rhs])
-                {
-                    let (ConstKind::Int(lhs_c), ConstKind::Int(rhs_c)) = (lhs_kind, rhs_kind)
-                    else {
-                        panic!()
-                    };
-                    self.ranges.push(Range::Unknown);
-                    return Ok(self.insts.push(Inst::Const(Const {
-                        tyidx: *tyidx,
-                        kind: ConstKind::Int(lhs_c.bitand(rhs_c)),
-                    })));
-                }
-            }
-            Inst::DynPtrAdd(DynPtrAdd {
-                ptr,
-                num_elems,
-                elem_size,
-            }) => {
-                if let Inst::Const(Const { tyidx: _, kind }) = &self.insts[*num_elems] {
-                    let ConstKind::Int(nelems) = kind else {
-                        panic!()
-                    };
-                    let v = nelems.to_sign_ext_isize().unwrap();
-                    let off =
-                        i32::try_from(v.checked_mul(isize::try_from(*elem_size).unwrap()).unwrap())
-                            .unwrap();
-                    self.ranges.push(Range::Unknown);
-                    if off == 0 {
-                        return Ok(*ptr);
-                    } else {
-                        return self.push_inst(Inst::PtrAdd(PtrAdd {
-                            ptr: *ptr,
-                            off,
-                            in_bounds: false,
-                            nusw: false,
-                            nuw: false,
-                        }));
-                    }
-                }
-            }
-            Inst::Guard(Guard {
-                expect,
-                cond,
-                bid: _,
-                entry_vars: _,
-                gridx: _,
-                switch: _,
-            }) => {
-                if let Inst::Const(_) = &self.insts[*cond] {
-                    return Ok(*cond);
-                }
-                if *expect
-                    && let Inst::ICmp(ICmp {
-                        lhs,
-                        rhs,
-                        pred: IPred::Eq,
-                        ..
-                    }) = &self.insts[*cond]
-                    && let Inst::Const(_) = &self.insts[*rhs]
-                {
-                    match &self.ranges[*lhs] {
-                        Range::Unknown => self.ranges[*lhs] = Range::Equivalent(*rhs),
-                        Range::Equivalent(x) => {
-                            if x != rhs {
-                                todo!("{x:?} {rhs:?}");
-                            }
-                        }
-                    }
-                }
-            }
-            Inst::ICmp(ICmp {
-                pred: IPred::Eq,
-                lhs,
-                rhs,
-                samesign: _,
-            }) => {
-                if let Inst::Const(Const { kind: lhs_kind, .. }) = &self.insts[*lhs]
-                    && let Inst::Const(Const { kind: rhs_kind, .. }) = &self.insts[*rhs]
-                    && lhs_kind == rhs_kind
-                {
-                    let dst_tyidx = self.push_ty(Ty::Int(1))?;
-                    self.ranges.push(Range::Unknown);
-                    return Ok(self.insts.push(Inst::Const(Const {
-                        tyidx: dst_tyidx,
-                        kind: ConstKind::Int(ArbBitInt::from_u64(1, 1)),
-                    })));
-                }
-            }
-            Inst::LShr(LShr {
-                tyidx,
-                lhs,
-                rhs,
-                exact: _,
-            }) => {
-                if let (
-                    Inst::Const(Const { kind: lhs_kind, .. }),
-                    Inst::Const(Const { kind: rhs_kind, .. }),
-                ) = (&self.insts[*lhs], &self.insts[*rhs])
-                {
-                    let (ConstKind::Int(lhs_c), ConstKind::Int(rhs_c)) = (lhs_kind, rhs_kind)
-                    else {
-                        panic!()
-                    };
-                    // If checked_shr fails, we've encountered LLVM poison and can
-                    // choose any value.
-                    let lshr = lhs_c
-                        .checked_lshr(rhs_c.to_zero_ext_u32().unwrap())
-                        .unwrap_or_else(|| ArbBitInt::all_bits_set(lhs_c.bitw()));
-                    self.ranges.push(Range::Unknown);
-                    return Ok(self.insts.push(Inst::Const(Const {
-                        tyidx: *tyidx,
-                        kind: ConstKind::Int(lshr),
-                    })));
-                }
-            }
-            Inst::PtrAdd(PtrAdd {
-                ptr,
-                off,
-                in_bounds,
-                nusw,
-                nuw,
-            }) => {
-                // LLVM semantics require pointer arithmetic to wrap as though they were "pointer
-                // index typed".
-                assert!(!in_bounds && !nusw && !nuw);
-                if let Inst::Const(Const { tyidx, kind }) = &self.insts[*ptr] {
-                    let ConstKind::Ptr(addr) = kind else { panic!() };
-                    self.ranges.push(Range::Unknown);
-                    return Ok(self.insts.push(Inst::Const(Const {
-                        tyidx: *tyidx,
-                        kind: ConstKind::Ptr(
-                            addr.wrapping_add_signed(isize::try_from(*off).unwrap()),
-                        ),
-                    })));
-                }
-            }
-            Inst::SExt(SExt { tyidx, val }) => {
-                if let Inst::Const(Const {
-                    tyidx: _src_tyidx,
-                    kind,
-                }) = &self.insts[*val]
-                {
-                    match kind {
-                        ConstKind::Double(_) | ConstKind::Float(_) => unreachable!(),
-                        ConstKind::Int(src_val) => {
-                            let dst_bitw = self.tys[*tyidx].bitw();
-                            let dst_val = src_val.sign_extend(dst_bitw);
-                            let dst_tyidx = self.push_ty(Ty::Int(dst_bitw))?;
-                            self.ranges.push(Range::Unknown);
-                            return Ok(self.insts.push(Inst::Const(Const {
-                                tyidx: dst_tyidx,
-                                kind: ConstKind::Int(dst_val),
-                            })));
-                        }
-                        ConstKind::Ptr(_) => todo!(),
-                    }
-                }
-            }
-            Inst::ZExt(ZExt { tyidx, val }) => {
-                if let Inst::Const(Const {
-                    tyidx: _src_tyidx,
-                    kind,
-                }) = &self.insts[*val]
-                {
-                    match kind {
-                        ConstKind::Double(_) | ConstKind::Float(_) => unreachable!(),
-                        ConstKind::Int(src_val) => {
-                            let dst_bitw = self.tys[*tyidx].bitw();
-                            let dst_val = src_val.zero_extend(dst_bitw);
-                            let dst_tyidx = self.push_ty(Ty::Int(dst_bitw))?;
-                            self.ranges.push(Range::Unknown);
-                            return Ok(self.insts.push(Inst::Const(Const {
-                                tyidx: dst_tyidx,
-                                kind: ConstKind::Int(dst_val),
-                            })));
-                        }
-                        ConstKind::Ptr(_) => todo!(),
-                    }
-                }
-            }
-            _ => (),
+        match strength_fold(self, inst) {
+            OptOutcome::Rewritten(inst) | OptOutcome::Unchanged(inst) => Ok(self.push_inst(inst)),
+            OptOutcome::ReducedTo(iidx) => Ok(iidx),
         }
-
-        self.ranges.push(Range::Unknown);
-        Ok(self.insts.push(inst))
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
@@ -260,7 +90,91 @@ impl OptT for Opt {
     }
 }
 
-enum Range {
+/// What an optimisation has managed to make of a given input [Inst].
+pub(super) enum OptOutcome {
+    /// The input [Inst] has been rewritten to a new [Inst].
+    Rewritten(Inst),
+    /// The input [Inst] is equivalent to [InstIdx].
+    ReducedTo(InstIdx),
+    /// The input [Inst] could not be optimised: it must be returned here so that it can be passed
+    /// on to the next phase.
+    Unchanged(Inst),
+}
+
+/// What we know about a given [InstIdx].
+struct InstKit {
+    /// The [Inst] at a given [InstIdx].
+    inst: Inst,
+    /// The current range of values know for [InstIdx].
+    range: Range,
+}
+
+pub(super) enum Range {
     Unknown,
+    #[allow(unused)]
     Equivalent(InstIdx),
+}
+
+#[cfg(test)]
+pub(in crate::compile::j2::opt) mod test {
+    use super::*;
+    use crate::compile::j2::{hir_parser::str_to_mod, regalloc::test::TestReg};
+    use fm::FMBuilder;
+    use index_vec::IndexVec;
+    use lazy_static::lazy_static;
+    use regex::Regex;
+
+    lazy_static! {
+        static ref PTN_RE: Regex = Regex::new(r"\{\{.+?\}\}").unwrap();
+        static ref PTN_RE_IGNORE: Regex = Regex::new(r"\{\{_}\}").unwrap();
+        static ref TEXT_RE: Regex = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
+    }
+
+    pub(in crate::compile::j2::opt) fn opt_and_test<F>(mod_s: &str, opt_f: F, ptn: &str)
+    where
+        F: Fn(&mut Opt, Inst) -> OptOutcome,
+    {
+        let m = str_to_mod::<TestReg>(mod_s);
+        let mut opt = Box::new(Opt::new());
+        opt.tys = m.tys;
+        let ModKind::Test {
+            entry_vlocs,
+            block: Block { insts },
+        } = m.kind
+        else {
+            panic!()
+        };
+        let mut opt_map = IndexVec::with_capacity(insts.len());
+        for inst in insts.into_iter() {
+            let inst = inst.map_iidxs(|x| opt_map[x]);
+            match opt_f(&mut opt, inst) {
+                OptOutcome::Rewritten(inst) | OptOutcome::Unchanged(inst) => {
+                    opt_map.push(opt.push_inst(inst));
+                }
+                OptOutcome::ReducedTo(iidx) => {
+                    opt_map.push(iidx);
+                }
+            }
+        }
+        let (block, tys) = opt.build();
+        let m = Mod {
+            trid: m.trid,
+            kind: ModKind::Test { entry_vlocs, block },
+            tys,
+            guard_restores: IndexVec::new(),
+            addr_name_map: None,
+        };
+        let s = m.to_string();
+
+        let fmb = FMBuilder::new(ptn)
+            .unwrap()
+            .name_matcher_ignore(PTN_RE_IGNORE.clone(), TEXT_RE.clone())
+            .name_matcher(PTN_RE.clone(), TEXT_RE.clone())
+            .build()
+            .unwrap();
+        if let Err(e) = fmb.matches(&s) {
+            eprintln!("{e}");
+            panic!();
+        }
+    }
 }

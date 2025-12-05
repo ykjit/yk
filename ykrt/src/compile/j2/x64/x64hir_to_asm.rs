@@ -4067,7 +4067,7 @@ mod test {
         for ptn in ptns {
             match fmatcher(ptn).matches(&log) {
                 Ok(()) => return,
-                Err(e) => failures.push(format!("{e:?}\n\n{log}\n\n{ptn}")),
+                Err(e) => failures.push(e.to_string()),
             }
         }
         panic!("{}", failures.join("\n\n"));

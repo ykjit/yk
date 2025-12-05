@@ -51,7 +51,7 @@ impl OptT for NoOpt {
         iidx
     }
 
-    fn push_inst(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
+    fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         Ok(self.insts.push(inst))
     }
 
