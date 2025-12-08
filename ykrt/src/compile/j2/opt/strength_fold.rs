@@ -15,6 +15,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
     match inst {
         Inst::Add(x) => opt_add(opt, x),
         Inst::And(x) => opt_and(opt, x),
+        Inst::DynPtrAdd(x) => opt_dynptradd(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
         Inst::ICmp(x) => opt_icmp(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
@@ -101,6 +102,49 @@ fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
     }
 
     OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_dynptradd(
+    opt: &mut Opt,
+    inst @ DynPtrAdd {
+        ptr,
+        num_elems,
+        elem_size,
+    }: DynPtrAdd,
+) -> OptOutcome {
+    if let Inst::Const(Const {
+        kind: ConstKind::Int(c),
+        ..
+    }) = opt.inst_rewrite(num_elems)
+    {
+        // LLVM IR semantics are such that GEP indices are sign-extended or truncated to the
+        // "pointer index size" (which for address space zero is a pointer-sized integer).
+        // First make sure we will be operating on that type.
+        let v = c.to_sign_ext_isize().unwrap();
+        // In LLVM slient two's compliment wrapping is permitted, but in Rust a `unchecked_mul()`
+        // that wraps is UB. It seems unlikely that the overflow case will actually happen, so we
+        // can cross that bridge if we come to it.
+        let off = v.checked_mul(isize::try_from(elem_size).unwrap()).unwrap();
+        let off = i32::try_from(off).unwrap();
+        if off == 0 {
+            OptOutcome::ReducedTo(ptr)
+        } else {
+            // We've reduced to a `ptradd`, so run it through that pass, which may be able to
+            // optimise it further.
+            opt_ptradd(
+                opt,
+                PtrAdd {
+                    ptr,
+                    off,
+                    in_bounds: false,
+                    nusw: false,
+                    nuw: false,
+                },
+            )
+        }
+    } else {
+        OptOutcome::Rewritten(inst.into())
+    }
 }
 
 fn opt_guard(opt: &mut Opt, inst @ Guard { expect, cond, .. }: Guard) -> OptOutcome {
@@ -416,6 +460,43 @@ mod test {
           ...
           %1: i8 = 255
           exit [%1]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_dynptradd() {
+        // Constant fold the number of elements
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: i32 = 10
+          %2: i8 = dynptradd %0, %1, 4
+          blackbox %2
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: i32 = 10
+          %2: ptr = 0x125C
+          blackbox %2
+        ",
+        );
+
+        // Constant fold the number of elements and optimise the intermediate ptradd
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: ptr = ptradd %0, 4
+          %2: i32 = 10
+          %3: i8 = dynptradd %1, %2, 4
+          blackbox %3
+        ",
+            "
+          %0: ptr = arg
+          %1: ptr = ptradd %0, 4
+          %2: i32 = 10
+          %3: ptr = ptradd %0, 44
+          blackbox %3
         ",
         );
     }
