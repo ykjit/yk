@@ -80,6 +80,7 @@ use std::{
     assert_matches::assert_matches,
     fmt::{Debug, Display, Formatter},
 };
+use vob::Vob;
 
 pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
     m: &'a Mod<AB::Reg>,
@@ -388,9 +389,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
     /// Topologically sort `ractions.distinct_copies`, breaking cycles as necessary, such that no
     /// [RegAction::Copy] can overwrite a value needed by a later [RegAction::Copy]. This will
-    /// update the `ractions.spills` and `raction.unspills` as necessary.
+    /// update the `ractions.spills` and `raction.unspills` as necessary. Note:
+    /// `ractions.distinct_copies` will be sorted in reverse-order (i.e. suitable for reverse code
+    /// generation).
     fn toposort_distinct_copies(
-        &mut self,
+        &self,
         ractions: &mut RegActions<AB::Reg>,
     ) -> Result<(), CompilationError> {
         // If there are 0 or 1 distinct [RegCopy]s, there is no chance of overlap, and no need to
@@ -399,68 +402,82 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             return Ok(());
         }
 
-        // We now continually loop over `ractions.distinct_copies` attempting a topological sort
-        // using Kahn's algorithm. If the topological sort fails, we have detected a cycle: we take
-        // one of the registers in the cycle, spill it, and try again.
+        // This is a fixed-point algorithm which produces an ordered set of copies without cycles.
         //
-        // In the below, a "node" is a [RegCopy]. `src_reg` and `dst_reg` implicitly define edges.
+        // To do that, on each iteration we attempt a topological sort on `ractions.distinct_copies`
+        // using Kahn's algorithm. If the topological sort fails, we have detected a cycle; we then
+        // take one of the registers identified in the cycle and use it to break that cycle; and
+        // try again. If the topological sort succeeds, we can then use its output to sort
+        // `ractions.distinct_copies`.
         loop {
-            // The degree of incoming edges to nodes.
-            let mut degrees = index_vec![0; AB::Reg::MAX_REGIDX.index()];
+            // Stage 1: a topological sort using Kahn's algorithm. Registers are nodes and
+            // [RegCopy]s define edges.
+
+            // Work out all the nodes (i.e. registers) and the number of incoming edges (i.e.
+            // register copies) to those nodes.
+            let mut nodes = Vob::from_elem(false, AB::Reg::MAX_REGIDX.index());
+            let mut indegrees = index_vec![0; AB::Reg::MAX_REGIDX.index()];
             for RegCopy {
-                src_reg: _,
-                dst_reg,
-                ..
+                src_reg, dst_reg, ..
             } in &ractions.distinct_copies
             {
-                degrees[dst_reg.regidx()] += 1;
+                nodes.set(src_reg.regidx().index(), true);
+                nodes.set(dst_reg.regidx().index(), true);
+                indegrees[dst_reg.regidx()] += 1;
             }
 
-            // The unordered set of nodes in the queue to be considered.
-            let mut queue = ractions
-                .distinct_copies
-                .iter()
-                .filter(|RegCopy { src_reg, .. }| degrees[src_reg.regidx()] == 0)
-                .cloned()
+            // Create the initial queue. Note: this must not contain duplicate nodes. Fortunately,
+            // that happens naturally because of our `Vob` representation of `nodes`.
+            let mut queue = nodes
+                .iter_set_bits(..)
+                .map(|x| AB::Reg::from_regidx(<AB::Reg as RegT>::RegIdx::from_usize(x)))
+                .filter(|reg| indegrees[reg.regidx()] == 0)
                 .collect::<Vec<_>>();
 
             // The topologically sorted output we will build up.
             let mut ordered = Vec::new();
-            while let Some(
-                x @ RegCopy {
-                    src_reg: _,
-                    dst_reg,
-                    ..
-                },
-            ) = queue.pop()
-            {
-                ordered.push(x);
-                for nbr @ RegCopy {
+            while let Some(reg) = queue.pop() {
+                ordered.push(reg);
+                for RegCopy {
                     src_reg: nbr_src_reg,
-                    dst_reg: _nbr_dst_reg,
+                    dst_reg,
                     ..
                 } in &ractions.distinct_copies
                 {
-                    if dst_reg == *nbr_src_reg {
-                        assert!(degrees[dst_reg.regidx()] > 0);
-                        degrees[dst_reg.regidx()] -= 1;
-                        if degrees[dst_reg.regidx()] == 0 {
-                            queue.push(nbr.clone());
+                    if reg == *nbr_src_reg {
+                        assert!(indegrees[dst_reg.regidx()] > 0);
+                        indegrees[dst_reg.regidx()] -= 1;
+                        if indegrees[dst_reg.regidx()] == 0 {
+                            queue.push(*dst_reg);
                         }
                     }
                 }
             }
 
-            if ractions.distinct_copies.len() == ordered.len() {
-                // The topological sort succeeded.
-                ractions.distinct_copies = ordered;
+            // Stage 2: did the topological sort succeed?
+            if ordered.len() == nodes.iter_set_bits(..).count() {
+                // It succeeded (i.e. so no cycles were detected). However, the topological sort
+                // has given us an ordered sequence of _nodes_ but we want an ordered sequence of
+                // _edges_. Fortunately we can easily derive the latter from the former. Note: we
+                // deliberately sort these in "reverse" order due to the general context of
+                // backwards code generation.
+                ractions.distinct_copies.sort_by_key(
+                    |RegCopy {
+                         src_reg, dst_reg, ..
+                     }| {
+                        (
+                            ordered.iter().position(|x| x == src_reg).unwrap(),
+                            ordered.iter().position(|x| x == dst_reg).unwrap(),
+                        )
+                    },
+                );
                 return Ok(());
             } else {
-                // The topological sort failed: there will be at least one register with a degree
-                // greater than 0. Arbitrarily pick one such register, and use it to break the
-                // cycle we've detected.
+                // It failed. Each register in the cycle -- of which there must be at least two --
+                // will have an indegree greater than zero. Arbitrarily pick one such register, and
+                // use it to break the cycle.
                 let break_reg = AB::Reg::from_regidx(
-                    degrees
+                    indegrees
                         .iter_enumerated()
                         .find(|(_, degree)| **degree > 0)
                         .unwrap()
@@ -1803,7 +1820,7 @@ struct RegActions<Reg: RegT> {
     /// distinct registers (i.e. where `src_reg` and `dst_reg` are different).
     ///
     /// After `break_regactions_cycles` this will be an ordered set of register copies stored in
-    /// forward-order.
+    /// reverse-order.
     distinct_copies: Vec<RegCopy<Reg>>,
     /// An unordered set of instructions .
     spills: Vec<RegSpill<Reg>>,
@@ -2884,7 +2901,7 @@ pub(crate) mod test {
         for ptn in ptns {
             match fmatcher(ptn).matches(&log) {
                 Ok(_) => return,
-                Err(e) => failures.push(format!("{e:?}\n\n{log}\n\n{ptn}")),
+                Err(e) => failures.push(format!("{e}")),
             }
         }
 
@@ -3007,6 +3024,154 @@ pub(crate) mod test {
           spill GPR0 Undefined stack_off=16 bitw=8
         ",
             ],
+        );
+    }
+
+    #[test]
+    fn toposort() {
+        let m = str_to_mod::<TestReg>("");
+        let b = match &m.kind {
+            ModKind::Test { block, .. } => block,
+            _ => panic!(),
+        };
+
+        // Encoding all the possible outcomes below is annoying, particularly if the current code
+        // can't generate them. Some of these tests therefore over-specialise on the current
+        // output: they may need to be adjusted if the algorithm produces different output.
+
+        // A direct cycle which must be broken.
+        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
+        let mut ractions = RegActions {
+            unspills: Vec::new(),
+            self_copies: Vec::new(),
+            distinct_copies: vec![
+                RegCopy {
+                    bitw: 8,
+                    src_reg: TestReg::GPR0,
+                    src_fill: RegFill::Undefined,
+                    dst_reg: TestReg::GPR1,
+                    dst_fill: RegFill::Undefined,
+                },
+                RegCopy {
+                    bitw: 8,
+                    src_reg: TestReg::GPR1,
+                    src_fill: RegFill::Undefined,
+                    dst_reg: TestReg::GPR0,
+                    dst_fill: RegFill::Undefined,
+                },
+            ],
+            spills: Vec::new(),
+        };
+        ra.toposort_distinct_copies(&mut ractions).unwrap();
+        assert_eq!(ractions.spills.len(), 1);
+        assert_matches!(
+            ractions.distinct_copies.as_slice(),
+            &[RegCopy {
+                src_reg: TestReg::GPR0,
+                dst_reg: TestReg::GPR1,
+                ..
+            }]
+        );
+
+        // A direct cycle which must be broken
+        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
+        let mut ractions = RegActions {
+            unspills: Vec::new(),
+            self_copies: Vec::new(),
+            distinct_copies: vec![
+                RegCopy {
+                    bitw: 8,
+                    src_reg: TestReg::GPR0,
+                    src_fill: RegFill::Undefined,
+                    dst_reg: TestReg::GPR1,
+                    dst_fill: RegFill::Undefined,
+                },
+                RegCopy {
+                    bitw: 8,
+                    src_reg: TestReg::GPR1,
+                    src_fill: RegFill::Undefined,
+                    dst_reg: TestReg::GPR2,
+                    dst_fill: RegFill::Undefined,
+                },
+                RegCopy {
+                    bitw: 8,
+                    src_reg: TestReg::GPR2,
+                    src_fill: RegFill::Undefined,
+                    dst_reg: TestReg::GPR0,
+                    dst_fill: RegFill::Undefined,
+                },
+            ],
+            spills: Vec::new(),
+        };
+        ra.toposort_distinct_copies(&mut ractions).unwrap();
+        assert_eq!(ractions.spills.len(), 1);
+        assert_matches!(
+            ractions.distinct_copies.as_slice(),
+            &[
+                RegCopy {
+                    src_reg: TestReg::GPR0,
+                    dst_reg: TestReg::GPR1,
+                    ..
+                },
+                RegCopy {
+                    src_reg: TestReg::GPR1,
+                    dst_reg: TestReg::GPR2,
+                    ..
+                }
+            ]
+        );
+
+        // A non-cycle, but which must be carefully ordered to avoid overwritings.
+        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
+        let mut ractions = RegActions {
+            unspills: Vec::new(),
+            self_copies: Vec::new(),
+            distinct_copies: vec![
+                RegCopy {
+                    bitw: 8,
+                    src_reg: TestReg::GPR0,
+                    src_fill: RegFill::Undefined,
+                    dst_reg: TestReg::GPR1,
+                    dst_fill: RegFill::Undefined,
+                },
+                RegCopy {
+                    bitw: 8,
+                    src_reg: TestReg::GPR2,
+                    src_fill: RegFill::Undefined,
+                    dst_reg: TestReg::GPR0,
+                    dst_fill: RegFill::Undefined,
+                },
+                RegCopy {
+                    bitw: 8,
+                    src_reg: TestReg::GPR0,
+                    src_fill: RegFill::Undefined,
+                    dst_reg: TestReg::GPR3,
+                    dst_fill: RegFill::Undefined,
+                },
+            ],
+            spills: Vec::new(),
+        };
+        ra.toposort_distinct_copies(&mut ractions).unwrap();
+        assert_eq!(ractions.spills.len(), 0);
+        assert_matches!(
+            ractions.distinct_copies.as_slice(),
+            &[
+                RegCopy {
+                    src_reg: TestReg::GPR2,
+                    dst_reg: TestReg::GPR0,
+                    ..
+                },
+                RegCopy {
+                    src_reg: TestReg::GPR0,
+                    dst_reg: TestReg::GPR3,
+                    ..
+                },
+                RegCopy {
+                    src_reg: TestReg::GPR0,
+                    dst_reg: TestReg::GPR1,
+                    ..
+                }
+            ]
         );
     }
 

@@ -4752,8 +4752,8 @@ mod test {
               ; %1: float = arg [Reg("xmm15")]
               ; %2: double = arg [Reg("xmm14")]
               ...
-              movsd xmm0, xmm15
               movsd xmm1, xmm14
+              movsd xmm0, xmm15
               ; call %0(%1, %2)
               call rax
               ...
@@ -4822,8 +4822,8 @@ mod test {
               ; %2: double = arg [Reg("xmm14")]
               ...
               mov r.64.x, rax
-              movsd xmm0, xmm15
               movsd xmm1, xmm14
+              movsd xmm0, xmm15
               ; call %0(%1, %2)
               mov eax, 2
               call r.64.x
@@ -6940,8 +6940,8 @@ mod test {
               movsxd r.64.y, r.32._
               ...
               ; %2: i32 = smax %0, %1
-              cmp r.64.x, r.64.y
-              cmovl r.64.x, r.64.y
+              cmp r.64.y, r.64.x
+              cmovl r.64.y, r.64.x
               ...
             "],
         );
@@ -6981,8 +6981,8 @@ mod test {
               movsxd r.64.y, r.32._
               ...
               ; %2: i32 = smin %0, %1
-              cmp r.64.x, r.64.y
-              cmovg r.64.x, r.64.y
+              cmp r.64.y, r.64.x
+              cmovg r.64.y, r.64.x
               ...
             "],
         );
