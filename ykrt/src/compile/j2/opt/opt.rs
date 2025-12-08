@@ -76,7 +76,7 @@ impl Opt {
     }
 
     /// Push `inst` into this optimisation module.
-    pub(super) fn push_inst(&mut self, inst: Inst) -> InstIdx {
+    fn push_inst(&mut self, inst: Inst) -> InstIdx {
         self.instkits.push(InstKit {
             inst,
             range: Range::Unknown,
