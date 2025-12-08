@@ -1,6 +1,57 @@
-//! A draft trace optimiser. This is not tested, and is merely intended to help us understand what
-//! APIs and so on we need to write a better trace optimiser. This will probably need to be
-//! somewhat rethought when peeling is implemented.
+//! Trace optimisation.
+//!
+//! This is a forward-pass optimiser: as it advances it builds up knowledge about past values that
+//! can be taken advantage of by later values. In essence, as we go along we can view older
+//! instructions "rewritten" to take advantage of later knowledge: note, this doesn't change the
+//! older instructions in the trace. This rewriting then allows us to more easily optimise the
+//! current instruction being fed into the optimiser.
+//!
+//! For example consider:
+//!
+//! ```text
+//! %0: i8 = arg [reg]
+//! %1: i8 = 9
+//! %2: i1 = icmp eq, %0, %1
+//! guard true, %2, []
+//! %4: i8 = 4
+//! %5: i8 = add %0, %4
+//! blackbox %5
+//! ```
+//!
+//! What do we know about `%2` is this trace is fed into the optimiser?
+//!
+//! * When feeding in `%0` and `%1` we do not know that `%2` will even exist: it is an error to ask
+//!   questions about `%2` at this point.
+//! * When feeding in the `icmp` we do not know if we will be able to prove that it is equivalent
+//!   to a previous instruction. In other words we don't know if the `icmp` will become `%2` or
+//!   will not be inserted.
+//! * At the `guard` we know that `%2` is an `i1` whose values will be 0..255 (inc.).
+//! * After the `guard` we know that `%0` must be exactly equal to `9` (otherwise the guard will
+//!   have failed).
+//!
+//! After this point, we can then make use of our knowledge that `%0` and `%1` are equivalent:
+//!
+//! * We can "rewrite" the `add` instruction to `add %1, %4`.
+//! * Recognising that, after the rewrite, the `add` is adding two constants, we can constant fold
+//!   the `add` to the constant 13.
+//!
+//! Thus after optimisation (including dead code elimination) the trace will look as follows:
+//!
+//! ```text
+//! %0: i8 = arg [reg]
+//! %1: i8 = 9
+//! %2: i1 = icmp eq, %0, %1
+//! guard true, %2, []
+//! %5: i8 = 13
+//! blackbox %5
+//! ```
+//!
+//!
+//! ## How passes should use the optimiser
+//!
+//! Passes will be passed an already-rewritten [Inst]. When looking up other instructions, one
+//! should use [Opt::inst_rewrite] to obtain "old" [Inst]s: this automatically rewrites those older
+//! instructions given the current state of knowledge.
 
 use crate::compile::{
     CompilationError,
@@ -25,7 +76,7 @@ impl Opt {
     }
 
     /// Push `inst` into this optimisation module.
-    pub(super) fn push_inst(&mut self, inst: Inst) -> InstIdx {
+    fn push_inst(&mut self, inst: Inst) -> InstIdx {
         self.instkits.push(InstKit {
             inst,
             range: Range::Unknown,
@@ -38,7 +89,8 @@ impl Opt {
     }
 
     /// Rewrite `inst` to reflect knowledge the optimiser has built up (e.g. ranges) and then
-    /// canonicalise.
+    /// canonicalise. In general, passes should not be using this function directly: they should be
+    /// passing instruction indexes to [Self::inst_rewrite].
     pub(super) fn rewrite(&self, inst: Inst) -> Inst {
         inst.map_iidxs(|iidx| self.map_iidx(iidx))
             .canonicalise(self, self)
