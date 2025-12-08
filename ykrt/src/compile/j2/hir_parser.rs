@@ -253,10 +253,17 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         }
                         AstConst::Int(span) => {
                             let s = self.lexer.span_str(span);
-                            let Ty::Int(bitw) = self.tys[tyidx] else {
-                                panic!()
+                            let bitw = match &self.tys[tyidx] {
+                                Ty::Int(bitw) => {
+                                    // We only handle 64-bit ints for now.
+                                    assert!(*bitw <= 64);
+                                    *bitw
+                                }
+                                Ty::Ptr(0) => {
+                                    u32::try_from(std::mem::size_of::<usize>() * 8).unwrap()
+                                }
+                                x => todo!("{x:?}"),
                             };
-                            // We only handle 64-bit ints for now.
                             assert!(
                                 usize::try_from(bitw).unwrap() <= std::mem::size_of::<usize>() * 8
                             );
@@ -290,10 +297,17 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                                 }
                                 val
                             };
-                            self.insts.push(Inst::Const(Const {
-                                tyidx,
-                                kind: ConstKind::Int(ArbBitInt::from_u64(bitw, val)),
-                            }));
+                            self.insts.push(match &self.tys[tyidx] {
+                                Ty::Int(_) => Inst::Const(Const {
+                                    tyidx,
+                                    kind: ConstKind::Int(ArbBitInt::from_u64(bitw, val)),
+                                }),
+                                Ty::Ptr(0) => Inst::Const(Const {
+                                    tyidx,
+                                    kind: ConstKind::Ptr(usize::try_from(val).unwrap()),
+                                }),
+                                _ => unreachable!(),
+                            });
                         }
                     }
                 }

@@ -17,6 +17,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::And(x) => opt_and(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
         Inst::ICmp(x) => opt_icmp(opt, x),
+        Inst::PtrAdd(x) => opt_ptradd(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
         _ => OptOutcome::Rewritten(inst),
     }
@@ -196,6 +197,50 @@ fn opt_icmp(
     }
 
     OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
+    // LLVM semantics require pointer arithmetic to wrap as though they were "pointer index typed"
+    // (a pointer-sized integer, for addrspace 0, the only address space we support right now).
+    let mut off: isize = 0;
+    loop {
+        let PtrAdd {
+            ptr,
+            off: inst_off,
+            in_bounds,
+            nusw,
+            nuw,
+        } = inst;
+        assert!(!in_bounds && !nusw && !nuw);
+
+        off = off.checked_add(isize::try_from(inst_off).unwrap()).unwrap();
+        let ptr_inst = opt.inst_rewrite(ptr);
+        if let Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Ptr(addr),
+        }) = ptr_inst
+        {
+            // Constant fold `ptr + off`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Ptr(addr.wrapping_add_signed(off)),
+            }));
+        } else if let Inst::PtrAdd(x) = ptr_inst {
+            inst = x;
+        } else if off == 0 {
+            // Reduce `ptr + 0` to `x`.
+            return OptOutcome::ReducedTo(ptr);
+        } else {
+            let inst = PtrAdd {
+                ptr,
+                off: i32::try_from(off).unwrap(),
+                in_bounds,
+                nusw,
+                nuw,
+            };
+            return OptOutcome::Rewritten(inst.into());
+        }
+    }
 }
 
 fn opt_sub(
@@ -988,6 +1033,67 @@ mod test {
           blackbox %2
           %4: i1 = icmp sge %0, %1
           blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ptradd() {
+        // Constant folding
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: i8 = ptradd %0, 4
+          blackbox %1
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1238
+          blackbox %1
+        ",
+        );
+
+        // ptr + 0 == ptr
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = ptradd %0, 0
+          blackbox %1
+        ",
+            "
+          %0: ptr = arg
+          blackbox %0
+        ",
+        );
+
+        // Collapsing `ptradd` chains.
+
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = ptradd %0, 4
+          %2: i8 = ptradd %1, 4
+          blackbox %2
+        ",
+            "
+          %0: ptr = arg
+          %1: ptr = ptradd %0, 4
+          %2: ptr = ptradd %0, 8
+          blackbox %2
+        ",
+        );
+
+        // ptr + 0 == ptr
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = ptradd %0, 4
+          blackbox %0
+        ",
+            "
+          %0: ptr = arg
+          %1: ptr = ptradd %0, 4
+          blackbox %0
         ",
         );
     }
