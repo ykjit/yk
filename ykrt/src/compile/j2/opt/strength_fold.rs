@@ -10,10 +10,51 @@ use crate::compile::{
 
 pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
     match inst {
+        Inst::Add(x) => opt_add(opt, x),
         Inst::And(x) => opt_and(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
         _ => OptOutcome::Rewritten(inst),
     }
+}
+
+fn opt_add(
+    opt: &mut Opt,
+    inst @ Add {
+        tyidx,
+        lhs,
+        rhs,
+        nuw,
+        nsw,
+    }: Add,
+) -> OptOutcome {
+    assert!(!nuw && !nsw);
+    if let (
+        Inst::Const(Const {
+            kind: ConstKind::Int(lhs_c),
+            ..
+        }),
+        Inst::Const(Const {
+            kind: ConstKind::Int(rhs_c),
+            ..
+        }),
+    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
+    {
+        // Constant fold `c1 + c2`.
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(lhs_c.wrapping_add(&rhs_c)),
+        }));
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(rhs_c),
+        ..
+    }) = opt.inst_rewrite(rhs)
+        && rhs_c.to_zero_ext_u8() == Some(0)
+    {
+        // Reduce `x + 0` to `x`.
+        return OptOutcome::ReducedTo(lhs);
+    }
+
+    OptOutcome::Rewritten(inst.into())
 }
 
 fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
@@ -100,6 +141,54 @@ mod test {
             mod_s,
             |opt, inst| strength_fold(opt, opt.rewrite(inst)),
             ptn,
+        );
+    }
+
+    #[test]
+    fn opt_add() {
+        // Simple constant folding e.g `1 + 2`.
+        test_sf(
+            "
+          %0: i8 = 2
+          %1: i8 = 3
+          %2: i8 = add %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 5
+          blackbox %2
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = 0
+          %1: i8 = 255
+          %2: i8 = add %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 255
+          blackbox %2
+        ",
+        );
+
+        // Strength reduction of `x + 0`.
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 0
+          %2: i8 = add %0, %1
+          exit [%2]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          %1: i8 = 0
+          exit [%0]
+        ",
         );
     }
 
