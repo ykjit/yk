@@ -43,10 +43,17 @@ pub(super) trait OptT: ModLikeT + BlockLikeT {
     /// If `iidx` is greater than the number of instructions the optimiser currently holds.
     fn map_iidx(&self, iidx: InstIdx) -> InstIdx;
 
-    /// Feed an instruction into the optimiser and return an [InstIdx]. The returned [InstIdx] may
-    /// refer to a previously inserted instruction, as an optimiser might prove that `inst` is
-    /// unneeded. That previously inserted instruction may not even be of the same kind as `inst`!
+    /// Feed a non-void instruction into the optimiser and return an [InstIdx]. The returned
+    /// [InstIdx] may refer to a previously inserted instruction, as an optimiser might prove that
+    /// `inst` is unneeded. That previously inserted instruction may not even be of the same kind
+    /// as `inst`!
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError>;
+
+    /// Feed a possibly removable instruction into the optimiser, returning `Some([InstIdx])` if it
+    /// was not removed. If `Some` is returned, the [InstIdx] may refer to a previously inserted
+    /// instruction, as an optimiser might prove that `inst` is unneeded. That previously inserted
+    /// instruction may not even be of the same kind as `inst`!
+    fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError>;
 
     /// Push a type [ty]. This type may be cached, and thus the [TyIdx] returned may not
     /// monotonically increase.

@@ -1936,7 +1936,7 @@ impl InstT for ICmp {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "icmp {} %{}, %{}",
-            self.pred.to_str(),
+            self.pred.as_str(),
             usize::from(self.lhs),
             usize::from(self.rhs)
         )
@@ -1971,7 +1971,7 @@ impl IPred {
         }
     }
 
-    fn to_str(&self) -> &str {
+    fn as_str(&self) -> &str {
         match self {
             IPred::Eq => "eq",
             IPred::Ne => "ne",

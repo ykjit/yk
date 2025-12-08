@@ -52,7 +52,13 @@ impl OptT for NoOpt {
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
+        assert_ne!(*inst.ty(self), Ty::Void);
         Ok(self.insts.push(inst))
+    }
+
+    fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
+        assert_eq!(*inst.ty(self), Ty::Void);
+        Ok(Some(self.insts.push(inst)))
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {

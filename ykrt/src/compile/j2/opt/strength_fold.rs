@@ -3,7 +3,7 @@
 use crate::compile::{
     j2::{
         hir::*,
-        opt::opt::{Opt, OptOutcome},
+        opt::opt::{Opt, OptOutcome, Range},
     },
     jitc_yk::arbbitint::ArbBitInt,
 };
@@ -11,7 +11,8 @@ use crate::compile::{
 pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
     match inst {
         Inst::And(x) => opt_and(opt, x),
-        _ => OptOutcome::Unchanged(inst),
+        Inst::Guard(x) => opt_guard(opt, x),
+        _ => OptOutcome::Rewritten(inst),
     }
 }
 
@@ -28,7 +29,7 @@ fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
             kind: ConstKind::Int(rhs_c),
             ..
         }),
-    ) = (opt.inst(lhs), &opt.inst(rhs))
+    ) = (opt.inst_rewrite(lhs), &opt.inst_rewrite(rhs))
     {
         // Constant fold `c1 & c2`.
         return OptOutcome::Rewritten(Inst::Const(Const {
@@ -38,13 +39,13 @@ fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
     } else if let Inst::Const(Const {
         kind: ConstKind::Int(rhs_c),
         ..
-    }) = opt.inst(rhs)
+    }) = opt.inst_rewrite(rhs)
     {
         if rhs_c.to_zero_ext_u8() == Some(0) {
             // Reduce `x & 0` to `0`.
             return OptOutcome::ReducedTo(rhs);
         }
-        if rhs_c == &ArbBitInt::all_bits_set(rhs_c.bitw()) {
+        if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
             // Reduce `x & y` to `x` if `y` is a constant that has all
             // the necessary bits set for this integer type. For an i1, for
             // example, `x & 1` can be replaced with `x`.
@@ -52,7 +53,41 @@ fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
         }
     }
 
-    OptOutcome::Unchanged(inst.into())
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_guard(opt: &mut Opt, inst @ Guard { expect, cond, .. }: Guard) -> OptOutcome {
+    let cond_inst = opt.inst_rewrite(cond);
+    if let Inst::Const(_) = cond_inst {
+        // A guard that references a constant is, by definition, not needed and
+        // doesn't affect future analyses.
+        return OptOutcome::NotNeeded;
+    } else if expect {
+        if let Inst::ICmp(ICmp {
+            pred: IPred::Eq,
+            lhs,
+            rhs,
+            samesign,
+        }) = cond_inst
+            && lhs == rhs
+        {
+            assert!(!samesign);
+            return OptOutcome::NotNeeded;
+        }
+        if let Inst::ICmp(ICmp {
+            pred: IPred::Eq,
+            lhs,
+            rhs,
+            samesign,
+        }) = cond_inst
+            && let Inst::Const(_) = opt.inst_rewrite(rhs)
+        {
+            assert!(!samesign);
+            opt.set_range(lhs, Range::Equivalent(rhs));
+        }
+    }
+
+    OptOutcome::Rewritten(inst.into())
 }
 
 #[cfg(test)]
@@ -61,7 +96,11 @@ mod test {
     use crate::compile::j2::opt::opt::test::opt_and_test;
 
     fn test_sf(mod_s: &str, ptn: &str) {
-        opt_and_test(mod_s, strength_fold, ptn);
+        opt_and_test(
+            mod_s,
+            |opt, inst| strength_fold(opt, opt.rewrite(inst)),
+            ptn,
+        );
     }
 
     #[test]
@@ -136,6 +175,123 @@ mod test {
           ...
           %1: i8 = 255
           exit [%1]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_guard() {
+        // Guard referencing a constant
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i1 = 1
+          guard true, %1, []
+          exit [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i1 = 1
+          exit [%0]
+        ",
+        );
+
+        // Guard setting a range on IPred::Eq
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 4
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          exit [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 4
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          exit [%1]
+        ",
+        );
+
+        // Guard not setting a range on IPred::Ne
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 4
+          %2: i1 = icmp ne %0, %1
+          guard true, %2, []
+          exit [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 4
+          %2: i1 = icmp ne %0, %1
+          guard true, %2, []
+          exit [%0]
+        ",
+        );
+
+        // Equivalency determined by guards
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 1
+          %3: i8 = 4
+          %4: i1 = icmp eq %0, %3
+          %5: i1 = icmp eq %0, %1
+          guard true, %4, []
+          guard true, %5, []
+          blackbox %0
+          blackbox %1
+          exit [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = 1
+          %3: i8 = 4
+          %4: i1 = icmp eq %0, %3
+          %5: i1 = icmp eq %0, %1
+          guard true, %4, []
+          guard true, %5, []
+          blackbox %3
+          blackbox %3
+          exit [%3, %3]
+        ",
+        );
+
+        // Removing duplicate guards after equivalency
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 1
+          %3: i8 = 4
+          %4: i1 = icmp eq %0, %3
+          %5: i1 = icmp eq %0, %1
+          %6: i1 = icmp eq %1, %3
+          guard true, %4, []
+          guard true, %5, []
+          guard true, %6, []
+          blackbox %0
+          blackbox %1
+          exit [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = 1
+          %3: i8 = 4
+          %4: i1 = icmp eq %0, %3
+          %5: i1 = icmp eq %0, %1
+          %6: i1 = icmp eq %1, %3
+          guard true, %4, []
+          guard true, %5, []
+          blackbox %3
+          blackbox %3
+          exit [%3, %3]
         ",
         );
     }

@@ -241,7 +241,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 .iter()
                 .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
                 .collect::<Vec<_>>();
-            self.opt.feed(hir::Inst::Exit(hir::Exit(exit_vars)))?;
+            self.opt.feed_void(hir::Inst::Exit(hir::Exit(exit_vars)))?;
         }
 
         let (entry, tys) = self.opt.build();
@@ -392,23 +392,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         };
 
         // We now try pushing the guard instruction...
-        let iidx = self.opt.feed(hinst.into())?;
+        let iidx = self.opt.feed_void(hinst.into())?;
         // ...but if it turned into a non-guard then it means the guard was optimised away and we
         // should remove the corresponding [GuardRestore].
-        match self.opt.inst(iidx) {
-            hir::Inst::Guard(hir::Guard {
-                gridx: pushed_gridx,
-                ..
-            }) => {
-                // If this fails, it means the optimiser has returned a reference to an older
-                // guard. That seems a reasonable thing to do, but I haven't thought it through
-                // yet.
-                assert_eq!(gridx, *pushed_gridx);
-            }
-            _ => {
-                self.guard_restores
-                    .remove(self.guard_restores.len_idx() - 1);
-            }
+        if iidx.is_none() {
+            self.guard_restores
+                .remove(self.guard_restores.len_idx() - 1);
         }
         Ok(())
     }
@@ -1073,15 +1062,21 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 .map(|x| x.insert(addr, func.name().to_owned()));
             let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
             let tgt_iidx = self.const_to_iidx(tyidx, hir::ConstKind::Ptr(addr))?;
-            self.push_inst_and_link_local(
-                iid,
-                hir::Call {
-                    tgt: tgt_iidx,
-                    func_tyidx: ftyidx,
-                    args: jargs,
-                }
-                .into(),
-            )?;
+
+            let inst = hir::Call {
+                tgt: tgt_iidx,
+                func_tyidx: ftyidx,
+                args: jargs,
+            }
+            .into();
+            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
+                panic!()
+            };
+            if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
+                self.opt.feed_void(inst)?;
+            } else {
+                self.push_inst_and_link_local(iid, inst)?;
+            }
             self.outline_until(bid)?;
             Ok(false)
         }
@@ -1109,15 +1104,20 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         for x in args {
             jargs.push(self.p_operand(x)?);
         }
-        self.push_inst_and_link_local(
-            iid,
-            hir::Call {
-                tgt: tgt_iidx,
-                func_tyidx: ftyidx,
-                args: jargs,
-            }
-            .into(),
-        )?;
+        let inst = hir::Call {
+            tgt: tgt_iidx,
+            func_tyidx: ftyidx,
+            args: jargs,
+        }
+        .into();
+        let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
+            panic!()
+        };
+        if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
+            self.opt.feed_void(inst)?;
+        } else {
+            self.push_inst_and_link_local(iid, inst)?;
+        }
         self.outline_until(bid)?;
         Ok(false)
     }
@@ -1282,7 +1282,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     len,
                     volatile,
                 };
-                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+                self.opt.feed_void(hinst.into()).map(|_| ())
             }
             "memset" => {
                 let [dst, val, len, volatile]: [hir::InstIdx; 4] =
@@ -1303,7 +1303,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     len,
                     volatile,
                 };
-                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+                self.opt.feed_void(hinst.into()).map(|_| ())
             }
             "smax" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
@@ -1646,7 +1646,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let safepoint = frame.pc_safepoint.unwrap();
             // We currently don't support passing values back during early returns.
             assert!(val.is_none());
-            self.opt.feed(hir::Return { safepoint }.into())?;
+            self.opt.feed_void(hir::Return { safepoint }.into())?;
             Ok(true)
         }
     }
@@ -1677,22 +1677,22 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         .map(|_| ())
     }
 
-    fn p_store(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+    fn p_store(&mut self, _iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
         let Inst::Store { val, tgt, volatile } = inst else {
             panic!()
         };
         let ptr = self.p_operand(tgt)?;
         let val = self.p_operand(val)?;
-        self.push_inst_and_link_local(
-            iid,
-            hir::Store {
-                ptr,
-                val,
-                is_volatile: *volatile,
-            }
-            .into(),
-        )
-        .map(|_| ())
+        self.opt
+            .feed_void(
+                hir::Store {
+                    ptr,
+                    val,
+                    is_volatile: *volatile,
+                }
+                .into(),
+            )
+            .map(|_| ())
     }
 
     fn p_switch(

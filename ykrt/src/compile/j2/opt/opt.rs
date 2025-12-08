@@ -31,6 +31,42 @@ impl Opt {
             range: Range::Unknown,
         })
     }
+
+    /// Produce a rewritten version of `iidx`: this is a convenience function over [Self::rewrite].
+    pub(super) fn inst_rewrite(&self, iidx: InstIdx) -> Inst {
+        self.rewrite(self.inst(iidx).clone())
+    }
+
+    /// Rewrite `inst` to reflect knowledge the optimiser has built up (e.g. ranges) and then
+    /// canonicalise.
+    pub(super) fn rewrite(&self, inst: Inst) -> Inst {
+        inst.map_iidxs(|iidx| self.map_iidx(iidx))
+            .canonicalise(self, self)
+    }
+
+    /// Set `iidx`'s range to `range`.
+    pub(super) fn set_range(&mut self, iidx: InstIdx, range: Range) {
+        let instkit = self.instkits.get_mut(iidx).unwrap();
+        match instkit.range {
+            Range::Unknown => instkit.range = range,
+            Range::Equivalent(cur_iidx) => match range {
+                Range::Unknown => todo!(),
+                Range::Equivalent(new_iidx) => {
+                    if cur_iidx != new_iidx {
+                        if let Inst::Const(_) = self.inst(cur_iidx) {
+                            self.instkits.get_mut(new_iidx).unwrap().range =
+                                Range::Equivalent(cur_iidx);
+                        } else if let Inst::Const(_) = self.inst(new_iidx) {
+                            self.instkits.get_mut(cur_iidx).unwrap().range =
+                                Range::Equivalent(new_iidx);
+                            self.instkits.get_mut(iidx).unwrap().range =
+                                Range::Equivalent(new_iidx);
+                        }
+                    }
+                }
+            },
+        }
+    }
 }
 
 impl ModLikeT for Opt {
@@ -68,20 +104,32 @@ impl OptT for Opt {
     }
 
     fn map_iidx(&self, iidx: InstIdx) -> InstIdx {
-        match self.instkits[iidx].range {
-            Range::Unknown => iidx,
-            Range::Equivalent(other) => other,
+        let mut search = iidx;
+        loop {
+            match self.instkits[search].range {
+                Range::Unknown => return search,
+                Range::Equivalent(other) => search = other,
+            }
         }
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
-        let inst = inst
-            .map_iidxs(|iidx| self.map_iidx(iidx))
-            .canonicalise(self, self);
-
+        assert_ne!(*inst.ty(self), Ty::Void);
+        let inst = self.rewrite(inst);
         match strength_fold(self, inst) {
-            OptOutcome::Rewritten(inst) | OptOutcome::Unchanged(inst) => Ok(self.push_inst(inst)),
+            OptOutcome::NotNeeded => panic!(),
+            OptOutcome::Rewritten(inst) => Ok(self.push_inst(inst)),
             OptOutcome::ReducedTo(iidx) => Ok(iidx),
+        }
+    }
+
+    fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
+        assert_eq!(*inst.ty(self), Ty::Void);
+        let inst = self.rewrite(inst);
+        match strength_fold(self, inst) {
+            OptOutcome::NotNeeded => Ok(None),
+            OptOutcome::Rewritten(inst) => Ok(Some(self.push_inst(inst))),
+            OptOutcome::ReducedTo(iidx) => Ok(Some(iidx)),
         }
     }
 
@@ -91,14 +139,13 @@ impl OptT for Opt {
 }
 
 /// What an optimisation has managed to make of a given input [Inst].
+#[derive(Debug)]
 pub(super) enum OptOutcome {
+    NotNeeded,
     /// The input [Inst] has been rewritten to a new [Inst].
     Rewritten(Inst),
     /// The input [Inst] is equivalent to [InstIdx].
     ReducedTo(InstIdx),
-    /// The input [Inst] could not be optimised: it must be returned here so that it can be passed
-    /// on to the next phase.
-    Unchanged(Inst),
 }
 
 /// What we know about a given [InstIdx].
@@ -148,7 +195,8 @@ pub(in crate::compile::j2::opt) mod test {
         for inst in insts.into_iter() {
             let inst = inst.map_iidxs(|x| opt_map[x]);
             match opt_f(&mut opt, inst) {
-                OptOutcome::Rewritten(inst) | OptOutcome::Unchanged(inst) => {
+                OptOutcome::NotNeeded => (),
+                OptOutcome::Rewritten(inst) => {
                     opt_map.push(opt.push_inst(inst));
                 }
                 OptOutcome::ReducedTo(iidx) => {
@@ -176,5 +224,78 @@ pub(in crate::compile::j2::opt) mod test {
             eprintln!("{e}");
             panic!();
         }
+    }
+
+    #[test]
+    fn equivalency() {
+        // This test is a somewhat weak test -- but better than nothing! -- that instruction
+        // equivalency works during optimisation stages. This partly tests functions in this module
+        // but also relies on `strength_fold` doing the right thing.
+
+        fn test_sf(mod_s: &str, ptn: &str) {
+            opt_and_test(
+                mod_s,
+                |opt, inst| strength_fold(opt, opt.rewrite(inst)),
+                ptn,
+            );
+        }
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i8 = 4
+          %3: i1 = icmp eq %0, %2
+          %4: i8 = 4
+          %5: i1 = icmp eq %0, %4
+          guard true, %3, []
+          guard true, %5, []
+          blackbox %0
+          blackbox %4
+          exit [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 1
+          %2: i8 = 4
+          %3: i1 = icmp eq %0, %2
+          %4: i8 = 4
+          %5: i1 = icmp eq %0, %4
+          guard true, %3, []
+          guard true, %5, []
+          blackbox %4
+          blackbox %4
+          exit [%4]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 1
+          %3: i8 = 4
+          %4: i1 = icmp eq %0, %3
+          %5: i1 = icmp eq %0, %1
+          guard true, %4, []
+          guard true, %5, []
+          blackbox %0
+          blackbox %1
+          exit [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = 1
+          %3: i8 = 4
+          %4: i1 = icmp eq %0, %3
+          %5: i1 = icmp eq %0, %1
+          guard true, %4, []
+          guard true, %5, []
+          blackbox %3
+          blackbox %3
+          exit [%3, %3]
+        ",
+        );
     }
 }
