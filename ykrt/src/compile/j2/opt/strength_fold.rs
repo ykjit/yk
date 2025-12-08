@@ -3,7 +3,10 @@
 use crate::compile::{
     j2::{
         hir::*,
-        opt::opt::{Opt, OptOutcome, Range},
+        opt::{
+            OptT,
+            opt::{Opt, OptOutcome, Range},
+        },
     },
     jitc_yk::arbbitint::ArbBitInt,
 };
@@ -13,6 +16,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::Add(x) => opt_add(opt, x),
         Inst::And(x) => opt_and(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
+        Inst::ICmp(x) => opt_icmp(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
         _ => OptOutcome::Rewritten(inst),
     }
@@ -127,6 +131,68 @@ fn opt_guard(opt: &mut Opt, inst @ Guard { expect, cond, .. }: Guard) -> OptOutc
             assert!(!samesign);
             opt.set_range(lhs, Range::Equivalent(rhs));
         }
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_icmp(
+    opt: &mut Opt,
+    inst @ ICmp {
+        pred,
+        lhs,
+        rhs,
+        samesign,
+    }: ICmp,
+) -> OptOutcome {
+    assert!(!samesign);
+    if let (
+        Inst::Const(Const {
+            kind: ConstKind::Int(lhs_c),
+            ..
+        }),
+        Inst::Const(Const {
+            kind: ConstKind::Int(rhs_c),
+            ..
+        }),
+    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
+    {
+        // Constant fold.
+        let v = match pred {
+            IPred::Eq => lhs_c == rhs_c,
+            IPred::Ne => lhs_c != rhs_c,
+            IPred::Ugt => lhs_c.to_zero_ext_u64() > rhs_c.to_zero_ext_u64(),
+            IPred::Uge => lhs_c.to_zero_ext_u64() >= rhs_c.to_zero_ext_u64(),
+            IPred::Ult => lhs_c.to_zero_ext_u64() < rhs_c.to_zero_ext_u64(),
+            IPred::Ule => lhs_c.to_zero_ext_u64() <= rhs_c.to_zero_ext_u64(),
+            IPred::Sgt => lhs_c.to_sign_ext_i64() > rhs_c.to_sign_ext_i64(),
+            IPred::Sge => lhs_c.to_sign_ext_i64() >= rhs_c.to_sign_ext_i64(),
+            IPred::Slt => lhs_c.to_sign_ext_i64() < rhs_c.to_sign_ext_i64(),
+            IPred::Sle => lhs_c.to_sign_ext_i64() <= rhs_c.to_sign_ext_i64(),
+        };
+        let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(1, v as u64)),
+        }));
+    } else if let IPred::Eq | IPred::Uge | IPred::Ule | IPred::Sge | IPred::Sle = pred
+        && opt.map_iidx(lhs) == opt.map_iidx(rhs)
+    {
+        // If the predicate includes equality then `%x eq %x` is trivially true.
+        let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(1, 1)),
+        }));
+    } else if let IPred::Ne | IPred::Ugt | IPred::Ult | IPred::Sgt | IPred::Slt = pred
+        && opt.map_iidx(lhs) == opt.map_iidx(rhs)
+    {
+        // If the predicate includes inequality then `%x ne %x` is trivially false.
+        let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
+        }));
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -422,6 +488,506 @@ mod test {
           blackbox %3
           blackbox %3
           exit [%3, %3]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_icmp() {
+        // Simple constant folding.
+
+        // eq
+        test_sf(
+            "
+          %0: i8 = 5
+          %1: i8 = 5
+          %2: i1 = icmp eq %0, %1
+          blackbox %2
+          %4: i8 = 6
+          %5: i1 = icmp eq %0, %4
+          blackbox %5
+        ",
+            "
+          %0: i8 = 5
+          %1: i8 = 5
+          %2: i1 = 1
+          blackbox %2
+          %4: i8 = 6
+          %5: i1 = 0
+          blackbox %5
+        ",
+        );
+
+        // ne
+        test_sf(
+            "
+          %0: i8 = 5
+          %1: i8 = 5
+          %2: i1 = icmp ne %0, %1
+          blackbox %2
+          %4: i8 = 6
+          %5: i1 = icmp ne %0, %4
+          blackbox %5
+        ",
+            "
+          %0: i8 = 5
+          %1: i8 = 5
+          %2: i1 = 0
+          blackbox %2
+          %4: i8 = 6
+          %5: i1 = 1
+          blackbox %5
+        ",
+        );
+
+        // ugt
+        test_sf(
+            "
+          %0: i8 = 5
+          %1: i8 = 4
+          %2: i1 = icmp ugt %0, %1
+          blackbox %2
+          %4: i8 = 5
+          %5: i1 = icmp ugt %0, %4
+          blackbox %5
+          %7: i8 = 6
+          %8: i1 = icmp ugt %0, %7
+          blackbox %8
+        ",
+            "
+          %0: i8 = 5
+          %1: i8 = 4
+          %2: i1 = 1
+          blackbox %2
+          %4: i8 = 5
+          %5: i1 = 0
+          blackbox %5
+          %7: i8 = 6
+          %8: i1 = 0
+          blackbox %8
+        ",
+        );
+
+        // uge
+        test_sf(
+            "
+          %0: i8 = 5
+          %1: i8 = 4
+          %2: i1 = icmp uge %0, %1
+          blackbox %2
+          %4: i8 = 5
+          %5: i1 = icmp uge %0, %4
+          blackbox %5
+          %7: i8 = 6
+          %8: i1 = icmp uge %0, %7
+          blackbox %8
+        ",
+            "
+          %0: i8 = 5
+          %1: i8 = 4
+          %2: i1 = 1
+          blackbox %2
+          %4: i8 = 5
+          %5: i1 = 1
+          blackbox %5
+          %7: i8 = 6
+          %8: i1 = 0
+          blackbox %8
+        ",
+        );
+
+        // ult
+        test_sf(
+            "
+          %0: i8 = 5
+          %1: i8 = 4
+          %2: i1 = icmp ult %0, %1
+          blackbox %2
+          %4: i8 = 5
+          %5: i1 = icmp ult %0, %4
+          blackbox %5
+          %7: i8 = 6
+          %8: i1 = icmp ult %0, %7
+          blackbox %8
+        ",
+            "
+          %0: i8 = 5
+          %1: i8 = 4
+          %2: i1 = 0
+          blackbox %2
+          %4: i8 = 5
+          %5: i1 = 0
+          blackbox %5
+          %7: i8 = 6
+          %8: i1 = 1
+          blackbox %8
+        ",
+        );
+
+        // ule
+        test_sf(
+            "
+          %0: i8 = 5
+          %1: i8 = 4
+          %2: i1 = icmp ule %0, %1
+          blackbox %2
+          %4: i8 = 5
+          %5: i1 = icmp ule %0, %4
+          blackbox %5
+          %7: i8 = 6
+          %8: i1 = icmp ule %0, %7
+          blackbox %8
+        ",
+            "
+          %0: i8 = 5
+          %1: i8 = 4
+          %2: i1 = 0
+          blackbox %2
+          %4: i8 = 5
+          %5: i1 = 1
+          blackbox %5
+          %7: i8 = 6
+          %8: i1 = 1
+          blackbox %8
+        ",
+        );
+
+        // sgt
+        test_sf(
+            "
+          %0: i8 = -5
+          %1: i8 = -6
+          %2: i1 = icmp sgt %0, %1
+          blackbox %2
+          %4: i8 = -5
+          %5: i1 = icmp sgt %0, %4
+          blackbox %5
+          %7: i8 = -4
+          %8: i1 = icmp sgt %0, %7
+          blackbox %8
+          %10: i8 = 0
+          %11: i1 = icmp sgt %0, %10
+          blackbox %11
+        ",
+            "
+          %0: i8 = 251
+          %1: i8 = 250
+          %2: i1 = 1
+          blackbox %2
+          %4: i8 = 251
+          %5: i1 = 0
+          blackbox %5
+          %7: i8 = 252
+          %8: i1 = 0
+          blackbox %8
+          %10: i8 = 0
+          %11: i1 = 0
+          blackbox %11
+        ",
+        );
+
+        // sge
+        test_sf(
+            "
+          %0: i8 = -5
+          %1: i8 = -6
+          %2: i1 = icmp sge %0, %1
+          blackbox %2
+          %4: i8 = -5
+          %5: i1 = icmp sge %0, %4
+          blackbox %5
+          %7: i8 = -4
+          %8: i1 = icmp sge %0, %7
+          blackbox %8
+          %10: i8 = 0
+          %11: i1 = icmp sge %0, %10
+          blackbox %11
+        ",
+            "
+          %0: i8 = 251
+          %1: i8 = 250
+          %2: i1 = 1
+          blackbox %2
+          %4: i8 = 251
+          %5: i1 = 1
+          blackbox %5
+          %7: i8 = 252
+          %8: i1 = 0
+          blackbox %8
+          %10: i8 = 0
+          %11: i1 = 0
+          blackbox %11
+        ",
+        );
+
+        // slt
+        test_sf(
+            "
+          %0: i8 = -5
+          %1: i8 = -6
+          %2: i1 = icmp slt %0, %1
+          blackbox %2
+          %4: i8 = -5
+          %5: i1 = icmp slt %0, %4
+          blackbox %5
+          %7: i8 = -4
+          %8: i1 = icmp slt %0, %7
+          blackbox %8
+          %10: i8 = 0
+          %11: i1 = icmp slt %0, %10
+          blackbox %11
+        ",
+            "
+          %0: i8 = 251
+          %1: i8 = 250
+          %2: i1 = 0
+          blackbox %2
+          %4: i8 = 251
+          %5: i1 = 0
+          blackbox %5
+          %7: i8 = 252
+          %8: i1 = 1
+          blackbox %8
+          %10: i8 = 0
+          %11: i1 = 1
+          blackbox %11
+        ",
+        );
+
+        // sle
+        test_sf(
+            "
+          %0: i8 = -5
+          %1: i8 = -6
+          %2: i1 = icmp sle %0, %1
+          blackbox %2
+          %4: i8 = -5
+          %5: i1 = icmp sle %0, %4
+          blackbox %5
+          %7: i8 = -4
+          %8: i1 = icmp sle %0, %7
+          blackbox %8
+          %10: i8 = 0
+          %11: i1 = icmp sle %0, %10
+          blackbox %11
+        ",
+            "
+          %0: i8 = 251
+          %1: i8 = 250
+          %2: i1 = 0
+          blackbox %2
+          %4: i8 = 251
+          %5: i1 = 1
+          blackbox %5
+          %7: i8 = 252
+          %8: i1 = 1
+          blackbox %8
+          %10: i8 = 0
+          %11: i1 = 1
+          blackbox %11
+        ",
+        );
+
+        // Equality/inequality comparisons of the same instruction are true/false
+        // respectively.
+
+        // eq
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %0
+          blackbox %2
+          %4: i1 = icmp eq %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 1
+          blackbox %2
+          %4: i1 = icmp eq %0, %1
+          blackbox %4
+        ",
+        );
+
+        // ne
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp ne %0, %0
+          blackbox %2
+          %4: i1 = icmp ne %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 0
+          blackbox %2
+          %4: i1 = icmp ne %0, %1
+          blackbox %4
+        ",
+        );
+
+        // ugt
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp ugt %0, %0
+          blackbox %2
+          %4: i1 = icmp ugt %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 0
+          blackbox %2
+          %4: i1 = icmp ugt %0, %1
+          blackbox %4
+        ",
+        );
+
+        // uge
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp uge %0, %0
+          blackbox %2
+          %4: i1 = icmp uge %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 1
+          blackbox %2
+          %4: i1 = icmp uge %0, %1
+          blackbox %4
+        ",
+        );
+
+        // ult
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = 0
+          blackbox %2
+          %4: i1 = icmp ult %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 0
+          blackbox %2
+          %4: i1 = icmp ult %0, %1
+          blackbox %4
+        ",
+        );
+
+        // ule
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp ule %0, %0
+          blackbox %2
+          %4: i1 = icmp ule %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 1
+          blackbox %2
+          %4: i1 = icmp ule %0, %1
+          blackbox %4
+        ",
+        );
+
+        // sgt
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = 0
+          blackbox %2
+          %4: i1 = icmp sgt %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 0
+          blackbox %2
+          %4: i1 = icmp sgt %0, %1
+          blackbox %4
+        ",
+        );
+
+        // sge
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp sge %0, %0
+          blackbox %2
+          %4: i1 = icmp sge %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 1
+          blackbox %2
+          %4: i1 = icmp sge %0, %1
+          blackbox %4
+        ",
+        );
+
+        // slt
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = 0
+          blackbox %2
+          %4: i1 = icmp slt %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 0
+          blackbox %2
+          %4: i1 = icmp slt %0, %1
+          blackbox %4
+        ",
+        );
+
+        // sge
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp sge %0, %0
+          blackbox %2
+          %4: i1 = icmp sge %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = 1
+          blackbox %2
+          %4: i1 = icmp sge %0, %1
+          blackbox %4
         ",
         );
     }
