@@ -71,12 +71,12 @@ fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
             kind: ConstKind::Int(rhs_c),
             ..
         }),
-    ) = (opt.inst_rewrite(lhs), &opt.inst_rewrite(rhs))
+    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
     {
         // Constant fold `c1 & c2`.
         return OptOutcome::Rewritten(Inst::Const(Const {
             tyidx,
-            kind: ConstKind::Int(lhs_c.bitand(rhs_c)),
+            kind: ConstKind::Int(lhs_c.bitand(&rhs_c)),
         }));
     } else if let Inst::Const(Const {
         kind: ConstKind::Int(rhs_c),
