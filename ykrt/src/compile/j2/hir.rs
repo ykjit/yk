@@ -555,7 +555,7 @@ pub(super) trait InstT: std::fmt::Debug {
 }
 
 #[enum_dispatch(InstT)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) enum Inst {
     Abs,
     Add,
@@ -609,7 +609,7 @@ pub(super) enum Inst {
 }
 
 /// Abs with the same semantics as `llvm.abs.`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Abs {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -655,7 +655,7 @@ impl InstT for Abs {
 }
 
 /// `+` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Add {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -727,7 +727,7 @@ impl InstT for Add {
 }
 
 /// `&` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct And {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -795,7 +795,7 @@ impl InstT for And {
 /// An instruction representing argument *n* passed to a [Block]. In a sense, this is a
 /// pseudo-instruction: it doesn't "do" anything directly, but it does (a) provide a consistent way
 /// of viewing block arguments and it gives each of them a HIR type.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Arg {
     pub tyidx: TyIdx,
 }
@@ -826,7 +826,7 @@ impl InstT for Arg {
 }
 
 /// Arithmetic shift right with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct AShr {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -883,7 +883,7 @@ impl InstT for AShr {
 /// Keep a value alive. Black boxes cannot be optimised away, and thus the value they refer to
 /// cannot be optimised away. This is only used for testing purposes.
 #[cfg(test)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct BlackBox {
     pub val: InstIdx,
 }
@@ -924,7 +924,7 @@ impl InstT for BlackBox {
 ///   5. addrspace is 0,
 ///   6. no function attributes,
 ///   7. no operand bundles.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Call {
     pub tgt: InstIdx,
     pub func_tyidx: TyIdx,
@@ -1004,7 +1004,7 @@ impl InstT for Call {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Const {
     pub tyidx: TyIdx,
     pub kind: ConstKind,
@@ -1095,7 +1095,7 @@ pub(super) enum ConstKind {
 }
 
 /// Count with the number of set bits, with the same semantics as `llvm.ctpop.`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct CtPop {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -1138,7 +1138,7 @@ impl InstT for CtPop {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct DynPtrAdd {
     pub ptr: InstIdx,
     pub num_elems: InstIdx,
@@ -1194,7 +1194,7 @@ impl InstT for DynPtrAdd {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Exit(pub(super) Vec<InstIdx>);
 
 impl InstT for Exit {
@@ -1233,7 +1233,7 @@ impl InstT for Exit {
 }
 
 /// Floating point `+` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct FAdd {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -1295,7 +1295,7 @@ impl InstT for FAdd {
 }
 
 /// Floating point comparison, with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct FCmp {
     /// What LLVM calls `cond`.
     pub pred: FPred,
@@ -1401,7 +1401,7 @@ impl FPred {
 }
 
 /// Floating point `/` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct FDiv {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -1461,7 +1461,7 @@ impl InstT for FDiv {
 }
 
 /// Floor with the same semantics as `llvm.floor.`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Floor {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -1511,7 +1511,7 @@ impl InstT for Floor {
 }
 
 /// Floating point `*` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct FMul {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -1571,7 +1571,7 @@ impl InstT for FMul {
 }
 
 /// Floating point negation with the same semantics as LLVM's `fneg`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct FNeg {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -1623,7 +1623,7 @@ impl InstT for FNeg {
 }
 
 /// Floating point `-` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct FSub {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -1683,7 +1683,7 @@ impl InstT for FSub {
 }
 
 /// Cast from a smaller to a larger floating point type with the same semantics as LLVM's `fpext`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct FPExt {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -1735,7 +1735,7 @@ impl InstT for FPExt {
 }
 
 /// Cast a floating point number to a signed integer with the same semantics as LLVM's `fptosi`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct FPToSI {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -1786,7 +1786,7 @@ impl InstT for FPToSI {
 
 /// A guard that the value produced by `cond` is `expect_true`. If not, the remainder of the
 /// trace is invalid for this execution.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Guard {
     pub expect: bool,
     pub cond: InstIdx,
@@ -1870,7 +1870,7 @@ pub(super) struct Switch {
 }
 
 /// Integer comparison, with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct ICmp {
     /// What LLVM calls `cond`.
     pub pred: IPred,
@@ -1948,7 +1948,7 @@ impl InstT for ICmp {
 }
 
 /// Integer comparison predicate with the same semantics as their LLVM IR equivalents.
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub(super) enum IPred {
     Eq,
     Ne,
@@ -1988,7 +1988,7 @@ impl IPred {
 }
 
 /// Cast a pointer to an int with the same semantics as LLVM's `ptrtoint`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct IntToPtr {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -2037,7 +2037,7 @@ impl InstT for IntToPtr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Load {
     pub tyidx: TyIdx,
     pub ptr: InstIdx,
@@ -2083,7 +2083,7 @@ impl InstT for Load {
 }
 
 /// Logical shift right with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct LShr {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -2138,7 +2138,7 @@ impl InstT for LShr {
 }
 
 /// `memcpy` with the same semantics as LLVM's `llvm.memcpy`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct MemCpy {
     pub dst: InstIdx,
     pub src: InstIdx,
@@ -2205,7 +2205,7 @@ impl InstT for MemCpy {
 }
 
 /// `memcpy` with the same semantics as LLVM's `llvm.memcpy`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct MemSet {
     pub dst: InstIdx,
     pub val: InstIdx,
@@ -2278,7 +2278,7 @@ impl InstT for MemSet {
 }
 
 /// `*` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Mul {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -2350,7 +2350,7 @@ impl InstT for Mul {
 }
 
 /// `|` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Or {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -2418,7 +2418,7 @@ impl InstT for Or {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct PtrAdd {
     pub ptr: InstIdx,
     pub off: i32,
@@ -2467,7 +2467,7 @@ impl InstT for PtrAdd {
 }
 
 /// Cast a pointer to an int with the same semantics as LLVM's `ptrtoint`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct PtrToInt {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -2516,7 +2516,7 @@ impl InstT for PtrToInt {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Return {
     pub safepoint: &'static DeoptSafepoint,
 }
@@ -2551,7 +2551,7 @@ impl InstT for Return {
 }
 
 /// Return the quotient from signed division with the same semantics as LLVM's `sdiv`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct SDiv {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -2612,7 +2612,7 @@ impl InstT for SDiv {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Select {
     pub tyidx: TyIdx,
     pub cond: InstIdx,
@@ -2673,7 +2673,7 @@ impl InstT for Select {
 }
 
 /// Sign extend with the same semantics as LLVM's `sext`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct SExt {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -2735,7 +2735,7 @@ impl InstT for SExt {
 }
 
 /// Shift left with the same semantics as LLVM's `shl`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Shl {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -2788,7 +2788,7 @@ impl InstT for Shl {
 }
 
 /// Cast a signed integer to floating point with the same semantics as LLVM's `sitofp`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct SIToFP {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -2838,7 +2838,7 @@ impl InstT for SIToFP {
 }
 
 /// Return the signed maximum of two values, with the same semantics as LLVM's `llvm.smax`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct SMax {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -2908,7 +2908,7 @@ impl InstT for SMax {
 }
 
 /// Return the signed maximum of two values, with the same semantics as LLVM's `llvm.smin`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct SMin {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -2978,7 +2978,7 @@ impl InstT for SMin {
 }
 
 /// Return the remainder from signed division with the same semantics as LLVM's `srem`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct SRem {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -3038,7 +3038,7 @@ impl InstT for SRem {
 }
 
 /// Store `val` into `ptr` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Store {
     pub val: InstIdx,
     pub ptr: InstIdx,
@@ -3089,7 +3089,7 @@ impl InstT for Store {
 }
 
 /// `-` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Sub {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -3148,7 +3148,7 @@ impl InstT for Sub {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct ThreadLocal(pub *const c_void);
 
 impl InstT for ThreadLocal {
@@ -3189,7 +3189,7 @@ impl InstT for ThreadLocal {
 }
 
 /// Truncate with the same semantics as LLVM's `trunc`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Trunc {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -3248,7 +3248,7 @@ impl InstT for Trunc {
 }
 
 /// Unsigned integer division with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct UDiv {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -3303,7 +3303,7 @@ impl InstT for UDiv {
 }
 
 /// Cast an unsigned integer to floating point with the same semantics as LLVM's `uitofp`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct UIToFP {
     pub tyidx: TyIdx,
     pub val: InstIdx,
@@ -3355,7 +3355,7 @@ impl InstT for UIToFP {
 }
 
 /// `^` with normal LLVM semantics.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Xor {
     pub tyidx: TyIdx,
     /// What LLVM calls `op1`.
@@ -3421,7 +3421,7 @@ impl InstT for Xor {
 }
 
 /// Zero extend with the same semantics as LLVM's `zext`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct ZExt {
     pub tyidx: TyIdx,
     pub val: InstIdx,
