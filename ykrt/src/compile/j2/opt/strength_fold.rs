@@ -21,6 +21,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::ICmp(x) => opt_icmp(opt, x),
         Inst::IntToPtr(x) => opt_inttoptr(opt, x),
         Inst::LShr(x) => opt_lshr(opt, x),
+        Inst::Or(x) => opt_or(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
         Inst::PtrToInt(x) => opt_ptrtoint(opt, x),
         Inst::Select(x) => opt_select(opt, x),
@@ -397,6 +398,54 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
             return OptOutcome::Rewritten(inst.into());
         }
     }
+}
+
+fn opt_or(
+    opt: &mut Opt,
+    inst @ Or {
+        tyidx,
+        lhs,
+        rhs,
+        disjoint,
+    }: Or,
+) -> OptOutcome {
+    assert!(!disjoint);
+    if lhs == rhs {
+        // Reduce x | x to x.
+        return OptOutcome::ReducedTo(lhs);
+    } else if let (
+        Inst::Const(Const {
+            kind: ConstKind::Int(lhs_c),
+            ..
+        }),
+        Inst::Const(Const {
+            kind: ConstKind::Int(rhs_c),
+            ..
+        }),
+    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
+    {
+        // Constant fold `c1 | c2`.
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(lhs_c.bitor(&rhs_c)),
+        }));
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(rhs_c),
+        ..
+    }) = opt.inst_rewrite(rhs)
+    {
+        if rhs_c.to_zero_ext_u8() == Some(0) {
+            // Reduce `x | 0` to `x`.
+            return OptOutcome::ReducedTo(lhs);
+        }
+        if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
+            // Reduce `x | y` to `y` if `y` is a constant that has all
+            // the necessary bits set for this integer type.
+            return OptOutcome::ReducedTo(lhs);
+        }
+    }
+
+    OptOutcome::Rewritten(inst.into())
 }
 
 fn opt_ptrtoint(opt: &mut Opt, inst @ PtrToInt { tyidx, val }: PtrToInt) -> OptOutcome {
@@ -1512,6 +1561,68 @@ mod test {
           %0: i8 = arg
           %1: i8 = 0
           blackbox %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_or() {
+        // x | x == x
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = or %0, %0
+          exit [%1]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          exit [%0]
+        ",
+        );
+
+        // Constant folding
+        test_sf(
+            "
+          %0: i8 = 2
+          %1: i8 = 8
+          %2: i8 = or %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 10
+          blackbox %2
+        ",
+        );
+
+        // Strength reduction of `y | 0`.
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 0
+          %2: i8 = or %0, %1
+          exit [%2]
+        ",
+            "
+          ...
+          %1: i8 = 0
+          exit [%0]
+        ",
+        );
+
+        // Strength reduction of `y & 0b1111111` (i.e. all bits set in the appropriate type).
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 255
+          %2: i8 = or %0, %1
+          exit [%1]
+        ",
+            "
+          ...
+          %1: i8 = 255
+          exit [%1]
         ",
         );
     }
