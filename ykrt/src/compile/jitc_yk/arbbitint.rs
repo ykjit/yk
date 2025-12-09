@@ -249,7 +249,7 @@ impl ArbBitInt {
         if bits < self.bitw {
             Some(Self {
                 bitw: self.bitw,
-                val: self.val.checked_shr(bits).unwrap(), // unwrap cannot fail
+                val: self.val.truncate(self.bitw).checked_shr(bits).unwrap(), // unwrap cannot fail
             })
         } else {
             None
@@ -1001,7 +1001,18 @@ mod tests {
         }
 
         #[test]
-        fn arbbitint_8bit_lshr(x in any::<u8>(), y in 0u32..=8) {
+        fn arbbitint_i8bit_lshr(x in any::<i8>(), y in 0u32..=8) {
+            // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
+            // sure that we test the "failure" case, while not biasing our testing too-far to
+            // "failure cases only".
+            assert_eq!(
+                ArbBitInt::from_u64(8, x as u64).checked_lshr(y).map(|x| x.to_zero_ext_u8()),
+                x.cast_unsigned().checked_shr(y).map(Some)
+            );
+        }
+
+        #[test]
+        fn arbbitint_u8bit_lshr(x in any::<u8>(), y in 0u32..=8) {
             // Notice that we deliberately allow y to extend beyond to the shiftable range, to make
             // sure that we test the "failure" case, while not biasing our testing too-far to
             // "failure cases only".
