@@ -19,6 +19,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::DynPtrAdd(x) => opt_dynptradd(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
         Inst::ICmp(x) => opt_icmp(opt, x),
+        Inst::IntToPtr(x) => opt_inttoptr(opt, x),
         Inst::LShr(x) => opt_lshr(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
         Inst::PtrToInt(x) => opt_ptrtoint(opt, x),
@@ -313,6 +314,26 @@ fn opt_icmp(
             tyidx,
             kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
         }));
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_inttoptr(opt: &mut Opt, inst @ IntToPtr { val, .. }: IntToPtr) -> OptOutcome {
+    if let Inst::Const(Const {
+        kind: ConstKind::Int(c),
+        ..
+    }) = opt.inst_rewrite(val)
+    {
+        if c.bitw() <= u32::try_from(std::mem::size_of::<usize>() * 8).unwrap() {
+            let tyidx = opt.push_ty(Ty::Ptr(0)).unwrap();
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Ptr(c.to_zero_ext_usize().unwrap()),
+            }));
+        } else {
+            todo!();
+        }
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -1337,6 +1358,28 @@ mod test {
           %2: i1 = 1
           blackbox %2
           %4: i1 = icmp sge %0, %1
+          blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_inttoptr() {
+        test_sf(
+            "
+          %0: i8 = 129
+          %1: ptr = inttoptr %0
+          blackbox %1
+          %3: i64 = 0xABCD1234
+          %4: ptr = inttoptr %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = 129
+          %1: ptr = 0x81
+          blackbox %1
+          %3: i64 = 2882343476
+          %4: ptr = 0xABCD1234
           blackbox %4
         ",
         );
