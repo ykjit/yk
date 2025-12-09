@@ -1,3 +1,4 @@
+// ignore-if: test "$YK_JITC" = "j2" # not yet implemented in j2
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-post-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
