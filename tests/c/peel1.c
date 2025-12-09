@@ -1,6 +1,6 @@
 // ## The sanitisers fiddle with the generated code and mean we can't write the
-// ## test we want.
-// ignore-if: echo $RUSTFLAGS | grep "sanitizer"
+// ## test we want. This test will also need a complete rethink for j2.
+// ignore-if: echo $RUSTFLAGS | grep "sanitizer" || test "$YK_JITC" = "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:

@@ -755,7 +755,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         loop {
             let (pc, bid, blk) = {
                 let mut pc = self.frames.last().unwrap().pc.clone().unwrap();
-                let bid = BBlockId::new(pc.funcidx(), pc.bbidx());
+                let mut bid = BBlockId::new(pc.funcidx(), pc.bbidx());
                 let mut blk = self.am.bblock(&bid);
                 if usize::from(pc.iidx()) == blk.insts.len() {
                     let Some(ta) = self.ta_iter.next() else {
@@ -781,6 +781,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                             break;
                         }
                     }
+                    bid = cnd_bid;
                 }
                 (pc, bid, blk)
             };

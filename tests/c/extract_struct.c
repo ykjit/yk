@@ -1,3 +1,4 @@
+// ignore-if: test "$YK_JITC" = "j2" # not yet implemented in j2
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0
 // Run-time:

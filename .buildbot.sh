@@ -175,6 +175,9 @@ for _ in $(seq 10); do
     YKB_TRACER=swt RUST_TEST_SHUFFLE=1 cargo test
 done
 
+# Keep j2 honest w.r.t. lang_tests
+YK_JITC=j2 RUST_TEST_SHUFFLE=1 cargo test lang_tests::
+
 # test yklua/swt in debug mode.
 PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug YKB_TRACER=swt test_yklua
 
@@ -268,6 +271,8 @@ done
 # Note: collect_and_decode is hwt-specific.
 #YKB_TRACER=hwt cargo bench --bench collect_and_decode -- --profile-time 1
 YKB_TRACER=swt cargo bench --bench promote -- --profile-time 1
+# Keep j2 honest
+YK_JITC=j2 YKB_TRACER=swt cargo bench --bench promote -- --profile-time 1
 
 # Test some BF programs.
 git clone --depth=1 "$YKCBF_REPO"
