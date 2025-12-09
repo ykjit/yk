@@ -21,6 +21,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::ICmp(x) => opt_icmp(opt, x),
         Inst::LShr(x) => opt_lshr(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
+        Inst::PtrToInt(x) => opt_ptrtoint(opt, x),
         Inst::SExt(x) => opt_sext(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
         Inst::ZExt(x) => opt_zext(opt, x),
@@ -372,6 +373,27 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
             return OptOutcome::Rewritten(inst.into());
         }
     }
+}
+
+fn opt_ptrtoint(opt: &mut Opt, inst @ PtrToInt { tyidx, val }: PtrToInt) -> OptOutcome {
+    if let Inst::Const(Const {
+        kind: ConstKind::Ptr(addr),
+        ..
+    }) = opt.inst_rewrite(val)
+    {
+        let dst_bitw = opt.ty(tyidx).bitw();
+        let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
+        if dst_bitw <= u32::try_from(std::mem::size_of::<usize>() * 8).unwrap() {
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx: dst_tyidx,
+                kind: ConstKind::Int(ArbBitInt::from_usize(addr).truncate(dst_bitw)),
+            }));
+        } else {
+            todo!();
+        }
+    }
+
+    OptOutcome::Rewritten(inst.into())
 }
 
 fn opt_sext(opt: &mut Opt, inst @ SExt { tyidx, val }: SExt) -> OptOutcome {
@@ -1400,6 +1422,26 @@ mod test {
           %0: ptr = arg
           %1: ptr = ptradd %0, 4
           blackbox %0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ptrtoint() {
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: i8 = ptrtoint %0
+          blackbox %1
+          %3: i16 = ptrtoint %0
+          blackbox %3
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: i8 = 52
+          blackbox %1
+          %3: i16 = 4660
+          blackbox %3
         ",
         );
     }
