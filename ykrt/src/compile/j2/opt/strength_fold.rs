@@ -19,6 +19,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::Guard(x) => opt_guard(opt, x),
         Inst::ICmp(x) => opt_icmp(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
+        Inst::SExt(x) => opt_sext(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
         _ => OptOutcome::Rewritten(inst),
     }
@@ -285,6 +286,25 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
             return OptOutcome::Rewritten(inst.into());
         }
     }
+}
+
+fn opt_sext(opt: &mut Opt, inst @ SExt { tyidx, val }: SExt) -> OptOutcome {
+    if let Inst::Const(Const { kind, .. }) = opt.inst_rewrite(val) {
+        match kind {
+            ConstKind::Double(_) | ConstKind::Float(_) => unreachable!(),
+            ConstKind::Int(src_val) => {
+                let dst_bitw = opt.ty(tyidx).bitw();
+                let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
+                return OptOutcome::Rewritten(Inst::Const(Const {
+                    tyidx: dst_tyidx,
+                    kind: ConstKind::Int(src_val.sign_extend(dst_bitw)),
+                }));
+            }
+            ConstKind::Ptr(_) => todo!(),
+        }
+    }
+
+    OptOutcome::Rewritten(inst.into())
 }
 
 fn opt_sub(
@@ -1175,6 +1195,28 @@ mod test {
           %0: ptr = arg
           %1: ptr = ptradd %0, 4
           blackbox %0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_sext() {
+        test_sf(
+            "
+          %0: i8 = 3
+          %1: i16 = sext %0
+          blackbox %1
+          %3: i8 = 255
+          %4: i16 = sext %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = 3
+          %1: i16 = 3
+          blackbox %1
+          %3: i8 = 255
+          %4: i16 = 65535
+          blackbox %4
         ",
         );
     }
