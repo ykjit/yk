@@ -16,6 +16,7 @@
 ;         unimplemented <<  store i16 0, ptr %0, align 1>>
 ;         ret
 ;     }
+;     ...
 
 ; Check that loads and stores lower OK.
 

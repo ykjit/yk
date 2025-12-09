@@ -7,6 +7,7 @@
 ;         %0_1: i32 = load %0_0
 ;         ret
 ;     }
+;     ...
 
 ; Check that GEP operands are rewritten to GEP instructions which in turn are
 ; lowered to a ptr_add and a load.

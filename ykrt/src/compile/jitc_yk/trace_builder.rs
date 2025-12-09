@@ -18,11 +18,13 @@ use crate::{
     mt::{MT, TraceId},
     trace::{AOTTraceIterator, TraceAction},
 };
+use smallvec::SmallVec;
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
 
-/// Caller-saved registers in DWARF notation.
-static CALLER_CLOBBER_REG: [u16; 9] = [0, 1, 2, 4, 5, 8, 9, 10, 11];
+/// SysV x86_64 callee-saved registers in DWARF notation.
+#[cfg(target_arch = "x86_64")]
+static CALLEE_SAVE_REGS: [u16; 6] = [6, 3, 12, 13, 14, 15];
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder {
@@ -135,6 +137,12 @@ impl TraceBuilder {
         &mut self,
         blk: &'static aot_ir::BBlock,
     ) -> Result<(), CompilationError> {
+        // This code assumes that the trace starts from a call to the control point. In other
+        // words, that it's a root trace.
+        assert!(!matches!(
+            self.jit_mod.tracekind(),
+            TraceKind::Sidetrace(..)
+        ));
         // Find the control point call to retrieve the live variables from its safepoint.
         let safepoint = match self.jit_mod.tracekind() {
             TraceKind::HeaderOnly | TraceKind::HeaderAndBody | TraceKind::DifferentFrames => {
@@ -172,29 +180,67 @@ impl TraceBuilder {
                 todo!("Deal with multi register locations");
             }
 
-            // Rewrite registers to their spill locations. We need to do this as we no longer
-            // push/pop registers around the control point to reduce its overhead. We know that
-            // for every live variable in a caller-saved register there must exist a spill offset
-            // in that location's extras.
+            // Rewrite live values in caller-save registers to their saved locations.
+            //
+            // Due to the unconventional control flow involved in executing a root trace, we cannot
+            // guarantee that caller-save registers have their values preserved between entering
+            // the control point and executing a trace.
+            //
+            // When the interpreter calls the control point, and a trace is going to be executed,
+            // this is the sequence of events:
+            //
+            //  - interpreter does caller-save before calling `__ykrt_control_point`.
+            //  - `__ykrt_control_point` does the callee-save before running all of the Rust
+            //    internals of the control point.
+            //  - eventually the control point internals determine that a trace needs to be
+            //    executed and calls `__yk_exec_trace`.
+            //  - `__yk_exec_trace` *overwrites the return value* of the control point with the
+            //    trace entry point, before returning.
+            //  - Rust frames return normally until we reach the frame for `__ykrt_control_point`:
+            //    the frame that had its return address overwritten.
+            //  - `__ykrt_control_point` returns to *the trace*.
+            //
+            // After this, the stack looks as though the interpreter directly called the trace, but
+            // this isn't the case at all, and the caller-save registers remain in their "probably
+            // clobbered" state. Yet sometimes traces expect to be able to read from a caller-save
+            // register, as though the control point had never run.
+            //
+            // For every live variable in a caller-save register we *must* find the caller-saved
+            // copy of that value created during the call sequence to the control point. For each
+            // such live variable there must be a copy either spilled to the stack, or in a
+            // *callee-save* register. Here we tell the trace to use one of those alternative
+            // locations instead.
             let loc = match &var[0] {
-                yksmp::Location::Register(reg, size, v) => {
+                yksmp::Location::Register(_, size, v) => {
                     let mut newloc = None;
-                    for offset in v {
-                        if *offset < 0 {
-                            newloc = Some(yksmp::Location::Indirect(6, i32::from(*offset), *size));
-                            break;
+                    for extra in v {
+                        if *extra > 0 && CALLEE_SAVE_REGS.contains(&u16::try_from(*extra).unwrap())
+                        {
+                            newloc = Some(yksmp::Location::Register(
+                                u16::try_from(*extra).unwrap(),
+                                *size,
+                                SmallVec::new(),
+                            ));
+                            break; // Stop now, a register save is the best-case scenario.
+                        } else if *extra < 0 && newloc.is_none() {
+                            newloc = Some(yksmp::Location::Indirect(6, i32::from(*extra), *size));
+                            // No `break`. Keep trying, in case we find the value in a register,
+                            // which is preferable.
                         }
                     }
                     if let Some(loc) = newloc {
                         loc
-                    } else if CALLER_CLOBBER_REG.contains(reg) {
-                        panic!("No spill offset for caller-saved register.")
                     } else {
                         var[0].clone()
                     }
                 }
                 _ => var[0].clone(),
             };
+            if let yksmp::Location::Register(r, ..) = loc {
+                // If we plan to read a live value from a register, it must be from a callee save
+                // register now. See large comment above for an explanation.
+                assert!(CALLEE_SAVE_REGS.contains(&r));
+            }
 
             let param_inst = jit_ir::ParamInst::new(ParamIdx::try_from(idx)?, input_tyidx).into();
             self.jit_mod.push(param_inst)?;
