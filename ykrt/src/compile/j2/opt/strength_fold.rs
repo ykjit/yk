@@ -16,6 +16,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::AShr(x) => opt_ashr(opt, x),
         Inst::Add(x) => opt_add(opt, x),
         Inst::And(x) => opt_and(opt, x),
+        Inst::CtPop(x) => opt_ctpop(opt, x),
         Inst::DynPtrAdd(x) => opt_dynptradd(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
         Inst::ICmp(x) => opt_icmp(opt, x),
@@ -178,6 +179,24 @@ where
     }
 
     OptOutcome::Rewritten(inst)
+}
+
+fn opt_ctpop(opt: &mut Opt, inst @ CtPop { tyidx, val }: CtPop) -> OptOutcome {
+    if let Inst::Const(Const {
+        kind: ConstKind::Int(c),
+        ..
+    }) = opt.inst_rewrite(val)
+    {
+        // LLVM's ctpop has a polymorphic return type: since the maximum number of bits we can
+        // represent in LLVM IR is 2^23, and `count_ones` returns a `u32`, using
+        // `ArbBitInt::from_u64` is always safe.
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(c.bitw(), u64::from(c.count_ones()))),
+        }));
+    }
+
+    OptOutcome::Rewritten(inst.into())
 }
 
 fn opt_dynptradd(
@@ -704,6 +723,23 @@ mod test {
             "
           %0: i8 = arg
           %1: i8 = 0
+          blackbox %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ctpop() {
+        // Constant fold the number of set bits
+        test_sf(
+            "
+          %0: i64 = 0x1234
+          %1: i64 = ctpop %0
+          blackbox %1
+        ",
+            "
+          %0: i64 = 4660
+          %1: i64 = 5
           blackbox %1
         ",
         );
