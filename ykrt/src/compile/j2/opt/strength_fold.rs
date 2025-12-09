@@ -19,10 +19,13 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::DynPtrAdd(x) => opt_dynptradd(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
         Inst::ICmp(x) => opt_icmp(opt, x),
+        Inst::IntToPtr(x) => opt_inttoptr(opt, x),
         Inst::LShr(x) => opt_lshr(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
+        Inst::PtrToInt(x) => opt_ptrtoint(opt, x),
         Inst::SExt(x) => opt_sext(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
+        Inst::Trunc(x) => opt_trunc(opt, x),
         Inst::ZExt(x) => opt_zext(opt, x),
         _ => OptOutcome::Rewritten(inst),
     }
@@ -316,6 +319,26 @@ fn opt_icmp(
     OptOutcome::Rewritten(inst.into())
 }
 
+fn opt_inttoptr(opt: &mut Opt, inst @ IntToPtr { val, .. }: IntToPtr) -> OptOutcome {
+    if let Inst::Const(Const {
+        kind: ConstKind::Int(c),
+        ..
+    }) = opt.inst_rewrite(val)
+    {
+        if c.bitw() <= u32::try_from(std::mem::size_of::<usize>() * 8).unwrap() {
+            let tyidx = opt.push_ty(Ty::Ptr(0)).unwrap();
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Ptr(c.to_zero_ext_usize().unwrap()),
+            }));
+        } else {
+            todo!();
+        }
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
 fn opt_lshr(
     opt: &mut Opt,
     inst @ LShr {
@@ -374,6 +397,27 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
     }
 }
 
+fn opt_ptrtoint(opt: &mut Opt, inst @ PtrToInt { tyidx, val }: PtrToInt) -> OptOutcome {
+    if let Inst::Const(Const {
+        kind: ConstKind::Ptr(addr),
+        ..
+    }) = opt.inst_rewrite(val)
+    {
+        let dst_bitw = opt.ty(tyidx).bitw();
+        let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
+        if dst_bitw <= u32::try_from(std::mem::size_of::<usize>() * 8).unwrap() {
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx: dst_tyidx,
+                kind: ConstKind::Int(ArbBitInt::from_usize(addr).truncate(dst_bitw)),
+            }));
+        } else {
+            todo!();
+        }
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
 fn opt_sext(opt: &mut Opt, inst @ SExt { tyidx, val }: SExt) -> OptOutcome {
     if let Inst::Const(Const { kind, .. }) = opt.inst_rewrite(val) {
         match kind {
@@ -428,6 +472,32 @@ fn opt_sub(
     {
         // Reduce `x - 0` to `x`.
         return OptOutcome::ReducedTo(lhs);
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_trunc(
+    opt: &mut Opt,
+    inst @ Trunc {
+        tyidx,
+        val,
+        nuw,
+        nsw,
+    }: Trunc,
+) -> OptOutcome {
+    assert!(!nuw && !nsw);
+    if let Inst::Const(Const {
+        kind: ConstKind::Int(c),
+        ..
+    }) = opt.inst_rewrite(val)
+    {
+        let dst_bitw = opt.ty(tyidx).bitw();
+        let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx: dst_tyidx,
+            kind: ConstKind::Int(c.truncate(dst_bitw)),
+        }));
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -1294,6 +1364,28 @@ mod test {
     }
 
     #[test]
+    fn opt_inttoptr() {
+        test_sf(
+            "
+          %0: i8 = 129
+          %1: ptr = inttoptr %0
+          blackbox %1
+          %3: i64 = 0xABCD1234
+          %4: ptr = inttoptr %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = 129
+          %1: ptr = 0x81
+          blackbox %1
+          %3: i64 = 2882343476
+          %4: ptr = 0xABCD1234
+          blackbox %4
+        ",
+        );
+    }
+
+    #[test]
     fn opt_lshr() {
         // Constant folding. We deliberately use an example where ashr/lshr give different
         // results
@@ -1405,6 +1497,26 @@ mod test {
     }
 
     #[test]
+    fn opt_ptrtoint() {
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: i8 = ptrtoint %0
+          blackbox %1
+          %3: i16 = ptrtoint %0
+          blackbox %3
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: i8 = 52
+          blackbox %1
+          %3: i16 = 4660
+          blackbox %3
+        ",
+        );
+    }
+
+    #[test]
     fn opt_sext() {
         test_sf(
             "
@@ -1471,6 +1583,28 @@ mod test {
           %0: i8 = arg
           %1: i8 = 0
           exit [%0]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_trunc() {
+        test_sf(
+            "
+          %0: i16 = 0xFFFF
+          %1: i8 = trunc %0
+          blackbox %1
+          %3: i16 = 254
+          %4: i8 = trunc %3
+          blackbox %4
+        ",
+            "
+          %0: i16 = 65535
+          %1: i8 = 255
+          blackbox %1
+          %3: i16 = 254
+          %4: i8 = 254
+          blackbox %4
         ",
         );
     }
