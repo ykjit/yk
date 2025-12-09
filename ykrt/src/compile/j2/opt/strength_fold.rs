@@ -24,6 +24,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
         Inst::PtrToInt(x) => opt_ptrtoint(opt, x),
         Inst::SExt(x) => opt_sext(opt, x),
+        Inst::Shl(x) => opt_shl(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
         Inst::Trunc(x) => opt_trunc(opt, x),
         Inst::ZExt(x) => opt_zext(opt, x),
@@ -432,6 +433,59 @@ fn opt_sext(opt: &mut Opt, inst @ SExt { tyidx, val }: SExt) -> OptOutcome {
             }
             ConstKind::Ptr(_) => todo!(),
         }
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_shl(
+    opt: &mut Opt,
+    inst @ Shl {
+        tyidx,
+        lhs,
+        rhs,
+        nuw,
+        nsw,
+    }: Shl,
+) -> OptOutcome {
+    assert!(!nuw && !nsw);
+    let lhs_inst = opt.inst_rewrite(lhs);
+    let rhs_inst = opt.inst_rewrite(rhs);
+    if let (
+        Inst::Const(Const {
+            kind: ConstKind::Int(lhs_c),
+            ..
+        }),
+        Inst::Const(Const {
+            kind: ConstKind::Int(rhs_c),
+            ..
+        }),
+    ) = (&lhs_inst, &rhs_inst)
+    {
+        // Constant fold `lhs_c << rhs_c`.
+        let c = lhs_c
+            .checked_shl(rhs_c.to_zero_ext_u32().unwrap())
+            .unwrap_or_else(|| ArbBitInt::all_bits_set(lhs_c.bitw()));
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(c),
+        }));
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(rhs_c),
+        ..
+    }) = rhs_inst
+        && rhs_c.to_zero_ext_u8() == Some(0)
+    {
+        // Reduce `x << 0` to `x`.
+        return OptOutcome::ReducedTo(lhs);
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(lhs_c),
+        ..
+    }) = lhs_inst
+        && lhs_c.to_zero_ext_u8() == Some(0)
+    {
+        // Reduce `0 << x` to `0`.
+        return OptOutcome::ReducedTo(lhs);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -1534,6 +1588,55 @@ mod test {
           %3: i8 = 255
           %4: i16 = 65535
           blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_shl() {
+        // Constant folding
+        test_sf(
+            "
+          %0: i8 = 7
+          %1: i8 = 3
+          %2: i8 = shl %0, %1
+          blackbox %2
+        ",
+            "
+          %0: i8 = 7
+          %1: i8 = 3
+          %2: i8 = 56
+          blackbox %2
+        ",
+        );
+
+        // `x << 0` reduces to `x`
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i8 = shl %0, %1
+          blackbox %2
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          blackbox %0
+        ",
+        );
+
+        // `0 << x` reduces to `0`
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i8 = shl %1, %0
+          blackbox %2
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          blackbox %1
         ",
         );
     }
