@@ -29,6 +29,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::Shl(x) => opt_shl(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
         Inst::Trunc(x) => opt_trunc(opt, x),
+        Inst::Xor(x) => opt_xor(opt, x),
         Inst::ZExt(x) => opt_zext(opt, x),
         _ => OptOutcome::Rewritten(inst),
     }
@@ -628,6 +629,43 @@ fn opt_trunc(
             tyidx: dst_tyidx,
             kind: ConstKind::Int(c.truncate(dst_bitw)),
         }));
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_xor(opt: &mut Opt, inst @ Xor { tyidx, lhs, rhs }: Xor) -> OptOutcome {
+    let bitw = opt.ty(tyidx).bitw();
+    if lhs == rhs {
+        // Reduce x ^ x to 0.
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(bitw, 0)),
+        }));
+    } else if let (
+        Inst::Const(Const {
+            kind: ConstKind::Int(lhs_c),
+            ..
+        }),
+        Inst::Const(Const {
+            kind: ConstKind::Int(rhs_c),
+            ..
+        }),
+    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
+    {
+        // Constant fold `c1 ^ c2`.
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(lhs_c.bitxor(&rhs_c)),
+        }));
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(rhs_c),
+        ..
+    }) = opt.inst_rewrite(rhs)
+        && rhs_c.to_zero_ext_u8() == Some(0)
+    {
+        // Reduce `x ^ 0` to `x`.
+        return OptOutcome::ReducedTo(lhs);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -1898,6 +1936,54 @@ mod test {
           %3: i16 = 254
           %4: i8 = 254
           blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_xor() {
+        // x ^ x == 0
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = xor %0, %0
+          exit [%1]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          %1: i8 = 0
+          exit [%1]
+        ",
+        );
+
+        // Constant folding
+        test_sf(
+            "
+          %0: i8 = 2
+          %1: i8 = 3
+          %2: i8 = xor %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 1
+          blackbox %2
+        ",
+        );
+
+        // Strength reduction of `y ^ 0`.
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 0
+          %2: i8 = xor %0, %1
+          exit [%2]
+        ",
+            "
+          ...
+          %1: i8 = 0
+          exit [%0]
         ",
         );
     }
