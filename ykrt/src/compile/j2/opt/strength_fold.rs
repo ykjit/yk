@@ -23,6 +23,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::LShr(x) => opt_lshr(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
         Inst::PtrToInt(x) => opt_ptrtoint(opt, x),
+        Inst::Select(x) => opt_select(opt, x),
         Inst::SExt(x) => opt_sext(opt, x),
         Inst::Shl(x) => opt_shl(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
@@ -414,6 +415,32 @@ fn opt_ptrtoint(opt: &mut Opt, inst @ PtrToInt { tyidx, val }: PtrToInt) -> OptO
         } else {
             todo!();
         }
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_select(
+    opt: &mut Opt,
+    inst @ Select {
+        cond,
+        truev,
+        falsev,
+        ..
+    }: Select,
+) -> OptOutcome {
+    if let Inst::Const(Const {
+        kind: ConstKind::Int(lhs_c),
+        ..
+    }) = opt.inst_rewrite(cond)
+    {
+        match lhs_c.to_zero_ext_u8().unwrap() {
+            0 => return OptOutcome::ReducedTo(falsev),
+            1 => return OptOutcome::ReducedTo(truev),
+            _ => unreachable!(),
+        }
+    } else if truev == falsev {
+        return OptOutcome::ReducedTo(truev);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -1566,6 +1593,58 @@ mod test {
           blackbox %1
           %3: i16 = 4660
           blackbox %3
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_select() {
+        // Constant false
+        test_sf(
+            "
+          %0: i1 = 0
+          %1: i8 = 2
+          %2: i8 = 3
+          %3: i8 = select %0, %1, %2
+          blackbox %3
+        ",
+            "
+          %0: i1 = 0
+          %1: i8 = 2
+          %2: i8 = 3
+          blackbox %2
+        ",
+        );
+
+        // Constant true
+        test_sf(
+            "
+          %0: i1 = 1
+          %1: i8 = 2
+          %2: i8 = 3
+          %3: i8 = select %0, %1, %2
+          blackbox %3
+        ",
+            "
+          %0: i1 = 1
+          %1: i8 = 2
+          %2: i8 = 3
+          blackbox %1
+        ",
+        );
+
+        // Equal truev/falsev
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = select %0, %1, %1
+          blackbox %2
+        ",
+            "
+          %0: i1 = arg
+          %1: i8 = arg
+          blackbox %1
         ",
         );
     }
