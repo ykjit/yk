@@ -326,10 +326,6 @@ fn opt_lshr(
     }: LShr,
 ) -> OptOutcome {
     opt_ashr_lshr(opt, inst.into(), tyidx, lhs, rhs, exact, |lhs_c, rhs_c| {
-        println!(
-            "woo {lhs_c:?} {rhs_c:?} {:?}",
-            lhs_c.checked_lshr(rhs_c.to_zero_ext_u32().unwrap())
-        );
         lhs_c.checked_lshr(rhs_c.to_zero_ext_u32().unwrap())
     })
 }
