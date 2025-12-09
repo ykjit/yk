@@ -13,11 +13,13 @@ use crate::compile::{
 
 pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
     match inst {
+        Inst::AShr(x) => opt_ashr(opt, x),
         Inst::Add(x) => opt_add(opt, x),
         Inst::And(x) => opt_and(opt, x),
         Inst::DynPtrAdd(x) => opt_dynptradd(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
         Inst::ICmp(x) => opt_icmp(opt, x),
+        Inst::LShr(x) => opt_lshr(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
         Inst::SExt(x) => opt_sext(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
@@ -104,6 +106,75 @@ fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
     }
 
     OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_ashr(
+    opt: &mut Opt,
+    inst @ AShr {
+        tyidx,
+        lhs,
+        rhs,
+        exact,
+    }: AShr,
+) -> OptOutcome {
+    opt_ashr_lshr(opt, inst.into(), tyidx, lhs, rhs, exact, |lhs_c, rhs_c| {
+        lhs_c.checked_ashr(rhs_c.to_zero_ext_u32().unwrap())
+    })
+}
+
+/// Optimise the common parts of `ashr` and `lshr`, outsourcing the difference between the two to
+/// `f`.
+fn opt_ashr_lshr<F>(
+    opt: &mut Opt,
+    inst: Inst,
+    tyidx: TyIdx,
+    lhs: InstIdx,
+    rhs: InstIdx,
+    exact: bool,
+    f: F,
+) -> OptOutcome
+where
+    F: FnOnce(&ArbBitInt, &ArbBitInt) -> Option<ArbBitInt>,
+{
+    assert!(!exact);
+    let lhs_inst = opt.inst_rewrite(lhs);
+    let rhs_inst = opt.inst_rewrite(rhs);
+    if let (
+        Inst::Const(Const {
+            kind: ConstKind::Int(lhs_c),
+            ..
+        }),
+        Inst::Const(Const {
+            kind: ConstKind::Int(rhs_c),
+            ..
+        }),
+    ) = (&lhs_inst, &rhs_inst)
+    {
+        // Constant fold `lhs_c >> rhs_c`.
+        let c = f(lhs_c, rhs_c).unwrap_or_else(|| ArbBitInt::all_bits_set(lhs_c.bitw()));
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(c),
+        }));
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(rhs_c),
+        ..
+    }) = rhs_inst
+        && rhs_c.to_zero_ext_u8() == Some(0)
+    {
+        // Reduce `x >> 0` to `x`.
+        return OptOutcome::ReducedTo(lhs);
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(lhs_c),
+        ..
+    }) = lhs_inst
+        && lhs_c.to_zero_ext_u8() == Some(0)
+    {
+        // Reduce `0 >> x` to `0`.
+        return OptOutcome::ReducedTo(lhs);
+    }
+
+    OptOutcome::Rewritten(inst)
 }
 
 fn opt_dynptradd(
@@ -243,6 +314,24 @@ fn opt_icmp(
     }
 
     OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_lshr(
+    opt: &mut Opt,
+    inst @ LShr {
+        tyidx,
+        lhs,
+        rhs,
+        exact,
+    }: LShr,
+) -> OptOutcome {
+    opt_ashr_lshr(opt, inst.into(), tyidx, lhs, rhs, exact, |lhs_c, rhs_c| {
+        println!(
+            "woo {lhs_c:?} {rhs_c:?} {:?}",
+            lhs_c.checked_lshr(rhs_c.to_zero_ext_u32().unwrap())
+        );
+        lhs_c.checked_lshr(rhs_c.to_zero_ext_u32().unwrap())
+    })
 }
 
 fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
@@ -500,6 +589,56 @@ mod test {
           ...
           %1: i8 = 255
           exit [%1]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_ashr() {
+        // Constant folding. We deliberately use an example where ashr/lshr give different
+        // results
+        test_sf(
+            "
+          %0: i8 = -2
+          %1: i8 = 1
+          %2: i8 = ashr %0, %1
+          blackbox %2
+        ",
+            "
+          %0: i8 = 254
+          %1: i8 = 1
+          %2: i8 = 255
+          blackbox %2
+        ",
+        );
+
+        // `x >> 0` reduces to `x`
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i8 = ashr %0, %1
+          blackbox %2
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          blackbox %0
+        ",
+        );
+
+        // `0 >> x` reduces to `0`
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i8 = ashr %1, %0
+          blackbox %2
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          blackbox %1
         ",
         );
     }
@@ -1154,6 +1293,56 @@ mod test {
           blackbox %2
           %4: i1 = icmp sge %0, %1
           blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_lshr() {
+        // Constant folding. We deliberately use an example where ashr/lshr give different
+        // results
+        test_sf(
+            "
+          %0: i8 = -2
+          %1: i8 = 1
+          %2: i8 = lshr %0, %1
+          blackbox %2
+        ",
+            "
+          %0: i8 = 254
+          %1: i8 = 1
+          %2: i8 = 127
+          blackbox %2
+        ",
+        );
+
+        // `x >> 0` reduces to `x`
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i8 = lshr %0, %1
+          blackbox %2
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          blackbox %0
+        ",
+        );
+
+        // `0 >> x` reduces to `0`
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i8 = lshr %1, %0
+          blackbox %2
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          blackbox %1
         ",
         );
     }
