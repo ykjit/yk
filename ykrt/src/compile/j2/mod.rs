@@ -60,14 +60,35 @@ pub(super) struct J2 {
 
 impl J2 {
     pub(super) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
-        Ok(Arc::new(Self {
+        let mmap_hint;
+
+        #[cfg(not(test))]
+        {
+            // In normal operation, we don't have a good way of knowing when the first `mmap`able
+            // page near the executable will be, and we can waste noticeable time trying to find
+            // it. As a proxy, we try to look up the executable size and add that to `main`'s
+            // address: this is likely to overshoot the first `mmap`able address, but we can
+            // tolerate some wastage.
+            let exe_size = std::env::current_exe()
+                .and_then(|x| x.metadata())
+                .map(|x| usize::try_from(x.len()).unwrap())
+                // A plausible constant (4MiB) is better than nothing as a fallback.
+                .unwrap_or(4096 * 1024);
+            let main = dlsym("main").unwrap();
+            mmap_hint = unsafe { main.0.byte_add(exe_size) };
+        }
+
+        #[cfg(test)]
+        {
+            mmap_hint = std::ptr::null();
+        }
+
+        let j2 = Arc::new(Self {
             global_dlsym_cache: Mutex::new(HashMap::new()),
-            #[cfg(not(test))]
-            mmap_hint: Mutex::new(dlsym("main").unwrap()),
-            #[cfg(test)]
-            // When we're testing, no `main` function may be available.
-            mmap_hint: Mutex::new(SyncSafePtr(std::ptr::null()))
-        }))
+            mmap_hint: Mutex::new(SyncSafePtr(mmap_hint)),
+        });
+
+        Ok(j2)
     }
 
     /// Produce a new [CodeBufInProgress] of at least `len` bytes.
