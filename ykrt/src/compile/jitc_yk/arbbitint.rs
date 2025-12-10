@@ -171,6 +171,11 @@ impl ArbBitInt {
         Some(self.val.truncate(self.bitw) as usize)
     }
 
+    /// Count the number of set bits in `self`.
+    pub(crate) fn count_ones(&self) -> u32 {
+        self.val.truncate(self.bitw).count_ones()
+    }
+
     /// Return a new [ArbBitInt] that performs two's complement wrapping addition on `self` and
     /// `other`.
     ///
@@ -325,6 +330,12 @@ mod tests {
         fn arbbitint_8bit(x in any::<i8>(), y in any::<i8>()) {
             assert_eq!(ArbBitInt::from_i64(8, x as i64).to_sign_ext_i8(), Some(x));
 
+            // count_ones
+            assert_eq!(
+                ArbBitInt::from_i64(8, x as i64).count_ones(),
+                x.count_ones()
+            );
+
             // wrapping_add
             // i8
             assert_eq!(
@@ -417,6 +428,12 @@ mod tests {
                 a => panic!("{a:?}")
             }
             assert_eq!(ArbBitInt::from_i64(16, x as i64).to_sign_ext_i16(), Some(x));
+
+            // count_ones
+            assert_eq!(
+                ArbBitInt::from_i64(16, x as i64).count_ones(),
+                x.count_ones()
+            );
 
             // wrapping_add
             // i8
@@ -516,6 +533,12 @@ mod tests {
                 a => panic!("{a:?}")
             }
             assert_eq!(ArbBitInt::from_i64(32, x as i64).to_sign_ext_i32(), Some(x));
+
+            // count_ones
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64).count_ones(),
+                x.count_ones()
+            );
 
             // wrapping_add
             // i8
@@ -656,6 +679,12 @@ mod tests {
                 a => panic!("{a:?}")
             }
             assert_eq!(ArbBitInt::from_i64(64, x).to_sign_ext_i64(), Some(x));
+
+            // count_ones
+            assert_eq!(
+                ArbBitInt::from_i64(64, x).count_ones(),
+                x.count_ones()
+            );
 
             // wrapping_add
             // i8
