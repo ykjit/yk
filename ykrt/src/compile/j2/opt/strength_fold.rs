@@ -31,6 +31,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::Shl(x) => opt_shl(opt, x),
         Inst::Sub(x) => opt_sub(opt, x),
         Inst::Trunc(x) => opt_trunc(opt, x),
+        Inst::UDiv(x) => opt_udiv(opt, x),
         Inst::Xor(x) => opt_xor(opt, x),
         Inst::ZExt(x) => opt_zext(opt, x),
         _ => OptOutcome::Rewritten(inst),
@@ -723,6 +724,75 @@ fn opt_trunc(
             tyidx: dst_tyidx,
             kind: ConstKind::Int(c.truncate(dst_bitw)),
         }));
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_udiv(
+    opt: &mut Opt,
+    inst @ UDiv {
+        tyidx,
+        lhs,
+        rhs,
+        exact,
+    }: UDiv,
+) -> OptOutcome {
+    assert!(!exact);
+    let rhs_inst = opt.inst_rewrite(rhs);
+    if let (
+        Inst::Const(Const {
+            kind: ConstKind::Int(lhs_c),
+            ..
+        }),
+        Inst::Const(Const {
+            kind: ConstKind::Int(rhs_c),
+            ..
+        }),
+    ) = (opt.inst_rewrite(lhs), &rhs_inst)
+    {
+        // Constant fold `c1 / c2`.
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(
+                lhs_c
+                    .checked_udiv(rhs_c)
+                    .unwrap_or_else(|| ArbBitInt::all_bits_set(rhs_c.bitw())),
+            ),
+        }));
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(rhs_c),
+        ..
+    }) = rhs_inst
+    {
+        match rhs_c.to_zero_ext_u64() {
+            Some(1) => {
+                // Reduce `x / 1` to `x`.
+                return OptOutcome::ReducedTo(lhs);
+            }
+            Some(x) if x.is_power_of_two() => {
+                // Replace `x * y` with `x >> ...`.
+                let c_iidx = opt
+                    .feed(Inst::Const(Const {
+                        tyidx,
+                        kind: ConstKind::Int(ArbBitInt::from_u64(
+                            rhs_c.bitw(),
+                            u64::from(x.ilog2()),
+                        )),
+                    }))
+                    .unwrap();
+                return OptOutcome::Rewritten(
+                    LShr {
+                        tyidx,
+                        lhs,
+                        rhs: c_iidx,
+                        exact: false,
+                    }
+                    .into(),
+                );
+            }
+            _ => (),
+        }
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -2289,6 +2359,72 @@ mod test {
           %3: i16 = 254
           %4: i8 = 254
           blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_udiv() {
+        // Simple constant folding e.g `1 / 2`.
+        test_sf(
+            "
+          %0: i8 = 6
+          %1: i8 = 2
+          %2: i8 = udiv %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 3
+          blackbox %2
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = 255
+          %1: i8 = 2
+          %2: i8 = udiv %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 127
+          blackbox %2
+        ",
+        );
+
+        // Strength reduction of `x / 1`.
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 1
+          %2: i8 = udiv %0, %1
+          exit [%2]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          %1: i8 = 1
+          exit [%0]
+        ",
+        );
+
+        // Strength reduction of `x / y` if y is a power of 2.
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 4
+          %2: i8 = udiv %0, %1
+          exit [%2]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          %1: i8 = 4
+          %2: i8 = 2
+          %3: i8 = lshr %0, %2
+          exit [%3]
         ",
         );
     }
