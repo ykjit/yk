@@ -10,16 +10,16 @@
 //     ...
 //     %{{12}}: ptr = ptradd %{{_}}, 8
 //     ...
-//     %{{16}}: i32 = 2
+//     %{{16}}: i32 = 3
 //     %{{17}}: i32 = mul %{{_}}, %{{16}}
 //     %{{18}}: ptr = load %{{12}}
 //     store %{{17}}, %{{18}}
 //     ...
 //     Run trace in a thread.
 //     ...
-//     res: {{thread_ptr}} 2
+//     res: {{thread_ptr}} 3
 //     yk-execution: deoptimise ...
-//     res: {{thread_ptr}} 2
+//     res: {{thread_ptr}} 3
 //     ...
 
 // Check that threads use a different shadow stack than normal execution.
@@ -44,7 +44,7 @@ struct thread_data {
 
 __attribute__((noinline))
 void foo(int a, int *res) {
-  *res = a * 2;
+  *res = a * 3;
 }
 
 // Decrement an integer from ITERS down to the thread's number, then return it.

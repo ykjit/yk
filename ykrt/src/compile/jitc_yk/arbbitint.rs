@@ -218,6 +218,24 @@ impl ArbBitInt {
         }
     }
 
+    /// Return a new [ArbBitInt] that performs unsigned division of `self` by `other`, returning
+    /// `None` if `other` is 0.
+    pub(crate) fn checked_udiv(&self, other: &Self) -> Option<Self> {
+        debug_assert_eq!(self.bitw, other.bitw);
+        if other.to_zero_ext_u8() == Some(0) {
+            None
+        } else {
+            Some(Self {
+                bitw: self.bitw,
+                val: self
+                    .val
+                    .truncate(self.bitw)
+                    .checked_div(other.to_zero_ext_u64().unwrap())
+                    .unwrap(), // unwrap cannot fail
+            })
+        }
+    }
+
     /// Return a new [ArbBitInt] that left shifts `self` by `bits`s or `None` if `bits >=
     /// self.bitw()`.
     pub(crate) fn checked_shl(&self, bits: u32) -> Option<Self> {
@@ -1081,6 +1099,46 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_u64(64, x).checked_lshr(y).map(|x| x.to_zero_ext_u64()),
                 x.checked_shr(y).map(Some)
+            );
+        }
+
+        #[test]
+        fn arbbitint_8bit_udiv(x in any::<u8>(), y in any::<u8>()) {
+            assert_eq!(
+                ArbBitInt::from_u64(8, x as u64)
+                    .checked_udiv(&ArbBitInt::from_u64(8, y as u64))
+                    .map(|x| x.to_zero_ext_u8().unwrap()),
+                x.checked_div(y)
+            );
+        }
+
+        #[test]
+        fn arbbitint_16bit_udiv(x in any::<u16>(), y in any::<u16>()) {
+            assert_eq!(
+                ArbBitInt::from_u64(16, x as u64)
+                    .checked_udiv(&ArbBitInt::from_u64(16, y as u64))
+                    .map(|x| x.to_zero_ext_u16().unwrap()),
+                x.checked_div(y)
+            );
+        }
+
+        #[test]
+        fn arbbitint_32bit_udiv(x in any::<u32>(), y in any::<u32>()) {
+            assert_eq!(
+                ArbBitInt::from_u64(32, x as u64)
+                    .checked_udiv(&ArbBitInt::from_u64(32, y as u64))
+                    .map(|x| x.to_zero_ext_u32().unwrap()),
+                x.checked_div(y)
+            );
+        }
+
+        #[test]
+        fn arbbitint_64bit_udiv(x in any::<u64>(), y in any::<u64>()) {
+            assert_eq!(
+                ArbBitInt::from_u64(64, x)
+                    .checked_udiv(&ArbBitInt::from_u64(64, y))
+                    .map(|x| x.to_zero_ext_u64().unwrap()),
+                x.checked_div(y)
             );
         }
     }
