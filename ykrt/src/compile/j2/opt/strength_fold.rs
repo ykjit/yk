@@ -267,29 +267,33 @@ fn opt_icmp(
     }: ICmp,
 ) -> OptOutcome {
     assert!(!samesign);
-    if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
+    if let (Inst::Const(Const { kind: lhs_c, .. }), Inst::Const(Const { kind: rhs_c, .. })) =
+        (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
     {
         // Constant fold.
-        let v = match pred {
-            IPred::Eq => lhs_c == rhs_c,
-            IPred::Ne => lhs_c != rhs_c,
-            IPred::Ugt => lhs_c.to_zero_ext_u64() > rhs_c.to_zero_ext_u64(),
-            IPred::Uge => lhs_c.to_zero_ext_u64() >= rhs_c.to_zero_ext_u64(),
-            IPred::Ult => lhs_c.to_zero_ext_u64() < rhs_c.to_zero_ext_u64(),
-            IPred::Ule => lhs_c.to_zero_ext_u64() <= rhs_c.to_zero_ext_u64(),
-            IPred::Sgt => lhs_c.to_sign_ext_i64() > rhs_c.to_sign_ext_i64(),
-            IPred::Sge => lhs_c.to_sign_ext_i64() >= rhs_c.to_sign_ext_i64(),
-            IPred::Slt => lhs_c.to_sign_ext_i64() < rhs_c.to_sign_ext_i64(),
-            IPred::Sle => lhs_c.to_sign_ext_i64() <= rhs_c.to_sign_ext_i64(),
+        let v = match (lhs_c, rhs_c) {
+            (ConstKind::Int(lhs_c), ConstKind::Int(rhs_c)) => match pred {
+                IPred::Eq => lhs_c == rhs_c,
+                IPred::Ne => lhs_c != rhs_c,
+                IPred::Ugt => lhs_c.to_zero_ext_u64() > rhs_c.to_zero_ext_u64(),
+                IPred::Uge => lhs_c.to_zero_ext_u64() >= rhs_c.to_zero_ext_u64(),
+                IPred::Ult => lhs_c.to_zero_ext_u64() < rhs_c.to_zero_ext_u64(),
+                IPred::Ule => lhs_c.to_zero_ext_u64() <= rhs_c.to_zero_ext_u64(),
+                IPred::Sgt => lhs_c.to_sign_ext_i64() > rhs_c.to_sign_ext_i64(),
+                IPred::Sge => lhs_c.to_sign_ext_i64() >= rhs_c.to_sign_ext_i64(),
+                IPred::Slt => lhs_c.to_sign_ext_i64() < rhs_c.to_sign_ext_i64(),
+                IPred::Sle => lhs_c.to_sign_ext_i64() <= rhs_c.to_sign_ext_i64(),
+            },
+            (ConstKind::Ptr(lhs_c), ConstKind::Ptr(rhs_c)) => match pred {
+                IPred::Eq => lhs_c == rhs_c,
+                IPred::Ne => lhs_c != rhs_c,
+                IPred::Ugt => lhs_c > rhs_c,
+                IPred::Uge => lhs_c >= rhs_c,
+                IPred::Ult => lhs_c < rhs_c,
+                IPred::Ule => lhs_c <= rhs_c,
+                IPred::Sgt | IPred::Sge | IPred::Slt | IPred::Sle => unreachable!(),
+            },
+            _ => unreachable!(),
         };
         let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
         return OptOutcome::Rewritten(Inst::Const(Const {
@@ -297,7 +301,7 @@ fn opt_icmp(
             kind: ConstKind::Int(ArbBitInt::from_u64(1, v as u64)),
         }));
     } else if let IPred::Eq | IPred::Uge | IPred::Ule | IPred::Sge | IPred::Sle = pred
-        && opt.map_iidx(lhs) == opt.map_iidx(rhs)
+        && lhs == rhs
     {
         // If the predicate includes equality then `%x eq %x` is trivially true.
         let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
@@ -306,7 +310,7 @@ fn opt_icmp(
             kind: ConstKind::Int(ArbBitInt::from_u64(1, 1)),
         }));
     } else if let IPred::Ne | IPred::Ugt | IPred::Ult | IPred::Sgt | IPred::Slt = pred
-        && opt.map_iidx(lhs) == opt.map_iidx(rhs)
+        && lhs == rhs
     {
         // If the predicate includes inequality then `%x ne %x` is trivially false.
         let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
@@ -865,6 +869,8 @@ mod test {
 
     #[test]
     fn opt_icmp() {
+        // Ints
+
         // Simple constant folding.
 
         // eq
@@ -1156,6 +1162,164 @@ mod test {
           %10: i8 = 0
           %11: i1 = 1
           blackbox %11
+        ",
+        );
+
+        // Pointers
+
+        // eq
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1234
+          %2: i1 = icmp eq %0, %1
+          blackbox %2
+          %4: ptr = 0xABCD
+          %5: i1 = icmp eq %0, %4
+          blackbox %5
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1234
+          %2: i1 = 1
+          blackbox %2
+          %4: ptr = 0xABCD
+          %5: i1 = 0
+          blackbox %5
+        ",
+        );
+
+        // ne
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1234
+          %2: i1 = icmp ne %0, %1
+          blackbox %2
+          %4: ptr = 0xABCD
+          %5: i1 = icmp ne %0, %4
+          blackbox %5
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1234
+          %2: i1 = 0
+          blackbox %2
+          %4: ptr = 0xABCD
+          %5: i1 = 1
+          blackbox %5
+        ",
+        );
+
+        // ugt
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1233
+          %2: i1 = icmp ugt %0, %1
+          blackbox %2
+          %4: ptr = 0x1234
+          %5: i1 = icmp ugt %0, %4
+          blackbox %5
+          %7: ptr = 0x1235
+          %8: i1 = icmp ugt %0, %7
+          blackbox %8
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1233
+          %2: i1 = 1
+          blackbox %2
+          %4: ptr = 0x1234
+          %5: i1 = 0
+          blackbox %5
+          %7: ptr = 0x1235
+          %8: i1 = 0
+          blackbox %8
+        ",
+        );
+
+        // uge
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1233
+          %2: i1 = icmp uge %0, %1
+          blackbox %2
+          %4: ptr = 0x1234
+          %5: i1 = icmp uge %0, %4
+          blackbox %5
+          %7: ptr = 0x1235
+          %8: i1 = icmp uge %0, %7
+          blackbox %8
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1233
+          %2: i1 = 1
+          blackbox %2
+          %4: ptr = 0x1234
+          %5: i1 = 1
+          blackbox %5
+          %7: ptr = 0x1235
+          %8: i1 = 0
+          blackbox %8
+        ",
+        );
+
+        // ult
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1233
+          %2: i1 = icmp ult %0, %1
+          blackbox %2
+          %4: ptr = 0x1234
+          %5: i1 = icmp ult %0, %4
+          blackbox %5
+          %7: ptr = 0x1235
+          %8: i1 = icmp ult %0, %7
+          blackbox %8
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1233
+          %2: i1 = 0
+          blackbox %2
+          %4: ptr = 0x1234
+          %5: i1 = 0
+          blackbox %5
+          %7: ptr = 0x1235
+          %8: i1 = 1
+          blackbox %8
+        ",
+        );
+
+        // ule
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1233
+          %2: i1 = icmp ule %0, %1
+          blackbox %2
+          %4: ptr = 0x1234
+          %5: i1 = icmp ule %0, %4
+          blackbox %5
+          %7: ptr = 0x1235
+          %8: i1 = icmp ule %0, %7
+          blackbox %8
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1233
+          %2: i1 = 0
+          blackbox %2
+          %4: ptr = 0x1234
+          %5: i1 = 1
+          blackbox %5
+          %7: ptr = 0x1235
+          %8: i1 = 1
+          blackbox %8
         ",
         );
 
