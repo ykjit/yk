@@ -1,7 +1,7 @@
 ; Dump:
 ;   stdout:
 ;     # IR format version: 0
-;     # Num funcs: 2
+;     # Num funcs: 3
 ;     # Num consts: 0
 ;     # Num global decls: 0
 ;     # Num types: 4
