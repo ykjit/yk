@@ -22,6 +22,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::ICmp(x) => opt_icmp(opt, x),
         Inst::IntToPtr(x) => opt_inttoptr(opt, x),
         Inst::LShr(x) => opt_lshr(opt, x),
+        Inst::Mul(x) => opt_mul(opt, x),
         Inst::Or(x) => opt_or(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
         Inst::PtrToInt(x) => opt_ptrtoint(opt, x),
@@ -378,6 +379,76 @@ fn opt_lshr(
     opt_ashr_lshr(opt, inst.into(), tyidx, lhs, rhs, exact, |lhs_c, rhs_c| {
         lhs_c.checked_lshr(rhs_c.to_zero_ext_u32().unwrap())
     })
+}
+
+fn opt_mul(
+    opt: &mut Opt,
+    inst @ Mul {
+        tyidx,
+        lhs,
+        rhs,
+        nuw,
+        nsw,
+    }: Mul,
+) -> OptOutcome {
+    assert!(!nuw && !nsw);
+    if let (
+        Inst::Const(Const {
+            kind: ConstKind::Int(lhs_c),
+            ..
+        }),
+        Inst::Const(Const {
+            kind: ConstKind::Int(rhs_c),
+            ..
+        }),
+    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
+    {
+        // Constant fold `c1 * c2`.
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(lhs_c.wrapping_mul(&rhs_c)),
+        }));
+    } else if let Inst::Const(Const {
+        kind: ConstKind::Int(rhs_c),
+        ..
+    }) = opt.inst_rewrite(rhs)
+    {
+        match rhs_c.to_zero_ext_u64() {
+            Some(0) => {
+                // Reduce `x * 0` to `0`.
+                return OptOutcome::ReducedTo(rhs);
+            }
+            Some(1) => {
+                // Reduce `x * 1` to `x`.
+                return OptOutcome::ReducedTo(lhs);
+            }
+            Some(x) if x.is_power_of_two() => {
+                // Replace `x * y` with `x << ...`.
+                let c_iidx = opt
+                    .feed(Inst::Const(Const {
+                        tyidx,
+                        kind: ConstKind::Int(ArbBitInt::from_u64(
+                            rhs_c.bitw(),
+                            u64::from(x.ilog2()),
+                        )),
+                    }))
+                    .unwrap();
+                return OptOutcome::Rewritten(
+                    Shl {
+                        tyidx,
+                        lhs,
+                        rhs: c_iidx,
+                        nuw: false,
+                        nsw: false,
+                    }
+                    .into(),
+                );
+            }
+            _ => (),
+        }
+    }
+
+    OptOutcome::Rewritten(inst.into())
 }
 
 fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
@@ -1799,6 +1870,88 @@ mod test {
           %0: i8 = arg
           %1: i8 = 0
           blackbox %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_mul() {
+        // Simple constant folding e.g `1 * 2`.
+        test_sf(
+            "
+          %0: i8 = 2
+          %1: i8 = 3
+          %2: i8 = mul %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 6
+          blackbox %2
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = 2
+          %1: i8 = 200
+          %2: i8 = mul %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 144
+          blackbox %2
+        ",
+        );
+
+        // Strength reduction of `x * 0`.
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 0
+          %2: i8 = mul %0, %1
+          exit [%2]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          %1: i8 = 0
+          exit [%1]
+        ",
+        );
+
+        // Strength reduction of `x * 1`.
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 1
+          %2: i8 = mul %0, %1
+          exit [%2]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          %1: i8 = 1
+          exit [%0]
+        ",
+        );
+
+        // Strength reduction of `x * y` if y is a power of 2.
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = 4
+          %2: i8 = mul %0, %1
+          exit [%2]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          %1: i8 = 4
+          %2: i8 = 2
+          %3: i8 = shl %0, %2
+          exit [%3]
         ",
         );
     }
