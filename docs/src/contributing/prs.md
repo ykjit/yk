@@ -5,12 +5,12 @@ submitted as *pull requests* to one of our [GitHub
 repositories](https://github.com/ykjit/). Pull requests are reviewed by a yk
 contributor: changes may be requested in an ongoing dialogue between reviewee
 and reviewer; and, if and when agreement is reached, the pull request will be
-merged.
+merged by the reviewer.
 
 This page explains yk's approach to the pull request model, based on
 observations of good practise in other projects, and our own experiences.
-Please note that this is a living process: the details are subject to continual
-refinement and change, and no document can perfectly capture all the
+Please note that this is a living process: our experiences and opinions will
+inevitably change over time, and no document can perfectly capture all the
 possibilities that will crop up in real life.
 
 
@@ -135,10 +135,9 @@ possibility of an empty list at this point"). For each comment you can either:
      conversation as "resolved" if their point is adequately addressed; or
      raise further comments otherwise.
 
-     Note that the reviewee must not: mark conversations as resolved (only the
-     reviewer should do so); force push updates to your branch unless
-     explicitly requested to do so by the reviewer (always make new commits on
-     the existing branch).
+     Note that the reviewee must not: mark conversations as resolved (only
+     the reviewer should do so); force push changes during this stage (push
+     new commits instead).
 
   2. Add a query. You might not understand the reviewer's question: it's fine
      to ask for clarification.
@@ -151,12 +150,30 @@ possibility of an empty list at this point"). For each comment you can either:
 
 Often multiple rounds of comments, queries, and fixes are required. When the
 reviewer is happy with the changes, they will ask the reviewee to "please
-squash" their pull request. The aim here is to provide a readable sequence of
+squash" their pull request. See [squashing and
+rebasing](#squashing-and-rebasing) for guidance on this.
+
+Once squashing and rebasing has occurred, the reviewer will then push the
+button to merge the PR: continuous integration will then run, which may spot
+issues, and cause the merge to fail. If so, please use the log generated to fix
+the problem. If the fix is trivial -- e.g. a forgotten `cargo fmt` -- it is
+acceptable to force push a fix. Note that unrequested force pushes such as this
+must not rebase against a different commit at the same time --- doing so makes
+it impossible to review the changed PR, and the reviewer will have to ask the
+reviewee to undo the force push. If in doubt as to whether a fix is simple
+enough to count "trivial", push new commits rather than force pushing.
+
+
+## Squashing and rebasing
+
+The aim of squashing and rebasing is to provide a readable sequence of
 commits for those who later need to look at the history of changes to a
 particular part of the repository. The general aim is to provide a pleasing
-sequence of individually documented commits which clearly articulate a change to future
-readers. At the very least, all of the "fix commits" must be merged away:
-commonly, these are merged into the main commits, or, though rarely, into a new
+sequence of individually documented commits which clearly articulate a change
+to future readers.
+
+At the very least, all of the "fix commits" must be merged away: commonly,
+these are merged into the main commits, or, though rarely, into a new
 commit(s). It is not required, and is often undesirable, to squash all commits
 down into a single commit: when multiple commits can better explain a change,
 they are much preferred. During squashing, you should also check that commit
@@ -166,11 +183,6 @@ updating.
 The process of squashing is synonymous with `git rebase`, so when you are asked
 to squash it is also acceptable to: rebase the commit against the `master`
 branch at the same time; and force push the resulting rebased branch.
-
-Not that being asked to squash or to update a commit message are the only times
-you may force push an update to a branch. In both cases, the reviewee must only
-do so when explicitly asked to by a reviewer. If you are unsure, please ask a
-reviewer before force pushing.
 
 
 ## Documentation
@@ -207,11 +219,8 @@ comments.
 ## Automated testing
 
 Before pull requests are merged into yk they must pass automated tests. yk uses
-[bors](https://bors.tech/) and [Buildbot](https://www.buildbot.net/) to run the
+GitHub merge queues and [Buildbot](https://www.buildbot.net/) to run the
 `.buildbot.sh` file in yk's root in a fresh Docker image: if that file executes
 successfully, the pull request is suitable for merging. Pull requests may edit
 `.buildbot.sh` as with any other file, though one must be careful not to slow
-down how long it takes to run unduly. In general, only yk contributors can
-issue `bors` commands, though they can in certain situations give external
-users the right to issue commands on a given pull request. Users given this
-privilege should use it responsibly.
+down how long it takes to run unduly.
