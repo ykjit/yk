@@ -33,7 +33,7 @@ use std::{collections::HashMap, ffi::CString, marker::PhantomData};
 
 lrlex_mod!("compile/j2/hir.l");
 lrpar_mod!("compile/j2/hir.y");
-type StorageT = u8;
+type StorageT = u16;
 
 /// In unit test mode, there are are no [DeoptSafepoint]s, since we're running as a normal Rust
 /// binary, not a ykllvm compiled C program. If we want to use a [DeoptSafepoint] in tests, we have
@@ -88,7 +88,12 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let val = self.p_local(span);
                     self.insts.push(BlackBox { val }.into());
                 }
-                AstInst::Abs { local, ty, val } => {
+                AstInst::Abs {
+                    local,
+                    ty,
+                    val,
+                    int_min_poison,
+                } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
                     let val = self.p_local(val);
@@ -96,7 +101,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         Abs {
                             tyidx,
                             val,
-                            int_min_poison: false,
+                            int_min_poison,
                         }
                         .into(),
                     );
@@ -995,6 +1000,7 @@ enum AstInst {
         local: Span,
         ty: AstTy,
         val: Span,
+        int_min_poison: bool,
     },
     Add {
         local: Span,

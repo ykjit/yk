@@ -642,12 +642,20 @@ impl InstT for Abs {
         Self {
             tyidx: self.tyidx,
             val: f(self.val),
-            int_min_poison: self.int_min_poison
+            int_min_poison: self.int_min_poison,
         }
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("abs %{}, {}", usize::from(self.val), self.int_min_poison)
+        format!(
+            "abs %{}{}",
+            usize::from(self.val),
+            if self.int_min_poison {
+                ", int_min_poison"
+            } else {
+                ""
+            }
+        )
     }
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {

@@ -44,9 +44,10 @@ fn opt_abs(
     inst @ Abs {
         tyidx,
         val,
-        int_min_poison: _,
+        int_min_poison,
     }: Abs,
 ) -> OptOutcome {
+    assert!(int_min_poison);
     if let Inst::Const(Const {
         kind: ConstKind::Int(val_c),
         ..
@@ -895,7 +896,7 @@ mod test {
         test_sf(
             "
           %0: i8 = 2
-          %1: i8 = abs %0
+          %1: i8 = abs %0, int_min_poison
           blackbox %1
         ",
             "
@@ -908,7 +909,7 @@ mod test {
         test_sf(
             "
           %0: i8 = -2
-          %1: i8 = abs %0
+          %1: i8 = abs %0, int_min_poison
           blackbox %1
         ",
             "

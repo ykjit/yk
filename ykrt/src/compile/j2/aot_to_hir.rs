@@ -1226,8 +1226,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         assert!(name.starts_with("llvm."));
         match name.split_once(".").unwrap().1.split_once(".").unwrap().0 {
             "abs" => {
-                let [src, int_min_poison]: [hir::InstIdx; 2] =
-                    jargs.into_vec().try_into().unwrap();
+                let [src, int_min_poison]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let int_min_poison = if let hir::Inst::Const(hir::Const {
                     kind: hir::ConstKind::Int(x),
                     ..
