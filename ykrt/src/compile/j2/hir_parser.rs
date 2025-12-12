@@ -96,7 +96,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         Abs {
                             tyidx,
                             val,
-                            is_int_min_poison: false,
+                            int_min_poison: false,
                         }
                         .into(),
                     );

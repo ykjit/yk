@@ -44,7 +44,7 @@ fn opt_abs(
     inst @ Abs {
         tyidx,
         val,
-        is_int_min_poison: _,
+        int_min_poison: _,
     }: Abs,
 ) -> OptOutcome {
     if let Inst::Const(Const {

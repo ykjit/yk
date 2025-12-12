@@ -1226,12 +1226,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         assert!(name.starts_with("llvm."));
         match name.split_once(".").unwrap().1.split_once(".").unwrap().0 {
             "abs" => {
-                let [src, is_int_min_poison]: [hir::InstIdx; 2] =
+                let [src, int_min_poison]: [hir::InstIdx; 2] =
                     jargs.into_vec().try_into().unwrap();
-                let is_int_min_poison = if let hir::Inst::Const(hir::Const {
+                let int_min_poison = if let hir::Inst::Const(hir::Const {
                     kind: hir::ConstKind::Int(x),
                     ..
-                }) = &self.opt.inst(is_int_min_poison)
+                }) = &self.opt.inst(int_min_poison)
                 {
                     x.to_zero_ext_u8().unwrap() != 0
                 } else {
@@ -1241,7 +1241,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 let hinst = hir::Abs {
                     tyidx: fty.rtn_tyidx,
                     val: src,
-                    is_int_min_poison,
+                    int_min_poison,
                 };
                 self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
             }

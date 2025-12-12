@@ -1426,7 +1426,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Abs {
             tyidx: _,
             val: src,
-            is_int_min_poison: _,
+            int_min_poison: _,
         }: &Abs,
     ) -> Result<(), CompilationError> {
         let bitw = b.inst_bitw(self.m, iidx);
