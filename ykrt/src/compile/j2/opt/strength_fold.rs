@@ -13,6 +13,7 @@ use crate::compile::{
 
 pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
     match inst {
+        Inst::Abs(x) => opt_abs(opt, x),
         Inst::AShr(x) => opt_ashr(opt, x),
         Inst::Add(x) => opt_add(opt, x),
         Inst::And(x) => opt_and(opt, x),
@@ -36,6 +37,27 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::ZExt(x) => opt_zext(opt, x),
         _ => OptOutcome::Rewritten(inst),
     }
+}
+
+fn opt_abs(
+    opt: &mut Opt,
+    inst @ Abs {
+        tyidx,
+        val,
+        is_int_min_poison: _,
+    }: Abs,
+) -> OptOutcome {
+    if let Inst::Const(Const {
+        kind: ConstKind::Int(val_c),
+        ..
+    }) = opt.inst_rewrite(val)
+    {
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(val_c.bitabs()),
+        }));
+    }
+    OptOutcome::Rewritten(inst.into())
 }
 
 fn opt_add(
@@ -864,6 +886,36 @@ mod test {
             mod_s,
             |opt, inst| strength_fold(opt, opt.rewrite(inst)),
             ptn,
+        );
+    }
+
+    #[test]
+    fn opt_abs() {
+        // Simple constant folding e.g abs(-1) == 1
+        test_sf(
+            "
+          %0: i8 = 2
+          %1: i8 = abs %0
+          blackbox %1
+        ",
+            "
+          ...
+          %1: i8 = 2
+          blackbox %1
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = -2
+          %1: i8 = abs %0
+          blackbox %1
+        ",
+            "
+          ...
+          %1: i8 = 2
+          blackbox %1
+        ",
         );
     }
 
