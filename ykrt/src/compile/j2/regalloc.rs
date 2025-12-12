@@ -46,19 +46,6 @@
 //! cannot be merged together.
 //!
 //!
-//! ## Guard optimism
-//!
-//! When a guard's `entry_vars` reference a variable that is not currently in a register, we don't
-//! want to force them to be in a register, as nothing other than the guard (or other guards) may
-//! reference them. However, often there is a register free, at which point it would be *nice* to
-//! place values there, but not at the expense of forcing out definitely useful values later. We
-//! call this "guard optimism" within the register allocator.
-//!
-//! To make this possible, [RState::gridxs] allows a register to say "this `iidx` is only used in
-//! guards {G1, G2}": if the `iidx` is replaced in lieu of a more useful value, the register
-//! allocator will retrospectively patch the guards in question. This relies on the implicit
-//!
-//!
 //! ## Register fill expectations
 //!
 //! The allocator assumes that values on entry to a trace have a [RegFill::Undefined] fill. Spills
@@ -70,7 +57,7 @@ use crate::compile::j2::hir::Ty;
 use crate::compile::{
     CompilationError,
     j2::{
-        hir::{Block, BlockLikeT, Const, ConstKind, GuardRestoreIdx, Inst, InstIdx, Mod, ModKind},
+        hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod, ModKind},
         hir_to_asm::HirToAsmBackend,
     },
 };
@@ -131,9 +118,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
     /// Snapshot this register allocator in a way that is suitable for a
     /// [super::hir::GuardRestore].
-    pub(super) fn snapshot(&mut self, iidx: InstIdx, gridx: GuardRestoreIdx) -> SnapshotIdx {
+    pub(super) fn snapshot(&mut self, iidx: InstIdx) -> SnapshotIdx {
         self.snapshots.push(Snapshot {
-            gridx,
             istates: self.istates[..iidx].to_vec(),
             rstates: self.rstates.clone(),
         })
@@ -200,12 +186,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             todo!();
                         }
                     }
-                    in_rstate.set_fill_iidxs_gridxs(
-                        *reg,
-                        RegFill::Undefined,
-                        smallvec![iidx],
-                        smallvec![],
-                    );
+                    in_rstate.set_fill_iidxs(*reg, RegFill::Undefined, smallvec![iidx]);
                 }
             }
         }
@@ -486,7 +467,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
                 ractions.spills.push(RegSpill {
                     iidxs: self.rstates.iidxs(break_reg).clone(),
-                    reg: break_reg,
                 });
 
                 let mut new_unspills = Vec::new();
@@ -577,7 +557,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             be.arrange_fill(*dst_reg, *src_fill, *bitw, *dst_fill);
         }
 
-        for RegSpill { iidxs, reg } in ractions.spills.iter().rev() {
+        for RegSpill { iidxs } in ractions.spills.iter().rev() {
             for iidx in iidxs {
                 if matches!(self.b.inst(*iidx), Inst::Const(_))
                     || matches!(self.istates[*iidx], IState::StackOff(_))
@@ -586,27 +566,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     continue;
                 }
 
-                let stack_off = match self.istates[*iidx] {
-                    IState::None => {
-                        let bitw = self.b.inst_bitw(self.m, *iidx);
-                        let stack_off = be.align_spill(self.stack_off, bitw);
-                        self.stack_off = stack_off;
-                        self.istates[*iidx] = IState::Stack(stack_off);
-                        stack_off
-                    }
-                    IState::Stack(stack_off) => stack_off,
-                    IState::StackOff(_) => unreachable!(),
-                };
-
-                for gridx in self.rstates.gridxs(*reg) {
-                    let snap = &mut self.snapshots[SnapshotIdx::from(
-                        self.m.guard_restores().len() - usize::from(*gridx) - 1,
-                    )];
-                    assert_eq!(snap.gridx, *gridx);
-                    for patch_iidx in self.rstates.iidxs(*reg) {
-                        assert_matches!(snap.istates[*patch_iidx], IState::None);
-                        snap.istates[*patch_iidx] = IState::Stack(stack_off);
-                    }
+                if let IState::None = self.istates[*iidx] {
+                    let bitw = self.b.inst_bitw(self.m, *iidx);
+                    let stack_off = be.align_spill(self.stack_off, bitw);
+                    self.stack_off = stack_off;
+                    self.istates[*iidx] = IState::Stack(stack_off);
                 }
             }
         }
@@ -795,7 +759,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         for (reg, cnstr) in allocs.iter().cloned().zip(cnstrs.iter_mut()) {
             match cnstr {
                 RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } => {
-                    n_out.set_fill_iidxs_gridxs(reg, RegFill::Undefined, smallvec![], smallvec![]);
+                    n_out.set_fill_iidxs(reg, RegFill::Undefined, smallvec![]);
                     rtn_fills.push(RegFill::Undefined);
                 }
                 RegCnstr::Input {
@@ -805,16 +769,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     ..
                 } => {
                     if *clobber {
-                        n_out.set_fill_iidxs_gridxs(
-                            reg,
-                            RegFill::Undefined,
-                            smallvec![],
-                            smallvec![],
-                        );
+                        n_out.set_fill_iidxs(reg, RegFill::Undefined, smallvec![]);
                         rtn_fills.push(RegFill::Undefined);
                     } else {
                         let in_fill = RegFill::from_regcnstrfill(in_fill);
-                        n_out.set_fill_iidxs_gridxs(reg, in_fill, smallvec![*in_iidx], smallvec![]);
+                        n_out.set_fill_iidxs(reg, in_fill, smallvec![*in_iidx]);
                         rtn_fills.push(in_fill);
                     }
                 }
@@ -833,7 +792,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         *out_fill = RegCnstrFill::from_regfill(fill);
                     }
                     let out_fill = RegFill::from_regcnstrfill(out_fill);
-                    n_out.set_fill_iidxs_gridxs(reg, out_fill, smallvec![iidx], smallvec![]);
+                    n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
                     rtn_fills.push(out_fill);
                     output_reg = Some(reg);
                 }
@@ -847,12 +806,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             || n_out.fill(reg) == RegFill::Undefined
                             || out_fill == RegFill::Undefined
                         {
-                            n_out.set_fill_iidxs_gridxs(
-                                reg,
-                                out_fill,
-                                smallvec![iidx],
-                                smallvec![],
-                            );
+                            n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
                             rtn_fills.push(out_fill);
                             output_reg = Some(reg);
                         } else {
@@ -872,7 +826,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             todo!()
                         }
                     } else {
-                        n_out.set_fill_iidxs_gridxs(reg, out_fill, smallvec![iidx], smallvec![]);
+                        n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
                         rtn_fills.push(out_fill);
                         output_reg = Some(reg);
                     }
@@ -910,7 +864,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // Before we can get the output fills in the correct states, we need to discount anything
         // we'd immediately unspill on top of.
         for RegUnspill { reg, .. } in &ractions.unspills {
-            n_out.set_fill_iidxs_gridxs(*reg, RegFill::Undefined, smallvec![], smallvec![]);
+            n_out.set_fill_iidxs(*reg, RegFill::Undefined, smallvec![]);
         }
 
         // Phase 3.2: Spill outputs if they will need to be unspilled later.
@@ -977,11 +931,10 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 | RegCnstr::InputOutput {
                     in_iidx, in_fill, ..
                 } => {
-                    n_in.set_fill_iidxs_gridxs(
+                    n_in.set_fill_iidxs(
                         reg,
                         RegFill::from_regcnstrfill(in_fill),
                         smallvec![*in_iidx],
-                        smallvec![],
                     );
                 }
                 RegCnstr::Output {
@@ -997,22 +950,16 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                                 reg == cnd_reg && matches!(cnd_cnstr, RegCnstr::Input { .. })
                             })
                     {
-                        n_in.set_fill_iidxs_gridxs(
-                            reg,
-                            RegFill::Undefined,
-                            smallvec![],
-                            smallvec![],
-                        );
+                        n_in.set_fill_iidxs(reg, RegFill::Undefined, smallvec![]);
                     }
                 }
                 RegCnstr::Cast {
                     in_iidx, out_fill, ..
                 } => {
-                    n_in.set_fill_iidxs_gridxs(
+                    n_in.set_fill_iidxs(
                         reg,
                         RegFill::from_regcnstrfill(out_fill),
                         smallvec![*in_iidx],
-                        smallvec![],
                     );
                 }
                 RegCnstr::KeepAlive { .. } => (),
@@ -1032,7 +979,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // Deal with `KeepAlive`: at this point we know what the incoming registers for the "next"
         // rstate will be (because it's now the "current" rstate).
         for (_, cnstr) in allocs.iter().cloned().zip(cnstrs.iter()) {
-            if let RegCnstr::KeepAlive { gridx, iidxs } = cnstr {
+            if let RegCnstr::KeepAlive { iidxs } = cnstr {
                 for ka_iidx in iidxs.iter() {
                     let reg = self.iter_reg_for(*ka_iidx).nth(0);
                     if reg.is_none()
@@ -1042,11 +989,10 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         let mut found = false;
                         for reg in be.iter_possible_regs(self.b, *ka_iidx) {
                             if self.rstates.iidxs(reg).is_empty() {
-                                self.rstates.set_fill_iidxs_gridxs(
+                                self.rstates.set_fill_iidxs(
                                     reg,
                                     RegFill::Undefined,
                                     smallvec![*ka_iidx],
-                                    smallvec![*gridx],
                                 );
                                 found = true;
                                 break;
@@ -1057,11 +1003,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             self.stack_off = be.align_spill(self.stack_off, ka_bitw);
                             self.istates[*ka_iidx] = IState::Stack(self.stack_off);
                         }
-                    } else if let Some(reg) = reg
-                        && !self.rstates.gridxs(reg).is_empty()
-                        && !self.rstates.gridxs(reg).contains(gridx)
-                    {
-                        self.rstates.gridxs_mut(reg).push(*gridx);
                     }
                     self.is_used[*ka_iidx] = iidx;
                 }
@@ -1352,16 +1293,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             // If the value(s) isn't an existing register, we will need to ensure it is spilt...
             spills.push(RegSpill {
                 iidxs: dst_rstate.iidxs.clone(),
-                reg: dst_reg,
             });
-            // ...and -- unless the values would only be used in guard entries -- unspilt.
-            if dst_rstate.gridxs.is_empty() {
-                unspills.push(RegUnspill {
-                    iidxs: dst_rstate.iidxs.clone(),
-                    reg: dst_reg,
-                    fill: dst_rstate.fill,
-                });
-            }
+            unspills.push(RegUnspill {
+                iidxs: dst_rstate.iidxs.clone(),
+                reg: dst_reg,
+                fill: dst_rstate.fill,
+            });
         }
 
         RegActions {
@@ -1389,14 +1326,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         if let Some(reg) = regs
             .iter()
             .find(|reg| !allocs.contains(&Some(**reg)) && self.rstates.iidxs(**reg).is_empty())
-        {
-            return *reg;
-        }
-
-        // Is there a value in a register which is only going to be used in a guard?
-        if let Some(reg) = regs
-            .iter()
-            .find(|reg| !allocs.contains(&Some(**reg)) && !self.rstates.gridxs(**reg).is_empty())
         {
             return *reg;
         }
@@ -1467,14 +1396,6 @@ impl<Reg: RegT> RStates<Reg> {
         self.rstate[reg.regidx()].fill = fill;
     }
 
-    fn gridxs(&self, reg: Reg) -> &SmallVec<[GuardRestoreIdx; 1]> {
-        &self.rstate[reg.regidx()].gridxs
-    }
-
-    fn gridxs_mut(&mut self, reg: Reg) -> &mut SmallVec<[GuardRestoreIdx; 1]> {
-        &mut self.rstate[reg.regidx()].gridxs
-    }
-
     fn iidxs(&self, reg: Reg) -> &SmallVec<[InstIdx; 2]> {
         &self.rstate[reg.regidx()].iidxs
     }
@@ -1483,18 +1404,8 @@ impl<Reg: RegT> RStates<Reg> {
         &mut self.rstate[reg.regidx()].iidxs
     }
 
-    fn set_fill_iidxs_gridxs(
-        &mut self,
-        reg: Reg,
-        fill: RegFill,
-        iidxs: SmallVec<[InstIdx; 2]>,
-        gridxs: SmallVec<[GuardRestoreIdx; 1]>,
-    ) {
-        self.rstate[reg.regidx()] = RState {
-            fill,
-            iidxs,
-            gridxs,
-        };
+    fn set_fill_iidxs(&mut self, reg: Reg, fill: RegFill, iidxs: SmallVec<[InstIdx; 2]>) {
+        self.rstate[reg.regidx()] = RState { fill, iidxs };
     }
 }
 
@@ -1502,7 +1413,6 @@ impl<Reg: RegT> RStates<Reg> {
 struct RState {
     fill: RegFill,
     iidxs: SmallVec<[InstIdx; 2]>,
-    gridxs: SmallVec<[GuardRestoreIdx; 1]>,
 }
 
 impl Default for RState {
@@ -1510,15 +1420,12 @@ impl Default for RState {
         Self {
             fill: RegFill::Undefined,
             iidxs: smallvec![],
-            gridxs: smallvec![],
         }
     }
 }
 
 #[derive(Debug)]
 pub(super) struct Snapshot<AB: HirToAsmBackend + ?Sized> {
-    /// Used only to ensure we get the maths around reverse code generation correct.
-    gridx: GuardRestoreIdx,
     istates: IndexVec<InstIdx, IState>,
     rstates: RStates<AB::Reg>,
 }
@@ -1684,10 +1591,7 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
     Temp { regs: &'a [Reg] },
     /// Keep alive the values in `InstIdx` but do not allocate a register for them. Returns
     /// `Reg::Undefined`. Intended only for guards.
-    KeepAlive {
-        gridx: GuardRestoreIdx,
-        iidxs: &'a [InstIdx],
-    },
+    KeepAlive { iidxs: &'a [InstIdx] },
 }
 
 /// What should the *fill bits* of a register be set to?
@@ -1823,7 +1727,7 @@ struct RegActions<Reg: RegT> {
     /// reverse-order.
     distinct_copies: Vec<RegCopy<Reg>>,
     /// An unordered set of instructions .
-    spills: Vec<RegSpill<Reg>>,
+    spills: Vec<RegSpill>,
 }
 
 /// Unspill `InstIdx` into `Reg` with fill `RegExt`. Note: by definition, spilled values are stored
@@ -1846,9 +1750,8 @@ struct RegCopy<Reg: RegT> {
 
 /// Specify that instruction values in `iidx`s currently in `reg` will need to be marked as spilt.
 #[derive(Debug)]
-struct RegSpill<Reg: RegT> {
+struct RegSpill {
     iidxs: SmallVec<[InstIdx; 2]>,
-    reg: Reg,
 }
 
 /// Return the bit width of the widest instruction in `iidxs`.
@@ -2510,10 +2413,7 @@ pub(crate) mod test {
                         regs: &GP_REGS,
                         clobber: false,
                     },
-                    RegCnstr::KeepAlive {
-                        gridx: GuardRestoreIdx::from(0),
-                        iidxs: entry_vars,
-                    },
+                    RegCnstr::KeepAlive { iidxs: entry_vars },
                 ],
             )?;
 
@@ -3172,39 +3072,6 @@ pub(crate) mod test {
                     ..
                 }
             ]
-        );
-    }
-
-    #[test]
-    fn guard_optimism() {
-        // A case where guard optimism has to be undone.
-        //
-        // It's a bit hard to see in the test output, but note the spill to `stack_off=8` that is
-        // not used in the trace: that's the guard optimism being undone.
-        build_and_test(
-            r#"
-          %0: i8 = arg [reg "GPR0"]
-          %1: i8 = arg [reg "GPR1"]
-          %2: i8 = add %0, %1
-          %3: i8 = add %2, %2
-          %4: i8 = add %3, %3
-          %5: i1 = icmp eq %0, %4
-          guard true, %5, [%2]
-          exit [%0, %1]
-        "#,
-            |s| !s.starts_with("arrange_fill"),
-            &["
-          alloc %6 GPR2
-          alloc %5 GPR0 GPR2 GPR2
-          alloc %4 GPR2 GPR3
-          unspill stack_off=16 GPR0 Undefined bitw=8
-          copy_reg from=GPR2 to=GPR3
-          alloc %3 GPR2 GPR0
-          copy_reg from=GPR0 to=GPR2
-          spill GPR0 Undefined stack_off=8 bitw=8
-          alloc %2 GPR0 GPR1
-          spill GPR0 Undefined stack_off=16 bitw=8
-        "],
         );
     }
 
