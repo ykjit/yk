@@ -219,11 +219,8 @@ comments.
 ## Automated testing
 
 Before pull requests are merged into yk they must pass automated tests. yk uses
-[bors](https://bors.tech/) and [Buildbot](https://www.buildbot.net/) to run the
+GitHub merge queues and [Buildbot](https://www.buildbot.net/) to run the
 `.buildbot.sh` file in yk's root in a fresh Docker image: if that file executes
 successfully, the pull request is suitable for merging. Pull requests may edit
 `.buildbot.sh` as with any other file, though one must be careful not to slow
-down how long it takes to run unduly. In general, only yk contributors can
-issue `bors` commands, though they can in certain situations give external
-users the right to issue commands on a given pull request. Users given this
-privilege should use it responsibly.
+down how long it takes to run unduly.
