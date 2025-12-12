@@ -531,7 +531,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     assert!(cnd_idx <= grestores.len());
                     if cnd_idx == grestores.len() {
                         let label = self.be.i_guard(&mut ra, b, iidx, x)?;
-                        let sidx = ra.snapshot(iidx, *gridx);
+                        let sidx = ra.snapshot(iidx);
                         grestores.push(AsmGuardRestore {
                             gridx: *gridx,
                             label,

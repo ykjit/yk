@@ -268,7 +268,6 @@ impl<'a> X64HirToAsm<'a> {
         iidx: InstIdx,
         Guard {
             expect,
-            gridx,
             cond,
             entry_vars,
             ..
@@ -336,10 +335,7 @@ impl<'a> X64HirToAsm<'a> {
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
-                        RegCnstr::KeepAlive {
-                            gridx: *gridx,
-                            iidxs: entry_vars,
-                        },
+                        RegCnstr::KeepAlive { iidxs: entry_vars },
                     ],
                 )?;
                 RegOrMemOp::MemOp(lhsr, off)
@@ -354,10 +350,7 @@ impl<'a> X64HirToAsm<'a> {
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
-                        RegCnstr::KeepAlive {
-                            gridx: *gridx,
-                            iidxs: entry_vars,
-                        },
+                        RegCnstr::KeepAlive { iidxs: entry_vars },
                     ],
                 )?;
                 RegOrMemOp::Reg(lhsr)
@@ -389,10 +382,7 @@ impl<'a> X64HirToAsm<'a> {
                                 regs: &NORMAL_GP_REGS,
                                 clobber: false,
                             },
-                            RegCnstr::KeepAlive {
-                                gridx: *gridx,
-                                iidxs: entry_vars,
-                            },
+                            RegCnstr::KeepAlive { iidxs: entry_vars },
                         ],
                     )?;
                     (RegOrMemOp::MemOp(lhsr, off), rhsr)
@@ -413,10 +403,7 @@ impl<'a> X64HirToAsm<'a> {
                                 regs: &NORMAL_GP_REGS,
                                 clobber: false,
                             },
-                            RegCnstr::KeepAlive {
-                                gridx: *gridx,
-                                iidxs: entry_vars,
-                            },
+                            RegCnstr::KeepAlive { iidxs: entry_vars },
                         ],
                     )?;
                     (RegOrMemOp::Reg(lhsr), rhsr)
@@ -2512,7 +2499,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             expect,
             cond,
             entry_vars,
-            gridx,
             ..
         }: &Guard,
     ) -> Result<Self::Label, CompilationError> {
@@ -2530,10 +2516,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
-                RegCnstr::KeepAlive {
-                    gridx: *gridx,
-                    iidxs: entry_vars,
-                },
+                RegCnstr::KeepAlive { iidxs: entry_vars },
             ],
         )?;
 
