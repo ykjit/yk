@@ -279,6 +279,19 @@ impl ArbBitInt {
         }
     }
 
+    /// Return a new [ArbBitInt] that performs an `abs` on `self`.
+    pub(crate) fn bitabs(&self) -> Self {
+        Self {
+            bitw: self.bitw,
+            val: self
+                .truncate(self.bitw)
+                .to_sign_ext_i64()
+                .unwrap()
+                .abs()
+                .cast_unsigned(),
+        }
+    }
+
     /// Return a new [ArbBitInt] that performs bitwise `AND` on `self` and `other`.
     ///
     /// # Panics
@@ -495,6 +508,18 @@ mod tests {
                 Some(x.wrapping_mul(y))
             );
 
+            // bitabs
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(16, x as i64).bitabs().to_sign_ext_i8(),
+                i8::try_from(x.abs()).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(16, x as i64).bitabs().to_sign_ext_i16(),
+                Some(x.abs())
+            );
+
             // bitand
             // i8
             assert_eq!(
@@ -616,6 +641,23 @@ mod tests {
                 ArbBitInt::from_i64(32, x as i64)
                     .wrapping_mul(&ArbBitInt::from_i64(32, y as i64)).to_sign_ext_i32(),
                 Some(x.wrapping_mul(y))
+            );
+
+            // bitabs
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64).bitabs().to_sign_ext_i8(),
+                i8::try_from(x.abs()).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64).bitabs().to_sign_ext_i16(),
+                i16::try_from(x.abs()).ok()
+            );
+            // i32
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64).bitabs().to_sign_ext_i32(),
+                Some(x.abs())
             );
 
             // bitand
@@ -780,6 +822,29 @@ mod tests {
                 ArbBitInt::from_i64(64, x)
                     .wrapping_mul(&ArbBitInt::from_i64(64, y)).to_sign_ext_i64(),
                 Some(x.wrapping_mul(y))
+            );
+
+            // bitabs
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(64, x).bitabs().to_sign_ext_i8(),
+                i8::try_from(x.abs()).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(64, x).bitabs().to_sign_ext_i16(),
+                i16::try_from(x.abs()).ok()
+            );
+            // i32
+            assert_eq!(
+                ArbBitInt::from_i64(64, x).bitabs().to_sign_ext_i32(),
+                i32::try_from(x.abs()).ok()
+            );
+            // i64
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .bitabs().to_sign_ext_i64(),
+                Some(x.abs())
             );
 
             // bitand
