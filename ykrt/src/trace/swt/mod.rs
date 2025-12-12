@@ -8,8 +8,8 @@ use std::{cell::RefCell, error::Error, sync::Arc};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBBlock {
-    function_index: usize,
-    block_index: usize,
+    function_index: u16,
+    block_index: u16,
 }
 
 thread_local! {
@@ -22,16 +22,17 @@ thread_local! {
 /// This must only be called if the current thread is tracing.
 ///
 /// # Arguments
-/// * `function_index` - The index of the function to which the basic block belongs.
-/// * `block_index` - The index of the basic block within the function.
+///
+/// * `block_id` specifies the block to be recorded. The upper 16-bits are the function index, the
+///   lower 16-bits are the basic block index.
 #[cfg(tracer_swt)]
 #[unsafe(no_mangle)]
-pub extern "C" fn __yk_trace_basicblock(function_index: usize, block_index: usize) {
+pub extern "C" fn __yk_trace_basicblock(block_id: u32) {
     debug_assert!(MTThread::is_tracing());
     BASIC_BLOCKS.with(|v| {
         v.borrow_mut().push(TracingBBlock {
-            function_index,
-            block_index,
+            function_index: u16::try_from(block_id >> 16).unwrap(),
+            block_index: u16::try_from(block_id & 0xffff).unwrap(),
         });
     })
 }
@@ -84,8 +85,8 @@ impl Iterator for SWTraceIterator {
     fn next(&mut self) -> Option<Self::Item> {
         self.bbs.next().map(|tb| {
             Ok(TraceAction::MappedAOTBBlock {
-                funcidx: tb.function_index,
-                bbidx: tb.block_index,
+                funcidx: usize::from(tb.function_index),
+                bbidx: usize::from(tb.block_index),
             })
         })
     }
