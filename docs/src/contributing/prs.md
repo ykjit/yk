@@ -9,8 +9,8 @@ merged by the reviewer.
 
 This page explains yk's approach to the pull request model, based on
 observations of good practise in other projects, and our own experiences.
-Please note that this is a living process: the details are subject to continual
-refinement and change, and no document can perfectly capture all the
+Please note that this is a living process: our experiences and opinions will
+inevitably change over time, and no document can perfectly capture all the
 possibilities that will crop up in real life.
 
 
