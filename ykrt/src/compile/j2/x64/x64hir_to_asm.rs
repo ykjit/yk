@@ -1426,9 +1426,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Abs {
             tyidx: _,
             val: src,
-            is_int_min_poison: _,
+            int_min_poison,
         }: &Abs,
     ) -> Result<(), CompilationError> {
+        assert!(int_min_poison);
         let bitw = b.inst_bitw(self.m, iidx);
         let [ior, tmpr] = ra.alloc(
             self,
@@ -4237,12 +4238,12 @@ mod test {
         codegen_and_test(
             "
               %0: i32 = arg [reg]
-              %1: i32 = abs %0
+              %1: i32 = abs %0, int_min_poison
               exit [%1]
             ",
             &["
               ...
-              ; %1: i32 = abs %0, false
+              ; %1: i32 = abs %0, int_min_poison
               mov r.64.x, r.64.y
               neg r.64.y
               cmovl r.64.y, r.64.x
@@ -4254,12 +4255,12 @@ mod test {
         codegen_and_test(
             "
               %0: i64 = arg [reg]
-              %1: i64 = abs %0
+              %1: i64 = abs %0, int_min_poison
               exit [%1]
             ",
             &["
               ...
-              ; %1: i64 = abs %0, false
+              ; %1: i64 = abs %0, int_min_poison
               mov r.64.x, r.64.y
               neg r.64.y
               cmovl r.64.y, r.64.x
@@ -4914,10 +4915,10 @@ mod test {
         codegen_and_test(
             "
               %0: i32 = 0
-              %1: i32 = abs %0
+              %1: i32 = abs %0, int_min_poison
               blackbox %1
               %3: i32 = 0xFFFFFFFF
-              %4: i32 = abs %3
+              %4: i32 = abs %3, int_min_poison
               blackbox %4
               exit []
             ",
@@ -4978,16 +4979,16 @@ mod test {
         codegen_and_test(
             "
               %0: i64 = 0
-              %1: i64 = abs %0
+              %1: i64 = abs %0, int_min_poison
               blackbox %1
               %3: i64 = 0xFFFFFFFF
-              %4: i64 = abs %3
+              %4: i64 = abs %3, int_min_poison
               blackbox %4
               %6: i64 = 0xFFFFFFFFFFFFFFFF
-              %7: i64 = abs %6
+              %7: i64 = abs %6, int_min_poison
               blackbox %7
               %9: i64 = 0x1010101010101010
-              %10: i64 = abs %9
+              %10: i64 = abs %9, int_min_poison
               blackbox %10
               exit []
             ",
