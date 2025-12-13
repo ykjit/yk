@@ -885,7 +885,10 @@ mod test {
     fn test_sf(mod_s: &str, ptn: &str) {
         opt_and_test(
             mod_s,
-            |opt, inst| strength_fold(opt, opt.rewrite(inst)),
+            |opt, inst| {
+                let inst = opt.rewrite(inst);
+                strength_fold(opt, inst)
+            },
             ptn,
         );
     }

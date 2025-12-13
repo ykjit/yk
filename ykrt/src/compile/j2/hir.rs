@@ -550,7 +550,7 @@ pub(super) trait InstT: std::fmt::Debug {
     /// Return a copy of this instruction with any operands that reference [InstIdx]s mapped by `f`.
     fn map_iidxs<F>(self, f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized;
 
     /// Return a pretty printed version of `self`.
@@ -640,9 +640,9 @@ impl InstT for Abs {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -718,9 +718,9 @@ impl InstT for Add {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -786,9 +786,9 @@ impl InstT for And {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -825,7 +825,7 @@ impl InstT for Arg {
 
     fn map_iidxs<F>(self, _f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self { tyidx: self.tyidx }
@@ -869,9 +869,9 @@ impl InstT for AShr {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -913,9 +913,9 @@ impl InstT for BlackBox {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self { val: f(self.val) }
@@ -980,9 +980,9 @@ impl InstT for Call {
         self.args.iter().for_each(|iidx| f(*iidx));
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1072,7 +1072,7 @@ impl InstT for Const {
 
     fn map_iidxs<F>(self, _f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1133,9 +1133,9 @@ impl InstT for CtPop {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1183,9 +1183,9 @@ impl InstT for DynPtrAdd {
         f(self.num_elems);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1223,7 +1223,7 @@ impl InstT for Exit {
 
     fn map_iidxs<F>(self, f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self(self.0.into_iter().map(f).collect::<Vec<_>>())
@@ -1284,9 +1284,9 @@ impl InstT for FAdd {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1345,9 +1345,9 @@ impl InstT for FCmp {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1450,9 +1450,9 @@ impl InstT for FDiv {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1505,9 +1505,9 @@ impl InstT for Floor {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1560,9 +1560,9 @@ impl InstT for FMul {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1617,9 +1617,9 @@ impl InstT for FNeg {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1672,9 +1672,9 @@ impl InstT for FSub {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1729,9 +1729,9 @@ impl InstT for FPExt {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1779,9 +1779,9 @@ impl InstT for FPToSI {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1840,9 +1840,9 @@ impl InstT for Guard {
         self.entry_vars.iter().for_each(|iidx| f(*iidx));
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -1935,9 +1935,9 @@ impl InstT for ICmp {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2032,9 +2032,9 @@ impl InstT for IntToPtr {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2076,9 +2076,9 @@ impl InstT for Load {
         f(self.ptr);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2126,9 +2126,9 @@ impl InstT for LShr {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2191,9 +2191,9 @@ impl InstT for MemCpy {
         f(self.len);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2264,9 +2264,9 @@ impl InstT for MemSet {
         f(self.len);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2341,9 +2341,9 @@ impl InstT for Mul {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2411,9 +2411,9 @@ impl InstT for Or {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2458,9 +2458,9 @@ impl InstT for PtrAdd {
         f(self.ptr);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2511,9 +2511,9 @@ impl InstT for PtrToInt {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2548,7 +2548,7 @@ impl InstT for Return {
 
     fn map_iidxs<F>(self, _f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2601,9 +2601,9 @@ impl InstT for SDiv {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2660,9 +2660,9 @@ impl InstT for Select {
         f(self.falsev);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2729,9 +2729,9 @@ impl InstT for SExt {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2779,9 +2779,9 @@ impl InstT for Shl {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2832,9 +2832,9 @@ impl InstT for SIToFP {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2897,9 +2897,9 @@ impl InstT for SMax {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -2967,9 +2967,9 @@ impl InstT for SMin {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -3027,9 +3027,9 @@ impl InstT for SRem {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -3078,9 +3078,9 @@ impl InstT for Store {
         f(self.ptr);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -3140,9 +3140,9 @@ impl InstT for Sub {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -3185,7 +3185,7 @@ impl InstT for ThreadLocal {
 
     fn map_iidxs<F>(self, _f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self(self.0)
@@ -3240,9 +3240,9 @@ impl InstT for Trunc {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -3291,9 +3291,9 @@ impl InstT for UDiv {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -3348,9 +3348,9 @@ impl InstT for UIToFP {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -3414,9 +3414,9 @@ impl InstT for Xor {
         f(self.rhs);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {
@@ -3470,9 +3470,9 @@ impl InstT for ZExt {
         f(self.val);
     }
 
-    fn map_iidxs<F>(self, f: F) -> Self
+    fn map_iidxs<F>(self, mut f: F) -> Self
     where
-        F: Fn(InstIdx) -> InstIdx,
+        F: FnMut(InstIdx) -> InstIdx,
         Self: Sized,
     {
         Self {

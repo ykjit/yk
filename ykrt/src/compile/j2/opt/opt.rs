@@ -92,14 +92,14 @@ impl Opt {
     }
 
     /// Produce a rewritten version of `iidx`: this is a convenience function over [Self::rewrite].
-    pub(super) fn inst_rewrite(&self, iidx: InstIdx) -> Inst {
+    pub(super) fn inst_rewrite(&mut self, iidx: InstIdx) -> Inst {
         self.rewrite(self.inst(iidx).clone())
     }
 
     /// Rewrite `inst` to reflect knowledge the optimiser has built up (e.g. ranges) and then
     /// canonicalise. In general, passes should not be using this function directly: they should be
     /// passing instruction indexes to [Self::inst_rewrite].
-    pub(super) fn rewrite(&self, inst: Inst) -> Inst {
+    pub(super) fn rewrite(&mut self, inst: Inst) -> Inst {
         inst.map_iidxs(|iidx| self.equiv_iidx(iidx))
             .canonicalise(self, self)
     }
@@ -144,11 +144,14 @@ impl OptT for Opt {
         todo!()
     }
 
-    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
+    fn equiv_iidx(&mut self, iidx: InstIdx) -> InstIdx {
         let mut search = iidx;
         loop {
             let equiv = self.insts[search].equiv;
             if equiv == InstIdx::MAX {
+                if search != iidx {
+                    self.insts[iidx].equiv = search;
+                }
                 return search;
             }
             search = equiv;
@@ -274,7 +277,10 @@ pub(in crate::compile::j2::opt) mod test {
         fn test_sf(mod_s: &str, ptn: &str) {
             opt_and_test(
                 mod_s,
-                |opt, inst| strength_fold(opt, opt.rewrite(inst)),
+                |opt, inst| {
+                    let inst = opt.rewrite(inst);
+                    strength_fold(opt, inst)
+                },
                 ptn,
             );
         }
