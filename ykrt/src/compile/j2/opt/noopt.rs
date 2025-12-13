@@ -47,7 +47,7 @@ impl OptT for NoOpt {
         todo!()
     }
 
-    fn map_iidx(&self, iidx: InstIdx) -> InstIdx {
+    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
         iidx
     }
 

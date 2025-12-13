@@ -1873,7 +1873,7 @@ struct Frame {
 impl Frame {
     /// Lookup the AOT variable `iid` relative to `opt`.
     fn get_local(&self, opt: &dyn OptT, iid: &InstId) -> hir::InstIdx {
-        opt.map_iidx(self.locals[iid])
+        opt.equiv_iidx(self.locals[iid])
     }
 
     /// Set the AOT variable `iid` mapping to HIR `iidx`. This is allowed to override previous
