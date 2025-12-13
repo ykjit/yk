@@ -277,29 +277,19 @@ fn opt_guard(opt: &mut Opt, inst @ Guard { expect, cond, .. }: Guard) -> OptOutc
         // A guard that references a constant is, by definition, not needed and
         // doesn't affect future analyses.
         return OptOutcome::NotNeeded;
-    } else if expect {
-        if let Inst::ICmp(ICmp {
+    } else if expect
+        && let Inst::ICmp(ICmp {
             pred: IPred::Eq,
             lhs,
             rhs,
             samesign,
         }) = cond_inst
-            && lhs == rhs
-        {
-            assert!(!samesign);
+    {
+        assert!(!samesign);
+        if lhs == rhs {
             return OptOutcome::NotNeeded;
         }
-        if let Inst::ICmp(ICmp {
-            pred: IPred::Eq,
-            lhs,
-            rhs,
-            samesign,
-        }) = cond_inst
-            && let Inst::Const(_) = opt.inst_rewrite(rhs)
-        {
-            assert!(!samesign);
-            opt.set_equiv(lhs, rhs);
-        }
+        opt.set_equiv(lhs, rhs);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -1231,6 +1221,23 @@ mod test {
           blackbox %3
           blackbox %3
           exit [%3, %3]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          exit [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          exit [%0, %0]
         ",
         );
 

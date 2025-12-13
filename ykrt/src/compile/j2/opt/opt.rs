@@ -104,9 +104,17 @@ impl Opt {
             .canonicalise(self, self)
     }
 
-    /// Henceforth consider `iidx` to be equivalent to `equiv_to`. See the careful
+    /// Henceforth consider `iidx` to be equivalent to `equiv_to` (and/or vice versa). Note: it is
+    /// the caller's job to ensure that `iidx` and `equiv_to` have already been transformed for
+    /// equivalence.
     pub(super) fn set_equiv(&mut self, iidx: InstIdx, equiv_to: InstIdx) {
-        self.insts.get_mut(iidx).unwrap().equiv = equiv_to;
+        assert_eq!(iidx, self.equiv_iidx(iidx));
+        assert_eq!(equiv_to, self.equiv_iidx(equiv_to));
+        match (self.inst(iidx), self.inst(equiv_to)) {
+            (Inst::Const(_), Inst::Const(_)) => (),
+            (_, Inst::Const(_)) => self.insts.get_mut(iidx).unwrap().equiv = equiv_to,
+            (_, _) => self.insts.get_mut(equiv_to).unwrap().equiv = iidx,
+        }
     }
 }
 
@@ -308,9 +316,9 @@ pub(in crate::compile::j2::opt) mod test {
           %5: i1 = icmp eq %0, %4
           guard true, %3, []
           guard true, %5, []
+          blackbox %2
           blackbox %4
-          blackbox %4
-          exit [%4]
+          exit [%2]
         ",
         );
 
