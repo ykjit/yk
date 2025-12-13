@@ -506,8 +506,14 @@ index_vec::define_index_type! {
     pub(super) struct GuardRestoreIdx = u16;
 }
 
+// Note: if you change the `u32` here, `MAX` must also be updated.
 index_vec::define_index_type! {
     pub(super) struct InstIdx = u32;
+}
+
+impl InstIdx {
+    /// The maximum representable [InstIdx].
+    pub(super) const MAX: InstIdx = InstIdx::from_raw_unchecked(u32::MAX);
 }
 
 index_vec::define_index_type! {

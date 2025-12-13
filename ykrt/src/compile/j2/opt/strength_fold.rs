@@ -5,7 +5,7 @@ use crate::compile::{
         hir::*,
         opt::{
             OptT,
-            opt::{Opt, OptOutcome, Range},
+            opt::{Opt, OptOutcome},
         },
     },
     jitc_yk::arbbitint::ArbBitInt,
@@ -298,7 +298,7 @@ fn opt_guard(opt: &mut Opt, inst @ Guard { expect, cond, .. }: Guard) -> OptOutc
             && let Inst::Const(_) = opt.inst_rewrite(rhs)
         {
             assert!(!samesign);
-            opt.set_range(lhs, Range::Equivalent(rhs));
+            opt.set_equiv(lhs, rhs);
         }
     }
 

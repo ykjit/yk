@@ -1,10 +1,8 @@
 //! Trace optimisation.
 //!
-//! This is a forward-pass optimiser: as it advances it builds up knowledge about past values that
-//! can be taken advantage of by later values. In essence, as we go along we can view older
-//! instructions "rewritten" to take advantage of later knowledge: note, this doesn't change the
-//! older instructions in the trace. This rewriting then allows us to more easily optimise the
-//! current instruction being fed into the optimiser.
+//! This is a forward-pass optimiser: as it advances, it builds up knowledge about past values that
+//! can be taken advantage of by later values. In essence, as we go along we can view earlier
+//! instructions as [equivalent](#equivalence) to later instructions.
 //!
 //! For example consider:
 //!
@@ -18,7 +16,7 @@
 //! blackbox %5
 //! ```
 //!
-//! What do we know about `%2` is this trace is fed into the optimiser?
+//! What do we know about `%2` as this trace is fed into the optimiser?
 //!
 //! * When feeding in `%0` and `%1` we do not know that `%2` will even exist: it is an error to ask
 //!   questions about `%2` at this point.
@@ -31,9 +29,9 @@
 //!
 //! After this point, we can then make use of our knowledge that `%0` and `%1` are equivalent:
 //!
-//! * We can "rewrite" the `add` instruction to `add %1, %4`.
-//! * Recognising that, after the rewrite, the `add` is adding two constants, we can constant fold
-//!   the `add` to the constant 13.
+//! * We can now view the `add` instruction as equivalent to `add %1, %4`.
+//! * Recognising that the `add` is thus adding two constants, we can constant fold the `add` to
+//!   the constant 13.
 //!
 //! Thus after optimisation (including dead code elimination) the trace will look as follows:
 //!
@@ -45,6 +43,16 @@
 //! %5: i8 = 13
 //! blackbox %5
 //! ```
+//!
+//! ## Equivalence
+//!
+//! The notion of instruction "equivalence" is both intuitive and easy to over-generalise.
+//! Importantly: "equivalence" only makes sense during forward-pass optimisation. If at point X we
+//! prove that instruction A is equivalent to instruction B, that knowledge is only correct for
+//! instructions at positions > X. In other words, that knowledge is correctly iff one has
+//! consecutively executed all instructions (notably guards!) up to, and including, X. After
+//! optimisation is complete, and a HIR [Module] is created, we throw away all notions of
+//! equivalence: they are by definition baked into the optimised trace.
 //!
 //!
 //! ## How passes should use the optimiser
@@ -63,23 +71,23 @@ use crate::compile::{
 use index_vec::*;
 
 pub(in crate::compile::j2) struct Opt {
-    instkits: IndexVec<InstIdx, InstKit>,
+    insts: IndexVec<InstIdx, InstEquiv>,
     tys: IndexVec<TyIdx, Ty>,
 }
 
 impl Opt {
     pub(in crate::compile::j2) fn new() -> Self {
         Self {
-            instkits: IndexVec::new(),
+            insts: IndexVec::new(),
             tys: IndexVec::new(),
         }
     }
 
     /// Push `inst` into this optimisation module.
     fn push_inst(&mut self, inst: Inst) -> InstIdx {
-        self.instkits.push(InstKit {
+        self.insts.push(InstEquiv {
             inst,
-            range: Range::Unknown,
+            equiv: InstIdx::MAX,
         })
     }
 
@@ -96,28 +104,9 @@ impl Opt {
             .canonicalise(self, self)
     }
 
-    /// Set `iidx`'s range to `range`.
-    pub(super) fn set_range(&mut self, iidx: InstIdx, range: Range) {
-        let instkit = self.instkits.get_mut(iidx).unwrap();
-        match instkit.range {
-            Range::Unknown => instkit.range = range,
-            Range::Equivalent(cur_iidx) => match range {
-                Range::Unknown => todo!(),
-                Range::Equivalent(new_iidx) => {
-                    if cur_iidx != new_iidx {
-                        if let Inst::Const(_) = self.inst(cur_iidx) {
-                            self.instkits.get_mut(new_iidx).unwrap().range =
-                                Range::Equivalent(cur_iidx);
-                        } else if let Inst::Const(_) = self.inst(new_iidx) {
-                            self.instkits.get_mut(cur_iidx).unwrap().range =
-                                Range::Equivalent(new_iidx);
-                            self.instkits.get_mut(iidx).unwrap().range =
-                                Range::Equivalent(new_iidx);
-                        }
-                    }
-                }
-            },
-        }
+    /// Henceforth consider `iidx` to be equivalent to `equiv_to`. See the careful
+    pub(super) fn set_equiv(&mut self, iidx: InstIdx, equiv_to: InstIdx) {
+        self.insts.get_mut(iidx).unwrap().equiv = equiv_to;
     }
 }
 
@@ -133,7 +122,7 @@ impl ModLikeT for Opt {
 
 impl BlockLikeT for Opt {
     fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.instkits[usize::from(idx)].inst
+        &self.insts[usize::from(idx)].inst
     }
 }
 
@@ -142,7 +131,7 @@ impl OptT for Opt {
         (
             Block {
                 insts: self
-                    .instkits
+                    .insts
                     .into_iter()
                     .map(|x| x.inst)
                     .collect::<IndexVec<_, _>>(),
@@ -158,10 +147,11 @@ impl OptT for Opt {
     fn map_iidx(&self, iidx: InstIdx) -> InstIdx {
         let mut search = iidx;
         loop {
-            match self.instkits[search].range {
-                Range::Unknown => return search,
-                Range::Equivalent(other) => search = other,
+            let equiv = self.insts[search].equiv;
+            if equiv == InstIdx::MAX {
+                return search;
             }
+            search = equiv;
         }
     }
 
@@ -200,18 +190,15 @@ pub(super) enum OptOutcome {
     ReducedTo(InstIdx),
 }
 
-/// What we know about a given [InstIdx].
-struct InstKit {
+/// A wrapper around an [Inst] and our current knowledge of another instruction it is equivalent
+/// to.
+struct InstEquiv {
     /// The [Inst] at a given [InstIdx].
     inst: Inst,
-    /// The current range of values know for [InstIdx].
-    range: Range,
-}
-
-pub(super) enum Range {
-    Unknown,
-    #[allow(unused)]
-    Equivalent(InstIdx),
+    /// As the optimiser has advanced, we might have been able to prove that `inst` is equivalent
+    /// to a later instruction: if so, `equiv` will give the index of that instruction; if not, it
+    /// will be set [InstIdx::MAX].
+    equiv: InstIdx,
 }
 
 #[cfg(test)]
