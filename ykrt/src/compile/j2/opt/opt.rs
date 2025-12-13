@@ -161,7 +161,7 @@ impl OptT for Opt {
         match strength_fold(self, inst) {
             OptOutcome::NotNeeded => panic!(),
             OptOutcome::Rewritten(inst) => Ok(self.push_inst(inst)),
-            OptOutcome::ReducedTo(iidx) => Ok(iidx),
+            OptOutcome::Equiv(iidx) => Ok(iidx),
         }
     }
 
@@ -171,7 +171,7 @@ impl OptT for Opt {
         match strength_fold(self, inst) {
             OptOutcome::NotNeeded => Ok(None),
             OptOutcome::Rewritten(inst) => Ok(Some(self.push_inst(inst))),
-            OptOutcome::ReducedTo(iidx) => Ok(Some(iidx)),
+            OptOutcome::Equiv(iidx) => Ok(Some(iidx)),
         }
     }
 
@@ -187,7 +187,7 @@ pub(super) enum OptOutcome {
     /// The input [Inst] has been rewritten to a new [Inst].
     Rewritten(Inst),
     /// The input [Inst] is equivalent to [InstIdx].
-    ReducedTo(InstIdx),
+    Equiv(InstIdx),
 }
 
 /// A wrapper around an [Inst] and our current knowledge of another instruction it is equivalent
@@ -238,7 +238,7 @@ pub(in crate::compile::j2::opt) mod test {
                 OptOutcome::Rewritten(inst) => {
                     opt_map.push(opt.push_inst(inst));
                 }
-                OptOutcome::ReducedTo(iidx) => {
+                OptOutcome::Equiv(iidx) => {
                     opt_map.push(iidx);
                 }
             }

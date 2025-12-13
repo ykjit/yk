@@ -95,7 +95,7 @@ fn opt_add(
         && rhs_c.to_zero_ext_u8() == Some(0)
     {
         // Reduce `x + 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -104,7 +104,7 @@ fn opt_add(
 fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
     if lhs == rhs {
         // Reduce x & x with x.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     } else if let (
         Inst::Const(Const {
             kind: ConstKind::Int(lhs_c),
@@ -128,13 +128,13 @@ fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
     {
         if rhs_c.to_zero_ext_u8() == Some(0) {
             // Reduce `x & 0` to `0`.
-            return OptOutcome::ReducedTo(rhs);
+            return OptOutcome::Equiv(rhs);
         }
         if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
             // Reduce `x & y` to `x` if `y` is a constant that has all
             // the necessary bits set for this integer type. For an i1, for
             // example, `x & 1` can be replaced with `x`.
-            return OptOutcome::ReducedTo(lhs);
+            return OptOutcome::Equiv(lhs);
         }
     }
 
@@ -196,7 +196,7 @@ where
         && rhs_c.to_zero_ext_u8() == Some(0)
     {
         // Reduce `x >> 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     } else if let Inst::Const(Const {
         kind: ConstKind::Int(lhs_c),
         ..
@@ -204,7 +204,7 @@ where
         && lhs_c.to_zero_ext_u8() == Some(0)
     {
         // Reduce `0 >> x` to `0`.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     }
 
     OptOutcome::Rewritten(inst)
@@ -251,9 +251,9 @@ fn opt_dynptradd(
         let off = v.checked_mul(isize::try_from(elem_size).unwrap()).unwrap();
         let off = i32::try_from(off).unwrap();
         if off == 0 {
-            OptOutcome::ReducedTo(ptr)
+            OptOutcome::Equiv(ptr)
         } else {
-            // We've reduced to a `ptradd`, so run it through that pass, which may be able to
+            // We've optimised to a `ptradd`, so run it through that pass, which may be able to
             // optimise it further.
             opt_ptradd(
                 opt,
@@ -440,11 +440,11 @@ fn opt_mul(
         match rhs_c.to_zero_ext_u64() {
             Some(0) => {
                 // Reduce `x * 0` to `0`.
-                return OptOutcome::ReducedTo(rhs);
+                return OptOutcome::Equiv(rhs);
             }
             Some(1) => {
                 // Reduce `x * 1` to `x`.
-                return OptOutcome::ReducedTo(lhs);
+                return OptOutcome::Equiv(lhs);
             }
             Some(x) if x.is_power_of_two() => {
                 // Replace `x * y` with `x << ...`.
@@ -505,7 +505,7 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
             inst = x;
         } else if off == 0 {
             // Reduce `ptr + 0` to `x`.
-            return OptOutcome::ReducedTo(ptr);
+            return OptOutcome::Equiv(ptr);
         } else {
             let inst = PtrAdd {
                 ptr,
@@ -531,7 +531,7 @@ fn opt_or(
     assert!(!disjoint);
     if lhs == rhs {
         // Reduce x | x to x.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     } else if let (
         Inst::Const(Const {
             kind: ConstKind::Int(lhs_c),
@@ -555,12 +555,12 @@ fn opt_or(
     {
         if rhs_c.to_zero_ext_u8() == Some(0) {
             // Reduce `x | 0` to `x`.
-            return OptOutcome::ReducedTo(lhs);
+            return OptOutcome::Equiv(lhs);
         }
         if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
             // Reduce `x | y` to `y` if `y` is a constant that has all
             // the necessary bits set for this integer type.
-            return OptOutcome::ReducedTo(lhs);
+            return OptOutcome::Equiv(lhs);
         }
     }
 
@@ -603,12 +603,12 @@ fn opt_select(
     }) = opt.inst_rewrite(cond)
     {
         match lhs_c.to_zero_ext_u8().unwrap() {
-            0 => return OptOutcome::ReducedTo(falsev),
-            1 => return OptOutcome::ReducedTo(truev),
+            0 => return OptOutcome::Equiv(falsev),
+            1 => return OptOutcome::Equiv(truev),
             _ => unreachable!(),
         }
     } else if truev == falsev {
-        return OptOutcome::ReducedTo(truev);
+        return OptOutcome::Equiv(truev);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -672,7 +672,7 @@ fn opt_shl(
         && rhs_c.to_zero_ext_u8() == Some(0)
     {
         // Reduce `x << 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     } else if let Inst::Const(Const {
         kind: ConstKind::Int(lhs_c),
         ..
@@ -680,7 +680,7 @@ fn opt_shl(
         && lhs_c.to_zero_ext_u8() == Some(0)
     {
         // Reduce `0 << x` to `0`.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -720,7 +720,7 @@ fn opt_sub(
         && rhs_c.to_zero_ext_u8() == Some(0)
     {
         // Reduce `x - 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -791,7 +791,7 @@ fn opt_udiv(
         match rhs_c.to_zero_ext_u64() {
             Some(1) => {
                 // Reduce `x / 1` to `x`.
-                return OptOutcome::ReducedTo(lhs);
+                return OptOutcome::Equiv(lhs);
             }
             Some(x) if x.is_power_of_two() => {
                 // Replace `x * y` with `x >> ...`.
@@ -852,7 +852,7 @@ fn opt_xor(opt: &mut Opt, inst @ Xor { tyidx, lhs, rhs }: Xor) -> OptOutcome {
         && rhs_c.to_zero_ext_u8() == Some(0)
     {
         // Reduce `x ^ 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
     }
 
     OptOutcome::Rewritten(inst.into())
