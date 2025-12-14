@@ -323,7 +323,7 @@ impl Block {
                 }
             }
 
-            inst.iter_iidxs(|op_iidx| {
+            inst.for_each_iidx(|op_iidx| {
                 assert!(
                     op_iidx < iidx,
                     "%{iidx:?}: forward reference to %{op_iidx:?}"
@@ -540,9 +540,9 @@ pub(super) trait InstT: std::fmt::Debug {
         self
     }
 
-    /// Iterate over this instructions' operands that reference [InstIdx]s and call `f` on each.
-    #[allow(unused)]
-    fn iter_iidxs<F>(&self, f: F)
+    /// Iterate over this instructions' operands that reference [InstIdx]s and call `iidx_item` on
+    /// each.
+    fn for_each_iidx<F>(&self, iidx_item: F)
     where
         F: Fn(InstIdx),
         Self: Sized;
@@ -632,7 +632,7 @@ impl InstT for Abs {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -709,7 +709,7 @@ impl InstT for Add {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -777,7 +777,7 @@ impl InstT for And {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -816,7 +816,7 @@ pub(super) struct Arg {
 }
 
 impl InstT for Arg {
-    fn iter_iidxs<F>(&self, _f: F)
+    fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -860,7 +860,7 @@ impl InstT for AShr {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -905,7 +905,7 @@ pub(super) struct BlackBox {
 
 #[cfg(test)]
 impl InstT for BlackBox {
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -971,7 +971,7 @@ impl InstT for Call {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1063,7 +1063,7 @@ impl InstT for Const {
         }
     }
 
-    fn iter_iidxs<F>(&self, _f: F)
+    fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1125,7 +1125,7 @@ impl InstT for CtPop {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1174,7 +1174,7 @@ impl InstT for DynPtrAdd {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1213,7 +1213,7 @@ impl InstT for DynPtrAdd {
 pub(super) struct Exit(pub(super) Vec<InstIdx>);
 
 impl InstT for Exit {
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1275,7 +1275,7 @@ impl InstT for FAdd {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1336,7 +1336,7 @@ impl InstT for FCmp {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1441,7 +1441,7 @@ impl InstT for FDiv {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1497,7 +1497,7 @@ impl InstT for Floor {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1551,7 +1551,7 @@ impl InstT for FMul {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1609,7 +1609,7 @@ impl InstT for FNeg {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1663,7 +1663,7 @@ impl InstT for FSub {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1721,7 +1721,7 @@ impl InstT for FPExt {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1771,7 +1771,7 @@ impl InstT for FPToSI {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1831,7 +1831,7 @@ impl InstT for Guard {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -1926,7 +1926,7 @@ impl InstT for ICmp {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2024,7 +2024,7 @@ impl InstT for IntToPtr {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2068,7 +2068,7 @@ impl InstT for Load {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2117,7 +2117,7 @@ impl InstT for LShr {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2181,7 +2181,7 @@ impl InstT for MemCpy {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2254,7 +2254,7 @@ impl InstT for MemSet {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2332,7 +2332,7 @@ impl InstT for Mul {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2402,7 +2402,7 @@ impl InstT for Or {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2450,7 +2450,7 @@ impl InstT for PtrAdd {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2503,7 +2503,7 @@ impl InstT for PtrToInt {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2539,7 +2539,7 @@ pub(super) struct Return {
 impl InstT for Return {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    fn iter_iidxs<F>(&self, _f: F)
+    fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2592,7 +2592,7 @@ impl InstT for SDiv {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2650,7 +2650,7 @@ impl InstT for Select {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2721,7 +2721,7 @@ impl InstT for SExt {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2770,7 +2770,7 @@ impl InstT for Shl {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2824,7 +2824,7 @@ impl InstT for SIToFP {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2888,7 +2888,7 @@ impl InstT for SMax {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -2958,7 +2958,7 @@ impl InstT for SMin {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3018,7 +3018,7 @@ impl InstT for SRem {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3069,7 +3069,7 @@ impl InstT for Store {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3131,7 +3131,7 @@ impl InstT for Sub {
         self
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3176,7 +3176,7 @@ impl InstT for ThreadLocal {
         self
     }
 
-    fn iter_iidxs<F>(&self, _f: F)
+    fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3232,7 +3232,7 @@ impl InstT for Trunc {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3282,7 +3282,7 @@ impl InstT for UDiv {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3340,7 +3340,7 @@ impl InstT for UIToFP {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3405,7 +3405,7 @@ impl InstT for Xor {
         }
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
@@ -3462,7 +3462,7 @@ impl InstT for ZExt {
         );
     }
 
-    fn iter_iidxs<F>(&self, f: F)
+    fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
