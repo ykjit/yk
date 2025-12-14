@@ -3780,29 +3780,47 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             32 | 64 => RegCnstrFill::Zeroed,
             _ => RegCnstrFill::Undefined,
         };
-        let [lhsr, rhsr] = ra.alloc(
-            self,
-            iidx,
-            [
-                RegCnstr::InputOutput {
+        if let Some(imm) = self.zero_ext_op_for_imm32(b, bitw, *rhs) {
+            let [lhsr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Undefined,
                     out_fill,
                     regs: &NORMAL_GP_REGS,
-                },
-                RegCnstr::Input {
-                    in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-            ],
-        )?;
-        self.asm.push_inst(match bitw {
-            1..=32 => IcedInst::with2(Code::Xor_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-            64 => IcedInst::with2(Code::Xor_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-            x => todo!("{x}"),
-        });
+                }],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Xor_rm32_imm32, lhsr.to_reg32(), imm),
+                64 => IcedInst::with2(Code::Xor_rm64_imm32, lhsr.to_reg64(), imm),
+                x => todo!("{x}"),
+            });
+        } else {
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        out_fill,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Xor_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                64 => IcedInst::with2(Code::Xor_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+                x => todo!("{x}"),
+            });
+        }
 
         Ok(())
     }
@@ -7788,6 +7806,76 @@ mod test {
 
     #[test]
     fn cg_xor() {
+        // Constant RHS
+
+        // i8
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 3
+              %2: i8 = xor %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i8 = xor %0, %1
+              xor r.32._, 3
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = -1
+              %2: i8 = xor %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i8 = xor %0, %1
+              xor r.32._, 0xFF
+              ...
+            "],
+        );
+
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 3
+              %2: i32 = xor %0, %1
+              blackbox %2
+              exit [%0]
+            ",
+            &["
+              ...
+              ; %2: i32 = xor %0, %1
+              xor r.32._, 3
+              ...
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 3
+              %2: i64 = xor %0, %1
+              exit [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = xor %0, %1
+              xor r.64._, 3
+              ...
+            "],
+        );
+
+        // Variable RHS
+
         // i32
         codegen_and_test(
             "
