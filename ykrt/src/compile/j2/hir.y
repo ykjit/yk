@@ -59,8 +59,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "CALL" "ID" "LOCAL" "(" Locals ")" {
       Ok(AstInst::Call { local: Some($1?.span()), ty: Some($3?), extern_: $6?.span(), tgt: $7?.span(), args: $9? })
     }
-  | "LOCAL" ":" Ty "=" "ABS" "LOCAL" {
-      Ok(AstInst::Abs { local: $1?.span(), ty: $3?, val: $6?.span() })
+  | "LOCAL" ":" Ty "=" "ABS" "LOCAL" IntMinPoison {
+      Ok(AstInst::Abs { local: $1?.span(), ty: $3?, val: $6?.span(), int_min_poison: $7? })
     }
   | "LOCAL" ":" Ty "=" "ADD" "LOCAL" "," "LOCAL" {
        Ok(AstInst::Add { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
@@ -226,6 +226,11 @@ FPred -> Result<FPred, Box<dyn Error>>:
   | "UNE" { Ok(FPred::Une) }
   | "UNO" { Ok(FPred::Uno) }
   | "TRUE" { Ok(FPred::True) }
+  ;
+
+IntMinPoison -> Result<bool, Box<dyn Error>>:
+    "," "INT_MIN_POISON" { Ok(true) }
+  | { Ok(false) }
   ;
 
 Locals -> Result<Vec<Span>, Box<dyn Error>>:
