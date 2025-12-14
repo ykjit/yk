@@ -100,7 +100,7 @@ impl Opt {
     /// canonicalise. In general, passes should not be using this function directly: they should be
     /// passing instruction indexes to [Self::inst_rewrite].
     pub(super) fn rewrite(&mut self, inst: Inst) -> Inst {
-        inst.map_iidxs(|iidx| self.equiv_iidx(iidx))
+        inst.map(|iidx| self.equiv_iidx(iidx))
             .canonicalise(self, self)
     }
 
@@ -241,9 +241,23 @@ pub(in crate::compile::j2::opt) mod test {
         else {
             panic!()
         };
+        // We need to maintain a manual map of iidxs the user has written in their test to the
+        // current state of the actual optimiser. Consider:
+        //
+        // ```
+        // %0: i8 = arg [reg]
+        // %1: i8 = 0
+        // %2: i8 = add %0, %1
+        // %3: blackbox %2
+        // ```
+        //
+        // The `add` is a no-op, and won't be inserted into the optimisation's ongoing module at
+        // all, so when we get to `blackbox %2` there is no `%2` to reference: we'd get an
+        // out-of-bounds error! We thus need to rewrite this to `blackbox %0` _before_ feeding the
+        // instruction to the optimiser.
         let mut opt_map = IndexVec::with_capacity(insts.len());
         for inst in insts.into_iter() {
-            let inst = inst.map_iidxs(|x| opt_map[x]);
+            let inst = inst.map(|x| opt_map[x]);
             match opt_f(&mut opt, inst) {
                 OptOutcome::NotNeeded => (),
                 OptOutcome::Rewritten(inst) => {
