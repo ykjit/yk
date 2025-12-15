@@ -81,16 +81,25 @@
 //!
 //! ## Canonicalisation
 //!
-//! HIR instructions are able to produce a canonicalised version of themselves (via
-//! [InstT::canonicalise]. For example, for this trace:
+//! Canonicalisation in HIR is only possible during the optimisation phase. It does two things:
+//!
+//! 1. It rewrites all operands to their most recently identified equivalents.
+//! 2. It optionally rewrites the instruction (e.g. to favour constants on the RHS).
+//!
+//! The first of these is objective, but the second is subjective. That said, common-sense suggests
+//! that regularity helps understanding: for example, whenever possible, canonicalisation on binary
+//! operations (`add`, `and`, `icmp eq` etc.) favours references to constants on the right-hand
+//! side. Note that canonicalisation never changes the _kind_ of an instruction.
+//!
+//! For example, for this trace:
 //!
 //! ```text
 //! %0: i8 = arg
 //! %1: i8 = 10
-//! %2: i8 = add %1, %2
+//! %2: i8 = add %1, %0
 //! ```
 //!
-//! the last instruction will be canonicalised to `add %2, %1` i.e. favouring the constant on the
+//! the last instruction will be canonicalised to `add %0, %1` i.e. favouring the constant on the
 //! right-hand side of the `add`. Canonicalisation is inherently subjective and you should check
 //! the details of each instruction for how it canonicalises itself: `add`, for example, could just
 //! as easily, have favoured the constant being on the left-hand side. That said, common-sense
@@ -99,7 +108,7 @@
 //! right-hand side.
 //!
 //!
-//! ## To and from text
+//! ## To / from text
 //!
 //! HIR can be pretty-printed to a string and, via [super::hir_parser::str_to_mod] created from a
 //! string. The textual representations are non-normative: the text created as output and text
@@ -532,9 +541,9 @@ pub(super) trait InstT: std::fmt::Debug {
     #[allow(unused)]
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    /// Canonicalise this instruction. Canonicalisation is inherently subjective, and it is
-    /// acceptable to do nothing.
-    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+    /// Canonicalise this instruction. This rewrites operands to their most recent equivalent
+    /// [InstIdx]s and performs other, basic, canonicalisation on a per-instruction kind basis.
+    fn canonicalise(&mut self, _opt: &mut dyn OptT);
 
     /// Iterate over this instructions' operands that reference [InstIdx]s and call `iidx_item` on
     /// each.
@@ -543,11 +552,12 @@ pub(super) trait InstT: std::fmt::Debug {
         F: Fn(InstIdx),
         Self: Sized;
 
-    /// Return a copy of this instruction with any operands that reference [InstIdx]s mapped by `iidx_map`.
-    fn map<F>(self, iidx_map: F) -> Self
+    /// Apply the function `iidx_map` to each of this instruction's operands, mutating `self` with
+    /// the result.
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, iidx_map: F)
     where
-        F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized;
+        F: FnMut(InstIdx) -> InstIdx;
 
     /// Return a pretty printed version of `self`.
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, m: &M, b: &B) -> String;
@@ -628,6 +638,10 @@ impl InstT for Abs {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -636,16 +650,12 @@ impl InstT for Abs {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-            int_min_poison: self.int_min_poison,
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -688,6 +698,8 @@ impl InstT for Add {
 
     /// Canonicalise to favour references to constants on the RHS.
     fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
@@ -704,18 +716,13 @@ impl InstT for Add {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            nuw: self.nuw,
-            nsw: self.nsw,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -748,6 +755,8 @@ impl InstT for And {
 
     /// Canonicalise to favour references to constants on the RHS.
     fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
@@ -764,16 +773,13 @@ impl InstT for And {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -794,6 +800,8 @@ pub(super) struct Arg {
 }
 
 impl InstT for Arg {
+    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+
     fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
@@ -801,12 +809,11 @@ impl InstT for Arg {
     {
     }
 
-    fn map<F>(self, _f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self { tyidx: self.tyidx }
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -838,6 +845,11 @@ impl InstT for AShr {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -847,17 +859,13 @@ impl InstT for AShr {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            exact: self.exact,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -883,6 +891,10 @@ pub(super) struct BlackBox {
 
 #[cfg(test)]
 impl InstT for BlackBox {
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -891,12 +903,12 @@ impl InstT for BlackBox {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self { val: f(self.val) }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -949,6 +961,13 @@ impl InstT for Call {
         }
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.tgt = opt.equiv_iidx(self.tgt);
+        for x in self.args.iter_mut() {
+            *x = opt.equiv_iidx(*x);
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -958,15 +977,14 @@ impl InstT for Call {
         self.args.iter().for_each(|iidx| f(*iidx));
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tgt: f(self.tgt),
-            func_tyidx: self.func_tyidx,
-            args: self.args.into_iter().map(f).collect::<SmallVec<_>>(),
+        self.tgt = iidx_map(self.tgt);
+        for x in self.args.iter_mut() {
+            *x = iidx_map(*x);
         }
     }
 
@@ -1041,6 +1059,8 @@ impl InstT for Const {
         }
     }
 
+    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+
     fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
@@ -1048,15 +1068,11 @@ impl InstT for Const {
     {
     }
 
-    fn map<F>(self, _f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            kind: self.kind.clone(),
-        }
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, m: &M, _b: &B) -> String {
@@ -1103,6 +1119,10 @@ impl InstT for CtPop {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val)
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1111,15 +1131,12 @@ impl InstT for CtPop {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1152,6 +1169,11 @@ impl InstT for DynPtrAdd {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.ptr = opt.equiv_iidx(self.ptr);
+        self.num_elems = opt.equiv_iidx(self.num_elems);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1161,16 +1183,13 @@ impl InstT for DynPtrAdd {
         f(self.num_elems);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            ptr: f(self.ptr),
-            num_elems: f(self.num_elems),
-            elem_size: self.elem_size,
-        }
+        self.ptr = iidx_map(self.ptr);
+        self.num_elems = iidx_map(self.num_elems);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1191,20 +1210,18 @@ impl InstT for DynPtrAdd {
 pub(super) struct Exit(pub(super) Vec<InstIdx>);
 
 impl InstT for Exit {
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        for x in self.0.iter_mut() {
+            *x = opt.equiv_iidx(*x);
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
         Self: Sized,
     {
         self.0.iter().for_each(|iidx| f(*iidx));
-    }
-
-    fn map<F>(self, f: F) -> Self
-    where
-        F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
-    {
-        Self(self.0.into_iter().map(f).collect::<Vec<_>>())
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1216,6 +1233,16 @@ impl InstT for Exit {
                 .collect::<Vec<_>>()
                 .join(", ")
         )
+    }
+
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        for x in self.0.iter_mut() {
+            *x = iidx_map(*x);
+        }
     }
 
     fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
@@ -1244,6 +1271,11 @@ impl InstT for FAdd {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1253,16 +1285,13 @@ impl InstT for FAdd {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1298,6 +1327,11 @@ impl InstT for FCmp {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1307,16 +1341,13 @@ impl InstT for FCmp {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            pred: self.pred,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1396,6 +1427,11 @@ impl InstT for FDiv {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1405,16 +1441,13 @@ impl InstT for FDiv {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1452,6 +1485,10 @@ impl InstT for Floor {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1460,15 +1497,12 @@ impl InstT for Floor {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1499,6 +1533,11 @@ impl InstT for FMul {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1508,16 +1547,13 @@ impl InstT for FMul {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1550,6 +1586,10 @@ impl InstT for FNeg {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1558,15 +1598,12 @@ impl InstT for FNeg {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1597,6 +1634,11 @@ impl InstT for FSub {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1606,16 +1648,13 @@ impl InstT for FSub {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1655,6 +1694,10 @@ impl InstT for FPExt {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1663,15 +1706,12 @@ impl InstT for FPExt {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1705,6 +1745,10 @@ impl InstT for FPToSI {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1713,15 +1757,12 @@ impl InstT for FPToSI {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1765,6 +1806,13 @@ impl InstT for Guard {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.cond = opt.equiv_iidx(self.cond);
+        for x in self.entry_vars.iter_mut() {
+            *x = opt.equiv_iidx(*x);
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1774,18 +1822,14 @@ impl InstT for Guard {
         self.entry_vars.iter().for_each(|iidx| f(*iidx));
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            expect: self.expect,
-            cond: f(self.cond),
-            bid: self.bid,
-            entry_vars: self.entry_vars.into_iter().map(f).collect::<Vec<_>>(),
-            gridx: self.gridx,
-            switch: self.switch,
+        self.cond = iidx_map(self.cond);
+        for x in self.entry_vars.iter_mut() {
+            *x = iidx_map(*x);
         }
     }
 
@@ -1842,6 +1886,8 @@ impl InstT for ICmp {
     /// For [IPred::Eq] and [IPred::Ne], canonicalise to favour references to constants on the RHS of
     /// the addition.
     fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
         if (self.pred == IPred::Eq || self.pred == IPred::Ne)
             && matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
@@ -1859,17 +1905,13 @@ impl InstT for ICmp {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            pred: self.pred,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            samesign: self.samesign,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1948,6 +1990,10 @@ impl InstT for IntToPtr {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1956,15 +2002,12 @@ impl InstT for IntToPtr {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1992,6 +2035,10 @@ impl InstT for Load {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.ptr = opt.equiv_iidx(self.ptr);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2000,16 +2047,12 @@ impl InstT for Load {
         f(self.ptr);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            ptr: f(self.ptr),
-            is_volatile: self.is_volatile,
-        }
+        self.ptr = iidx_map(self.ptr);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2041,6 +2084,11 @@ impl InstT for LShr {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2050,17 +2098,13 @@ impl InstT for LShr {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            exact: self.exact,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2098,6 +2142,12 @@ impl InstT for MemCpy {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.dst = opt.equiv_iidx(self.dst);
+        self.src = opt.equiv_iidx(self.src);
+        self.len = opt.equiv_iidx(self.len);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2108,17 +2158,14 @@ impl InstT for MemCpy {
         f(self.len);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            dst: f(self.dst),
-            src: f(self.src),
-            len: f(self.len),
-            volatile: self.volatile,
-        }
+        self.dst = iidx_map(self.dst);
+        self.src = iidx_map(self.src);
+        self.len = iidx_map(self.len);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2164,6 +2211,12 @@ impl InstT for MemSet {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.dst = opt.equiv_iidx(self.dst);
+        self.val = opt.equiv_iidx(self.val);
+        self.len = opt.equiv_iidx(self.len);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2174,17 +2227,14 @@ impl InstT for MemSet {
         f(self.len);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            dst: f(self.dst),
-            val: f(self.val),
-            len: f(self.len),
-            volatile: self.volatile,
-        }
+        self.dst = iidx_map(self.dst);
+        self.val = iidx_map(self.val);
+        self.len = iidx_map(self.len);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2225,6 +2275,8 @@ impl InstT for Mul {
 
     /// Canonicalise to favour references to constants on the RHS.
     fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
@@ -2241,18 +2293,13 @@ impl InstT for Mul {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            nuw: self.nuw,
-            nsw: self.nsw,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2286,6 +2333,8 @@ impl InstT for Or {
 
     /// Canonicalise to favour references to constants on the RHS.
     fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
@@ -2302,17 +2351,13 @@ impl InstT for Or {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            disjoint: self.disjoint,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2341,6 +2386,10 @@ impl InstT for PtrAdd {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.ptr = opt.equiv_iidx(self.ptr);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2349,18 +2398,12 @@ impl InstT for PtrAdd {
         f(self.ptr);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            ptr: f(self.ptr),
-            off: self.off,
-            in_bounds: self.in_bounds,
-            nusw: self.nusw,
-            nuw: self.nuw,
-        }
+        self.ptr = iidx_map(self.ptr);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2394,6 +2437,10 @@ impl InstT for PtrToInt {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2402,15 +2449,12 @@ impl InstT for PtrToInt {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2430,6 +2474,8 @@ pub(super) struct Return {
 impl InstT for Return {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
+    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+
     fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
@@ -2437,14 +2483,11 @@ impl InstT for Return {
     {
     }
 
-    fn map<F>(self, _f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            safepoint: self.safepoint,
-        }
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2476,6 +2519,11 @@ impl InstT for SDiv {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2485,17 +2533,13 @@ impl InstT for SDiv {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            exact: self.exact,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2534,6 +2578,12 @@ impl InstT for Select {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.cond = opt.equiv_iidx(self.cond);
+        self.truev = opt.equiv_iidx(self.truev);
+        self.falsev = opt.equiv_iidx(self.falsev);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2544,17 +2594,14 @@ impl InstT for Select {
         f(self.falsev);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            cond: f(self.cond),
-            truev: f(self.truev),
-            falsev: f(self.falsev),
-        }
+        self.cond = iidx_map(self.cond);
+        self.truev = iidx_map(self.truev);
+        self.falsev = iidx_map(self.falsev);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2598,6 +2645,10 @@ impl InstT for SExt {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2606,15 +2657,12 @@ impl InstT for SExt {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2647,6 +2695,11 @@ impl InstT for Shl {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2656,18 +2709,13 @@ impl InstT for Shl {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            nuw: self.nuw,
-            nsw: self.nsw,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2701,6 +2749,10 @@ impl InstT for SIToFP {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2709,15 +2761,12 @@ impl InstT for SIToFP {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2750,6 +2799,8 @@ impl InstT for SMax {
 
     /// Canonicalise to favour references to constants on the RHS.
     fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
@@ -2766,16 +2817,13 @@ impl InstT for SMax {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2812,6 +2860,8 @@ impl InstT for SMin {
 
     /// Canonicalise to favour references to constants on the RHS.
     fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
@@ -2828,16 +2878,13 @@ impl InstT for SMin {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2872,6 +2919,11 @@ impl InstT for SRem {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2881,16 +2933,13 @@ impl InstT for SRem {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2911,6 +2960,7 @@ impl InstT for SRem {
 pub(super) struct Store {
     pub val: InstIdx,
     pub ptr: InstIdx,
+    #[allow(unused)]
     pub is_volatile: bool,
 }
 
@@ -2923,6 +2973,11 @@ impl InstT for Store {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+        self.ptr = opt.equiv_iidx(self.ptr);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2932,16 +2987,13 @@ impl InstT for Store {
         f(self.ptr);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            val: f(self.val),
-            ptr: f(self.ptr),
-            is_volatile: self.is_volatile,
-        }
+        self.val = iidx_map(self.val);
+        self.ptr = iidx_map(self.ptr);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -2978,6 +3030,11 @@ impl InstT for Sub {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2987,18 +3044,13 @@ impl InstT for Sub {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            nuw: self.nuw,
-            nsw: self.nsw,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -3016,6 +3068,8 @@ pub(super) struct ThreadLocal(pub *const c_void);
 impl InstT for ThreadLocal {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
+    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+
     fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
@@ -3023,12 +3077,11 @@ impl InstT for ThreadLocal {
     {
     }
 
-    fn map<F>(self, _f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self(self.0)
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, m: &M, _b: &B) -> String {
@@ -3072,6 +3125,10 @@ impl InstT for Trunc {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3080,17 +3137,12 @@ impl InstT for Trunc {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-            nuw: self.nuw,
-            nsw: self.nsw,
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -3122,6 +3174,11 @@ impl InstT for UDiv {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3131,17 +3188,13 @@ impl InstT for UDiv {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-            exact: self.exact,
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -3180,6 +3233,10 @@ impl InstT for UIToFP {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3188,16 +3245,12 @@ impl InstT for UIToFP {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-            nneg: self.nneg,
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -3230,6 +3283,8 @@ impl InstT for Xor {
 
     /// Canonicalise to favour references to constants on the RHS.
     fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
@@ -3246,16 +3301,13 @@ impl InstT for Xor {
         f(self.rhs);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            lhs: f(self.lhs),
-            rhs: f(self.rhs),
-        }
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -3294,6 +3346,10 @@ impl InstT for ZExt {
         );
     }
 
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3302,15 +3358,12 @@ impl InstT for ZExt {
         f(self.val);
     }
 
-    fn map<F>(self, mut f: F) -> Self
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
-        Self: Sized,
     {
-        Self {
-            tyidx: self.tyidx,
-            val: f(self.val),
-        }
+        self.val = iidx_map(self.val);
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {

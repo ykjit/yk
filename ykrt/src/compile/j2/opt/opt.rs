@@ -109,8 +109,7 @@ impl Opt {
     /// Rewrite `inst` to reflect knowledge the optimiser has built up (e.g. ranges) and then
     /// canonicalise. In general, passes should not be using this function directly: they should be
     /// passing instruction indexes to [Self::inst_rewrite].
-    pub(super) fn rewrite(&mut self, inst: Inst) -> Inst {
-        let mut inst = inst.map(|iidx| self.equiv_iidx(iidx));
+    pub(super) fn rewrite(&mut self, mut inst: Inst) -> Inst {
         inst.canonicalise(self);
         inst
     }
@@ -257,8 +256,8 @@ pub(in crate::compile::j2::opt) mod test {
         // out-of-bounds error! We thus need to rewrite this to `blackbox %0` _before_ feeding the
         // instruction to the optimiser.
         let mut opt_map = IndexVec::with_capacity(insts.len());
-        for inst in insts.into_iter() {
-            let inst = inst.map(|x| opt_map[x]);
+        for mut inst in insts.into_iter() {
+            inst.rewrite_iidxs(|x| opt_map[x]);
             match opt_f(&mut opt, inst) {
                 OptOutcome::NotNeeded => (),
                 OptOutcome::Rewritten(inst) => {
