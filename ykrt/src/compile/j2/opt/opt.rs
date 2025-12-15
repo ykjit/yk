@@ -83,6 +83,16 @@ impl Opt {
         }
     }
 
+    /// Used by [Self::feed] and [Self::feed_void].
+    fn feed_internal(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
+        let inst = self.rewrite(inst);
+        match strength_fold(self, inst) {
+            OptOutcome::NotNeeded => Ok(None),
+            OptOutcome::Rewritten(inst) => Ok(Some(self.push_inst(inst))),
+            OptOutcome::Equiv(iidx) => Ok(Some(iidx)),
+        }
+    }
+
     /// Push `inst` into this optimisation module.
     fn push_inst(&mut self, inst: Inst) -> InstIdx {
         self.insts.push(InstEquiv {
@@ -169,22 +179,12 @@ impl OptT for Opt {
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         assert_ne!(*inst.ty(self), Ty::Void);
-        let inst = self.rewrite(inst);
-        match strength_fold(self, inst) {
-            OptOutcome::NotNeeded => panic!(),
-            OptOutcome::Rewritten(inst) => Ok(self.push_inst(inst)),
-            OptOutcome::Equiv(iidx) => Ok(iidx),
-        }
+        self.feed_internal(inst).map(|x| x.unwrap())
     }
 
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
         assert_eq!(*inst.ty(self), Ty::Void);
-        let inst = self.rewrite(inst);
-        match strength_fold(self, inst) {
-            OptOutcome::NotNeeded => Ok(None),
-            OptOutcome::Rewritten(inst) => Ok(Some(self.push_inst(inst))),
-            OptOutcome::Equiv(iidx) => Ok(Some(iidx)),
-        }
+        self.feed_internal(inst)
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
