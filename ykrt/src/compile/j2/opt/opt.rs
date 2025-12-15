@@ -1,10 +1,8 @@
 //! Trace optimisation.
 //!
-//! This is a forward-pass optimiser: as it advances it builds up knowledge about past values that
-//! can be taken advantage of by later values. In essence, as we go along we can view older
-//! instructions "rewritten" to take advantage of later knowledge: note, this doesn't change the
-//! older instructions in the trace. This rewriting then allows us to more easily optimise the
-//! current instruction being fed into the optimiser.
+//! This is a forward-pass optimiser: as it advances, it builds up knowledge about past values that
+//! can be taken advantage of by later values. In essence, as we go along we can view earlier
+//! instructions as [equivalent](#equivalence) to later instructions.
 //!
 //! For example consider:
 //!
@@ -18,7 +16,7 @@
 //! blackbox %5
 //! ```
 //!
-//! What do we know about `%2` is this trace is fed into the optimiser?
+//! What do we know about `%2` as this trace is fed into the optimiser?
 //!
 //! * When feeding in `%0` and `%1` we do not know that `%2` will even exist: it is an error to ask
 //!   questions about `%2` at this point.
@@ -31,9 +29,9 @@
 //!
 //! After this point, we can then make use of our knowledge that `%0` and `%1` are equivalent:
 //!
-//! * We can "rewrite" the `add` instruction to `add %1, %4`.
-//! * Recognising that, after the rewrite, the `add` is adding two constants, we can constant fold
-//!   the `add` to the constant 13.
+//! * We can now view the `add` instruction as equivalent to `add %1, %4`.
+//! * Recognising that the `add` is thus adding two constants, we can constant fold the `add` to
+//!   the constant 13.
 //!
 //! Thus after optimisation (including dead code elimination) the trace will look as follows:
 //!
@@ -46,12 +44,21 @@
 //! blackbox %5
 //! ```
 //!
+//! ## Equivalence
+//!
+//! The notion of instruction "equivalence" is both intuitive and easy to over-generalise.
+//! Importantly: "equivalence" only makes sense during forward-pass optimisation. If at point X we
+//! prove that instruction A is equivalent to instruction B, that knowledge is only correct for
+//! instructions at positions > X. In other words, that knowledge is correctly iff one has
+//! consecutively executed all instructions (notably guards!) up to, and including, X. After
+//! optimisation is complete, and a HIR [Module] is created, we throw away all notions of
+//! equivalence: they are by definition baked into the optimised trace.
+//!
 //!
 //! ## How passes should use the optimiser
 //!
-//! Passes will be passed an already-rewritten [Inst]. When looking up other instructions, one
-//! should use [Opt::inst_rewrite] to obtain "old" [Inst]s: this automatically rewrites those older
-//! instructions given the current state of knowledge.
+//! Passes will be passed a possibly non-canonicalised [Inst]; they must return a canonicalised
+//! [Inst].
 
 use crate::compile::{
     CompilationError,
@@ -63,60 +70,54 @@ use crate::compile::{
 use index_vec::*;
 
 pub(in crate::compile::j2) struct Opt {
-    instkits: IndexVec<InstIdx, InstKit>,
+    insts: IndexVec<InstIdx, InstEquiv>,
     tys: IndexVec<TyIdx, Ty>,
 }
 
 impl Opt {
     pub(in crate::compile::j2) fn new() -> Self {
         Self {
-            instkits: IndexVec::new(),
+            insts: IndexVec::new(),
             tys: IndexVec::new(),
+        }
+    }
+
+    /// Used by [Self::feed] and [Self::feed_void].
+    fn feed_internal(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
+        match strength_fold(self, inst) {
+            OptOutcome::NotNeeded => Ok(None),
+            OptOutcome::Rewritten(inst) => Ok(Some(self.push_inst(inst))),
+            OptOutcome::Equiv(iidx) => Ok(Some(iidx)),
         }
     }
 
     /// Push `inst` into this optimisation module.
     fn push_inst(&mut self, inst: Inst) -> InstIdx {
-        self.instkits.push(InstKit {
+        self.insts.push(InstEquiv {
             inst,
-            range: Range::Unknown,
+            equiv: InstIdx::MAX,
         })
     }
 
-    /// Produce a rewritten version of `iidx`: this is a convenience function over [Self::rewrite].
-    pub(super) fn inst_rewrite(&self, iidx: InstIdx) -> Inst {
-        self.rewrite(self.inst(iidx).clone())
+    /// If `iidx` references a constant, return an owned version of the accompany [ConstKind], or
+    /// `None` otherwise.
+    pub(super) fn as_constkind(&self, iidx: InstIdx) -> Option<ConstKind> {
+        match self.inst(iidx) {
+            Inst::Const(Const { kind, .. }) => Some(kind.clone()),
+            _ => None,
+        }
     }
 
-    /// Rewrite `inst` to reflect knowledge the optimiser has built up (e.g. ranges) and then
-    /// canonicalise. In general, passes should not be using this function directly: they should be
-    /// passing instruction indexes to [Self::inst_rewrite].
-    pub(super) fn rewrite(&self, inst: Inst) -> Inst {
-        inst.map_iidxs(|iidx| self.map_iidx(iidx))
-            .canonicalise(self, self)
-    }
-
-    /// Set `iidx`'s range to `range`.
-    pub(super) fn set_range(&mut self, iidx: InstIdx, range: Range) {
-        let instkit = self.instkits.get_mut(iidx).unwrap();
-        match instkit.range {
-            Range::Unknown => instkit.range = range,
-            Range::Equivalent(cur_iidx) => match range {
-                Range::Unknown => todo!(),
-                Range::Equivalent(new_iidx) => {
-                    if cur_iidx != new_iidx {
-                        if let Inst::Const(_) = self.inst(cur_iidx) {
-                            self.instkits.get_mut(new_iidx).unwrap().range =
-                                Range::Equivalent(cur_iidx);
-                        } else if let Inst::Const(_) = self.inst(new_iidx) {
-                            self.instkits.get_mut(cur_iidx).unwrap().range =
-                                Range::Equivalent(new_iidx);
-                            self.instkits.get_mut(iidx).unwrap().range =
-                                Range::Equivalent(new_iidx);
-                        }
-                    }
-                }
-            },
+    /// Henceforth consider `iidx` to be equivalent to `equiv_to` (and/or vice versa). Note: it is
+    /// the caller's job to ensure that `iidx` and `equiv_to` have already been transformed for
+    /// equivalence.
+    pub(super) fn set_equiv(&mut self, iidx: InstIdx, equiv_to: InstIdx) {
+        assert_eq!(iidx, self.equiv_iidx(iidx));
+        assert_eq!(equiv_to, self.equiv_iidx(equiv_to));
+        match (self.inst(iidx), self.inst(equiv_to)) {
+            (Inst::Const(_), Inst::Const(_)) => (),
+            (_, Inst::Const(_)) => self.insts.get_mut(iidx).unwrap().equiv = equiv_to,
+            (_, _) => self.insts.get_mut(equiv_to).unwrap().equiv = iidx,
         }
     }
 }
@@ -133,7 +134,7 @@ impl ModLikeT for Opt {
 
 impl BlockLikeT for Opt {
     fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.instkits[usize::from(idx)].inst
+        &self.insts[usize::from(idx)].inst
     }
 }
 
@@ -142,7 +143,7 @@ impl OptT for Opt {
         (
             Block {
                 insts: self
-                    .instkits
+                    .insts
                     .into_iter()
                     .map(|x| x.inst)
                     .collect::<IndexVec<_, _>>(),
@@ -155,34 +156,28 @@ impl OptT for Opt {
         todo!()
     }
 
-    fn map_iidx(&self, iidx: InstIdx) -> InstIdx {
+    fn equiv_iidx(&mut self, iidx: InstIdx) -> InstIdx {
         let mut search = iidx;
         loop {
-            match self.instkits[search].range {
-                Range::Unknown => return search,
-                Range::Equivalent(other) => search = other,
+            let equiv = self.insts[search].equiv;
+            if equiv == InstIdx::MAX {
+                if search != iidx {
+                    self.insts[iidx].equiv = search;
+                }
+                return search;
             }
+            search = equiv;
         }
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         assert_ne!(*inst.ty(self), Ty::Void);
-        let inst = self.rewrite(inst);
-        match strength_fold(self, inst) {
-            OptOutcome::NotNeeded => panic!(),
-            OptOutcome::Rewritten(inst) => Ok(self.push_inst(inst)),
-            OptOutcome::ReducedTo(iidx) => Ok(iidx),
-        }
+        self.feed_internal(inst).map(|x| x.unwrap())
     }
 
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
         assert_eq!(*inst.ty(self), Ty::Void);
-        let inst = self.rewrite(inst);
-        match strength_fold(self, inst) {
-            OptOutcome::NotNeeded => Ok(None),
-            OptOutcome::Rewritten(inst) => Ok(Some(self.push_inst(inst))),
-            OptOutcome::ReducedTo(iidx) => Ok(Some(iidx)),
-        }
+        self.feed_internal(inst)
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
@@ -197,21 +192,18 @@ pub(super) enum OptOutcome {
     /// The input [Inst] has been rewritten to a new [Inst].
     Rewritten(Inst),
     /// The input [Inst] is equivalent to [InstIdx].
-    ReducedTo(InstIdx),
+    Equiv(InstIdx),
 }
 
-/// What we know about a given [InstIdx].
-struct InstKit {
+/// A wrapper around an [Inst] and our current knowledge of another instruction it is equivalent
+/// to.
+struct InstEquiv {
     /// The [Inst] at a given [InstIdx].
     inst: Inst,
-    /// The current range of values know for [InstIdx].
-    range: Range,
-}
-
-pub(super) enum Range {
-    Unknown,
-    #[allow(unused)]
-    Equivalent(InstIdx),
+    /// As the optimiser has advanced, we might have been able to prove that `inst` is equivalent
+    /// to a later instruction: if so, `equiv` will give the index of that instruction; if not, it
+    /// will be set [InstIdx::MAX].
+    equiv: InstIdx,
 }
 
 #[cfg(test)]
@@ -243,15 +235,29 @@ pub(in crate::compile::j2::opt) mod test {
         else {
             panic!()
         };
+        // We need to maintain a manual map of iidxs the user has written in their test to the
+        // current state of the actual optimiser. Consider:
+        //
+        // ```
+        // %0: i8 = arg [reg]
+        // %1: i8 = 0
+        // %2: i8 = add %0, %1
+        // %3: blackbox %2
+        // ```
+        //
+        // The `add` is a no-op, and won't be inserted into the optimisation's ongoing module at
+        // all, so when we get to `blackbox %2` there is no `%2` to reference: we'd get an
+        // out-of-bounds error! We thus need to rewrite this to `blackbox %0` _before_ feeding the
+        // instruction to the optimiser.
         let mut opt_map = IndexVec::with_capacity(insts.len());
-        for inst in insts.into_iter() {
-            let inst = inst.map_iidxs(|x| opt_map[x]);
+        for mut inst in insts.into_iter() {
+            inst.rewrite_iidxs(|x| opt_map[x]);
             match opt_f(&mut opt, inst) {
                 OptOutcome::NotNeeded => (),
                 OptOutcome::Rewritten(inst) => {
                     opt_map.push(opt.push_inst(inst));
                 }
-                OptOutcome::ReducedTo(iidx) => {
+                OptOutcome::Equiv(iidx) => {
                     opt_map.push(iidx);
                 }
             }
@@ -287,7 +293,10 @@ pub(in crate::compile::j2::opt) mod test {
         fn test_sf(mod_s: &str, ptn: &str) {
             opt_and_test(
                 mod_s,
-                |opt, inst| strength_fold(opt, opt.rewrite(inst)),
+                |opt, mut inst| {
+                    inst.canonicalise(opt);
+                    strength_fold(opt, inst)
+                },
                 ptn,
             );
         }
@@ -315,9 +324,9 @@ pub(in crate::compile::j2::opt) mod test {
           %5: i1 = icmp eq %0, %4
           guard true, %3, []
           guard true, %5, []
+          blackbox %2
           blackbox %4
-          blackbox %4
-          exit [%4]
+          exit [%2]
         ",
         );
 

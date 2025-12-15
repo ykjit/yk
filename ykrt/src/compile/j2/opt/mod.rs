@@ -18,8 +18,8 @@ pub(super) trait OptT: ModLikeT + BlockLikeT {
     #[allow(dead_code)]
     fn peel(self) -> (Block, Block);
 
-    /// What does this optimiser currently map `iidx` to? By definition this will return `iidx` or
-    /// a smaller [InstIdx].
+    /// Return the instruction currently equivalent to `iidx`. By definition this will be `iidx` or
+    /// a smaller value.
     ///
     /// Note that the value returned may vary as the optimiser receives more instructions. For
     /// example consider an input trace along the lines of:
@@ -34,14 +34,14 @@ pub(super) trait OptT: ModLikeT + BlockLikeT {
     /// %6: i32 = sub %0, %1
     /// ```
     ///
-    /// From instructions 1..=5 `map_iidx(InstIdx::from(0))` will return `0`; from that point
+    /// From instructions 1..=5 `equiv_iidx(InstIdx::from(0))` will return `0`; from that point
     /// onwards it may (depending on the optimiser!) return `3` because the `guard` proves that it
     /// is equivalent.
     ///
     /// # Panics
     ///
     /// If `iidx` is greater than the number of instructions the optimiser currently holds.
-    fn map_iidx(&self, iidx: InstIdx) -> InstIdx;
+    fn equiv_iidx(&mut self, iidx: InstIdx) -> InstIdx;
 
     /// Feed a non-void instruction into the optimiser and return an [InstIdx]. The returned
     /// [InstIdx] may refer to a previously inserted instruction, as an optimiser might prove that

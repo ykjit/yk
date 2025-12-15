@@ -5,7 +5,7 @@ use crate::compile::{
         hir::*,
         opt::{
             OptT,
-            opt::{Opt, OptOutcome, Range},
+            opt::{Opt, OptOutcome},
         },
     },
     jitc_yk::arbbitint::ArbBitInt,
@@ -39,20 +39,15 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
     }
 }
 
-fn opt_abs(
-    opt: &mut Opt,
-    inst @ Abs {
+fn opt_abs(opt: &mut Opt, mut inst: Abs) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Abs {
         tyidx,
         val,
         int_min_poison,
-    }: Abs,
-) -> OptOutcome {
+    } = inst;
     assert!(int_min_poison);
-    if let Inst::Const(Const {
-        kind: ConstKind::Int(val_c),
-        ..
-    }) = opt.inst_rewrite(val)
-    {
+    if let Some(ConstKind::Int(val_c)) = opt.as_constkind(val) {
         return OptOutcome::Rewritten(Inst::Const(Const {
             tyidx,
             kind: ConstKind::Int(val_c.bitabs()),
@@ -61,95 +56,79 @@ fn opt_abs(
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_add(
-    opt: &mut Opt,
-    inst @ Add {
+fn opt_add(opt: &mut Opt, mut inst: Add) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Add {
         tyidx,
         lhs,
         rhs,
         nuw,
         nsw,
-    }: Add,
-) -> OptOutcome {
+    } = inst;
     assert!(!nuw && !nsw);
-    if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
-    {
-        // Constant fold `c1 + c2`.
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(lhs_c.wrapping_add(&rhs_c)),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = opt.inst_rewrite(rhs)
-        && rhs_c.to_zero_ext_u8() == Some(0)
-    {
-        // Reduce `x + 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
+
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `c1 + c2`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(lhs_c.wrapping_add(&rhs_c)),
+            }));
+        }
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            if rhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `x + 0` to `x`.
+                return OptOutcome::Equiv(lhs);
+            }
+        }
+        _ => (),
     }
 
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_and(opt: &mut Opt, inst @ And { tyidx, lhs, rhs }: And) -> OptOutcome {
+fn opt_and(opt: &mut Opt, mut inst: And) -> OptOutcome {
+    inst.canonicalise(opt);
+    let And { tyidx, lhs, rhs } = inst;
     if lhs == rhs {
         // Reduce x & x with x.
-        return OptOutcome::ReducedTo(lhs);
-    } else if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
-    {
-        // Constant fold `c1 & c2`.
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(lhs_c.bitand(&rhs_c)),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = opt.inst_rewrite(rhs)
-    {
-        if rhs_c.to_zero_ext_u8() == Some(0) {
-            // Reduce `x & 0` to `0`.
-            return OptOutcome::ReducedTo(rhs);
+        return OptOutcome::Equiv(lhs);
+    }
+
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `c1 & c2`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(lhs_c.bitand(&rhs_c)),
+            }));
         }
-        if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
-            // Reduce `x & y` to `x` if `y` is a constant that has all
-            // the necessary bits set for this integer type. For an i1, for
-            // example, `x & 1` can be replaced with `x`.
-            return OptOutcome::ReducedTo(lhs);
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            if rhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `x & 0` to `0`.
+                return OptOutcome::Equiv(rhs);
+            }
+            if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
+                // Reduce `x & y` to `x` if `y` is a constant that has all
+                // the necessary bits set for this integer type. For an i1, for
+                // example, `x & 1` can be replaced with `x`.
+                return OptOutcome::Equiv(lhs);
+            }
         }
+        _ => (),
     }
 
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_ashr(
-    opt: &mut Opt,
-    inst @ AShr {
+fn opt_ashr(opt: &mut Opt, mut inst: AShr) -> OptOutcome {
+    inst.canonicalise(opt);
+    let AShr {
         tyidx,
         lhs,
         rhs,
         exact,
-    }: AShr,
-) -> OptOutcome {
+    } = inst;
     opt_ashr_lshr(opt, inst.into(), tyidx, lhs, rhs, exact, |lhs_c, rhs_c| {
         lhs_c.checked_ashr(rhs_c.to_zero_ext_u32().unwrap())
     })
@@ -170,52 +149,38 @@ where
     F: FnOnce(&ArbBitInt, &ArbBitInt) -> Option<ArbBitInt>,
 {
     assert!(!exact);
-    let lhs_inst = opt.inst_rewrite(lhs);
-    let rhs_inst = opt.inst_rewrite(rhs);
-    if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (&lhs_inst, &rhs_inst)
-    {
-        // Constant fold `lhs_c >> rhs_c`.
-        let c = f(lhs_c, rhs_c).unwrap_or_else(|| ArbBitInt::all_bits_set(lhs_c.bitw()));
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(c),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = rhs_inst
-        && rhs_c.to_zero_ext_u8() == Some(0)
-    {
-        // Reduce `x >> 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(lhs_c),
-        ..
-    }) = lhs_inst
-        && lhs_c.to_zero_ext_u8() == Some(0)
-    {
-        // Reduce `0 >> x` to `0`.
-        return OptOutcome::ReducedTo(lhs);
+
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `lhs_c >> rhs_c`.
+            let c = f(&lhs_c, &rhs_c).unwrap_or_else(|| ArbBitInt::all_bits_set(lhs_c.bitw()));
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(c),
+            }));
+        }
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            if rhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `x >> 0` to `x`.
+                return OptOutcome::Equiv(lhs);
+            }
+        }
+        (Some(ConstKind::Int(lhs_c)), _) => {
+            if lhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `0 >> x` to `0`.
+                return OptOutcome::Equiv(lhs);
+            }
+        }
+        _ => (),
     }
 
     OptOutcome::Rewritten(inst)
 }
 
-fn opt_ctpop(opt: &mut Opt, inst @ CtPop { tyidx, val }: CtPop) -> OptOutcome {
-    if let Inst::Const(Const {
-        kind: ConstKind::Int(c),
-        ..
-    }) = opt.inst_rewrite(val)
-    {
+fn opt_ctpop(opt: &mut Opt, mut inst: CtPop) -> OptOutcome {
+    inst.canonicalise(opt);
+    let CtPop { tyidx, val } = inst;
+    if let Some(ConstKind::Int(c)) = opt.as_constkind(val) {
         // LLVM's ctpop has a polymorphic return type: since the maximum number of bits we can
         // represent in LLVM IR is 2^23, and `count_ones` returns a `u32`, using
         // `ArbBitInt::from_u64` is always safe.
@@ -228,22 +193,17 @@ fn opt_ctpop(opt: &mut Opt, inst @ CtPop { tyidx, val }: CtPop) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_dynptradd(
-    opt: &mut Opt,
-    inst @ DynPtrAdd {
+fn opt_dynptradd(opt: &mut Opt, mut inst: DynPtrAdd) -> OptOutcome {
+    inst.canonicalise(opt);
+    let DynPtrAdd {
         ptr,
         num_elems,
         elem_size,
-    }: DynPtrAdd,
-) -> OptOutcome {
-    if let Inst::Const(Const {
-        kind: ConstKind::Int(c),
-        ..
-    }) = opt.inst_rewrite(num_elems)
-    {
+    } = inst;
+    if let Some(ConstKind::Int(c)) = opt.as_constkind(num_elems) {
         // LLVM IR semantics are such that GEP indices are sign-extended or truncated to the
-        // "pointer index size" (which for address space zero is a pointer-sized integer).
-        // First make sure we will be operating on that type.
+        // "pointer index size" (which for address space zero is a pointer-sized integer). First
+        // make sure we will be operating on that type.
         let v = c.to_sign_ext_isize().unwrap();
         // In LLVM slient two's compliment wrapping is permitted, but in Rust a `unchecked_mul()`
         // that wraps is UB. It seems unlikely that the overflow case will actually happen, so we
@@ -251,11 +211,11 @@ fn opt_dynptradd(
         let off = v.checked_mul(isize::try_from(elem_size).unwrap()).unwrap();
         let off = i32::try_from(off).unwrap();
         if off == 0 {
-            OptOutcome::ReducedTo(ptr)
+            return OptOutcome::Equiv(ptr);
         } else {
-            // We've reduced to a `ptradd`, so run it through that pass, which may be able to
+            // We've optimised to a `ptradd`, so run it through that pass, which may be able to
             // optimise it further.
-            opt_ptradd(
+            return opt_ptradd(
                 opt,
                 PtrAdd {
                     ptr,
@@ -264,60 +224,64 @@ fn opt_dynptradd(
                     nusw: false,
                     nuw: false,
                 },
-            )
-        }
-    } else {
-        OptOutcome::Rewritten(inst.into())
-    }
-}
-
-fn opt_guard(opt: &mut Opt, inst @ Guard { expect, cond, .. }: Guard) -> OptOutcome {
-    let cond_inst = opt.inst_rewrite(cond);
-    if let Inst::Const(_) = cond_inst {
-        // A guard that references a constant is, by definition, not needed and
-        // doesn't affect future analyses.
-        return OptOutcome::NotNeeded;
-    } else if expect {
-        if let Inst::ICmp(ICmp {
-            pred: IPred::Eq,
-            lhs,
-            rhs,
-            samesign,
-        }) = cond_inst
-            && lhs == rhs
-        {
-            assert!(!samesign);
-            return OptOutcome::NotNeeded;
-        }
-        if let Inst::ICmp(ICmp {
-            pred: IPred::Eq,
-            lhs,
-            rhs,
-            samesign,
-        }) = cond_inst
-            && let Inst::Const(_) = opt.inst_rewrite(rhs)
-        {
-            assert!(!samesign);
-            opt.set_range(lhs, Range::Equivalent(rhs));
+            );
         }
     }
 
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_icmp(
-    opt: &mut Opt,
-    inst @ ICmp {
+fn opt_guard(opt: &mut Opt, mut inst @ Guard { expect, cond, .. }: Guard) -> OptOutcome {
+    // Since guards tend to have lots of operands, we avoid `canonicalising` unless we really need
+    // to. This needs to be done carefully, because after we've called `set_equiv` below,
+    // recanonicalising the guard would change the `entry_vars` in a semantically incorrect way.
+
+    let cond = opt.equiv_iidx(cond);
+    if let Inst::Const(_) = opt.inst(cond) {
+        // A guard that references a constant is, by definition, not needed and
+        // doesn't affect future analyses.
+        return OptOutcome::NotNeeded;
+    }
+
+    if expect
+        && let cond_inst @ Inst::ICmp(ICmp {
+            pred: IPred::Eq, ..
+        }) = opt.inst(cond)
+    {
+        let mut cond_inst = cond_inst.to_owned();
+        cond_inst.canonicalise(opt);
+        let Inst::ICmp(ICmp {
+            pred: IPred::Eq,
+            lhs,
+            rhs,
+            samesign,
+        }) = cond_inst
+        else {
+            panic!()
+        };
+        assert!(!samesign);
+        if lhs == rhs {
+            return OptOutcome::NotNeeded;
+        }
+        inst.canonicalise(opt);
+        opt.set_equiv(lhs, rhs);
+    } else {
+        inst.canonicalise(opt);
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_icmp(opt: &mut Opt, mut inst: ICmp) -> OptOutcome {
+    inst.canonicalise(opt);
+    let ICmp {
         pred,
         lhs,
         rhs,
         samesign,
-    }: ICmp,
-) -> OptOutcome {
+    } = inst;
     assert!(!samesign);
-    if let (Inst::Const(Const { kind: lhs_c, .. }), Inst::Const(Const { kind: rhs_c, .. })) =
-        (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
-    {
+    if let (Some(lhs_c), Some(rhs_c)) = (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
         // Constant fold.
         let v = match (lhs_c, rhs_c) {
             (ConstKind::Int(lhs_c), ConstKind::Int(rhs_c)) => match pred {
@@ -371,12 +335,10 @@ fn opt_icmp(
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_inttoptr(opt: &mut Opt, inst @ IntToPtr { val, .. }: IntToPtr) -> OptOutcome {
-    if let Inst::Const(Const {
-        kind: ConstKind::Int(c),
-        ..
-    }) = opt.inst_rewrite(val)
-    {
+fn opt_inttoptr(opt: &mut Opt, mut inst: IntToPtr) -> OptOutcome {
+    inst.canonicalise(opt);
+    let IntToPtr { val, .. } = inst;
+    if let Some(ConstKind::Int(c)) = opt.as_constkind(val) {
         if c.bitw() <= u32::try_from(std::mem::size_of::<usize>() * 8).unwrap() {
             let tyidx = opt.push_ty(Ty::Ptr(0)).unwrap();
             return OptOutcome::Rewritten(Inst::Const(Const {
@@ -391,85 +353,73 @@ fn opt_inttoptr(opt: &mut Opt, inst @ IntToPtr { val, .. }: IntToPtr) -> OptOutc
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_lshr(
-    opt: &mut Opt,
-    inst @ LShr {
+fn opt_lshr(opt: &mut Opt, mut inst: LShr) -> OptOutcome {
+    inst.canonicalise(opt);
+    let LShr {
         tyidx,
         lhs,
         rhs,
         exact,
-    }: LShr,
-) -> OptOutcome {
+    } = inst;
     opt_ashr_lshr(opt, inst.into(), tyidx, lhs, rhs, exact, |lhs_c, rhs_c| {
         lhs_c.checked_lshr(rhs_c.to_zero_ext_u32().unwrap())
     })
 }
 
-fn opt_mul(
-    opt: &mut Opt,
-    inst @ Mul {
+fn opt_mul(opt: &mut Opt, mut inst: Mul) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Mul {
         tyidx,
         lhs,
         rhs,
         nuw,
         nsw,
-    }: Mul,
-) -> OptOutcome {
+    } = inst;
     assert!(!nuw && !nsw);
-    if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
-    {
-        // Constant fold `c1 * c2`.
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(lhs_c.wrapping_mul(&rhs_c)),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = opt.inst_rewrite(rhs)
-    {
-        match rhs_c.to_zero_ext_u64() {
-            Some(0) => {
-                // Reduce `x * 0` to `0`.
-                return OptOutcome::ReducedTo(rhs);
-            }
-            Some(1) => {
-                // Reduce `x * 1` to `x`.
-                return OptOutcome::ReducedTo(lhs);
-            }
-            Some(x) if x.is_power_of_two() => {
-                // Replace `x * y` with `x << ...`.
-                let c_iidx = opt
-                    .feed(Inst::Const(Const {
-                        tyidx,
-                        kind: ConstKind::Int(ArbBitInt::from_u64(
-                            rhs_c.bitw(),
-                            u64::from(x.ilog2()),
-                        )),
-                    }))
-                    .unwrap();
-                return OptOutcome::Rewritten(
-                    Shl {
-                        tyidx,
-                        lhs,
-                        rhs: c_iidx,
-                        nuw: false,
-                        nsw: false,
-                    }
-                    .into(),
-                );
-            }
-            _ => (),
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `c1 * c2`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(lhs_c.wrapping_mul(&rhs_c)),
+            }));
         }
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            match rhs_c.to_zero_ext_u64() {
+                Some(0) => {
+                    // Reduce `x * 0` to `0`.
+                    return OptOutcome::Equiv(rhs);
+                }
+                Some(1) => {
+                    // Reduce `x * 1` to `x`.
+                    return OptOutcome::Equiv(lhs);
+                }
+                Some(x) if x.is_power_of_two() => {
+                    // Replace `x * y` with `x << ...`.
+                    let c_iidx = opt
+                        .feed(Inst::Const(Const {
+                            tyidx,
+                            kind: ConstKind::Int(ArbBitInt::from_u64(
+                                rhs_c.bitw(),
+                                u64::from(x.ilog2()),
+                            )),
+                        }))
+                        .unwrap();
+                    return OptOutcome::Rewritten(
+                        Shl {
+                            tyidx,
+                            lhs,
+                            rhs: c_iidx,
+                            nuw: false,
+                            nsw: false,
+                        }
+                        .into(),
+                    );
+                }
+                _ => (),
+            }
+        }
+        _ => (),
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -480,6 +430,7 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
     // (a pointer-sized integer, for addrspace 0, the only address space we support right now).
     let mut off: isize = 0;
     loop {
+        inst.canonicalise(opt);
         let PtrAdd {
             ptr,
             off: inst_off,
@@ -490,22 +441,18 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
         assert!(!in_bounds && !nusw && !nuw);
 
         off = off.checked_add(isize::try_from(inst_off).unwrap()).unwrap();
-        let ptr_inst = opt.inst_rewrite(ptr);
-        if let Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Ptr(addr),
-        }) = ptr_inst
-        {
+        if let Some(ConstKind::Ptr(addr)) = opt.as_constkind(ptr) {
             // Constant fold `ptr + off`.
+            let tyidx = opt.push_ty(Ty::Ptr(0)).unwrap();
             return OptOutcome::Rewritten(Inst::Const(Const {
                 tyidx,
                 kind: ConstKind::Ptr(addr.wrapping_add_signed(off)),
             }));
-        } else if let Inst::PtrAdd(x) = ptr_inst {
-            inst = x;
+        } else if let Inst::PtrAdd(x) = opt.inst(ptr) {
+            inst = x.to_owned();
         } else if off == 0 {
             // Reduce `ptr + 0` to `x`.
-            return OptOutcome::ReducedTo(ptr);
+            return OptOutcome::Equiv(ptr);
         } else {
             let inst = PtrAdd {
                 ptr,
@@ -519,60 +466,48 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
     }
 }
 
-fn opt_or(
-    opt: &mut Opt,
-    inst @ Or {
+fn opt_or(opt: &mut Opt, mut inst: Or) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Or {
         tyidx,
         lhs,
         rhs,
         disjoint,
-    }: Or,
-) -> OptOutcome {
+    } = inst;
     assert!(!disjoint);
     if lhs == rhs {
         // Reduce x | x to x.
-        return OptOutcome::ReducedTo(lhs);
-    } else if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
-    {
-        // Constant fold `c1 | c2`.
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(lhs_c.bitor(&rhs_c)),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = opt.inst_rewrite(rhs)
-    {
-        if rhs_c.to_zero_ext_u8() == Some(0) {
-            // Reduce `x | 0` to `x`.
-            return OptOutcome::ReducedTo(lhs);
+        return OptOutcome::Equiv(lhs);
+    }
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `c1 | c2`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(lhs_c.bitor(&rhs_c)),
+            }));
         }
-        if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
-            // Reduce `x | y` to `y` if `y` is a constant that has all
-            // the necessary bits set for this integer type.
-            return OptOutcome::ReducedTo(lhs);
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            if rhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `x | 0` to `x`.
+                return OptOutcome::Equiv(lhs);
+            }
+            if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
+                // Reduce `x | y` to `y` if `y` is a constant that has all
+                // the necessary bits set for this integer type.
+                return OptOutcome::Equiv(lhs);
+            }
         }
+        _ => (),
     }
 
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_ptrtoint(opt: &mut Opt, inst @ PtrToInt { tyidx, val }: PtrToInt) -> OptOutcome {
-    if let Inst::Const(Const {
-        kind: ConstKind::Ptr(addr),
-        ..
-    }) = opt.inst_rewrite(val)
-    {
+fn opt_ptrtoint(opt: &mut Opt, mut inst: PtrToInt) -> OptOutcome {
+    inst.canonicalise(opt);
+    let PtrToInt { tyidx, val } = inst;
+    if let Some(ConstKind::Ptr(addr)) = opt.as_constkind(val) {
         let dst_bitw = opt.ty(tyidx).bitw();
         let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
         if dst_bitw <= u32::try_from(std::mem::size_of::<usize>() * 8).unwrap() {
@@ -588,159 +523,127 @@ fn opt_ptrtoint(opt: &mut Opt, inst @ PtrToInt { tyidx, val }: PtrToInt) -> OptO
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_select(
-    opt: &mut Opt,
-    inst @ Select {
+fn opt_select(opt: &mut Opt, mut inst: Select) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Select {
         cond,
         truev,
         falsev,
         ..
-    }: Select,
-) -> OptOutcome {
-    if let Inst::Const(Const {
-        kind: ConstKind::Int(lhs_c),
-        ..
-    }) = opt.inst_rewrite(cond)
-    {
-        match lhs_c.to_zero_ext_u8().unwrap() {
-            0 => return OptOutcome::ReducedTo(falsev),
-            1 => return OptOutcome::ReducedTo(truev),
+    } = inst;
+    if truev == falsev {
+        // If truev and falsev map to the same value, we can reduce to either side.
+        return OptOutcome::Equiv(truev);
+    }
+
+    if let Some(ConstKind::Int(cond_c)) = opt.as_constkind(cond) {
+        match cond_c.to_zero_ext_u8().unwrap() {
+            0 => return OptOutcome::Equiv(falsev),
+            1 => return OptOutcome::Equiv(truev),
             _ => unreachable!(),
         }
-    } else if truev == falsev {
-        return OptOutcome::ReducedTo(truev);
     }
 
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_sext(opt: &mut Opt, inst @ SExt { tyidx, val }: SExt) -> OptOutcome {
-    if let Inst::Const(Const { kind, .. }) = opt.inst_rewrite(val) {
-        match kind {
-            ConstKind::Double(_) | ConstKind::Float(_) => unreachable!(),
-            ConstKind::Int(src_val) => {
-                let dst_bitw = opt.ty(tyidx).bitw();
-                let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
-                return OptOutcome::Rewritten(Inst::Const(Const {
-                    tyidx: dst_tyidx,
-                    kind: ConstKind::Int(src_val.sign_extend(dst_bitw)),
-                }));
-            }
-            ConstKind::Ptr(_) => todo!(),
+fn opt_sext(opt: &mut Opt, mut inst: SExt) -> OptOutcome {
+    inst.canonicalise(opt);
+    let SExt { tyidx, val } = inst;
+    match opt.as_constkind(val) {
+        Some(ConstKind::Double(_) | ConstKind::Float(_)) => unreachable!(),
+        Some(ConstKind::Int(src_val)) => {
+            let dst_bitw = opt.ty(tyidx).bitw();
+            let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
+            OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx: dst_tyidx,
+                kind: ConstKind::Int(src_val.sign_extend(dst_bitw)),
+            }))
         }
+        Some(ConstKind::Ptr(_)) => todo!(),
+        None => OptOutcome::Rewritten(inst.into()),
     }
-
-    OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_shl(
-    opt: &mut Opt,
-    inst @ Shl {
+fn opt_shl(opt: &mut Opt, mut inst: Shl) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Shl {
         tyidx,
         lhs,
         rhs,
         nuw,
         nsw,
-    }: Shl,
-) -> OptOutcome {
+    } = inst;
     assert!(!nuw && !nsw);
-    let lhs_inst = opt.inst_rewrite(lhs);
-    let rhs_inst = opt.inst_rewrite(rhs);
-    if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (&lhs_inst, &rhs_inst)
-    {
-        // Constant fold `lhs_c << rhs_c`.
-        let c = lhs_c
-            .checked_shl(rhs_c.to_zero_ext_u32().unwrap())
-            .unwrap_or_else(|| ArbBitInt::all_bits_set(lhs_c.bitw()));
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(c),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = rhs_inst
-        && rhs_c.to_zero_ext_u8() == Some(0)
-    {
-        // Reduce `x << 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(lhs_c),
-        ..
-    }) = lhs_inst
-        && lhs_c.to_zero_ext_u8() == Some(0)
-    {
-        // Reduce `0 << x` to `0`.
-        return OptOutcome::ReducedTo(lhs);
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `lhs_c << rhs_c`.
+            let c = lhs_c
+                .checked_shl(rhs_c.to_zero_ext_u32().unwrap())
+                .unwrap_or_else(|| ArbBitInt::all_bits_set(lhs_c.bitw()));
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(c),
+            }));
+        }
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            if rhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `x << 0` to `x`.
+                return OptOutcome::Equiv(lhs);
+            }
+        }
+        (Some(ConstKind::Int(lhs_c)), _) => {
+            if lhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `0 << x` to `0`.
+                return OptOutcome::Equiv(lhs);
+            }
+        }
+        _ => (),
     }
 
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_sub(
-    opt: &mut Opt,
-    inst @ Sub {
+fn opt_sub(opt: &mut Opt, mut inst: Sub) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Sub {
         tyidx,
         lhs,
         rhs,
         nuw,
         nsw,
-    }: Sub,
-) -> OptOutcome {
+    } = inst;
     assert!(!nuw && !nsw);
-    if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
-    {
-        // Constant fold `c1 - c2`.
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(lhs_c.wrapping_sub(&rhs_c)),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = opt.inst_rewrite(rhs)
-        && rhs_c.to_zero_ext_u8() == Some(0)
-    {
-        // Reduce `x - 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `c1 - c2`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(lhs_c.wrapping_sub(&rhs_c)),
+            }));
+        }
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            if rhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `x - 0` to `x`.
+                return OptOutcome::Equiv(lhs);
+            }
+        }
+        _ => (),
     }
 
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_trunc(
-    opt: &mut Opt,
-    inst @ Trunc {
+fn opt_trunc(opt: &mut Opt, mut inst: Trunc) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Trunc {
         tyidx,
         val,
         nuw,
         nsw,
-    }: Trunc,
-) -> OptOutcome {
+    } = inst;
     assert!(!nuw && !nsw);
-    if let Inst::Const(Const {
-        kind: ConstKind::Int(c),
-        ..
-    }) = opt.inst_rewrite(val)
-    {
+    if let Some(ConstKind::Int(c)) = opt.as_constkind(val) {
         let dst_bitw = opt.ty(tyidx).bitw();
         let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
         return OptOutcome::Rewritten(Inst::Const(Const {
@@ -752,76 +655,65 @@ fn opt_trunc(
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_udiv(
-    opt: &mut Opt,
-    inst @ UDiv {
+fn opt_udiv(opt: &mut Opt, mut inst: UDiv) -> OptOutcome {
+    inst.canonicalise(opt);
+    let UDiv {
         tyidx,
         lhs,
         rhs,
         exact,
-    }: UDiv,
-) -> OptOutcome {
+    } = inst;
     assert!(!exact);
-    let rhs_inst = opt.inst_rewrite(rhs);
-    if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (opt.inst_rewrite(lhs), &rhs_inst)
-    {
-        // Constant fold `c1 / c2`.
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(
-                lhs_c
-                    .checked_udiv(rhs_c)
-                    .unwrap_or_else(|| ArbBitInt::all_bits_set(rhs_c.bitw())),
-            ),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = rhs_inst
-    {
-        match rhs_c.to_zero_ext_u64() {
-            Some(1) => {
-                // Reduce `x / 1` to `x`.
-                return OptOutcome::ReducedTo(lhs);
-            }
-            Some(x) if x.is_power_of_two() => {
-                // Replace `x * y` with `x >> ...`.
-                let c_iidx = opt
-                    .feed(Inst::Const(Const {
-                        tyidx,
-                        kind: ConstKind::Int(ArbBitInt::from_u64(
-                            rhs_c.bitw(),
-                            u64::from(x.ilog2()),
-                        )),
-                    }))
-                    .unwrap();
-                return OptOutcome::Rewritten(
-                    LShr {
-                        tyidx,
-                        lhs,
-                        rhs: c_iidx,
-                        exact: false,
-                    }
-                    .into(),
-                );
-            }
-            _ => (),
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `c1 / c2`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(
+                    lhs_c
+                        .checked_udiv(&rhs_c)
+                        .unwrap_or_else(|| ArbBitInt::all_bits_set(rhs_c.bitw())),
+                ),
+            }));
         }
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            match rhs_c.to_zero_ext_u64() {
+                Some(1) => {
+                    // Reduce `x / 1` to `x`.
+                    return OptOutcome::Equiv(lhs);
+                }
+                Some(x) if x.is_power_of_two() => {
+                    // Replace `x * y` with `x >> ...`.
+                    let c_iidx = opt
+                        .feed(Inst::Const(Const {
+                            tyidx,
+                            kind: ConstKind::Int(ArbBitInt::from_u64(
+                                rhs_c.bitw(),
+                                u64::from(x.ilog2()),
+                            )),
+                        }))
+                        .unwrap();
+                    return OptOutcome::Rewritten(
+                        LShr {
+                            tyidx,
+                            lhs,
+                            rhs: c_iidx,
+                            exact: false,
+                        }
+                        .into(),
+                    );
+                }
+                _ => (),
+            }
+        }
+        (_, _) => (),
     }
-
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_xor(opt: &mut Opt, inst @ Xor { tyidx, lhs, rhs }: Xor) -> OptOutcome {
+fn opt_xor(opt: &mut Opt, mut inst: Xor) -> OptOutcome {
+    inst.canonicalise(opt);
+    let Xor { tyidx, lhs, rhs } = inst;
     let bitw = opt.ty(tyidx).bitw();
     if lhs == rhs {
         // Reduce x ^ x to 0.
@@ -829,52 +721,43 @@ fn opt_xor(opt: &mut Opt, inst @ Xor { tyidx, lhs, rhs }: Xor) -> OptOutcome {
             tyidx,
             kind: ConstKind::Int(ArbBitInt::from_u64(bitw, 0)),
         }));
-    } else if let (
-        Inst::Const(Const {
-            kind: ConstKind::Int(lhs_c),
-            ..
-        }),
-        Inst::Const(Const {
-            kind: ConstKind::Int(rhs_c),
-            ..
-        }),
-    ) = (opt.inst_rewrite(lhs), opt.inst_rewrite(rhs))
-    {
-        // Constant fold `c1 ^ c2`.
-        return OptOutcome::Rewritten(Inst::Const(Const {
-            tyidx,
-            kind: ConstKind::Int(lhs_c.bitxor(&rhs_c)),
-        }));
-    } else if let Inst::Const(Const {
-        kind: ConstKind::Int(rhs_c),
-        ..
-    }) = opt.inst_rewrite(rhs)
-        && rhs_c.to_zero_ext_u8() == Some(0)
-    {
-        // Reduce `x ^ 0` to `x`.
-        return OptOutcome::ReducedTo(lhs);
     }
 
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
+            // Constant fold `c1 ^ c2`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(lhs_c.bitxor(&rhs_c)),
+            }));
+        }
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            if rhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `x ^ 0` to `x`.
+                return OptOutcome::Equiv(lhs);
+            }
+        }
+        _ => (),
+    }
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_zext(opt: &mut Opt, inst @ ZExt { tyidx, val }: ZExt) -> OptOutcome {
-    if let Inst::Const(Const { kind, .. }) = opt.inst_rewrite(val) {
-        match kind {
-            ConstKind::Double(_) | ConstKind::Float(_) => unreachable!(),
-            ConstKind::Int(src_val) => {
-                let dst_bitw = opt.ty(tyidx).bitw();
-                let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
-                return OptOutcome::Rewritten(Inst::Const(Const {
-                    tyidx: dst_tyidx,
-                    kind: ConstKind::Int(src_val.zero_extend(dst_bitw)),
-                }));
-            }
-            ConstKind::Ptr(_) => todo!(),
+fn opt_zext(opt: &mut Opt, mut inst: ZExt) -> OptOutcome {
+    inst.canonicalise(opt);
+    let ZExt { tyidx, val } = inst;
+    match opt.as_constkind(val) {
+        Some(ConstKind::Double(_) | ConstKind::Float(_)) => unreachable!(),
+        Some(ConstKind::Int(src_val)) => {
+            let dst_bitw = opt.ty(tyidx).bitw();
+            let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
+            OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx: dst_tyidx,
+                kind: ConstKind::Int(src_val.zero_extend(dst_bitw)),
+            }))
         }
+        Some(ConstKind::Ptr(_)) => todo!(),
+        None => OptOutcome::Rewritten(inst.into()),
     }
-
-    OptOutcome::Rewritten(inst.into())
 }
 
 #[cfg(test)]
@@ -885,7 +768,10 @@ mod test {
     fn test_sf(mod_s: &str, ptn: &str) {
         opt_and_test(
             mod_s,
-            |opt, inst| strength_fold(opt, opt.rewrite(inst)),
+            |opt, mut inst| {
+                inst.canonicalise(opt);
+                strength_fold(opt, inst)
+            },
             ptn,
         );
     }
@@ -1228,6 +1114,23 @@ mod test {
           blackbox %3
           blackbox %3
           exit [%3, %3]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          exit [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          exit [%0, %0]
         ",
         );
 
