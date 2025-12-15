@@ -57,9 +57,8 @@
 //!
 //! ## How passes should use the optimiser
 //!
-//! Passes will be passed an already-rewritten [Inst]. When looking up other instructions, one
-//! should use [Opt::inst_rewrite] to obtain "old" [Inst]s: this automatically rewrites those older
-//! instructions given the current state of knowledge.
+//! Passes will be passed a possibly non-canonicalised [Inst]; they must return a canonicalised
+//! [Inst].
 
 use crate::compile::{
     CompilationError,
@@ -85,7 +84,6 @@ impl Opt {
 
     /// Used by [Self::feed] and [Self::feed_void].
     fn feed_internal(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
-        let inst = self.rewrite(inst);
         match strength_fold(self, inst) {
             OptOutcome::NotNeeded => Ok(None),
             OptOutcome::Rewritten(inst) => Ok(Some(self.push_inst(inst))),
@@ -101,17 +99,13 @@ impl Opt {
         })
     }
 
-    /// Produce a rewritten version of `iidx`: this is a convenience function over [Self::rewrite].
-    pub(super) fn inst_rewrite(&mut self, iidx: InstIdx) -> Inst {
-        self.rewrite(self.inst(iidx).clone())
-    }
-
-    /// Rewrite `inst` to reflect knowledge the optimiser has built up (e.g. ranges) and then
-    /// canonicalise. In general, passes should not be using this function directly: they should be
-    /// passing instruction indexes to [Self::inst_rewrite].
-    pub(super) fn rewrite(&mut self, mut inst: Inst) -> Inst {
-        inst.canonicalise(self);
-        inst
+    /// If `iidx` references a constant, return an owned version of the accompany [ConstKind], or
+    /// `None` otherwise.
+    pub(super) fn as_constkind(&self, iidx: InstIdx) -> Option<ConstKind> {
+        match self.inst(iidx) {
+            Inst::Const(Const { kind, .. }) => Some(kind.clone()),
+            _ => None,
+        }
     }
 
     /// Henceforth consider `iidx` to be equivalent to `equiv_to` (and/or vice versa). Note: it is
@@ -299,8 +293,8 @@ pub(in crate::compile::j2::opt) mod test {
         fn test_sf(mod_s: &str, ptn: &str) {
             opt_and_test(
                 mod_s,
-                |opt, inst| {
-                    let inst = opt.rewrite(inst);
+                |opt, mut inst| {
+                    inst.canonicalise(opt);
                     strength_fold(opt, inst)
                 },
                 ptn,
