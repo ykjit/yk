@@ -100,8 +100,9 @@ impl Opt {
     /// canonicalise. In general, passes should not be using this function directly: they should be
     /// passing instruction indexes to [Self::inst_rewrite].
     pub(super) fn rewrite(&mut self, inst: Inst) -> Inst {
-        inst.map(|iidx| self.equiv_iidx(iidx))
-            .canonicalise(self, self)
+        let mut inst = inst.map(|iidx| self.equiv_iidx(iidx));
+        inst.canonicalise(self);
+        inst
     }
 
     /// Henceforth consider `iidx` to be equivalent to `equiv_to` (and/or vice versa). Note: it is

@@ -117,6 +117,7 @@ use crate::{
     compile::{
         j2::{
             compiled_trace::J2CompiledTrace,
+            opt::OptT,
             regalloc::{RegT, VarLocs},
         },
         jitc_yk::{
@@ -531,14 +532,9 @@ pub(super) trait InstT: std::fmt::Debug {
     #[allow(unused)]
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    /// Return a canonicalised version of this instruction. Canonicalisation is inherently
-    /// subjective, and it is acceptable to simply return `self` unchanged.
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
+    /// Canonicalise this instruction. Canonicalisation is inherently subjective, and it is
+    /// acceptable to do nothing.
+    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
 
     /// Iterate over this instructions' operands that reference [InstIdx]s and call `iidx_item` on
     /// each.
@@ -691,21 +687,11 @@ impl InstT for Add {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        if matches!(b.inst(self.lhs), Inst::Const(_)) && !matches!(b.inst(self.rhs), Inst::Const(_))
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            Self {
-                tyidx: self.tyidx,
-                lhs: self.rhs,
-                rhs: self.lhs,
-                nuw: self.nuw,
-                nsw: self.nsw,
-            }
-        } else {
-            self
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -761,19 +747,11 @@ impl InstT for And {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        if matches!(b.inst(self.lhs), Inst::Const(_)) && !matches!(b.inst(self.rhs), Inst::Const(_))
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            Self {
-                tyidx: self.tyidx,
-                lhs: self.rhs,
-                rhs: self.lhs,
-            }
-        } else {
-            self
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -1863,22 +1841,12 @@ impl InstT for ICmp {
 
     /// For [IPred::Eq] and [IPred::Ne], canonicalise to favour references to constants on the RHS of
     /// the addition.
-    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
         if (self.pred == IPred::Eq || self.pred == IPred::Ne)
-            && matches!(b.inst(self.lhs), Inst::Const(_))
-            && !matches!(b.inst(self.rhs), Inst::Const(_))
+            && matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            Self {
-                pred: self.pred,
-                lhs: self.rhs,
-                rhs: self.lhs,
-                samesign: self.samesign,
-            }
-        } else {
-            self
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -2256,21 +2224,11 @@ impl InstT for Mul {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        if matches!(b.inst(self.lhs), Inst::Const(_)) && !matches!(b.inst(self.rhs), Inst::Const(_))
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            Self {
-                tyidx: self.tyidx,
-                lhs: self.rhs,
-                rhs: self.lhs,
-                nuw: self.nuw,
-                nsw: self.nsw,
-            }
-        } else {
-            self
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -2327,20 +2285,11 @@ impl InstT for Or {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        if matches!(b.inst(self.lhs), Inst::Const(_)) && !matches!(b.inst(self.rhs), Inst::Const(_))
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            Self {
-                tyidx: self.tyidx,
-                lhs: self.rhs,
-                rhs: self.lhs,
-                disjoint: self.disjoint,
-            }
-        } else {
-            self
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -2800,19 +2749,11 @@ impl InstT for SMax {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        if matches!(b.inst(self.lhs), Inst::Const(_)) && !matches!(b.inst(self.rhs), Inst::Const(_))
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            Self {
-                tyidx: self.tyidx,
-                lhs: self.rhs,
-                rhs: self.lhs,
-            }
-        } else {
-            self
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -2870,19 +2811,11 @@ impl InstT for SMin {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        if matches!(b.inst(self.lhs), Inst::Const(_)) && !matches!(b.inst(self.rhs), Inst::Const(_))
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            Self {
-                tyidx: self.tyidx,
-                lhs: self.rhs,
-                rhs: self.lhs,
-            }
-        } else {
-            self
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -3296,19 +3229,11 @@ impl InstT for Xor {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(self, _m: &dyn ModLikeT, b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        if matches!(b.inst(self.lhs), Inst::Const(_)) && !matches!(b.inst(self.rhs), Inst::Const(_))
+    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            Self {
-                tyidx: self.tyidx,
-                lhs: self.rhs,
-                rhs: self.lhs,
-            }
-        } else {
-            self
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
