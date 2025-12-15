@@ -1266,15 +1266,6 @@ impl InstT for FAdd {
         );
     }
 
-    /// IEEE 754 addition is not commutative if NaNs are involved, so we can't easily canonicalise
-    /// this.
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1327,13 +1318,6 @@ impl InstT for FCmp {
             b.inst(self.rhs).ty(m),
             "%{iidx:?}: inconsistent lhs / rhs types"
         );
-    }
-
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1432,13 +1416,6 @@ impl InstT for FDiv {
                 && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
-    }
-
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1544,13 +1521,6 @@ impl InstT for FMul {
         );
     }
 
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1602,13 +1572,6 @@ impl InstT for FNeg {
         );
     }
 
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1654,13 +1617,6 @@ impl InstT for FSub {
                 && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
-    }
-
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2174,13 +2130,6 @@ impl InstT for MemCpy {
         );
     }
 
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2245,13 +2194,6 @@ impl InstT for MemSet {
             &Ty::Int(32 | 64),
             "%{iidx:?}: len has wrong type"
         );
-    }
-
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2585,13 +2527,6 @@ impl InstT for SDiv {
         );
     }
 
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2712,13 +2647,6 @@ impl InstT for SExt {
             b.inst_bitw(m, self.val) < m.ty(self.tyidx).bitw(),
             "%{iidx:?}: val bitw must be strictly less than the return type bitw"
         );
-    }
-
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -3011,13 +2939,6 @@ impl InstT for SRem {
         );
     }
 
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3124,13 +3045,6 @@ impl InstT for Sub {
         );
     }
 
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3168,13 +3082,6 @@ pub(super) struct ThreadLocal(pub *const c_void);
 
 impl InstT for ThreadLocal {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
-
-    fn canonicalise(self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
 
     fn for_each_iidx<F>(&self, _f: F)
     where
