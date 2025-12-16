@@ -41,7 +41,7 @@ pub(super) trait OptT: ModLikeT + BlockLikeT {
     /// # Panics
     ///
     /// If `iidx` is greater than the number of instructions the optimiser currently holds.
-    fn equiv_iidx(&mut self, iidx: InstIdx) -> InstIdx;
+    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx;
 
     /// Feed a non-void instruction into the optimiser and return an [InstIdx]. The returned
     /// [InstIdx] may refer to a previously inserted instruction, as an optimiser might prove that
