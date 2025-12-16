@@ -20,6 +20,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::CtPop(x) => opt_ctpop(opt, x),
         Inst::DynPtrAdd(x) => opt_dynptradd(opt, x),
         Inst::FAdd(x) => opt_fadd(opt, x),
+        Inst::FSub(x) => opt_fsub(opt, x),
         Inst::Guard(x) => opt_guard(opt, x),
         Inst::ICmp(x) => opt_icmp(opt, x),
         Inst::IntToPtr(x) => opt_inttoptr(opt, x),
@@ -249,6 +250,32 @@ fn opt_fadd(opt: &mut Opt, mut inst: FAdd) -> OptOutcome {
             return OptOutcome::Rewritten(Inst::Const(Const {
                 tyidx,
                 kind: ConstKind::Double(lhs_c + rhs_c),
+            }));
+        }
+        // Note: rhs = 0.0 is not safe to eliminate in general, due to IEE754.
+        _ => (),
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_fsub(opt: &mut Opt, mut inst: FSub) -> OptOutcome {
+    inst.canonicalise(opt);
+    let FSub { tyidx, lhs, rhs } = inst;
+
+    match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
+        (Some(ConstKind::Float(lhs_c)), Some(ConstKind::Float(rhs_c))) => {
+            // Constant fold `c1f - c2f`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Float(lhs_c - rhs_c),
+            }));
+        }
+        (Some(ConstKind::Double(lhs_c)), Some(ConstKind::Double(rhs_c))) => {
+            // Constant fold `c1d - c2d`.
+            return OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Double(lhs_c - rhs_c),
             }));
         }
         // Note: rhs = 0.0 is not safe to eliminate in general, due to IEE754.
@@ -1089,6 +1116,39 @@ mod test {
             "
           ...
           %2: double = 3.05
+          blackbox %2
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_fsub() {
+        // Constant fold lhs float and rhs float
+        test_sf(
+            "
+          %0: float = 2.02float
+          %1: float = 1.01float
+          %2: float = fsub %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: float = 1.01
+          blackbox %2
+        ",
+        );
+
+        // Constant fold lhs double and rhs double
+        test_sf(
+            "
+          %0: double = 2.02double
+          %1: double = 1.01double
+          %2: double = fsub %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: double = 1.01
           blackbox %2
         ",
         );
