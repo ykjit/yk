@@ -68,10 +68,13 @@ use crate::compile::{
     },
 };
 use index_vec::*;
+use std::collections::HashMap;
 
 pub(in crate::compile::j2) struct Opt {
     insts: IndexVec<InstIdx, InstEquiv>,
     tys: IndexVec<TyIdx, Ty>,
+    /// ty_map is used to ensure that only distinct [Ty]s lead to new [TyIdx]s.
+    ty_map: HashMap<Ty, TyIdx>,
 }
 
 impl Opt {
@@ -79,6 +82,7 @@ impl Opt {
         Self {
             insts: IndexVec::new(),
             tys: IndexVec::new(),
+            ty_map: HashMap::new(),
         }
     }
 
@@ -182,7 +186,12 @@ impl OptT for Opt {
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
-        Ok(self.tys.push(ty))
+        if let Some(tyidx) = self.ty_map.get(&ty) {
+            return Ok(*tyidx);
+        }
+        let tyidx = self.tys.push(ty.clone());
+        self.ty_map.insert(ty, tyidx);
+        Ok(tyidx)
     }
 }
 

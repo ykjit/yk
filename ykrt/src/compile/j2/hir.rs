@@ -49,6 +49,13 @@
 //! for efficiency reasons. Thus instructions are always numbered 0..*n*.
 //!
 //!
+//! ## Guarantees
+//!
+//! * HIR must map the same [Ty] to a single [TyIdx] (i.e. no matter how often a given type is
+//!   inserted into a [Module], it must produce the same [TyIdx]). Thus type comparisons are simple
+//!   integer comparisons.
+//!
+//!
 //! ## Modules vs. blocks
 //!
 //! A HIR [Module] is a complete, high-level, representation of our intuitive notion of a "trace".
@@ -213,6 +220,13 @@ impl<Reg: RegT> Mod<Reg> {
     /// Check that this module is well-formed, panicing if it is not.
     #[allow(dead_code)]
     pub(super) fn assert_well_formed(&self) {
+        // Guarantee that a given [Ty] appears only once in `self.tys`.
+        for (i, ty) in self.tys.iter().enumerate() {
+            for ty2 in self.tys.iter().skip(i + 1) {
+                assert_ne!(ty, ty2, "Type '{ty:?}' appears more than once");
+            }
+        }
+
         match &self.kind {
             ModKind::Coupler { .. } => todo!(),
             ModKind::Loop { .. } => todo!(),
@@ -444,7 +458,7 @@ pub(super) struct GuardRestore {
 }
 
 /// A HIR type.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) enum Ty {
     // As in LLVM IR: a 64-bit floating-point value (IEEE-754 binary64).
     Double,
@@ -498,7 +512,7 @@ impl Ty {
 }
 
 /// A function type.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) struct FuncTy {
     /// The type of each argument.
     pub args_tyidxs: SmallVec<[TyIdx; 4]>,
@@ -3517,6 +3531,18 @@ mod test {
     #[should_panic(expected = "%0: forward reference to %1")]
     fn no_forward_references() {
         str_to_mod::<DummyReg>("%0: i8 = add %1, %2");
+    }
+
+    #[test]
+    #[should_panic(expected = "Type 'Int(8)' appears more than once")]
+    fn tys_appear_once() {
+        let mut m = str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+        ",
+        );
+        m.tys.push(Ty::Int(8));
+        m.assert_well_formed();
     }
 
     // The per-[Inst] checks.

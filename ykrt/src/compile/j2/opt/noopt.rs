@@ -7,10 +7,13 @@ use crate::compile::{
     j2::{hir::*, opt::OptT},
 };
 use index_vec::*;
+use std::collections::HashMap;
 
 pub(in crate::compile::j2) struct NoOpt {
     insts: IndexVec<InstIdx, Inst>,
     tys: IndexVec<TyIdx, Ty>,
+    /// ty_map is used to ensure that only distinct [Ty]s lead to new [TyIdx]s.
+    ty_map: HashMap<Ty, TyIdx>,
 }
 
 impl NoOpt {
@@ -18,6 +21,7 @@ impl NoOpt {
         Self {
             insts: IndexVec::new(),
             tys: IndexVec::new(),
+            ty_map: HashMap::new(),
         }
     }
 }
@@ -62,6 +66,11 @@ impl OptT for NoOpt {
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
-        Ok(self.tys.push(ty))
+        if let Some(tyidx) = self.ty_map.get(&ty) {
+            return Ok(*tyidx);
+        }
+        let tyidx = self.tys.push(ty.clone());
+        self.ty_map.insert(ty, tyidx);
+        Ok(tyidx)
     }
 }
