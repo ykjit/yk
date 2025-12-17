@@ -64,13 +64,14 @@ use crate::compile::{
     CompilationError,
     j2::{
         hir::*,
-        opt::{OptT, strength_fold::strength_fold},
+        opt::{OptT, cse::CSE, strength_fold::strength_fold},
     },
 };
 use index_vec::*;
 use std::collections::HashMap;
 
 pub(in crate::compile::j2) struct Opt {
+    cse: CSE,
     insts: IndexVec<InstIdx, InstEquiv>,
     tys: IndexVec<TyIdx, Ty>,
     /// ty_map is used to ensure that only distinct [Ty]s lead to new [TyIdx]s.
@@ -80,6 +81,7 @@ pub(in crate::compile::j2) struct Opt {
 impl Opt {
     pub(in crate::compile::j2) fn new() -> Self {
         Self {
+            cse: CSE::new(),
             insts: IndexVec::new(),
             tys: IndexVec::new(),
             ty_map: HashMap::new(),
@@ -90,13 +92,20 @@ impl Opt {
     fn feed_internal(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
         match strength_fold(self, inst) {
             OptOutcome::NotNeeded => Ok(None),
-            OptOutcome::Rewritten(inst) => Ok(Some(self.push_inst(inst))),
+            OptOutcome::Rewritten(inst) => {
+                if let Some(iidx) = self.cse.is_equiv(self, &inst) {
+                    Ok(Some(iidx))
+                } else {
+                    Ok(Some(self.push_inst(inst)))
+                }
+            }
             OptOutcome::Equiv(iidx) => Ok(Some(iidx)),
         }
     }
 
     /// Push `inst` into this optimisation module.
     fn push_inst(&mut self, inst: Inst) -> InstIdx {
+        self.cse.push(&inst);
         self.insts.push(InstEquiv {
             inst,
             equiv: InstIdx::MAX,

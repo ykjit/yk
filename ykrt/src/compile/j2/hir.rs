@@ -155,6 +155,7 @@ use std::{
     ops::{Bound, RangeBounds},
     sync::Arc,
 };
+use strum::{EnumCount, EnumDiscriminants};
 
 /// A representation of a "module like" object.
 ///
@@ -559,6 +560,14 @@ pub(super) trait InstT: std::fmt::Debug {
     /// [InstIdx]s and performs other, basic, canonicalisation on a per-instruction kind basis.
     fn canonicalise(&mut self, _opt: &dyn OptT);
 
+    /// For the purposes of common subexpression elimination is `other` equivalent to `self`?
+    /// `other` must be canonicalised for this comparison to return true in all cases where
+    /// it should.
+    ///
+    /// This should use [OptT::equiv_iidx] for [InstIdx]s. Other attributes should be treated on a
+    /// case-by-case basis.
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool;
+
     /// Iterate over this instructions' operands that reference [InstIdx]s and call `iidx_item` on
     /// each.
     fn for_each_iidx<F>(&self, iidx_item: F)
@@ -581,7 +590,7 @@ pub(super) trait InstT: std::fmt::Debug {
 }
 
 #[enum_dispatch(InstT)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, EnumCount, EnumDiscriminants)]
 pub(super) enum Inst {
     Abs,
     Add,
@@ -656,6 +665,22 @@ impl InstT for Abs {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Abs(Abs {
+            tyidx,
+            val,
+            int_min_poison,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+            && self.int_min_poison == *int_min_poison
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -721,6 +746,26 @@ impl InstT for Add {
         }
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Add(Add {
+            tyidx,
+            lhs,
+            rhs,
+            nuw,
+            nsw,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.nuw == *nuw
+            && self.nsw == *nsw
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -778,6 +823,18 @@ impl InstT for And {
         }
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::And(And { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -823,6 +880,10 @@ impl InstT for Arg {
     {
     }
 
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
+    }
+
     #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
     where
@@ -862,6 +923,24 @@ impl InstT for AShr {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::AShr(AShr {
+            tyidx,
+            lhs,
+            rhs,
+            exact,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.exact == *exact
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -907,6 +986,10 @@ pub(super) struct BlackBox {
 impl InstT for BlackBox {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
+    }
+
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -980,6 +1063,10 @@ impl InstT for Call {
         for x in self.args.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
+    }
+
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1075,6 +1162,16 @@ impl InstT for Const {
 
     fn canonicalise(&mut self, _opt: &dyn OptT) {}
 
+    fn cse_eq(&self, _opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Const(Const { kind, .. }) = other
+            && &self.kind == kind
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
@@ -1137,6 +1234,17 @@ impl InstT for CtPop {
         self.val = opt.equiv_iidx(self.val)
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::CtPop(CtPop { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1188,6 +1296,22 @@ impl InstT for DynPtrAdd {
         self.num_elems = opt.equiv_iidx(self.num_elems);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::DynPtrAdd(DynPtrAdd {
+            ptr,
+            num_elems,
+            elem_size,
+        }) = other
+            && opt.equiv_iidx(self.ptr) == *ptr
+            && opt.equiv_iidx(self.num_elems) == *num_elems
+            && self.elem_size == *elem_size
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1228,6 +1352,10 @@ impl InstT for Exit {
         for x in self.0.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
+    }
+
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1290,6 +1418,18 @@ impl InstT for FAdd {
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::FAdd(FAdd { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1344,6 +1484,18 @@ impl InstT for FCmp {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::FCmp(FCmp { pred, lhs, rhs }) = other
+            && self.pred == *pred
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1446,6 +1598,18 @@ impl InstT for FDiv {
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::FDiv(FDiv { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1503,6 +1667,17 @@ impl InstT for Floor {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Floor(Floor { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1550,6 +1725,18 @@ impl InstT for FMul {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::FMul(FMul { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1604,6 +1791,17 @@ impl InstT for FNeg {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::FNeg(FNeg { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1651,6 +1849,18 @@ impl InstT for FSub {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::FSub(FSub { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1712,6 +1922,17 @@ impl InstT for FPExt {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::FPExt(FPExt { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -1761,6 +1982,17 @@ impl InstT for FPToSI {
 
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::FPToSI(FPToSI { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1825,6 +2057,10 @@ impl InstT for Guard {
         for x in self.entry_vars.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
+    }
+
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -1907,6 +2143,24 @@ impl InstT for ICmp {
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
             std::mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::ICmp(ICmp {
+            pred,
+            lhs,
+            rhs,
+            samesign,
+        }) = other
+            && self.pred == *pred
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.samesign == *samesign
+        {
+            true
+        } else {
+            false
         }
     }
 
@@ -2008,6 +2262,17 @@ impl InstT for IntToPtr {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::IntToPtr(IntToPtr { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2051,6 +2316,10 @@ impl InstT for Load {
 
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.ptr = opt.equiv_iidx(self.ptr);
+    }
+
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2101,6 +2370,24 @@ impl InstT for LShr {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::LShr(LShr {
+            tyidx,
+            lhs,
+            rhs,
+            exact,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.exact == *exact
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2160,6 +2447,10 @@ impl InstT for MemCpy {
         self.dst = opt.equiv_iidx(self.dst);
         self.src = opt.equiv_iidx(self.src);
         self.len = opt.equiv_iidx(self.len);
+    }
+
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2231,6 +2522,10 @@ impl InstT for MemSet {
         self.len = opt.equiv_iidx(self.len);
     }
 
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2298,6 +2593,26 @@ impl InstT for Mul {
         }
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Mul(Mul {
+            tyidx,
+            lhs,
+            rhs,
+            nuw,
+            nsw,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.nuw == *nuw
+            && self.nsw == *nsw
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2356,6 +2671,24 @@ impl InstT for Or {
         }
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Or(Or {
+            tyidx,
+            lhs,
+            rhs,
+            disjoint,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.disjoint == *disjoint
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2402,6 +2735,26 @@ impl InstT for PtrAdd {
 
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.ptr = opt.equiv_iidx(self.ptr);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::PtrAdd(PtrAdd {
+            ptr,
+            off,
+            in_bounds,
+            nusw,
+            nuw,
+        }) = other
+            && opt.equiv_iidx(self.ptr) == *ptr
+            && self.off == *off
+            && self.in_bounds == *in_bounds
+            && self.nusw == *nusw
+            && self.nuw == *nuw
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2455,6 +2808,17 @@ impl InstT for PtrToInt {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::PtrToInt(PtrToInt { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2490,6 +2854,10 @@ impl InstT for Return {
 
     fn canonicalise(&mut self, _opt: &dyn OptT) {}
 
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
+    }
+
     fn for_each_iidx<F>(&self, _f: F)
     where
         F: Fn(InstIdx),
@@ -2510,6 +2878,12 @@ impl InstT for Return {
 
     fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
         &Ty::Void
+    }
+}
+
+impl PartialEq for Return {
+    fn eq(&self, _other: &Self) -> bool {
+        panic!();
     }
 }
 
@@ -2536,6 +2910,24 @@ impl InstT for SDiv {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::SDiv(SDiv {
+            tyidx,
+            lhs,
+            rhs,
+            exact,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.exact == *exact
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2596,6 +2988,24 @@ impl InstT for Select {
         self.cond = opt.equiv_iidx(self.cond);
         self.truev = opt.equiv_iidx(self.truev);
         self.falsev = opt.equiv_iidx(self.falsev);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Select(Select {
+            tyidx,
+            cond,
+            truev,
+            falsev,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.cond) == *cond
+            && opt.equiv_iidx(self.truev) == *truev
+            && opt.equiv_iidx(self.falsev) == *falsev
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2663,6 +3073,17 @@ impl InstT for SExt {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::SExt(SExt { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2712,6 +3133,26 @@ impl InstT for Shl {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Shl(Shl {
+            tyidx,
+            lhs,
+            rhs,
+            nuw,
+            nsw,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.nuw == *nuw
+            && self.nsw == *nsw
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -2767,6 +3208,17 @@ impl InstT for SIToFP {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::SIToFP(SIToFP { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2819,6 +3271,18 @@ impl InstT for SMax {
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
             std::mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::SMax(SMax { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
         }
     }
 
@@ -2883,6 +3347,18 @@ impl InstT for SMin {
         }
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::SMin(SMin { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2938,6 +3414,18 @@ impl InstT for SRem {
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::SRem(SRem { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -2990,6 +3478,10 @@ impl InstT for Store {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
         self.ptr = opt.equiv_iidx(self.ptr);
+    }
+
+    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+        panic!();
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -3049,6 +3541,26 @@ impl InstT for Sub {
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Sub(Sub {
+            tyidx,
+            lhs,
+            rhs,
+            nuw,
+            nsw,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.nuw == *nuw
+            && self.nsw == *nsw
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3083,6 +3595,16 @@ impl InstT for ThreadLocal {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
     fn canonicalise(&mut self, _opt: &dyn OptT) {}
+
+    fn cse_eq(&self, _opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::ThreadLocal(ThreadLocal(x)) = other
+            && self.0 == *x
+        {
+            true
+        } else {
+            false
+        }
+    }
 
     fn for_each_iidx<F>(&self, _f: F)
     where
@@ -3143,6 +3665,24 @@ impl InstT for Trunc {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Trunc(Trunc {
+            tyidx,
+            val,
+            nuw,
+            nsw,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+            && self.nuw == *nuw
+            && self.nsw == *nsw
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3191,6 +3731,24 @@ impl InstT for UDiv {
     fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::UDiv(UDiv {
+            tyidx,
+            lhs,
+            rhs,
+            exact,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && self.exact == *exact
+        {
+            true
+        } else {
+            false
+        }
     }
 
     fn for_each_iidx<F>(&self, f: F)
@@ -3251,6 +3809,18 @@ impl InstT for UIToFP {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::UIToFP(UIToFP { tyidx, val, nneg }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+            && self.nneg == *nneg
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3303,6 +3873,18 @@ impl InstT for Xor {
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
             std::mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::Xor(Xor { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
         }
     }
 
@@ -3364,6 +3946,17 @@ impl InstT for ZExt {
         self.val = opt.equiv_iidx(self.val);
     }
 
+    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+        if let Inst::ZExt(ZExt { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn for_each_iidx<F>(&self, f: F)
     where
         F: Fn(InstIdx),
@@ -3404,7 +3997,11 @@ pub(super) struct Frame {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::{hir_parser::str_to_mod, regalloc::TestRegIter};
+    use crate::compile::j2::{
+        hir_parser::str_to_mod,
+        opt::opt::Opt,
+        regalloc::{TestRegIter, test::TestReg},
+    };
     use strum::{Display, EnumCount};
 
     #[derive(Copy, Clone, Debug, Display, EnumCount, PartialEq)]
@@ -4435,6 +5032,81 @@ mod test {
           %0: i8 = arg [reg]
           %1: i8 = zext %0
         ",
+        );
+    }
+
+    #[test]
+    fn cse_eq() {
+        let m = str_to_mod::<TestReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i64 = arg [reg]
+          %3: i1 = icmp eq %0, %1
+          guard true, %3, []
+",
+        );
+
+        let mut opt = Opt::new();
+        for ty in m.tys {
+            opt.push_ty(ty).unwrap();
+        }
+        let ModKind::Test {
+            entry_vlocs: _,
+            block: Block { insts },
+        } = m.kind
+        else {
+            panic!()
+        };
+        for inst in insts.into_iter() {
+            if let Inst::Guard(_) = inst {
+                opt.feed_void(inst).unwrap();
+            } else {
+                opt.feed(inst).unwrap();
+            }
+        }
+        let tyidx = TyIdx::from_usize(0);
+        let tyidx1 = TyIdx::from_usize(1);
+        let val = InstIdx::from_usize(0);
+        let val1 = InstIdx::from_usize(1);
+
+        // FIXME: We need the series of tests below for every HIR element.
+        let rhs = Inst::Abs(Abs {
+            tyidx,
+            val,
+            int_min_poison: true,
+        });
+        assert!(
+            Abs {
+                tyidx,
+                val,
+                int_min_poison: true,
+            }
+            .cse_eq(&opt, &rhs)
+        );
+        assert!(
+            !Abs {
+                tyidx: tyidx1,
+                val,
+                int_min_poison: true,
+            }
+            .cse_eq(&opt, &rhs)
+        );
+        assert!(
+            Abs {
+                tyidx,
+                val: val1,
+                int_min_poison: true,
+            }
+            .cse_eq(&opt, &rhs)
+        );
+        assert!(
+            !Abs {
+                tyidx,
+                val,
+                int_min_poison: false,
+            }
+            .cse_eq(&opt, &rhs)
         );
     }
 }
