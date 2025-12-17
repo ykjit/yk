@@ -239,7 +239,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let exit_vars = exit_safepoint
                 .lives
                 .iter()
-                .map(|x| self.frames[0].get_local(&mut *self.opt, &x.to_inst_id()))
+                .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
                 .collect::<Vec<_>>();
             self.opt.feed_void(hir::Inst::Exit(hir::Exit(exit_vars)))?;
         }
@@ -351,7 +351,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 exit_vars: pc_safepoint
                     .lives
                     .iter()
-                    .map(|x| frame.get_local(&mut *self.opt, &x.to_inst_id()))
+                    .map(|x| frame.get_local(&*self.opt, &x.to_inst_id()))
                     .collect::<Vec<_>>(),
             });
         }
@@ -360,12 +360,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         // variable: by definition, we know that if the guard is taken the value will be
         // `!expect_true`. We could leave this for the optimiser, but it's cheaper to do it here.
         if let Operand::Local(last_iid) = guard_safepoint.lives.last().unwrap()
-            && cond_iidx
-                == self
-                    .frames
-                    .last()
-                    .unwrap()
-                    .get_local(&mut *self.opt, last_iid)
+            && cond_iidx == self.frames.last().unwrap().get_local(&*self.opt, last_iid)
         {
             let tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
             let ciidx = self.const_to_iidx(
@@ -725,7 +720,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     x => todo!("{x:?}"),
                 }
             }
-            Operand::Local(iid) => Ok(self.frames.last().unwrap().get_local(&mut *self.opt, iid)),
+            Operand::Local(iid) => Ok(self.frames.last().unwrap().get_local(&*self.opt, iid)),
             Operand::Global(gidx) => {
                 let gl = self.am.global_decl(*gidx);
                 let (addr, inst) = if gl.is_threadlocal() {
@@ -1877,7 +1872,7 @@ struct Frame {
 
 impl Frame {
     /// Lookup the AOT variable `iid` relative to `opt`.
-    fn get_local(&self, opt: &mut dyn OptT, iid: &InstId) -> hir::InstIdx {
+    fn get_local(&self, opt: &dyn OptT, iid: &InstId) -> hir::InstIdx {
         opt.equiv_iidx(self.locals[iid])
     }
 

@@ -543,7 +543,7 @@ pub(super) trait InstT: std::fmt::Debug {
 
     /// Canonicalise this instruction. This rewrites operands to their most recent equivalent
     /// [InstIdx]s and performs other, basic, canonicalisation on a per-instruction kind basis.
-    fn canonicalise(&mut self, _opt: &mut dyn OptT);
+    fn canonicalise(&mut self, _opt: &dyn OptT);
 
     /// Iterate over this instructions' operands that reference [InstIdx]s and call `iidx_item` on
     /// each.
@@ -638,7 +638,7 @@ impl InstT for Abs {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -697,7 +697,7 @@ impl InstT for Add {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -754,7 +754,7 @@ impl InstT for And {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -800,7 +800,7 @@ pub(super) struct Arg {
 }
 
 impl InstT for Arg {
-    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+    fn canonicalise(&mut self, _opt: &dyn OptT) {}
 
     fn for_each_iidx<F>(&self, _f: F)
     where
@@ -845,7 +845,7 @@ impl InstT for AShr {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -891,7 +891,7 @@ pub(super) struct BlackBox {
 
 #[cfg(test)]
 impl InstT for BlackBox {
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -961,7 +961,7 @@ impl InstT for Call {
         }
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.tgt = opt.equiv_iidx(self.tgt);
         for x in self.args.iter_mut() {
             *x = opt.equiv_iidx(*x);
@@ -1059,7 +1059,7 @@ impl InstT for Const {
         }
     }
 
-    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+    fn canonicalise(&mut self, _opt: &dyn OptT) {}
 
     fn for_each_iidx<F>(&self, _f: F)
     where
@@ -1119,7 +1119,7 @@ impl InstT for CtPop {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val)
     }
 
@@ -1169,7 +1169,7 @@ impl InstT for DynPtrAdd {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.ptr = opt.equiv_iidx(self.ptr);
         self.num_elems = opt.equiv_iidx(self.num_elems);
     }
@@ -1210,7 +1210,7 @@ impl InstT for DynPtrAdd {
 pub(super) struct Exit(pub(super) Vec<InstIdx>);
 
 impl InstT for Exit {
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         for x in self.0.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
@@ -1271,7 +1271,7 @@ impl InstT for FAdd {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1327,7 +1327,7 @@ impl InstT for FCmp {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1427,7 +1427,7 @@ impl InstT for FDiv {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1485,7 +1485,7 @@ impl InstT for Floor {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -1533,7 +1533,7 @@ impl InstT for FMul {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1586,7 +1586,7 @@ impl InstT for FNeg {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -1634,7 +1634,7 @@ impl InstT for FSub {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1694,7 +1694,7 @@ impl InstT for FPExt {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -1745,7 +1745,7 @@ impl InstT for FPToSI {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -1806,7 +1806,7 @@ impl InstT for Guard {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.cond = opt.equiv_iidx(self.cond);
         for x in self.entry_vars.iter_mut() {
             *x = opt.equiv_iidx(*x);
@@ -1885,7 +1885,7 @@ impl InstT for ICmp {
 
     /// For [IPred::Eq] and [IPred::Ne], canonicalise to favour references to constants on the RHS of
     /// the addition.
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if (self.pred == IPred::Eq || self.pred == IPred::Ne)
@@ -1990,7 +1990,7 @@ impl InstT for IntToPtr {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -2035,7 +2035,7 @@ impl InstT for Load {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.ptr = opt.equiv_iidx(self.ptr);
     }
 
@@ -2084,7 +2084,7 @@ impl InstT for LShr {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -2142,7 +2142,7 @@ impl InstT for MemCpy {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.dst = opt.equiv_iidx(self.dst);
         self.src = opt.equiv_iidx(self.src);
         self.len = opt.equiv_iidx(self.len);
@@ -2211,7 +2211,7 @@ impl InstT for MemSet {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.dst = opt.equiv_iidx(self.dst);
         self.val = opt.equiv_iidx(self.val);
         self.len = opt.equiv_iidx(self.len);
@@ -2274,7 +2274,7 @@ impl InstT for Mul {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -2332,7 +2332,7 @@ impl InstT for Or {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -2386,7 +2386,7 @@ impl InstT for PtrAdd {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.ptr = opt.equiv_iidx(self.ptr);
     }
 
@@ -2437,7 +2437,7 @@ impl InstT for PtrToInt {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -2474,7 +2474,7 @@ pub(super) struct Return {
 impl InstT for Return {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+    fn canonicalise(&mut self, _opt: &dyn OptT) {}
 
     fn for_each_iidx<F>(&self, _f: F)
     where
@@ -2519,7 +2519,7 @@ impl InstT for SDiv {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -2578,7 +2578,7 @@ impl InstT for Select {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.cond = opt.equiv_iidx(self.cond);
         self.truev = opt.equiv_iidx(self.truev);
         self.falsev = opt.equiv_iidx(self.falsev);
@@ -2645,7 +2645,7 @@ impl InstT for SExt {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -2695,7 +2695,7 @@ impl InstT for Shl {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -2749,7 +2749,7 @@ impl InstT for SIToFP {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -2798,7 +2798,7 @@ impl InstT for SMax {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -2859,7 +2859,7 @@ impl InstT for SMin {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -2919,7 +2919,7 @@ impl InstT for SRem {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -2973,7 +2973,7 @@ impl InstT for Store {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
         self.ptr = opt.equiv_iidx(self.ptr);
     }
@@ -3030,7 +3030,7 @@ impl InstT for Sub {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -3068,7 +3068,7 @@ pub(super) struct ThreadLocal(pub *const c_void);
 impl InstT for ThreadLocal {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    fn canonicalise(&mut self, _opt: &mut dyn OptT) {}
+    fn canonicalise(&mut self, _opt: &dyn OptT) {}
 
     fn for_each_iidx<F>(&self, _f: F)
     where
@@ -3125,7 +3125,7 @@ impl InstT for Trunc {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -3174,7 +3174,7 @@ impl InstT for UDiv {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -3233,7 +3233,7 @@ impl InstT for UIToFP {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -3282,7 +3282,7 @@ impl InstT for Xor {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -3346,7 +3346,7 @@ impl InstT for ZExt {
         );
     }
 
-    fn canonicalise(&mut self, opt: &mut dyn OptT) {
+    fn canonicalise(&mut self, opt: &dyn OptT) {
         self.val = opt.equiv_iidx(self.val);
     }
 

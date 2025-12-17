@@ -156,14 +156,15 @@ impl OptT for Opt {
         todo!()
     }
 
-    fn equiv_iidx(&mut self, iidx: InstIdx) -> InstIdx {
+    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
         let mut search = iidx;
         loop {
             let equiv = self.insts[search].equiv;
             if equiv == InstIdx::MAX {
-                if search != iidx {
-                    self.insts[iidx].equiv = search;
-                }
+                // FIXME: Reinstate this.
+                // if search != iidx {
+                //     self.insts[iidx].equiv = search;
+                // }
                 return search;
             }
             search = equiv;
