@@ -27,6 +27,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
         Inst::ICmp(x) => opt_icmp(opt, x),
         Inst::IntToPtr(x) => opt_inttoptr(opt, x),
         Inst::LShr(x) => opt_lshr(opt, x),
+        Inst::MemCpy(x) => opt_memcpy(opt, x),
         Inst::Mul(x) => opt_mul(opt, x),
         Inst::Or(x) => opt_or(opt, x),
         Inst::PtrAdd(x) => opt_ptradd(opt, x),
@@ -471,6 +472,36 @@ fn opt_lshr(opt: &mut Opt, mut inst: LShr) -> OptOutcome {
     opt_ashr_lshr(opt, inst.into(), tyidx, lhs, rhs, exact, |lhs_c, rhs_c| {
         lhs_c.checked_lshr(rhs_c.to_zero_ext_u32().unwrap())
     })
+}
+
+fn opt_memcpy(opt: &mut Opt, mut inst: MemCpy) -> OptOutcome {
+    inst.canonicalise(opt);
+    let MemCpy {
+        dst,
+        src,
+        len,
+        volatile: _,
+    } = inst;
+    match (opt.as_constkind(dst), opt.as_constkind(src)) {
+        (Some(ConstKind::Ptr(lhs_c)), Some(ConstKind::Ptr(rhs_c))) if lhs_c == rhs_c => {
+            // memcpy where lhs_ptr == rhs_ptr. Not needed.
+            // This is technically UB, but GCC 15 and Clang 21
+            // both choose to optimise away the memcpy.
+            // Thus, we shall do the same.
+            return OptOutcome::NotNeeded;
+        }
+        _ => (),
+    }
+
+    if let Some(ConstKind::Int(len_c)) = opt.as_constkind(len)
+        && let Some(len_as_int) = len_c.to_zero_ext_u64()
+        && len_as_int == 0
+    {
+        // memcpy of zero bytes. Not needed.
+        return OptOutcome::NotNeeded;
+    }
+
+    OptOutcome::Rewritten(inst.into())
 }
 
 fn opt_mul(opt: &mut Opt, mut inst: Mul) -> OptOutcome {
@@ -2315,6 +2346,55 @@ mod test {
           %0: i8 = arg
           %1: i8 = 0
           blackbox %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_memcpy() {
+        // memcpy where src==dst is eliminated.
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1234
+          %2: i64 = 4
+          memcpy %0, %1, %2, false
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1234
+          %2: i64 = 4
+        ",
+        );
+
+        // memcpy where src!=dst is not eliminated.
+        test_sf(
+            "
+          %0: ptr = 0x4321
+          %1: ptr = 0x1234
+          %2: i64 = 4
+          memcpy %0, %1, %2, false
+        ",
+            "
+          %0: ptr = 0x4321
+          %1: ptr = 0x1234
+          %2: i64 = 4
+          memcpy %0, %1, %2, false
+        ",
+        );
+
+        // memcpy where len == 0 is eliminated.
+        test_sf(
+            "
+          %0: ptr = 0x4321
+          %1: ptr = 0x1234
+          %2: i64 = 0
+          memcpy %0, %1, %2, false
+        ",
+            "
+          %0: ptr = 0x4321
+          %1: ptr = 0x1234
+          %2: i64 = 0
         ",
         );
     }
