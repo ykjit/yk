@@ -348,12 +348,12 @@ impl Block {
                 }
             }
 
-            inst.for_each_iidx(|op_iidx| {
+            for op_iidx in inst.iter_iidxs() {
                 assert!(
                     op_iidx < iidx,
                     "%{iidx:?}: forward reference to %{op_iidx:?}"
                 )
-            });
+            }
             if let Inst::Exit(_) = inst {
                 assert_eq!(
                     iidx,
@@ -568,12 +568,8 @@ pub(super) trait InstT: std::fmt::Debug {
     /// case-by-case basis.
     fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool;
 
-    /// Iterate over this instructions' operands that reference [InstIdx]s and call `iidx_item` on
-    /// each.
-    fn for_each_iidx<F>(&self, iidx_item: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized;
+    /// Produce each of this instruction's operands: note no order is guaranteed.
+    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a>;
 
     /// Apply the function `iidx_map` to each of this instruction's operands, mutating `self` with
     /// the result.
@@ -681,12 +677,8 @@ impl InstT for Abs {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -766,13 +758,8 @@ impl InstT for Add {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -835,13 +822,8 @@ impl InstT for And {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -873,11 +855,8 @@ pub(super) struct Arg {
 impl InstT for Arg {
     fn canonicalise(&mut self, _opt: &dyn OptT) {}
 
-    fn for_each_iidx<F>(&self, _f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([].into_iter())
     }
 
     fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
@@ -943,13 +922,8 @@ impl InstT for AShr {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -992,12 +966,8 @@ impl InstT for BlackBox {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -1069,13 +1039,8 @@ impl InstT for Call {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.tgt);
-        self.args.iter().for_each(|iidx| f(*iidx));
+    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+        Box::new([self.tgt].into_iter().chain(self.args.iter().cloned()))
     }
 
     #[cfg(test)]
@@ -1172,11 +1137,8 @@ impl InstT for Const {
         }
     }
 
-    fn for_each_iidx<F>(&self, _f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([].into_iter())
     }
 
     #[cfg(test)]
@@ -1245,12 +1207,8 @@ impl InstT for CtPop {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -1312,13 +1270,8 @@ impl InstT for DynPtrAdd {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.ptr);
-        f(self.num_elems);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.ptr, self.num_elems].into_iter())
     }
 
     #[cfg(test)]
@@ -1358,12 +1311,8 @@ impl InstT for Exit {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        self.0.iter().for_each(|iidx| f(*iidx));
+    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+        Box::new(self.0.iter().cloned())
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -1430,13 +1379,8 @@ impl InstT for FAdd {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -1498,13 +1442,8 @@ impl InstT for FCmp {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -1610,13 +1549,8 @@ impl InstT for FDiv {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -1678,12 +1612,8 @@ impl InstT for Floor {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -1739,13 +1669,8 @@ impl InstT for FMul {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -1802,12 +1727,8 @@ impl InstT for FNeg {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -1863,13 +1784,8 @@ impl InstT for FSub {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -1933,12 +1849,8 @@ impl InstT for FPExt {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -1995,12 +1907,8 @@ impl InstT for FPToSI {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -2063,13 +1971,12 @@ impl InstT for Guard {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.cond);
-        self.entry_vars.iter().for_each(|iidx| f(*iidx));
+    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+        Box::new(
+            [self.cond]
+                .into_iter()
+                .chain(self.entry_vars.iter().cloned()),
+        )
     }
 
     #[cfg(test)]
@@ -2164,13 +2071,8 @@ impl InstT for ICmp {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -2273,12 +2175,8 @@ impl InstT for IntToPtr {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -2322,12 +2220,8 @@ impl InstT for Load {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.ptr);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.ptr].into_iter())
     }
 
     #[cfg(test)]
@@ -2390,13 +2284,8 @@ impl InstT for LShr {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -2453,14 +2342,8 @@ impl InstT for MemCpy {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.dst);
-        f(self.src);
-        f(self.len);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.dst, self.src, self.len].into_iter())
     }
 
     #[cfg(test)]
@@ -2526,14 +2409,8 @@ impl InstT for MemSet {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.dst);
-        f(self.val);
-        f(self.len);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.dst, self.val, self.len].into_iter())
     }
 
     #[cfg(test)]
@@ -2613,13 +2490,8 @@ impl InstT for Mul {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -2689,13 +2561,8 @@ impl InstT for Or {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -2757,12 +2624,8 @@ impl InstT for PtrAdd {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.ptr);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.ptr].into_iter())
     }
 
     #[cfg(test)]
@@ -2819,12 +2682,8 @@ impl InstT for PtrToInt {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -2858,11 +2717,8 @@ impl InstT for Return {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, _f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([].into_iter())
     }
 
     #[cfg(test)]
@@ -2930,13 +2786,8 @@ impl InstT for SDiv {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -3008,14 +2859,8 @@ impl InstT for Select {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.cond);
-        f(self.truev);
-        f(self.falsev);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.cond, self.truev, self.falsev].into_iter())
     }
 
     #[cfg(test)]
@@ -3084,12 +2929,8 @@ impl InstT for SExt {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -3155,13 +2996,8 @@ impl InstT for Shl {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -3219,12 +3055,8 @@ impl InstT for SIToFP {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -3286,13 +3118,8 @@ impl InstT for SMax {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -3359,13 +3186,8 @@ impl InstT for SMin {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -3426,13 +3248,8 @@ impl InstT for SRem {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -3484,13 +3301,8 @@ impl InstT for Store {
         panic!();
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
-        f(self.ptr);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val, self.ptr].into_iter())
     }
 
     #[cfg(test)]
@@ -3561,13 +3373,8 @@ impl InstT for Sub {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -3606,11 +3413,8 @@ impl InstT for ThreadLocal {
         }
     }
 
-    fn for_each_iidx<F>(&self, _f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([].into_iter())
     }
 
     #[cfg(test)]
@@ -3683,12 +3487,8 @@ impl InstT for Trunc {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -3751,13 +3551,8 @@ impl InstT for UDiv {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -3821,12 +3616,8 @@ impl InstT for UIToFP {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
@@ -3888,13 +3679,8 @@ impl InstT for Xor {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.lhs);
-        f(self.rhs);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
@@ -3957,12 +3743,8 @@ impl InstT for ZExt {
         }
     }
 
-    fn for_each_iidx<F>(&self, f: F)
-    where
-        F: Fn(InstIdx),
-        Self: Sized,
-    {
-        f(self.val);
+    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+        Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
