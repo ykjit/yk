@@ -1062,10 +1062,18 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             }
 
             // Handle user-level functions.
-            let addr = self.j2.dlsym(func.name(), false).unwrap().0.addr();
+            let opt_fname = format!("__yk_opt_{}", func.name());
+            let (fname, addr) = if let Some(x) = self.j2.dlsym(&opt_fname, false) {
+                (opt_fname.as_str(), x.0.addr())
+            } else {
+                (
+                    func.name(),
+                    self.j2.dlsym(func.name(), false).unwrap().0.addr(),
+                )
+            };
             self.addr_name_map
                 .as_mut()
-                .map(|x| x.insert(addr, func.name().to_owned()));
+                .map(|x| x.insert(addr, fname.to_owned()));
             let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
             let tgt_iidx = self.const_to_iidx(tyidx, hir::ConstKind::Ptr(addr))?;
 

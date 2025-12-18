@@ -9,7 +9,7 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //       ...
-//       call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{_}}, %{{_}}) ; @indirect
+//       call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{_}}, %{{_}}) ; @__yk_opt_indirect
 //       ...
 //     --- End jit-pre-opt ---
 //     0: 4
