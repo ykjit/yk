@@ -73,15 +73,9 @@ impl CSE {
             }
         }
 
-        // FIXME: This is an inefficient way of working out what the maximum operand reference is,
-        // but `for_each_iidx` needs to be changed for that to be possible.
-        let max_ref = std::rc::Rc::new(std::cell::RefCell::new(InstIdx::from_usize(0)));
-        inst.for_each_iidx(|x| {
-            if x > *max_ref.borrow() {
-                *max_ref.borrow_mut() = x;
-            }
-        });
-        let max_ref = *max_ref.borrow();
+        // Work out what the maximum iidx this instruction refers to: we know there's no point
+        // going further back than that.
+        let max_ref = inst.iter_iidxs().max().unwrap_or(InstIdx::from(0));
         let mut cur = self.heads[InstDiscriminants::from(inst) as usize];
         while cur != InstIdx::MAX_INDEX && cur >= max_ref {
             let equiv = opt.equiv_iidx(cur);
