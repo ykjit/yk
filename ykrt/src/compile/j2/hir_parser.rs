@@ -48,10 +48,21 @@ struct HirParser<'lexer, 'input: 'lexer, Reg: RegT> {
     externs: HashMap<&'input str, TyIdx>,
     insts: IndexVec<InstIdx, Inst>,
     tys: IndexVec<TyIdx, Ty>,
+    /// ty_map is used to ensure that only distinct [Ty]s lead to new [TyIdx]s.
+    ty_map: HashMap<Ty, TyIdx>,
     phantom: PhantomData<Reg>,
 }
 
 impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
+    fn push_ty(&mut self, ty: Ty) -> TyIdx {
+        if let Some(tyidx) = self.ty_map.get(&ty) {
+            return *tyidx;
+        }
+        let tyidx = self.tys.push(ty.clone());
+        self.ty_map.insert(ty, tyidx);
+        tyidx
+    }
+
     fn build(mut self, astexterns: Vec<AstExtern>, astinsts: Vec<AstInst>) -> Mod<Reg> {
         for AstExtern {
             name,
@@ -69,7 +80,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                 .map(|x| self.p_ty(x))
                 .collect::<SmallVec<_>>();
             let rtn_tyidx = self.p_ty(rtn_ty);
-            let tyidx = self.tys.push(Ty::Func(Box::new(FuncTy {
+            let tyidx = self.push_ty(Ty::Func(Box::new(FuncTy {
                 args_tyidxs,
                 has_varargs,
                 rtn_tyidx,
@@ -928,8 +939,8 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
 
     fn p_ty(&mut self, astty: AstTy) -> TyIdx {
         match astty {
-            AstTy::Double => self.tys.push(Ty::Double),
-            AstTy::Float => self.tys.push(Ty::Float),
+            AstTy::Double => self.push_ty(Ty::Double),
+            AstTy::Float => self.push_ty(Ty::Float),
             AstTy::Int(span) => {
                 let s = self.lexer.span_str(span);
                 assert_eq!(s.chars().nth(0).unwrap(), 'i');
@@ -939,10 +950,10 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                 if bitw > (1 << 22) {
                     todo!();
                 }
-                self.tys.push(Ty::Int(bitw))
+                self.push_ty(Ty::Int(bitw))
             }
-            AstTy::Ptr => self.tys.push(Ty::Ptr(0)),
-            AstTy::Void => self.tys.push(Ty::Void),
+            AstTy::Ptr => self.push_ty(Ty::Ptr(0)),
+            AstTy::Void => self.push_ty(Ty::Void),
         }
     }
 }
@@ -972,6 +983,7 @@ pub(super) fn str_to_mod<Reg: RegT>(s: &str) -> Mod<Reg> {
         externs: HashMap::new(),
         insts: IndexVec::new(),
         tys: IndexVec::new(),
+        ty_map: HashMap::new(),
         phantom: PhantomData,
     };
     hp.build(externs, insts)
