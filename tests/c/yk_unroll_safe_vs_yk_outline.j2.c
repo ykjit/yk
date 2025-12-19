@@ -12,7 +12,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     call %{{_}}(%{{_}}) ; @never_inline_into_trace
+//     call %{{_}}(%{{_}}) ; @__yk_opt_never_inline_into_trace
 //     ...
 //     --- End jit-pre-opt ---
 

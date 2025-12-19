@@ -12,7 +12,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     call %{{_}}() ; @call_me
+//     call %{{_}}() ; @__yk_opt_call_me
 //     ...
 //     --- End jit-pre-opt ---
 //     Can't JIT this!

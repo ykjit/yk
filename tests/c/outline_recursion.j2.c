@@ -18,7 +18,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     call %{{_}}(%{{4}}) ; @foo
+//     call %{{_}}(%{{4}}) ; @__yk_opt_foo
 //     ...
 //     --- End jit-pre-opt ---
 //     0
