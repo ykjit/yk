@@ -1602,8 +1602,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 .into(),
             )?;
         };
-        // self.push_inst_and_link_local(iid, hir::Load::new(ty, ptr, *volatile).into())
-        //     .map(|_| ())
 
         for (num_elems, elem_size) in dyn_elem_counts.iter().zip(dyn_elem_sizes) {
             let num_elems = self.p_operand(num_elems)?;
