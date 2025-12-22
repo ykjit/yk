@@ -1602,18 +1602,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 .into(),
             )?;
         };
-        // self.push_inst_and_link_local(iid, hir::Load::new(ty, ptr, *volatile).into())
-        //     .map(|_| ())
 
         for (num_elems, elem_size) in dyn_elem_counts.iter().zip(dyn_elem_sizes) {
             let num_elems = self.p_operand(num_elems)?;
             // If the element count is not the same width as LLVM's GEP index type, then we have to
             // sign extend it up (or truncate it down) to the right size. We've not yet
             // seen this in the wild.
-            // if num_elems.byte_size(&self.jit_mod) * 8 != usize::from(self.aot_mod.ptr_off_bitsize())
-            // {
-            //     todo!();
-            // }
+            assert_eq!(
+                self.opt.inst_bitw(&*self.opt, num_elems),
+                u32::from(self.am.ptr_off_bitsize())
+            );
             let elem_size = u32::try_from(*elem_size).map_err(|_| {
                 CompilationError::LimitExceeded("PtrAdd elem_size doesn't fit in u32".into())
             })?;
