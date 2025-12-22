@@ -5,7 +5,7 @@ use crate::compile::{
         hir::*,
         opt::{
             OptT,
-            opt::{Opt, OptOutcome},
+            fullopt::{Opt, OptOutcome},
         },
     },
     jitc_yk::arbbitint::ArbBitInt,
@@ -901,7 +901,7 @@ fn opt_zext(opt: &mut Opt, mut inst: ZExt) -> OptOutcome {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::opt::opt::test::opt_and_test;
+    use crate::compile::j2::opt::fullopt::test::opt_and_test;
 
     fn test_sf(mod_s: &str, ptn: &str) {
         opt_and_test(

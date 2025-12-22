@@ -4,9 +4,8 @@ use crate::compile::{CompilationError, j2::hir::*};
 use index_vec::IndexVec;
 
 mod cse;
+pub(super) mod fullopt;
 pub(super) mod noopt;
-#[allow(clippy::module_inception)]
-pub(super) mod opt;
 mod strength_fold;
 
 /// An optimiser. By definition this operates on one [Block] at a time, so it is both [ModLikeT]

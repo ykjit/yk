@@ -22,7 +22,7 @@ use crate::{
             J2,
             compiled_trace::{J2CompiledTrace, J2CompiledTraceKind},
             hir::{self, GuardRestore, GuardRestoreIdx},
-            opt::{OptT, noopt::NoOpt, opt::Opt},
+            opt::{OptT, fullopt::Opt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
         },
         jitc_yk::{AOT_MOD, aot_ir::*, arbbitint::ArbBitInt},
