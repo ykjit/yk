@@ -3798,7 +3798,7 @@ mod tests {
     #[test]
     fn stringify_const_ptr() {
         let m = Module::new_testing();
-        let ptr_val = stringify_const_ptr as usize;
+        let ptr_val = stringify_const_ptr as *const () as usize;
         let cp = Const::Ptr(ptr_val);
         assert_eq!(
             cp.display(&m).to_string(),
