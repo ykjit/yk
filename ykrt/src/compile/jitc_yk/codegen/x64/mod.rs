@@ -766,7 +766,7 @@ impl<'a> Assemble<'a> {
             {
                 dynasm!(self.asm
                     ; push r11
-                    ; mov r11, QWORD __yk_break as i64
+                    ; mov r11, QWORD __yk_break as *const () as i64
                     ; call r11
                     ; pop r11
                 );
@@ -956,7 +956,7 @@ impl<'a> Assemble<'a> {
             dynasm!(self.asm
                 ; mov rdi, rbp
                 ; mov r8, QWORD self.m.ctrid().as_u64().cast_signed()
-                ; mov rax, QWORD __yk_deopt as i64
+                ; mov rax, QWORD __yk_deopt as *const () as  i64
                 ; call rax
             );
         }
@@ -3266,7 +3266,7 @@ impl<'a> Assemble<'a> {
         {
             dynasm!(self.asm
                 ; mov rdi, QWORD self.m.ctrid().as_u64().cast_signed()
-                ; mov rax, QWORD __yk_ret_from_trace as i64
+                ; mov rax, QWORD __yk_ret_from_trace as *const () as i64
                 ; call rax
                 ; mov rsp, rbp
                 ; sub rsp, size

@@ -1359,7 +1359,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             Code::Mov_r64_imm64,
             IcedReg::RAX,
             // This cast is fine on x64, and this module will only be compiled on that platform.
-            super::deopt::__yk_j2_deopt as i64,
+            super::deopt::__yk_j2_deopt as *const () as i64,
         ));
         self.asm.push_inst(IcedInst::with2(
             Code::Mov_r32_imm32,
