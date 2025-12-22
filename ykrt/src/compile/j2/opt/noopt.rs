@@ -4,7 +4,10 @@
 
 use crate::compile::{
     CompilationError,
-    j2::{hir::*, opt::OptT},
+    j2::{
+        hir::*,
+        opt::{EquivIIdxT, OptT},
+    },
 };
 use index_vec::*;
 use std::collections::HashMap;
@@ -51,10 +54,6 @@ impl OptT for NoOpt {
         todo!()
     }
 
-    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
-        iidx
-    }
-
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         assert_ne!(*inst.ty(self), Ty::Void);
         Ok(self.insts.push(inst))
@@ -72,5 +71,11 @@ impl OptT for NoOpt {
         let tyidx = self.tys.push(ty.clone());
         self.ty_map.insert(ty, tyidx);
         Ok(tyidx)
+    }
+}
+
+impl EquivIIdxT for NoOpt {
+    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
+        iidx
     }
 }
