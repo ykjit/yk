@@ -70,7 +70,7 @@ use crate::compile::{
 use index_vec::*;
 use std::collections::HashMap;
 
-pub(in crate::compile::j2) struct Opt {
+pub(in crate::compile::j2) struct FullOpt {
     cse: CSE,
     insts: IndexVec<InstIdx, InstEquiv>,
     tys: IndexVec<TyIdx, Ty>,
@@ -78,7 +78,7 @@ pub(in crate::compile::j2) struct Opt {
     ty_map: HashMap<Ty, TyIdx>,
 }
 
-impl Opt {
+impl FullOpt {
     pub(in crate::compile::j2) fn new() -> Self {
         Self {
             cse: CSE::new(),
@@ -135,7 +135,7 @@ impl Opt {
     }
 }
 
-impl ModLikeT for Opt {
+impl ModLikeT for FullOpt {
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
         panic!("Not available in optimiser");
     }
@@ -145,13 +145,13 @@ impl ModLikeT for Opt {
     }
 }
 
-impl BlockLikeT for Opt {
+impl BlockLikeT for FullOpt {
     fn inst(&self, idx: InstIdx) -> &Inst {
         &self.insts[usize::from(idx)].inst
     }
 }
 
-impl OptT for Opt {
+impl OptT for FullOpt {
     fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>) {
         (
             Block {
@@ -242,10 +242,10 @@ pub(in crate::compile::j2::opt) mod test {
 
     pub(in crate::compile::j2::opt) fn opt_and_test<F>(mod_s: &str, opt_f: F, ptn: &str)
     where
-        F: Fn(&mut Opt, Inst) -> OptOutcome,
+        F: Fn(&mut FullOpt, Inst) -> OptOutcome,
     {
         let m = str_to_mod::<TestReg>(mod_s);
-        let mut opt = Box::new(Opt::new());
+        let mut opt = Box::new(FullOpt::new());
         opt.tys = m.tys;
         let ModKind::Test {
             entry_vlocs,

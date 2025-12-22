@@ -101,7 +101,7 @@ impl CSE {
 mod test {
     use super::*;
     use crate::compile::j2::opt::{
-        opt::{OptOutcome, test::opt_and_test},
+        fullopt::{OptOutcome, test::opt_and_test},
         strength_fold::strength_fold,
     };
     use std::{cell::RefCell, rc::Rc};
