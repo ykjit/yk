@@ -406,9 +406,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     fn push_inst_and_link_local(
         &mut self,
         iid: InstId,
-        inst: hir::Inst,
+        inst: impl Into<hir::Inst>,
     ) -> Result<hir::InstIdx, CompilationError> {
-        let iidx = self.opt.feed(inst)?;
+        let iidx = self.opt.feed(inst.into())?;
         self.frames.last_mut().unwrap().set_local(iid, iidx);
         Ok(iidx)
     }
@@ -569,7 +569,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         for op in safepoint.lives.iter() {
             let tyidx = self.p_ty(op.type_(self.am))?;
-            self.push_inst_and_link_local(op.to_inst_id(), hir::Arg { tyidx }.into())?;
+            self.push_inst_and_link_local(op.to_inst_id(), hir::Arg { tyidx })?;
         }
 
         Ok(safepoint)
@@ -852,7 +852,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         };
         let lhs = self.p_operand(lhs)?;
         let rhs = self.p_operand(rhs)?;
-        let inst = match binop {
+        let inst: hir::Inst = match binop {
             BinOp::Add => hir::Add {
                 tyidx: self.p_ty(inst.def_type(self.am).unwrap())?,
                 lhs,
@@ -1117,13 +1117,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             tgt: tgt_iidx,
             func_tyidx: ftyidx,
             args: jargs,
-        }
-        .into();
+        };
         let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
             panic!()
         };
         if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
-            self.opt.feed_void(inst)?;
+            self.opt.feed_void(inst.into())?;
         } else {
             self.push_inst_and_link_local(iid, inst)?;
         }
@@ -1250,7 +1249,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     val: src,
                     int_min_poison,
                 };
-                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
             "ctpop" => {
                 let [src]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
@@ -1259,7 +1258,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     tyidx: fty.rtn_tyidx,
                     val: src,
                 };
-                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
             "floor" => {
                 let [src]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
@@ -1268,7 +1267,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     tyidx: fty.rtn_tyidx,
                     val: src,
                 };
-                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
             "lifetime" => Ok(()),
             "memcpy" => {
@@ -1321,7 +1320,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     lhs,
                     rhs,
                 };
-                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
             "smin" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
@@ -1331,7 +1330,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     lhs,
                     rhs,
                 };
-                self.push_inst_and_link_local(iid, hinst.into()).map(|_| ())
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
             n => todo!("{name} ('{n}')"),
         }
@@ -1349,7 +1348,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         let val = self.p_operand(val)?;
         let tyidx = self.p_ty(self.am.type_(*dest_tyidx))?;
-        let hinst = match cast_kind {
+        let hinst: hir::Inst = match cast_kind {
             CastKind::SExt => hir::SExt { tyidx, val }.into(),
             CastKind::ZeroExtend => hir::ZExt { tyidx, val }.into(),
             CastKind::Trunc => hir::Trunc {
@@ -1440,7 +1439,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             FloatPredicate::UnorderedNotEqual => hir::FPred::Une,
             FloatPredicate::True => hir::FPred::True,
         };
-        self.push_inst_and_link_local(iid, hir::FCmp { pred, lhs, rhs }.into())
+        self.push_inst_and_link_local(iid, hir::FCmp { pred, lhs, rhs })
             .map(|_| ())
     }
 
@@ -1448,7 +1447,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let Inst::FNeg { val } = inst else { panic!() };
         let tyidx = self.p_ty(val.type_(self.am))?;
         let val = self.p_operand(val)?;
-        self.push_inst_and_link_local(iid, hir::FNeg { tyidx, val }.into())
+        self.push_inst_and_link_local(iid, hir::FNeg { tyidx, val })
             .map(|_| ())
     }
 
@@ -1483,8 +1482,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 lhs,
                 rhs,
                 samesign: false,
-            }
-            .into(),
+            },
         )
         .map(|_| ())
     }
@@ -1506,8 +1504,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 tyidx,
                 ptr,
                 is_volatile: *volatile,
-            }
-            .into(),
+            },
         )
         .map(|_| ())
     }
@@ -1679,8 +1676,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 cond,
                 truev,
                 falsev,
-            }
-            .into(),
+            },
         )
         .map(|_| ())
     }
