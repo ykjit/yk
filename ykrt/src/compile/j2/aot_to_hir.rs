@@ -22,7 +22,7 @@ use crate::{
             J2,
             compiled_trace::{J2CompiledTrace, J2CompiledTraceKind},
             hir::{self, GuardRestore, GuardRestoreIdx},
-            opt::{OptT, fullopt::Opt, noopt::NoOpt},
+            opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
         },
         jitc_yk::{AOT_MOD, aot_ir::*, arbbitint::ArbBitInt},
@@ -100,7 +100,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let opt = if mt.opt_level() == 0 {
             Box::new(NoOpt::new()) as Box<dyn OptT>
         } else {
-            Box::new(Opt::new())
+            Box::new(FullOpt::new())
         };
 
         Self {

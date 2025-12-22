@@ -5,13 +5,13 @@ use crate::compile::{
         hir::*,
         opt::{
             OptT,
-            fullopt::{Opt, OptOutcome},
+            fullopt::{FullOpt, OptOutcome},
         },
     },
     jitc_yk::arbbitint::ArbBitInt,
 };
 
-pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
+pub(super) fn strength_fold(opt: &mut FullOpt, inst: Inst) -> OptOutcome {
     match inst {
         Inst::Abs(x) => opt_abs(opt, x),
         Inst::AShr(x) => opt_ashr(opt, x),
@@ -44,7 +44,7 @@ pub(super) fn strength_fold(opt: &mut Opt, inst: Inst) -> OptOutcome {
     }
 }
 
-fn opt_abs(opt: &mut Opt, mut inst: Abs) -> OptOutcome {
+fn opt_abs(opt: &mut FullOpt, mut inst: Abs) -> OptOutcome {
     inst.canonicalise(opt);
     let Abs {
         tyidx,
@@ -61,7 +61,7 @@ fn opt_abs(opt: &mut Opt, mut inst: Abs) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_add(opt: &mut Opt, mut inst: Add) -> OptOutcome {
+fn opt_add(opt: &mut FullOpt, mut inst: Add) -> OptOutcome {
     inst.canonicalise(opt);
     let Add {
         tyidx,
@@ -92,7 +92,7 @@ fn opt_add(opt: &mut Opt, mut inst: Add) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_and(opt: &mut Opt, mut inst: And) -> OptOutcome {
+fn opt_and(opt: &mut FullOpt, mut inst: And) -> OptOutcome {
     inst.canonicalise(opt);
     let And { tyidx, lhs, rhs } = inst;
     if lhs == rhs {
@@ -126,7 +126,7 @@ fn opt_and(opt: &mut Opt, mut inst: And) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_ashr(opt: &mut Opt, mut inst: AShr) -> OptOutcome {
+fn opt_ashr(opt: &mut FullOpt, mut inst: AShr) -> OptOutcome {
     inst.canonicalise(opt);
     let AShr {
         tyidx,
@@ -142,7 +142,7 @@ fn opt_ashr(opt: &mut Opt, mut inst: AShr) -> OptOutcome {
 /// Optimise the common parts of `ashr` and `lshr`, outsourcing the difference between the two to
 /// `f`.
 fn opt_ashr_lshr<F>(
-    opt: &mut Opt,
+    opt: &mut FullOpt,
     inst: Inst,
     tyidx: TyIdx,
     lhs: InstIdx,
@@ -182,7 +182,7 @@ where
     OptOutcome::Rewritten(inst)
 }
 
-fn opt_ctpop(opt: &mut Opt, mut inst: CtPop) -> OptOutcome {
+fn opt_ctpop(opt: &mut FullOpt, mut inst: CtPop) -> OptOutcome {
     inst.canonicalise(opt);
     let CtPop { tyidx, val } = inst;
     if let Some(ConstKind::Int(c)) = opt.as_constkind(val) {
@@ -198,7 +198,7 @@ fn opt_ctpop(opt: &mut Opt, mut inst: CtPop) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_dynptradd(opt: &mut Opt, mut inst: DynPtrAdd) -> OptOutcome {
+fn opt_dynptradd(opt: &mut FullOpt, mut inst: DynPtrAdd) -> OptOutcome {
     inst.canonicalise(opt);
     let DynPtrAdd {
         ptr,
@@ -236,7 +236,7 @@ fn opt_dynptradd(opt: &mut Opt, mut inst: DynPtrAdd) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_fadd(opt: &mut Opt, mut inst: FAdd) -> OptOutcome {
+fn opt_fadd(opt: &mut FullOpt, mut inst: FAdd) -> OptOutcome {
     inst.canonicalise(opt);
     let FAdd { tyidx, lhs, rhs } = inst;
 
@@ -262,7 +262,7 @@ fn opt_fadd(opt: &mut Opt, mut inst: FAdd) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_fdiv(opt: &mut Opt, mut inst: FDiv) -> OptOutcome {
+fn opt_fdiv(opt: &mut FullOpt, mut inst: FDiv) -> OptOutcome {
     inst.canonicalise(opt);
     let FDiv { tyidx, lhs, rhs } = inst;
 
@@ -287,7 +287,7 @@ fn opt_fdiv(opt: &mut Opt, mut inst: FDiv) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_fmul(opt: &mut Opt, mut inst: FMul) -> OptOutcome {
+fn opt_fmul(opt: &mut FullOpt, mut inst: FMul) -> OptOutcome {
     inst.canonicalise(opt);
     let FMul { tyidx, lhs, rhs } = inst;
 
@@ -313,7 +313,7 @@ fn opt_fmul(opt: &mut Opt, mut inst: FMul) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_fsub(opt: &mut Opt, mut inst: FSub) -> OptOutcome {
+fn opt_fsub(opt: &mut FullOpt, mut inst: FSub) -> OptOutcome {
     inst.canonicalise(opt);
     let FSub { tyidx, lhs, rhs } = inst;
 
@@ -339,7 +339,7 @@ fn opt_fsub(opt: &mut Opt, mut inst: FSub) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_guard(opt: &mut Opt, mut inst @ Guard { expect, cond, .. }: Guard) -> OptOutcome {
+fn opt_guard(opt: &mut FullOpt, mut inst @ Guard { expect, cond, .. }: Guard) -> OptOutcome {
     // Since guards tend to have lots of operands, we avoid `canonicalising` unless we really need
     // to. This needs to be done carefully, because after we've called `set_equiv` below,
     // recanonicalising the guard would change the `entry_vars` in a semantically incorrect way.
@@ -380,7 +380,7 @@ fn opt_guard(opt: &mut Opt, mut inst @ Guard { expect, cond, .. }: Guard) -> Opt
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_icmp(opt: &mut Opt, mut inst: ICmp) -> OptOutcome {
+fn opt_icmp(opt: &mut FullOpt, mut inst: ICmp) -> OptOutcome {
     inst.canonicalise(opt);
     let ICmp {
         pred,
@@ -443,7 +443,7 @@ fn opt_icmp(opt: &mut Opt, mut inst: ICmp) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_inttoptr(opt: &mut Opt, mut inst: IntToPtr) -> OptOutcome {
+fn opt_inttoptr(opt: &mut FullOpt, mut inst: IntToPtr) -> OptOutcome {
     inst.canonicalise(opt);
     let IntToPtr { val, .. } = inst;
     if let Some(ConstKind::Int(c)) = opt.as_constkind(val) {
@@ -461,7 +461,7 @@ fn opt_inttoptr(opt: &mut Opt, mut inst: IntToPtr) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_lshr(opt: &mut Opt, mut inst: LShr) -> OptOutcome {
+fn opt_lshr(opt: &mut FullOpt, mut inst: LShr) -> OptOutcome {
     inst.canonicalise(opt);
     let LShr {
         tyidx,
@@ -474,7 +474,7 @@ fn opt_lshr(opt: &mut Opt, mut inst: LShr) -> OptOutcome {
     })
 }
 
-fn opt_memcpy(opt: &mut Opt, mut inst: MemCpy) -> OptOutcome {
+fn opt_memcpy(opt: &mut FullOpt, mut inst: MemCpy) -> OptOutcome {
     inst.canonicalise(opt);
     let MemCpy {
         dst,
@@ -504,7 +504,7 @@ fn opt_memcpy(opt: &mut Opt, mut inst: MemCpy) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_mul(opt: &mut Opt, mut inst: Mul) -> OptOutcome {
+fn opt_mul(opt: &mut FullOpt, mut inst: Mul) -> OptOutcome {
     inst.canonicalise(opt);
     let Mul {
         tyidx,
@@ -563,7 +563,7 @@ fn opt_mul(opt: &mut Opt, mut inst: Mul) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
+fn opt_ptradd(opt: &mut FullOpt, mut inst: PtrAdd) -> OptOutcome {
     // LLVM semantics require pointer arithmetic to wrap as though they were "pointer index typed"
     // (a pointer-sized integer, for addrspace 0, the only address space we support right now).
     let mut off: isize = 0;
@@ -604,7 +604,7 @@ fn opt_ptradd(opt: &mut Opt, mut inst: PtrAdd) -> OptOutcome {
     }
 }
 
-fn opt_or(opt: &mut Opt, mut inst: Or) -> OptOutcome {
+fn opt_or(opt: &mut FullOpt, mut inst: Or) -> OptOutcome {
     inst.canonicalise(opt);
     let Or {
         tyidx,
@@ -642,7 +642,7 @@ fn opt_or(opt: &mut Opt, mut inst: Or) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_ptrtoint(opt: &mut Opt, mut inst: PtrToInt) -> OptOutcome {
+fn opt_ptrtoint(opt: &mut FullOpt, mut inst: PtrToInt) -> OptOutcome {
     inst.canonicalise(opt);
     let PtrToInt { tyidx, val } = inst;
     if let Some(ConstKind::Ptr(addr)) = opt.as_constkind(val) {
@@ -661,7 +661,7 @@ fn opt_ptrtoint(opt: &mut Opt, mut inst: PtrToInt) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_select(opt: &mut Opt, mut inst: Select) -> OptOutcome {
+fn opt_select(opt: &mut FullOpt, mut inst: Select) -> OptOutcome {
     inst.canonicalise(opt);
     let Select {
         cond,
@@ -685,7 +685,7 @@ fn opt_select(opt: &mut Opt, mut inst: Select) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_sext(opt: &mut Opt, mut inst: SExt) -> OptOutcome {
+fn opt_sext(opt: &mut FullOpt, mut inst: SExt) -> OptOutcome {
     inst.canonicalise(opt);
     let SExt { tyidx, val } = inst;
     match opt.as_constkind(val) {
@@ -703,7 +703,7 @@ fn opt_sext(opt: &mut Opt, mut inst: SExt) -> OptOutcome {
     }
 }
 
-fn opt_shl(opt: &mut Opt, mut inst: Shl) -> OptOutcome {
+fn opt_shl(opt: &mut FullOpt, mut inst: Shl) -> OptOutcome {
     inst.canonicalise(opt);
     let Shl {
         tyidx,
@@ -742,7 +742,7 @@ fn opt_shl(opt: &mut Opt, mut inst: Shl) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_sub(opt: &mut Opt, mut inst: Sub) -> OptOutcome {
+fn opt_sub(opt: &mut FullOpt, mut inst: Sub) -> OptOutcome {
     inst.canonicalise(opt);
     let Sub {
         tyidx,
@@ -772,7 +772,7 @@ fn opt_sub(opt: &mut Opt, mut inst: Sub) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_trunc(opt: &mut Opt, mut inst: Trunc) -> OptOutcome {
+fn opt_trunc(opt: &mut FullOpt, mut inst: Trunc) -> OptOutcome {
     inst.canonicalise(opt);
     let Trunc {
         tyidx,
@@ -793,7 +793,7 @@ fn opt_trunc(opt: &mut Opt, mut inst: Trunc) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_udiv(opt: &mut Opt, mut inst: UDiv) -> OptOutcome {
+fn opt_udiv(opt: &mut FullOpt, mut inst: UDiv) -> OptOutcome {
     inst.canonicalise(opt);
     let UDiv {
         tyidx,
@@ -849,7 +849,7 @@ fn opt_udiv(opt: &mut Opt, mut inst: UDiv) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_xor(opt: &mut Opt, mut inst: Xor) -> OptOutcome {
+fn opt_xor(opt: &mut FullOpt, mut inst: Xor) -> OptOutcome {
     inst.canonicalise(opt);
     let Xor { tyidx, lhs, rhs } = inst;
     let bitw = opt.ty(tyidx).bitw();
@@ -880,7 +880,7 @@ fn opt_xor(opt: &mut Opt, mut inst: Xor) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_zext(opt: &mut Opt, mut inst: ZExt) -> OptOutcome {
+fn opt_zext(opt: &mut FullOpt, mut inst: ZExt) -> OptOutcome {
     inst.canonicalise(opt);
     let ZExt { tyidx, val } = inst;
     match opt.as_constkind(val) {

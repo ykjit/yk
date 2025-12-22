@@ -3781,7 +3781,7 @@ mod test {
     use super::*;
     use crate::compile::j2::{
         hir_parser::str_to_mod,
-        opt::opt::Opt,
+        opt::fullopt::FullOpt,
         regalloc::{TestRegIter, test::TestReg},
     };
     use strum::{Display, EnumCount};
@@ -4829,7 +4829,7 @@ mod test {
 ",
         );
 
-        let mut opt = Opt::new();
+        let mut opt = FullOpt::new();
         for ty in m.tys {
             opt.push_ty(ty).unwrap();
         }
