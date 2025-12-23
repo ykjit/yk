@@ -1,4 +1,9 @@
-//! The high-level interface to an optimiser.
+//! Optimisation.
+//!
+//! This module contains both the high-level outward-facing optimiser trait [OptT] and two
+//! optimisers: [noopt] is the "don't optimise anything" "optimiser" mostly used by `YKD_OPT=0`;
+//! and [fullopt] performs full optimisations. [fullopt] contains an inward-facing API that is
+//! then used by optimisation passes.
 
 use crate::compile::{CompilationError, j2::hir::*};
 use index_vec::IndexVec;
@@ -8,9 +13,9 @@ pub(super) mod fullopt;
 pub(super) mod noopt;
 mod strength_fold;
 
-/// An optimiser. By definition this operates on one [Block] at a time, so it is both [ModLikeT]
-/// and [BlockLikeT].
-pub(super) trait OptT: ModLikeT + BlockLikeT {
+/// An outward-facing optimiser, used by [super::aot_to_hir]. By definition this operates on one
+/// [Block] at a time, so it is both [ModLikeT] and [BlockLikeT].
+pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
     /// The block is now complete and the optimiser should turn it into a [Block] and a set of
     /// types (suitable for putting in a [Mod]).
     fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>);
@@ -18,6 +23,26 @@ pub(super) trait OptT: ModLikeT + BlockLikeT {
     #[allow(dead_code)]
     fn peel(self) -> (Block, Block);
 
+    /// Feed a non-void instruction into the optimiser and return an [InstIdx]. The returned
+    /// [InstIdx] may refer to a previously inserted instruction, as an optimiser might prove that
+    /// `inst` is unneeded. That previously inserted instruction may not even be of the same kind
+    /// as `inst`!
+    fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError>;
+
+    /// Feed a possibly removable instruction into the optimiser, returning `Some([InstIdx])` if it
+    /// was not removed. If `Some` is returned, the [InstIdx] may refer to a previously inserted
+    /// instruction, as an optimiser might prove that `inst` is unneeded. That previously inserted
+    /// instruction may not even be of the same kind as `inst`!
+    fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError>;
+
+    /// Push a type [ty]. This type may be cached, and thus the [TyIdx] returned may not
+    /// monotonically increase.
+    fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError>;
+}
+
+/// The trait for objects (which may be blocks or optimisers or ...) which can return the current
+/// known equivalent instruction for a given [InstIdx].
+pub(super) trait EquivIIdxT {
     /// Return the instruction currently equivalent to `iidx`. By definition this will be `iidx` or
     /// a smaller value.
     ///
@@ -42,20 +67,4 @@ pub(super) trait OptT: ModLikeT + BlockLikeT {
     ///
     /// If `iidx` is greater than the number of instructions the optimiser currently holds.
     fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx;
-
-    /// Feed a non-void instruction into the optimiser and return an [InstIdx]. The returned
-    /// [InstIdx] may refer to a previously inserted instruction, as an optimiser might prove that
-    /// `inst` is unneeded. That previously inserted instruction may not even be of the same kind
-    /// as `inst`!
-    fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError>;
-
-    /// Feed a possibly removable instruction into the optimiser, returning `Some([InstIdx])` if it
-    /// was not removed. If `Some` is returned, the [InstIdx] may refer to a previously inserted
-    /// instruction, as an optimiser might prove that `inst` is unneeded. That previously inserted
-    /// instruction may not even be of the same kind as `inst`!
-    fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError>;
-
-    /// Push a type [ty]. This type may be cached, and thus the [TyIdx] returned may not
-    /// monotonically increase.
-    fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError>;
 }

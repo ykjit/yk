@@ -133,7 +133,7 @@ use crate::{
     compile::{
         j2::{
             compiled_trace::J2CompiledTrace,
-            opt::OptT,
+            opt::EquivIIdxT,
             regalloc::{RegT, VarLocs},
         },
         jitc_yk::{
@@ -558,7 +558,7 @@ pub(super) trait InstT: std::fmt::Debug {
 
     /// Canonicalise this instruction. This rewrites operands to their most recent equivalent
     /// [InstIdx]s and performs other, basic, canonicalisation on a per-instruction kind basis.
-    fn canonicalise(&mut self, _opt: &dyn OptT);
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T);
 
     /// For the purposes of common subexpression elimination is `other` equivalent to `self`?
     /// `other` must be canonicalised for this comparison to return true in all cases where
@@ -566,7 +566,7 @@ pub(super) trait InstT: std::fmt::Debug {
     ///
     /// This should use [OptT::equiv_iidx] for [InstIdx]s. Other attributes should be treated on a
     /// case-by-case basis.
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool;
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool;
 
     /// Produce each of this instruction's operands: note no order is guaranteed.
     fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a>;
@@ -657,11 +657,11 @@ impl InstT for Abs {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Abs(Abs {
             tyidx,
             val,
@@ -728,7 +728,7 @@ impl InstT for Add {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -738,7 +738,7 @@ impl InstT for Add {
         }
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Add(Add {
             tyidx,
             lhs,
@@ -800,7 +800,7 @@ impl InstT for And {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -810,7 +810,7 @@ impl InstT for And {
         }
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::And(And { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -853,13 +853,13 @@ pub(super) struct Arg {
 }
 
 impl InstT for Arg {
-    fn canonicalise(&mut self, _opt: &dyn OptT) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
 
     fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([].into_iter())
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -899,12 +899,12 @@ impl InstT for AShr {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::AShr(AShr {
             tyidx,
             lhs,
@@ -958,11 +958,11 @@ pub(super) struct BlackBox {
 
 #[cfg(test)]
 impl InstT for BlackBox {
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -1028,14 +1028,14 @@ impl InstT for Call {
         }
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.tgt = opt.equiv_iidx(self.tgt);
         for x in self.args.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -1125,9 +1125,9 @@ impl InstT for Const {
         }
     }
 
-    fn canonicalise(&mut self, _opt: &dyn OptT) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
 
-    fn cse_eq(&self, _opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Const(Const { kind, .. }) = other
             && &self.kind == kind
         {
@@ -1192,11 +1192,11 @@ impl InstT for CtPop {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val)
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::CtPop(CtPop { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -1249,12 +1249,12 @@ impl InstT for DynPtrAdd {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.ptr = opt.equiv_iidx(self.ptr);
         self.num_elems = opt.equiv_iidx(self.num_elems);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::DynPtrAdd(DynPtrAdd {
             ptr,
             num_elems,
@@ -1301,13 +1301,13 @@ impl InstT for DynPtrAdd {
 pub(super) struct Exit(pub(super) Vec<InstIdx>);
 
 impl InstT for Exit {
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         for x in self.0.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -1362,12 +1362,12 @@ impl InstT for FAdd {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::FAdd(FAdd { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -1425,12 +1425,12 @@ impl InstT for FCmp {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::FCmp(FCmp { pred, lhs, rhs }) = other
             && self.pred == *pred
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -1532,12 +1532,12 @@ impl InstT for FDiv {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::FDiv(FDiv { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -1597,11 +1597,11 @@ impl InstT for Floor {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Floor(Floor { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -1652,12 +1652,12 @@ impl InstT for FMul {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::FMul(FMul { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -1712,11 +1712,11 @@ impl InstT for FNeg {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::FNeg(FNeg { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -1767,12 +1767,12 @@ impl InstT for FSub {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::FSub(FSub { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -1834,11 +1834,11 @@ impl InstT for FPExt {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::FPExt(FPExt { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -1892,11 +1892,11 @@ impl InstT for FPToSI {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::FPToSI(FPToSI { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -1960,14 +1960,14 @@ impl InstT for Guard {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.cond = opt.equiv_iidx(self.cond);
         for x in self.entry_vars.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -2042,7 +2042,7 @@ impl InstT for ICmp {
 
     /// For [IPred::Eq] and [IPred::Ne], canonicalise to favour references to constants on the RHS of
     /// the addition.
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if (self.pred == IPred::Eq || self.pred == IPred::Ne)
@@ -2053,7 +2053,7 @@ impl InstT for ICmp {
         }
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::ICmp(ICmp {
             pred,
             lhs,
@@ -2160,11 +2160,11 @@ impl InstT for IntToPtr {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::IntToPtr(IntToPtr { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -2212,11 +2212,11 @@ impl InstT for Load {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.ptr = opt.equiv_iidx(self.ptr);
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -2261,12 +2261,12 @@ impl InstT for LShr {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::LShr(LShr {
             tyidx,
             lhs,
@@ -2332,13 +2332,13 @@ impl InstT for MemCpy {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.dst = opt.equiv_iidx(self.dst);
         self.src = opt.equiv_iidx(self.src);
         self.len = opt.equiv_iidx(self.len);
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -2399,13 +2399,13 @@ impl InstT for MemSet {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.dst = opt.equiv_iidx(self.dst);
         self.val = opt.equiv_iidx(self.val);
         self.len = opt.equiv_iidx(self.len);
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -2460,7 +2460,7 @@ impl InstT for Mul {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -2470,7 +2470,7 @@ impl InstT for Mul {
         }
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Mul(Mul {
             tyidx,
             lhs,
@@ -2533,7 +2533,7 @@ impl InstT for Or {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -2543,7 +2543,7 @@ impl InstT for Or {
         }
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Or(Or {
             tyidx,
             lhs,
@@ -2600,11 +2600,11 @@ impl InstT for PtrAdd {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.ptr = opt.equiv_iidx(self.ptr);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::PtrAdd(PtrAdd {
             ptr,
             off,
@@ -2667,11 +2667,11 @@ impl InstT for PtrToInt {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::PtrToInt(PtrToInt { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -2711,9 +2711,9 @@ pub(super) struct Return {
 impl InstT for Return {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    fn canonicalise(&mut self, _opt: &dyn OptT) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -2763,12 +2763,12 @@ impl InstT for SDiv {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::SDiv(SDiv {
             tyidx,
             lhs,
@@ -2835,13 +2835,13 @@ impl InstT for Select {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.cond = opt.equiv_iidx(self.cond);
         self.truev = opt.equiv_iidx(self.truev);
         self.falsev = opt.equiv_iidx(self.falsev);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Select(Select {
             tyidx,
             cond,
@@ -2914,11 +2914,11 @@ impl InstT for SExt {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::SExt(SExt { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -2971,12 +2971,12 @@ impl InstT for Shl {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Shl(Shl {
             tyidx,
             lhs,
@@ -3040,11 +3040,11 @@ impl InstT for SIToFP {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::SIToFP(SIToFP { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -3096,7 +3096,7 @@ impl InstT for SMax {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -3106,7 +3106,7 @@ impl InstT for SMax {
         }
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::SMax(SMax { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -3164,7 +3164,7 @@ impl InstT for SMin {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -3174,7 +3174,7 @@ impl InstT for SMin {
         }
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::SMin(SMin { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -3231,12 +3231,12 @@ impl InstT for SRem {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::SRem(SRem { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -3292,12 +3292,12 @@ impl InstT for Store {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
         self.ptr = opt.equiv_iidx(self.ptr);
     }
 
-    fn cse_eq(&self, _opt: &dyn OptT, _other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
@@ -3348,12 +3348,12 @@ impl InstT for Sub {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Sub(Sub {
             tyidx,
             lhs,
@@ -3401,9 +3401,9 @@ pub(super) struct ThreadLocal(pub *const c_void);
 impl InstT for ThreadLocal {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    fn canonicalise(&mut self, _opt: &dyn OptT) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
 
-    fn cse_eq(&self, _opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::ThreadLocal(ThreadLocal(x)) = other
             && self.0 == *x
         {
@@ -3465,11 +3465,11 @@ impl InstT for Trunc {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Trunc(Trunc {
             tyidx,
             val,
@@ -3528,12 +3528,12 @@ impl InstT for UDiv {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::UDiv(UDiv {
             tyidx,
             lhs,
@@ -3600,11 +3600,11 @@ impl InstT for UIToFP {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::UIToFP(UIToFP { tyidx, val, nneg }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -3657,7 +3657,7 @@ impl InstT for Xor {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -3667,7 +3667,7 @@ impl InstT for Xor {
         }
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Xor(Xor { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
@@ -3728,11 +3728,11 @@ impl InstT for ZExt {
         );
     }
 
-    fn canonicalise(&mut self, opt: &dyn OptT) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
-    fn cse_eq(&self, opt: &dyn OptT, other: &Inst) -> bool {
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::ZExt(ZExt { tyidx, val }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.val) == *val
@@ -3781,7 +3781,7 @@ mod test {
     use super::*;
     use crate::compile::j2::{
         hir_parser::str_to_mod,
-        opt::fullopt::FullOpt,
+        opt::{OptT, fullopt::FullOpt},
         regalloc::{TestRegIter, test::TestReg},
     };
     use strum::{Display, EnumCount};

@@ -18,7 +18,10 @@
 
 use crate::compile::j2::{
     hir::{Inst, InstDiscriminants, InstIdx, InstT},
-    opt::OptT,
+    opt::{
+        BlockLikeT, EquivIIdxT,
+        fullopt::{OptOutcome, PassOpt, PassT},
+    },
 };
 use strum::EnumCount;
 
@@ -49,8 +52,10 @@ impl CSE {
             predecessors: Vec::new(),
         }
     }
+}
 
-    pub(super) fn is_equiv(&self, opt: &dyn OptT, inst: &Inst) -> Option<InstIdx> {
+impl PassT for CSE {
+    fn feed(&mut self, opt: &mut PassOpt, inst: Inst) -> OptOutcome {
         // FIXME: This is a hack for "does this instruction have side effects".
         if let Inst::Arg(_)
         | Inst::Call(_)
@@ -63,33 +68,31 @@ impl CSE {
         | Inst::Return(_)
         | Inst::Store(_) = inst
         {
-            return None;
+            return OptOutcome::Rewritten(inst);
         }
 
         #[cfg(test)]
         {
             if let Inst::BlackBox(_) = inst {
-                return None;
+                return OptOutcome::Rewritten(inst);
             }
         }
 
         // Work out what the maximum iidx this instruction refers to: we know there's no point
         // going further back than that.
         let max_ref = inst.iter_iidxs().max().unwrap_or(InstIdx::from(0));
-        let mut cur = self.heads[InstDiscriminants::from(inst) as usize];
+        let mut cur = self.heads[InstDiscriminants::from(&inst) as usize];
         while cur != InstIdx::MAX_INDEX && cur >= max_ref {
             let equiv = opt.equiv_iidx(cur);
-            if equiv >= max_ref && opt.inst(equiv).cse_eq(opt, inst) {
-                return Some(equiv);
+            if equiv >= max_ref && opt.inst(equiv).cse_eq(opt, &inst) {
+                return OptOutcome::Equiv(equiv);
             }
             cur = self.predecessors[usize::from(cur)];
         }
-        None
+        OptOutcome::Rewritten(inst)
     }
 
-    /// As a [Module] is being built-up, this method must be called with each new instruction
-    /// generated.
-    pub(super) fn push(&mut self, inst: &Inst) {
+    fn inst_committed(&mut self, inst: &Inst) {
         let dim_off = InstDiscriminants::from(inst) as usize;
         let prev = self.heads[dim_off];
         self.predecessors.push(prev);
@@ -102,21 +105,22 @@ mod test {
     use super::*;
     use crate::compile::j2::opt::{
         fullopt::{OptOutcome, test::opt_and_test},
-        strength_fold::strength_fold,
+        strength_fold::StrengthFold,
     };
     use std::{cell::RefCell, rc::Rc};
 
     fn test_cse(mod_s: &str, ptn: &str) {
         let cse = Rc::new(RefCell::new(CSE::new()));
+        let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
         opt_and_test(
             mod_s,
             |opt, mut inst| {
                 if let Inst::Guard(_) = inst {
-                    match strength_fold(opt, inst) {
+                    match strength_fold.borrow_mut().feed(opt, inst) {
                         OptOutcome::NotNeeded => OptOutcome::NotNeeded,
                         OptOutcome::Rewritten(inst) => {
                             let mut cse = cse.borrow_mut();
-                            cse.push(&inst);
+                            cse.inst_committed(&inst);
                             OptOutcome::Rewritten(inst)
                         }
                         OptOutcome::Equiv(iidx) => OptOutcome::Equiv(iidx),
@@ -124,11 +128,13 @@ mod test {
                 } else {
                     inst.canonicalise(opt);
                     let mut cse = cse.borrow_mut();
-                    if let Some(iidx) = cse.is_equiv(opt, &inst) {
-                        OptOutcome::Equiv(iidx)
-                    } else {
-                        cse.push(&inst);
-                        OptOutcome::Rewritten(inst)
+                    match cse.feed(opt, inst) {
+                        OptOutcome::NotNeeded => OptOutcome::NotNeeded,
+                        OptOutcome::Rewritten(inst) => {
+                            cse.inst_committed(&inst);
+                            OptOutcome::Rewritten(inst)
+                        }
+                        OptOutcome::Equiv(iidx) => OptOutcome::Equiv(iidx),
                     }
                 }
             },

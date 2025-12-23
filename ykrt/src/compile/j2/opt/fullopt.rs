@@ -44,6 +44,7 @@
 //! blackbox %5
 //! ```
 //!
+//!
 //! ## Equivalence
 //!
 //! The notion of instruction "equivalence" is both intuitive and easy to over-generalise.
@@ -55,83 +56,104 @@
 //! equivalence: they are by definition baked into the optimised trace.
 //!
 //!
-//! ## How passes should use the optimiser
+//! ## Structure of the optimiser
 //!
-//! Passes will be passed a possibly non-canonicalised [Inst]; they must return a canonicalised
-//! [Inst].
+//! The optimiser consists of an "outward facing to [aot_to_hir]" part ([FullOpt], implementing
+//! [OptT]) and in "inward facing to passes" part ([PassOpt]). What links these two things is
+//! [OptInternal]: the outer and inner parts both have access to this, passing ownership between
+//! themselves as appropriate.
+//!
+//!
+//! ## Preinstructions
+//!
+//! The optimiser API is deliberately simple: an instruction goes into the optimisation chain and
+//! passes operate on it. At the end it is either: committed to the trace; determined to be
+//! equivalent to another instruction; or shown not to be needed at all.
+//!
+//! However, sometimes when transforming an instruction one needs to ensure that other instructions
+//! (typically constants) are present in the trace. This does not fit with the "optimise one
+//! instruction" model. The [PassOpt] API thus has the concept of "preinstructions": that is,
+//! instructions which will be committed to the trace before the current instruction.
+//! Preinstructions should be used carefully:
+//!
+//! 1. They are only committed at the _end_ of the current pass. In other words, if a pass P calls
+//!    [PassOpt::push_pre_inst] then those instructions are not accessible via [PassOpt::inst] for
+//!    the duration of P. As soon as P has completed, the preinstructions will be committed, and
+//!    subsequent passes will have access to them. Note: it is guaranteed that the [InstIdx]s
+//!    returned by [PassOPt::push_pre_inst] will be valid after the preinstructions are
+//!    subsequently committed.
+//!
+//! 2. They are committed unconditionally at the end of a pass, even if a subsequent pass proves
+//!    that the instruction they were originally associated with is no longer needed.
+//!
+//! In practise, the main use of preinstructions is for constants: modulo (1), there are no real
+//! issues for constants. Similarly, for other side-effect-free instructions, one may put some
+//! pressure on dead-code elimination, but not on the eventual compiled trace. However, for
+//! side-effectful instructions of any kind, one should be extremely cautious about committing them
+//! as preinstructions.
 
 use crate::compile::{
     CompilationError,
     j2::{
         hir::*,
-        opt::{OptT, cse::CSE, strength_fold::strength_fold},
+        opt::{EquivIIdxT, OptT, cse::CSE, strength_fold::StrengthFold},
     },
 };
 use index_vec::*;
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
+////////////////////////////////////////////////////////////////////////////////
+// The external-facing part of the optimiser.
+
 pub(in crate::compile::j2) struct FullOpt {
-    cse: CSE,
-    insts: IndexVec<InstIdx, InstEquiv>,
-    tys: IndexVec<TyIdx, Ty>,
-    /// ty_map is used to ensure that only distinct [Ty]s lead to new [TyIdx]s.
-    ty_map: HashMap<Ty, TyIdx>,
+    /// The ordered set of optimisation passes that all instructions will be fed through.
+    passes: [Box<dyn PassT>; 2],
+    inner: OptInternal,
 }
 
 impl FullOpt {
     pub(in crate::compile::j2) fn new() -> Self {
         Self {
-            cse: CSE::new(),
-            insts: IndexVec::new(),
-            tys: IndexVec::new(),
-            ty_map: HashMap::new(),
+            passes: [Box::new(StrengthFold::new()), Box::new(CSE::new())],
+            inner: OptInternal {
+                insts: IndexVec::new(),
+                tys: IndexVec::new(),
+                ty_map: HashMap::new(),
+            },
         }
     }
 
     /// Used by [Self::feed] and [Self::feed_void].
-    fn feed_internal(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
-        match strength_fold(self, inst) {
-            OptOutcome::NotNeeded => Ok(None),
-            OptOutcome::Rewritten(inst) => {
-                if let Some(iidx) = self.cse.is_equiv(self, &inst) {
-                    Ok(Some(iidx))
-                } else {
-                    Ok(Some(self.push_inst(inst)))
-                }
+    fn feed_internal(&mut self, mut inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
+        for i in 0..self.passes.len() {
+            let mut opt = PassOpt {
+                inner: &mut self.inner,
+                pre_insts: SmallVec::new(),
+            };
+
+            match self.passes[i].feed(&mut opt, inst) {
+                OptOutcome::NotNeeded => return Ok(None),
+                OptOutcome::Rewritten(new_inst) => inst = new_inst,
+                OptOutcome::Equiv(iidx) => return Ok(Some(iidx)),
             }
-            OptOutcome::Equiv(iidx) => Ok(Some(iidx)),
+
+            for inst in opt.pre_insts {
+                self.commit_inst(inst);
+            }
         }
+        Ok(Some(self.commit_inst(inst)))
     }
 
-    /// Push `inst` into this optimisation module.
-    fn push_inst(&mut self, inst: Inst) -> InstIdx {
-        self.cse.push(&inst);
-        self.insts.push(InstEquiv {
+    /// Commit `inst` to this trace.
+    fn commit_inst(&mut self, inst: Inst) -> InstIdx {
+        for pass in &mut self.passes {
+            pass.inst_committed(&inst);
+        }
+        self.inner.insts.push(InstEquiv {
             inst,
             equiv: InstIdx::MAX,
         })
-    }
-
-    /// If `iidx` references a constant, return an owned version of the accompany [ConstKind], or
-    /// `None` otherwise.
-    pub(super) fn as_constkind(&self, iidx: InstIdx) -> Option<ConstKind> {
-        match self.inst(iidx) {
-            Inst::Const(Const { kind, .. }) => Some(kind.clone()),
-            _ => None,
-        }
-    }
-
-    /// Henceforth consider `iidx` to be equivalent to `equiv_to` (and/or vice versa). Note: it is
-    /// the caller's job to ensure that `iidx` and `equiv_to` have already been transformed for
-    /// equivalence.
-    pub(super) fn set_equiv(&mut self, iidx: InstIdx, equiv_to: InstIdx) {
-        assert_eq!(iidx, self.equiv_iidx(iidx));
-        assert_eq!(equiv_to, self.equiv_iidx(equiv_to));
-        match (self.inst(iidx), self.inst(equiv_to)) {
-            (Inst::Const(_), Inst::Const(_)) => (),
-            (_, Inst::Const(_)) => self.insts.get_mut(iidx).unwrap().equiv = equiv_to,
-            (_, _) => self.insts.get_mut(equiv_to).unwrap().equiv = iidx,
-        }
     }
 }
 
@@ -141,13 +163,13 @@ impl ModLikeT for FullOpt {
     }
 
     fn ty(&self, tyidx: TyIdx) -> &Ty {
-        &self.tys[tyidx]
+        self.inner.ty(tyidx)
     }
 }
 
 impl BlockLikeT for FullOpt {
     fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[usize::from(idx)].inst
+        &self.inner.insts[usize::from(idx)].inst
     }
 }
 
@@ -156,12 +178,13 @@ impl OptT for FullOpt {
         (
             Block {
                 insts: self
+                    .inner
                     .insts
                     .into_iter()
                     .map(|x| x.inst)
                     .collect::<IndexVec<_, _>>(),
             },
-            self.tys,
+            self.inner.tys,
         )
     }
 
@@ -169,6 +192,37 @@ impl OptT for FullOpt {
         todo!()
     }
 
+    fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
+        assert_ne!(*inst.ty(self), Ty::Void);
+        self.feed_internal(inst).map(|x| x.unwrap())
+    }
+
+    fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
+        assert_eq!(*inst.ty(self), Ty::Void);
+        self.feed_internal(inst)
+    }
+
+    fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
+        self.inner.push_ty(ty)
+    }
+}
+
+impl EquivIIdxT for FullOpt {
+    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
+        self.inner.equiv_iidx(iidx)
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// The shared part of the optimiser.
+
+struct OptInternal {
+    insts: IndexVec<InstIdx, InstEquiv>,
+    tys: IndexVec<TyIdx, Ty>,
+    ty_map: HashMap<Ty, TyIdx>,
+}
+
+impl OptInternal {
     fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
         let mut search = iidx;
         loop {
@@ -184,14 +238,8 @@ impl OptT for FullOpt {
         }
     }
 
-    fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
-        assert_ne!(*inst.ty(self), Ty::Void);
-        self.feed_internal(inst).map(|x| x.unwrap())
-    }
-
-    fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
-        assert_eq!(*inst.ty(self), Ty::Void);
-        self.feed_internal(inst)
+    fn inst(&self, iidx: InstIdx) -> &Inst {
+        &self.insts[iidx].inst
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
@@ -201,6 +249,10 @@ impl OptT for FullOpt {
         let tyidx = self.tys.push(ty.clone());
         self.ty_map.insert(ty, tyidx);
         Ok(tyidx)
+    }
+
+    fn ty(&self, tyidx: TyIdx) -> &Ty {
+        &self.tys[tyidx]
     }
 }
 
@@ -225,6 +277,88 @@ struct InstEquiv {
     equiv: InstIdx,
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// The internal-facing part of the optimiser.
+
+/// The interface that passes must implement.
+pub(super) trait PassT {
+    /// Feed [inst] instruction into the optimiser.
+    fn feed(&mut self, opt: &mut PassOpt, inst: Inst) -> OptOutcome;
+
+    /// After an instruction has been committed to the trace -- i.e. there is
+    /// no possibility that an optimisation pass will remove it -- this
+    /// function will be called on all passes.
+    fn inst_committed(&mut self, inst: &Inst);
+}
+
+/// The object passed to structs so that they can interact with the optimiser.
+pub(super) struct PassOpt<'a> {
+    inner: &'a mut OptInternal,
+    pre_insts: SmallVec<[Inst; 1]>,
+}
+
+impl PassOpt<'_> {
+    /// If `iidx` references a constant, return an owned version of the accompany [ConstKind], or
+    /// `None` otherwise.
+    pub(super) fn as_constkind(&self, iidx: InstIdx) -> Option<ConstKind> {
+        match self.inst(iidx) {
+            Inst::Const(Const { kind, .. }) => Some(kind.clone()),
+            _ => None,
+        }
+    }
+
+    /// Push `ty`: this is safe for passes to call at any point.
+    pub(super) fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
+        self.inner.push_ty(ty)
+    }
+
+    /// Add the "pre-instruction" `preinst`: when the current pass has completed, `inst` will be
+    /// committed to the trace, and immediately available to subsequent passes. The [InstIdx] that
+    /// is returned will be `preinst`'s [InstIdx] _after_ it is committed. In other words, during
+    /// the current pass, [InstIdx] is invalid, and attempting any operations with it will lead to
+    /// undefined behaviour.
+    pub(super) fn push_pre_inst(&mut self, preinst: Inst) -> InstIdx {
+        let iidx = InstIdx::from_usize(self.inner.insts.len() + self.pre_insts.len());
+        self.pre_insts.push(preinst);
+        iidx
+    }
+
+    /// Henceforth consider `iidx` to be equivalent to `equiv_to` (and/or vice versa). Note: it is
+    /// the caller's job to ensure that `iidx` and `equiv_to` have already been transformed for
+    /// equivalence.
+    pub(super) fn set_equiv(&mut self, iidx: InstIdx, equiv_to: InstIdx) {
+        assert_eq!(iidx, self.equiv_iidx(iidx));
+        assert_eq!(equiv_to, self.equiv_iidx(equiv_to));
+        match (self.inst(iidx), self.inst(equiv_to)) {
+            (Inst::Const(_), Inst::Const(_)) => (),
+            (_, Inst::Const(_)) => self.inner.insts.get_mut(iidx).unwrap().equiv = equiv_to,
+            (_, _) => self.inner.insts.get_mut(equiv_to).unwrap().equiv = iidx,
+        }
+    }
+}
+
+impl BlockLikeT for PassOpt<'_> {
+    fn inst(&self, iidx: InstIdx) -> &Inst {
+        self.inner.inst(iidx)
+    }
+}
+
+impl ModLikeT for PassOpt<'_> {
+    fn ty(&self, tyidx: TyIdx) -> &Ty {
+        self.inner.ty(tyidx)
+    }
+
+    fn addr_to_name(&self, _addr: usize) -> Option<&str> {
+        todo!()
+    }
+}
+
+impl EquivIIdxT for PassOpt<'_> {
+    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
+        self.inner.equiv_iidx(iidx)
+    }
+}
+
 #[cfg(test)]
 pub(in crate::compile::j2::opt) mod test {
     use super::*;
@@ -242,11 +376,11 @@ pub(in crate::compile::j2::opt) mod test {
 
     pub(in crate::compile::j2::opt) fn opt_and_test<F>(mod_s: &str, opt_f: F, ptn: &str)
     where
-        F: Fn(&mut FullOpt, Inst) -> OptOutcome,
+        for<'a> F: Fn(&'a mut PassOpt, Inst) -> OptOutcome,
     {
         let m = str_to_mod::<TestReg>(mod_s);
-        let mut opt = Box::new(FullOpt::new());
-        opt.tys = m.tys;
+        let mut fopt = Box::new(FullOpt::new());
+        fopt.inner.tys = m.tys;
         let ModKind::Test {
             entry_vlocs,
             block: Block { insts },
@@ -271,17 +405,26 @@ pub(in crate::compile::j2::opt) mod test {
         let mut opt_map = IndexVec::with_capacity(insts.len());
         for mut inst in insts.into_iter() {
             inst.rewrite_iidxs(|x| opt_map[x]);
+            let mut opt = PassOpt {
+                inner: &mut fopt.inner,
+                pre_insts: SmallVec::new(),
+            };
             match opt_f(&mut opt, inst) {
-                OptOutcome::NotNeeded => (),
+                OptOutcome::NotNeeded => {
+                    opt_map.push(InstIdx::MAX);
+                }
                 OptOutcome::Rewritten(inst) => {
-                    opt_map.push(opt.push_inst(inst));
+                    for pinst in opt.pre_insts {
+                        fopt.commit_inst(pinst);
+                    }
+                    opt_map.push(fopt.commit_inst(inst));
                 }
                 OptOutcome::Equiv(iidx) => {
                     opt_map.push(iidx);
                 }
             }
         }
-        let (block, tys) = opt.build();
+        let (block, tys) = fopt.build();
         let m = Mod {
             trid: m.trid,
             kind: ModKind::Test { entry_vlocs, block },
@@ -314,7 +457,7 @@ pub(in crate::compile::j2::opt) mod test {
                 mod_s,
                 |opt, mut inst| {
                     inst.canonicalise(opt);
-                    strength_fold(opt, inst)
+                    StrengthFold::new().feed(opt, inst)
                 },
                 ptn,
             );
