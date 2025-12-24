@@ -147,8 +147,10 @@ impl FullOpt {
 
     /// Commit `inst` to this trace.
     fn commit_inst(&mut self, inst: Inst) -> InstIdx {
+        let opt = CommitInstOpt { inner: &self.inner };
+        let iidx = self.inner.insts.len_idx();
         for pass in &mut self.passes {
-            pass.inst_committed(&inst);
+            pass.inst_committed(&opt, iidx, &inst);
         }
         self.inner.insts.push(InstEquiv {
             inst,
@@ -288,10 +290,10 @@ pub(super) trait PassT {
     /// After an instruction has been committed to the trace -- i.e. there is
     /// no possibility that an optimisation pass will remove it -- this
     /// function will be called on all passes.
-    fn inst_committed(&mut self, inst: &Inst);
+    fn inst_committed(&mut self, ci: &CommitInstOpt, iidx: InstIdx, inst: &Inst);
 }
 
-/// The object passed to structs so that they can interact with the optimiser.
+/// The object passed to [PassT::feed] so that they can interact with the optimiser.
 pub(super) struct PassOpt<'a> {
     inner: &'a mut OptInternal,
     pre_insts: SmallVec<[Inst; 1]>,
@@ -359,6 +361,33 @@ impl EquivIIdxT for PassOpt<'_> {
     }
 }
 
+/// The object passed to [PassT::inst_committed] so that they can interact with the optimiser.
+pub(super) struct CommitInstOpt<'a> {
+    inner: &'a OptInternal,
+}
+
+impl BlockLikeT for CommitInstOpt<'_> {
+    fn inst(&self, iidx: InstIdx) -> &Inst {
+        self.inner.inst(iidx)
+    }
+}
+
+impl ModLikeT for CommitInstOpt<'_> {
+    fn ty(&self, tyidx: TyIdx) -> &Ty {
+        self.inner.ty(tyidx)
+    }
+
+    fn addr_to_name(&self, _addr: usize) -> Option<&str> {
+        todo!()
+    }
+}
+
+impl EquivIIdxT for CommitInstOpt<'_> {
+    fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
+        self.inner.equiv_iidx(iidx)
+    }
+}
+
 #[cfg(test)]
 pub(in crate::compile::j2::opt) mod test {
     use super::*;
@@ -374,9 +403,14 @@ pub(in crate::compile::j2::opt) mod test {
         static ref TEXT_RE: Regex = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
     }
 
-    pub(in crate::compile::j2::opt) fn opt_and_test<F>(mod_s: &str, opt_f: F, ptn: &str)
-    where
+    pub(in crate::compile::j2::opt) fn opt_and_test<F, G>(
+        mod_s: &str,
+        feed_f: F,
+        committed_f: G,
+        ptn: &str,
+    ) where
         for<'a> F: Fn(&'a mut PassOpt, Inst) -> OptOutcome,
+        for<'a> G: Fn(&'a CommitInstOpt, InstIdx, &Inst),
     {
         let m = str_to_mod::<TestReg>(mod_s);
         let mut fopt = Box::new(FullOpt::new());
@@ -409,20 +443,38 @@ pub(in crate::compile::j2::opt) mod test {
                 inner: &mut fopt.inner,
                 pre_insts: SmallVec::new(),
             };
-            match opt_f(&mut opt, inst) {
+            match feed_f(&mut opt, inst) {
                 OptOutcome::NotNeeded => {
                     opt_map.push(InstIdx::MAX);
+                    continue;
                 }
-                OptOutcome::Rewritten(inst) => {
-                    for pinst in opt.pre_insts {
-                        fopt.commit_inst(pinst);
-                    }
-                    opt_map.push(fopt.commit_inst(inst));
+                OptOutcome::Rewritten(new_inst) => {
+                    inst = new_inst;
                 }
                 OptOutcome::Equiv(iidx) => {
                     opt_map.push(iidx);
+                    continue;
                 }
             }
+
+            for inst in opt.pre_insts {
+                let iidx = fopt.inner.insts.len_idx();
+                let opt = CommitInstOpt { inner: &fopt.inner };
+                committed_f(&opt, iidx, &inst);
+                fopt.inner.insts.push(InstEquiv {
+                    inst,
+                    equiv: InstIdx::MAX,
+                });
+            }
+
+            let iidx = fopt.inner.insts.len_idx();
+            opt_map.push(iidx);
+            let opt = CommitInstOpt { inner: &fopt.inner };
+            committed_f(&opt, iidx, &inst);
+            fopt.inner.insts.push(InstEquiv {
+                inst,
+                equiv: InstIdx::MAX,
+            });
         }
         let (block, tys) = fopt.build();
         let m = Mod {
@@ -459,6 +511,7 @@ pub(in crate::compile::j2::opt) mod test {
                     inst.canonicalise(opt);
                     StrengthFold::new().feed(opt, inst)
                 },
+                |_, _, _| (),
                 ptn,
             );
         }
