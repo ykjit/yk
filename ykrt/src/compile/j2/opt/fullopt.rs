@@ -96,7 +96,7 @@ use crate::compile::{
     CompilationError,
     j2::{
         hir::*,
-        opt::{EquivIIdxT, OptT, cse::CSE, strength_fold::StrengthFold},
+        opt::{EquivIIdxT, OptT, cse::CSE, load_store::LoadStore, strength_fold::StrengthFold},
     },
 };
 use index_vec::*;
@@ -108,14 +108,18 @@ use std::collections::HashMap;
 
 pub(in crate::compile::j2) struct FullOpt {
     /// The ordered set of optimisation passes that all instructions will be fed through.
-    passes: [Box<dyn PassT>; 2],
+    passes: [Box<dyn PassT>; 3],
     inner: OptInternal,
 }
 
 impl FullOpt {
     pub(in crate::compile::j2) fn new() -> Self {
         Self {
-            passes: [Box::new(StrengthFold::new()), Box::new(CSE::new())],
+            passes: [
+                Box::new(StrengthFold::new()),
+                Box::new(LoadStore::new()),
+                Box::new(CSE::new()),
+            ],
             inner: OptInternal {
                 insts: IndexVec::new(),
                 tys: IndexVec::new(),
