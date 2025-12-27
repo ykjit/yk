@@ -191,7 +191,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
-        let mut ractions = self.rstate_diff_to_action(&in_rstate);
+        let mut ractions = RegActions::new();
+        self.rstate_diff_to_action(&in_rstate, &mut ractions);
         self.toposort_distinct_copies(&mut ractions).unwrap();
         self.asm_ractions(be, &ractions).unwrap();
 
@@ -855,7 +856,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // in the right registers, but we might need to shuffle lots of other things around, and
         // unspill others, to get into the right state for *n:out*. First we calculate a simple
         // "diff", which will happily give us register copies that overwrite each other...
-        let mut ractions = self.rstate_diff_to_action(&n_out);
+        let mut ractions = RegActions::new();
+        self.rstate_diff_to_action(&n_out, &mut ractions);
         // ...so we then topologically sort the distinct copies, which will break any cycles.
         self.toposort_distinct_copies(&mut ractions)?;
         // We now have an [RegActions] which we can directly generate code from.
@@ -1052,12 +1054,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         if !unspills.is_empty() {
-            let ractions = RegActions {
-                unspills,
-                self_copies: Vec::new(),
-                distinct_copies: Vec::new(),
-                spills: Vec::new(),
-            };
+            let mut ractions = RegActions::new();
+            ractions.unspills = unspills;
             self.asm_ractions(be, &ractions)?;
         }
         Ok(())
@@ -1242,12 +1240,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// Given a new [RStates], produce a [RegActions] which is a diff telling us how to get from
     /// the current [self.rstates] to the new `src_rstates` (bearing in mind "src" and "dst" are
     /// relative to reverse code generation).
-    fn rstate_diff_to_action(&mut self, src_rstates: &RStates<AB::Reg>) -> RegActions<AB::Reg> {
-        let mut spills = Vec::new();
-        let mut self_copies = Vec::new();
-        let mut distinct_copies = Vec::new();
-        let mut unspills = Vec::new();
-
+    fn rstate_diff_to_action(
+        &mut self,
+        src_rstates: &RStates<AB::Reg>,
+        ractions: &mut RegActions<AB::Reg>,
+    ) {
         // It's preferable not to copy values between registers, so first check if we can keep
         // value(s) in the same registers they're already in.
         for (dst_reg, dst_rstate) in self.rstates.iter().filter(|(_, x)| !x.iidxs.is_empty()) {
@@ -1255,7 +1252,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
                 // If the same value(s) can end up in the same registers, we insert a "self copy"
                 // so that future parts of the algorithm know we want to use this, but we
-                self_copies.push(RegCopy {
+                ractions.self_copies.push(RegCopy {
                     bitw: max_bitw,
                     src_reg: dst_reg,
                     src_fill: src_rstates.fill(dst_reg),
@@ -1279,7 +1276,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     // This is handled above.
                     continue;
                 } else if !src_rstate.iidxs.is_empty() && src_rstate.iidxs == dst_rstate.iidxs {
-                    distinct_copies.push(RegCopy {
+                    ractions.distinct_copies.push(RegCopy {
                         bitw: max_bitw,
                         src_reg,
                         src_fill: src_rstate.fill,
@@ -1291,21 +1288,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
 
             // If the value(s) isn't an existing register, we will need to ensure it is spilt...
-            spills.push(RegSpill {
+            ractions.spills.push(RegSpill {
                 iidxs: dst_rstate.iidxs.clone(),
             });
-            unspills.push(RegUnspill {
+            ractions.unspills.push(RegUnspill {
                 iidxs: dst_rstate.iidxs.clone(),
                 reg: dst_reg,
                 fill: dst_rstate.fill,
             });
-        }
-
-        RegActions {
-            spills,
-            self_copies,
-            distinct_copies,
-            unspills,
         }
     }
 
@@ -1728,6 +1718,17 @@ struct RegActions<Reg: RegT> {
     distinct_copies: Vec<RegCopy<Reg>>,
     /// An unordered set of instructions .
     spills: Vec<RegSpill>,
+}
+
+impl<Reg: RegT> RegActions<Reg> {
+    fn new() -> Self {
+        Self {
+            unspills: Vec::new(),
+            self_copies: Vec::new(),
+            distinct_copies: Vec::new(),
+            spills: Vec::new(),
+        }
+    }
 }
 
 /// Unspill `InstIdx` into `Reg` with fill `RegExt`. Note: by definition, spilled values are stored
