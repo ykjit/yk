@@ -1245,10 +1245,10 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         src_rstates: &RStates<AB::Reg>,
         ractions: &mut RegActions<AB::Reg>,
     ) {
-        // It's preferable not to copy values between registers, so first check if we can keep
-        // value(s) in the same registers they're already in.
-        for (dst_reg, dst_rstate) in self.rstates.iter().filter(|(_, x)| !x.iidxs.is_empty()) {
+        'a: for (dst_reg, dst_rstate) in self.rstates.iter().filter(|(_, x)| !x.iidxs.is_empty()) {
             if src_rstates.iidxs(dst_reg) == &dst_rstate.iidxs {
+                // It's preferable not to copy values between registers, so first check if we can keep
+                // value(s) in the same registers they're already in.
                 let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
                 // If the same value(s) can end up in the same registers, we insert a "self copy"
                 // so that future parts of the algorithm know we want to use this, but we
@@ -1259,43 +1259,37 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     dst_reg,
                     dst_fill: dst_rstate.fill,
                 });
-            }
-        }
+            } else {
+                // Try and find cases where we can copy values between different registers, unspilling
+                // where that isn't possible.
 
-        // Try and find cases where we can copy values between different registers, unspilling
-        // where that isn't possible.
-        'a: for (dst_reg, dst_rstate) in self.rstates.iter().filter(|(_, x)| !x.iidxs.is_empty()) {
-            let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
-            // Check if we generated a copy in the first loop.
-            if src_rstates.iidxs(dst_reg) == &dst_rstate.iidxs {
-                continue;
-            }
-
-            for (src_reg, src_rstate) in src_rstates.iter() {
-                if src_reg == dst_reg {
-                    // This is handled above.
-                    continue;
-                } else if !src_rstate.iidxs.is_empty() && src_rstate.iidxs == dst_rstate.iidxs {
-                    ractions.distinct_copies.push(RegCopy {
-                        bitw: max_bitw,
-                        src_reg,
-                        src_fill: src_rstate.fill,
-                        dst_reg,
-                        dst_fill: dst_rstate.fill,
-                    });
-                    continue 'a;
+                for (src_reg, src_rstate) in src_rstates.iter() {
+                    if src_reg != dst_reg
+                        && !src_rstate.iidxs.is_empty()
+                        && src_rstate.iidxs == dst_rstate.iidxs
+                    {
+                        let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
+                        ractions.distinct_copies.push(RegCopy {
+                            bitw: max_bitw,
+                            src_reg,
+                            src_fill: src_rstate.fill,
+                            dst_reg,
+                            dst_fill: dst_rstate.fill,
+                        });
+                        continue 'a;
+                    }
                 }
-            }
 
-            // If the value(s) isn't an existing register, we will need to ensure it is spilt...
-            ractions.spills.push(RegSpill {
-                iidxs: dst_rstate.iidxs.clone(),
-            });
-            ractions.unspills.push(RegUnspill {
-                iidxs: dst_rstate.iidxs.clone(),
-                reg: dst_reg,
-                fill: dst_rstate.fill,
-            });
+                // If the value(s) isn't an existing register, we will need to ensure it is spilt...
+                ractions.spills.push(RegSpill {
+                    iidxs: dst_rstate.iidxs.clone(),
+                });
+                ractions.unspills.push(RegUnspill {
+                    iidxs: dst_rstate.iidxs.clone(),
+                    reg: dst_reg,
+                    fill: dst_rstate.fill,
+                });
+            }
         }
     }
 
