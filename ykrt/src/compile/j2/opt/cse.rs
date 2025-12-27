@@ -20,7 +20,7 @@ use crate::compile::j2::{
     hir::{Inst, InstDiscriminants, InstIdx, InstT},
     opt::{
         BlockLikeT, EquivIIdxT,
-        fullopt::{OptOutcome, PassOpt, PassT},
+        fullopt::{CommitInstOpt, OptOutcome, PassOpt, PassT},
     },
 };
 use strum::EnumCount;
@@ -92,7 +92,7 @@ impl PassT for CSE {
         OptOutcome::Rewritten(inst)
     }
 
-    fn inst_committed(&mut self, inst: &Inst) {
+    fn inst_committed(&mut self, _opt: &CommitInstOpt, _iidx: InstIdx, inst: &Inst) {
         let dim_off = InstDiscriminants::from(inst) as usize;
         let prev = self.heads[dim_off];
         self.predecessors.push(prev);
@@ -103,10 +103,7 @@ impl PassT for CSE {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::opt::{
-        fullopt::{OptOutcome, test::opt_and_test},
-        strength_fold::StrengthFold,
-    };
+    use crate::compile::j2::opt::{fullopt::test::opt_and_test, strength_fold::StrengthFold};
     use std::{cell::RefCell, rc::Rc};
 
     fn test_cse(mod_s: &str, ptn: &str) {
@@ -116,28 +113,13 @@ mod test {
             mod_s,
             |opt, mut inst| {
                 if let Inst::Guard(_) = inst {
-                    match strength_fold.borrow_mut().feed(opt, inst) {
-                        OptOutcome::NotNeeded => OptOutcome::NotNeeded,
-                        OptOutcome::Rewritten(inst) => {
-                            let mut cse = cse.borrow_mut();
-                            cse.inst_committed(&inst);
-                            OptOutcome::Rewritten(inst)
-                        }
-                        OptOutcome::Equiv(iidx) => OptOutcome::Equiv(iidx),
-                    }
+                    strength_fold.borrow_mut().feed(opt, inst)
                 } else {
                     inst.canonicalise(opt);
-                    let mut cse = cse.borrow_mut();
-                    match cse.feed(opt, inst) {
-                        OptOutcome::NotNeeded => OptOutcome::NotNeeded,
-                        OptOutcome::Rewritten(inst) => {
-                            cse.inst_committed(&inst);
-                            OptOutcome::Rewritten(inst)
-                        }
-                        OptOutcome::Equiv(iidx) => OptOutcome::Equiv(iidx),
-                    }
+                    cse.borrow_mut().feed(opt, inst)
                 }
             },
+            |opt, iidx, inst| cse.borrow_mut().inst_committed(opt, iidx, inst),
             ptn,
         );
     }

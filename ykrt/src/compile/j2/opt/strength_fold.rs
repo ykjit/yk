@@ -5,7 +5,7 @@ use crate::compile::{
         hir::*,
         opt::{
             EquivIIdxT,
-            fullopt::{OptOutcome, PassOpt, PassT},
+            fullopt::{CommitInstOpt, OptOutcome, PassOpt, PassT},
         },
     },
     jitc_yk::arbbitint::ArbBitInt,
@@ -53,7 +53,7 @@ impl PassT for StrengthFold {
         }
     }
 
-    fn inst_committed(&mut self, _inst: &Inst) {}
+    fn inst_committed(&mut self, _opt: &CommitInstOpt, _iidx: InstIdx, _inst: &Inst) {}
 }
 
 fn opt_abs(opt: &mut PassOpt, mut inst: Abs) -> OptOutcome {
@@ -918,6 +918,7 @@ mod test {
                 inst.canonicalise(opt);
                 StrengthFold::new().feed(opt, inst)
             },
+            |_, _, _| (),
             ptn,
         );
     }
