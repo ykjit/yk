@@ -493,13 +493,21 @@ fn opt_memcpy(opt: &mut PassOpt, mut inst: MemCpy) -> OptOutcome {
         len,
         volatile: _,
     } = inst;
-    match (opt.as_constkind(dst), opt.as_constkind(src)) {
-        (Some(ConstKind::Ptr(lhs_c)), Some(ConstKind::Ptr(rhs_c))) if lhs_c == rhs_c => {
-            // memcpy where lhs_ptr == rhs_ptr. Not needed. This is technically UB, but GCC 15 and
-            // Clang 21 both choose to optimise away the memcpy. Thus, we shall do the same.
-            return OptOutcome::NotNeeded;
-        }
-        _ => (),
+
+    // LLVM's `memcpy` allows `dst` and `src` to point to the same memory, at which point `memcpy`
+    // is a no-op.
+    let equiv = if dst == src {
+        true
+    } else if let (Some(ConstKind::Ptr(lhs_c)), Some(ConstKind::Ptr(rhs_c))) =
+        (opt.as_constkind(dst), opt.as_constkind(src))
+        && lhs_c == rhs_c
+    {
+        true
+    } else {
+        false
+    };
+    if equiv {
+        return OptOutcome::NotNeeded;
     }
 
     if let Some(ConstKind::Int(len_c)) = opt.as_constkind(len)
@@ -2369,6 +2377,18 @@ mod test {
           %0: ptr = 0x1234
           %1: ptr = 0x1234
           %2: i64 = 4
+        ",
+        );
+
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: i64 = 4
+          memcpy %0, %0, %1, false
+        ",
+            "
+          %0: ptr = arg
+          %1: i64 = 4
         ",
         );
 
