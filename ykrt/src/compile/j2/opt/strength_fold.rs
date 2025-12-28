@@ -126,9 +126,8 @@ fn opt_and(opt: &mut PassOpt, mut inst: And) -> OptOutcome {
                 return OptOutcome::Equiv(rhs);
             }
             if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
-                // Reduce `x & y` to `x` if `y` is a constant that has all
-                // the necessary bits set for this integer type. For an i1, for
-                // example, `x & 1` can be replaced with `x`.
+                // Reduce `x & y` to `x` if `y` is a constant that has all the necessary bits set
+                // for this integer type. For an i1, for example, `x & 1` can be replaced with `x`.
                 return OptOutcome::Equiv(lhs);
             }
         }
@@ -358,8 +357,8 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
 
     let cond = opt.equiv_iidx(cond);
     if let Inst::Const(_) = opt.inst(cond) {
-        // A guard that references a constant is, by definition, not needed and
-        // doesn't affect future analyses.
+        // A guard that references a constant is, by definition, not needed and doesn't affect
+        // future analyses.
         return OptOutcome::NotNeeded;
     }
 
@@ -494,20 +493,25 @@ fn opt_memcpy(opt: &mut PassOpt, mut inst: MemCpy) -> OptOutcome {
         len,
         volatile: _,
     } = inst;
-    match (opt.as_constkind(dst), opt.as_constkind(src)) {
-        (Some(ConstKind::Ptr(lhs_c)), Some(ConstKind::Ptr(rhs_c))) if lhs_c == rhs_c => {
-            // memcpy where lhs_ptr == rhs_ptr. Not needed.
-            // This is technically UB, but GCC 15 and Clang 21
-            // both choose to optimise away the memcpy.
-            // Thus, we shall do the same.
-            return OptOutcome::NotNeeded;
-        }
-        _ => (),
+
+    // LLVM's `memcpy` allows `dst` and `src` to point to the same memory, at which point `memcpy`
+    // is a no-op.
+    let equiv = if dst == src {
+        true
+    } else if let (Some(ConstKind::Ptr(lhs_c)), Some(ConstKind::Ptr(rhs_c))) =
+        (opt.as_constkind(dst), opt.as_constkind(src))
+        && lhs_c == rhs_c
+    {
+        true
+    } else {
+        false
+    };
+    if equiv {
+        return OptOutcome::NotNeeded;
     }
 
     if let Some(ConstKind::Int(len_c)) = opt.as_constkind(len)
-        && let Some(len_as_int) = len_c.to_zero_ext_u64()
-        && len_as_int == 0
+        && let Some(0) = len_c.to_zero_ext_u8()
     {
         // memcpy of zero bytes. Not needed.
         return OptOutcome::NotNeeded;
@@ -641,8 +645,8 @@ fn opt_or(opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
                 return OptOutcome::Equiv(lhs);
             }
             if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
-                // Reduce `x | y` to `y` if `y` is a constant that has all
-                // the necessary bits set for this integer type.
+                // Reduce `x | y` to `y` if `y` is a constant that has all the necessary bits set
+                // for this integer type.
                 return OptOutcome::Equiv(lhs);
             }
         }
@@ -2373,6 +2377,18 @@ mod test {
           %0: ptr = 0x1234
           %1: ptr = 0x1234
           %2: i64 = 4
+        ",
+        );
+
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: i64 = 4
+          memcpy %0, %0, %1, false
+        ",
+            "
+          %0: ptr = arg
+          %1: i64 = 4
         ",
         );
 
