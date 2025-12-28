@@ -126,9 +126,8 @@ fn opt_and(opt: &mut PassOpt, mut inst: And) -> OptOutcome {
                 return OptOutcome::Equiv(rhs);
             }
             if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
-                // Reduce `x & y` to `x` if `y` is a constant that has all
-                // the necessary bits set for this integer type. For an i1, for
-                // example, `x & 1` can be replaced with `x`.
+                // Reduce `x & y` to `x` if `y` is a constant that has all the necessary bits set
+                // for this integer type. For an i1, for example, `x & 1` can be replaced with `x`.
                 return OptOutcome::Equiv(lhs);
             }
         }
@@ -358,8 +357,8 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
 
     let cond = opt.equiv_iidx(cond);
     if let Inst::Const(_) = opt.inst(cond) {
-        // A guard that references a constant is, by definition, not needed and
-        // doesn't affect future analyses.
+        // A guard that references a constant is, by definition, not needed and doesn't affect
+        // future analyses.
         return OptOutcome::NotNeeded;
     }
 
@@ -496,10 +495,8 @@ fn opt_memcpy(opt: &mut PassOpt, mut inst: MemCpy) -> OptOutcome {
     } = inst;
     match (opt.as_constkind(dst), opt.as_constkind(src)) {
         (Some(ConstKind::Ptr(lhs_c)), Some(ConstKind::Ptr(rhs_c))) if lhs_c == rhs_c => {
-            // memcpy where lhs_ptr == rhs_ptr. Not needed.
-            // This is technically UB, but GCC 15 and Clang 21
-            // both choose to optimise away the memcpy.
-            // Thus, we shall do the same.
+            // memcpy where lhs_ptr == rhs_ptr. Not needed. This is technically UB, but GCC 15 and
+            // Clang 21 both choose to optimise away the memcpy. Thus, we shall do the same.
             return OptOutcome::NotNeeded;
         }
         _ => (),
@@ -641,8 +638,8 @@ fn opt_or(opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
                 return OptOutcome::Equiv(lhs);
             }
             if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
-                // Reduce `x | y` to `y` if `y` is a constant that has all
-                // the necessary bits set for this integer type.
+                // Reduce `x | y` to `y` if `y` is a constant that has all the necessary bits set
+                // for this integer type.
                 return OptOutcome::Equiv(lhs);
             }
         }
