@@ -191,7 +191,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
-        let mut ractions = self.rstate_diff_to_action(&in_rstate);
+        let mut ractions = RegActions::new();
+        self.rstate_diff_to_action(&in_rstate, &mut ractions);
         self.toposort_distinct_copies(&mut ractions).unwrap();
         self.asm_ractions(be, &ractions).unwrap();
 
@@ -552,7 +553,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             src_fill,
             dst_reg,
             dst_fill,
-        } in ractions.self_copies.iter()
+        } in ractions.fill_changes.iter()
         {
             be.arrange_fill(*dst_reg, *src_fill, *bitw, *dst_fill);
         }
@@ -855,7 +856,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // in the right registers, but we might need to shuffle lots of other things around, and
         // unspill others, to get into the right state for *n:out*. First we calculate a simple
         // "diff", which will happily give us register copies that overwrite each other...
-        let mut ractions = self.rstate_diff_to_action(&n_out);
+        let mut ractions = RegActions::new();
+        self.rstate_diff_to_action(&n_out, &mut ractions);
         // ...so we then topologically sort the distinct copies, which will break any cycles.
         self.toposort_distinct_copies(&mut ractions)?;
         // We now have an [RegActions] which we can directly generate code from.
@@ -1052,12 +1054,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         if !unspills.is_empty() {
-            let ractions = RegActions {
-                unspills,
-                self_copies: Vec::new(),
-                distinct_copies: Vec::new(),
-                spills: Vec::new(),
-            };
+            let mut ractions = RegActions::new();
+            ractions.unspills = unspills;
             self.asm_ractions(be, &ractions)?;
         }
         Ok(())
@@ -1242,70 +1240,60 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// Given a new [RStates], produce a [RegActions] which is a diff telling us how to get from
     /// the current [self.rstates] to the new `src_rstates` (bearing in mind "src" and "dst" are
     /// relative to reverse code generation).
-    fn rstate_diff_to_action(&mut self, src_rstates: &RStates<AB::Reg>) -> RegActions<AB::Reg> {
-        let mut spills = Vec::new();
-        let mut self_copies = Vec::new();
-        let mut distinct_copies = Vec::new();
-        let mut unspills = Vec::new();
-
-        // It's preferable not to copy values between registers, so first check if we can keep
-        // value(s) in the same registers they're already in.
-        for (dst_reg, dst_rstate) in self.rstates.iter().filter(|(_, x)| !x.iidxs.is_empty()) {
-            if src_rstates.iidxs(dst_reg) == &dst_rstate.iidxs {
-                let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
-                // If the same value(s) can end up in the same registers, we insert a "self copy"
-                // so that future parts of the algorithm know we want to use this, but we
-                self_copies.push(RegCopy {
-                    bitw: max_bitw,
-                    src_reg: dst_reg,
-                    src_fill: src_rstates.fill(dst_reg),
-                    dst_reg,
-                    dst_fill: dst_rstate.fill,
-                });
-            }
-        }
-
-        // Try and find cases where we can copy values between different registers, unspilling
-        // where that isn't possible.
+    fn rstate_diff_to_action(
+        &mut self,
+        src_rstates: &RStates<AB::Reg>,
+        ractions: &mut RegActions<AB::Reg>,
+    ) {
         'a: for (dst_reg, dst_rstate) in self.rstates.iter().filter(|(_, x)| !x.iidxs.is_empty()) {
-            let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
-            // Check if we generated a copy in the first loop.
             if src_rstates.iidxs(dst_reg) == &dst_rstate.iidxs {
-                continue;
-            }
-
-            for (src_reg, src_rstate) in src_rstates.iter() {
-                if src_reg == dst_reg {
-                    // This is handled above.
-                    continue;
-                } else if !src_rstate.iidxs.is_empty() && src_rstate.iidxs == dst_rstate.iidxs {
-                    distinct_copies.push(RegCopy {
+                // If fills have changed -- unless we're moving to `Undefined` -- we need to insert
+                // a self copy.
+                if src_rstates.fill(dst_reg) != dst_rstate.fill
+                    && dst_rstate.fill != RegFill::Undefined
+                {
+                    // It's preferable not to copy values between registers, so first check if we can keep
+                    // value(s) in the same registers they're already in.
+                    let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
+                    ractions.fill_changes.push(RegCopy {
                         bitw: max_bitw,
-                        src_reg,
-                        src_fill: src_rstate.fill,
+                        src_reg: dst_reg,
+                        src_fill: src_rstates.fill(dst_reg),
                         dst_reg,
                         dst_fill: dst_rstate.fill,
                     });
-                    continue 'a;
                 }
+            } else {
+                // Try and find cases where we can copy values between different registers, unspilling
+                // where that isn't possible.
+
+                for (src_reg, src_rstate) in src_rstates.iter() {
+                    if src_reg != dst_reg
+                        && !src_rstate.iidxs.is_empty()
+                        && src_rstate.iidxs == dst_rstate.iidxs
+                    {
+                        let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
+                        ractions.distinct_copies.push(RegCopy {
+                            bitw: max_bitw,
+                            src_reg,
+                            src_fill: src_rstate.fill,
+                            dst_reg,
+                            dst_fill: dst_rstate.fill,
+                        });
+                        continue 'a;
+                    }
+                }
+
+                // If the value(s) isn't an existing register, we will need to ensure it is spilt...
+                ractions.spills.push(RegSpill {
+                    iidxs: dst_rstate.iidxs.clone(),
+                });
+                ractions.unspills.push(RegUnspill {
+                    iidxs: dst_rstate.iidxs.clone(),
+                    reg: dst_reg,
+                    fill: dst_rstate.fill,
+                });
             }
-
-            // If the value(s) isn't an existing register, we will need to ensure it is spilt...
-            spills.push(RegSpill {
-                iidxs: dst_rstate.iidxs.clone(),
-            });
-            unspills.push(RegUnspill {
-                iidxs: dst_rstate.iidxs.clone(),
-                reg: dst_reg,
-                fill: dst_rstate.fill,
-            });
-        }
-
-        RegActions {
-            spills,
-            self_copies,
-            distinct_copies,
-            unspills,
         }
     }
 
@@ -1718,8 +1706,9 @@ impl RegFill {
 struct RegActions<Reg: RegT> {
     /// An unordered set of values that need to be unspilt.
     unspills: Vec<RegUnspill<Reg>>,
-    /// An unordered set of self-copies (i.e. where `src_reg` and `dst_reg` are the same).
-    self_copies: Vec<RegCopy<Reg>>,
+    /// An unordered set of self-copies (i.e. where `src_reg` and `dst_reg` are the same) where the
+    /// (a) the fills change (b) the destination fill is not `Undefined`.
+    fill_changes: Vec<RegCopy<Reg>>,
     /// Before `break_regactions_cycles` this will be an unordered set of register copies between
     /// distinct registers (i.e. where `src_reg` and `dst_reg` are different).
     ///
@@ -1728,6 +1717,17 @@ struct RegActions<Reg: RegT> {
     distinct_copies: Vec<RegCopy<Reg>>,
     /// An unordered set of instructions .
     spills: Vec<RegSpill>,
+}
+
+impl<Reg: RegT> RegActions<Reg> {
+    fn new() -> Self {
+        Self {
+            unspills: Vec::new(),
+            fill_changes: Vec::new(),
+            distinct_copies: Vec::new(),
+            spills: Vec::new(),
+        }
+    }
 }
 
 /// Unspill `InstIdx` into `Reg` with fill `RegExt`. Note: by definition, spilled values are stored
@@ -2943,7 +2943,7 @@ pub(crate) mod test {
         let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
         let mut ractions = RegActions {
             unspills: Vec::new(),
-            self_copies: Vec::new(),
+            fill_changes: Vec::new(),
             distinct_copies: vec![
                 RegCopy {
                     bitw: 8,
@@ -2977,7 +2977,7 @@ pub(crate) mod test {
         let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
         let mut ractions = RegActions {
             unspills: Vec::new(),
-            self_copies: Vec::new(),
+            fill_changes: Vec::new(),
             distinct_copies: vec![
                 RegCopy {
                     bitw: 8,
@@ -3025,7 +3025,7 @@ pub(crate) mod test {
         let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
         let mut ractions = RegActions {
             unspills: Vec::new(),
-            self_copies: Vec::new(),
+            fill_changes: Vec::new(),
             distinct_copies: vec![
                 RegCopy {
                     bitw: 8,
@@ -3130,7 +3130,6 @@ pub(crate) mod test {
           alloc %3 GPR0 GPR1
           arrange_fill GPR0 from=Zeroed dst_bitw=8 to=Zeroed
           copy_reg from=GPR1 to=GPR0
-          arrange_fill GPR1 from=Zeroed dst_bitw=8 to=Zeroed
           alloc %1 GPR0 GPR1
           const GPR1 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
           const GPR0 tmp_reg=None tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
@@ -3170,7 +3169,6 @@ pub(crate) mod test {
             |_| true,
             &["
           unspill stack_off=8 GPR1 Undefined bitw=64
-          arrange_fill GPR0 from=Zeroed dst_bitw=64 to=Undefined
           alloc %2 GPR1 GPR0
           unspill stack_off=16 GPR0 Undefined bitw=64
           arrange_fill GPR1 from=Undefined dst_bitw=64 to=Zeroed
@@ -3197,7 +3195,6 @@ pub(crate) mod test {
             &["
           unspill stack_off=8 GPR0 Undefined bitw=64
           trunc %1 GPR0
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
           spill GPR0 Undefined stack_off=8 bitw=64
         "],
         );
@@ -3211,11 +3208,9 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 from=Zeroed dst_bitw=64 to=Undefined
           zext %2 GPR0
           arrange_fill GPR0 from=Undefined dst_bitw=32 to=Zeroed
           trunc %1 GPR0
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
         "],
         );
 
@@ -3229,14 +3224,10 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
           trunc %2 GPR1
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
-          arrange_fill GPR1 from=Undefined dst_bitw=32 to=Undefined
           trunc %1 GPR1
           arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
           copy_reg from=GPR0 to=GPR1
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
         "],
         );
 
@@ -3250,11 +3241,8 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 from=Undefined dst_bitw=8 to=Undefined
           trunc %3 GPR0
-          arrange_fill GPR0 from=Zeroed dst_bitw=32 to=Undefined
           zext %2 GPR0
-          arrange_fill GPR0 from=Zeroed dst_bitw=16 to=Zeroed
           zext %1 GPR0
           arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
         "],
@@ -3270,14 +3258,11 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
           zext %2 GPR1
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
           arrange_fill GPR1 from=Undefined dst_bitw=32 to=Zeroed
           trunc %1 GPR1
           arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
           copy_reg from=GPR0 to=GPR1
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
         "],
         );
     }
