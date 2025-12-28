@@ -503,8 +503,7 @@ fn opt_memcpy(opt: &mut PassOpt, mut inst: MemCpy) -> OptOutcome {
     }
 
     if let Some(ConstKind::Int(len_c)) = opt.as_constkind(len)
-        && let Some(len_as_int) = len_c.to_zero_ext_u64()
-        && len_as_int == 0
+        && let Some(0) = len_c.to_zero_ext_u8()
     {
         // memcpy of zero bytes. Not needed.
         return OptOutcome::NotNeeded;
