@@ -172,15 +172,7 @@ impl<'a> X64HirToAsm<'a> {
                 ConstKind::Float(_) => unreachable!(),
                 ConstKind::Int(x) => match bitw {
                     1..=32 => x.to_zero_ext_u32().map(|x| x.cast_signed()),
-                    64 => {
-                        if let Some(x) = x.to_sign_ext_i32()
-                            && let Ok(x) = u32::try_from(x)
-                        {
-                            Some(x.cast_signed())
-                        } else {
-                            None
-                        }
-                    }
+                    64 => x.to_sign_ext_i32(),
                     x => todo!("{x}"),
                 },
                 ConstKind::Ptr(x) => match bitw {
@@ -4119,9 +4111,10 @@ mod test {
           %7: i32 = 0xFFFFFFFF
           %8: i64 = 0
           %9: i64 = 0xFFFFFFFF
-          %10: i64 = 0x100000000
-          %11: i64 = 0xFFFFFFFFFFFFFFFF
-          %12: i64 = 0xFFFFFFFFFFFFFFFE
+          %10: i64 = 0x10000000
+          %11: i64 = 0x100000000
+          %12: i64 = 0xFFFFFFFFFFFFFFFF
+          %13: i64 = 0xFFFFFFFFFFFFFFFE
         ",
         );
 
@@ -4138,9 +4131,13 @@ mod test {
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(7)), Some(-1));
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(8)), Some(0));
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(9)), None);
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(10)), None);
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(11)), Some(-1));
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(12)), Some(-2));
+        assert_eq!(
+            be.sign_ext_op_for_imm32(b, InstIdx::from(10)),
+            Some(0x10000000)
+        );
+        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(11)), None);
+        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(12)), Some(-1));
+        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(13)), Some(-2));
 
         assert_eq!(be.zero_ext_op_for_imm32(b, 1, InstIdx::from(0)), Some(0));
         assert_eq!(be.zero_ext_op_for_imm32(b, 1, InstIdx::from(1)), Some(1));
@@ -4156,9 +4153,13 @@ mod test {
 
         assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(8)), Some(0));
         assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(9)), None);
-        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(10)), None);
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 64, InstIdx::from(10)),
+            Some(0x10000000)
+        );
         assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(11)), None);
-        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(12)), None);
+        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(12)), Some(-1));
+        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(13)), Some(-2));
     }
 
     #[test]
