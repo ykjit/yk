@@ -10,6 +10,7 @@ use index_vec::IndexVec;
 
 mod cse;
 pub(super) mod fullopt;
+mod known_bits;
 mod load_store;
 pub(super) mod noopt;
 mod strength_fold;
