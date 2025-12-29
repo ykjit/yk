@@ -305,6 +305,14 @@ impl ArbBitInt {
         }
     }
 
+    /// Return a new [ArbBitInt] that performs bitwise `NEG` on `self`.
+    pub(crate) fn bitneg(&self) -> Self {
+        Self {
+            bitw: self.bitw,
+            val: (!self.val).truncate(self.bitw),
+        }
+    }
+
     /// Return a new [ArbBitInt] that performs bitwise `OR` on `self` and `other`.
     ///
     /// # Panics
@@ -422,6 +430,19 @@ mod tests {
                 Some(i16::from(x.bitand(y)))
             );
 
+            // bitneg
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(8, x as i64)
+                    .bitneg().to_sign_ext_i8(),
+                Some(!x)
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(8, x as i64).bitneg().to_sign_ext_i16(),
+                Some(i16::from(!x))
+            );
+
             // bitor
             // i16
             assert_eq!(
@@ -532,6 +553,20 @@ mod tests {
                 ArbBitInt::from_i64(16, x as i64)
                     .bitand(&ArbBitInt::from_i64(16, y as i64)).to_sign_ext_i16(),
                 Some(x.bitand(y))
+            );
+
+            // bitneg
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(16, x as i64)
+                    .bitneg().to_sign_ext_i8(),
+                i8::try_from(!x).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(16, x as i64)
+                    .bitneg().to_sign_ext_i16(),
+                Some(!x)
             );
 
             // bitor
@@ -678,6 +713,26 @@ mod tests {
                 ArbBitInt::from_i64(32, x as i64)
                     .bitand(&ArbBitInt::from_i64(32, y as i64)).to_sign_ext_i32(),
                 Some(x.bitand(y))
+            );
+
+            // bitneg
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64)
+                    .bitneg().to_sign_ext_i8(),
+                i8::try_from(!x).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64)
+                    .bitneg().to_sign_ext_i16(),
+                i16::try_from(!x).ok()
+            );
+            // i32
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64)
+                    .bitneg().to_sign_ext_i32(),
+                Some(!x)
             );
 
             // bitor
@@ -871,6 +926,32 @@ mod tests {
                 ArbBitInt::from_i64(64, x)
                     .bitand(&ArbBitInt::from_i64(64, y)).to_sign_ext_i64(),
                 Some(x.bitand(y))
+            );
+
+            // bitneg
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .bitneg().to_sign_ext_i8(),
+                i8::try_from(!x).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .bitneg().to_sign_ext_i16(),
+                i16::try_from(!x).ok()
+            );
+            // i32
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .bitneg().to_sign_ext_i32(),
+                i32::try_from(!x).ok()
+            );
+            // i64
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .bitneg().to_sign_ext_i64(),
+                Some(!x)
             );
 
             // bitor
