@@ -512,7 +512,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         Ok(iidx)
     }
 
-    fn vloc_to_const(&mut self, vloc: &VarLoc<Reg>) -> Result<hir::InstIdx, CompilationError> {
+    fn vloc_arg_to_const(&mut self, vloc: &VarLoc<Reg>) -> Result<hir::InstIdx, CompilationError> {
         match vloc {
             VarLoc::Stack(_) => todo!(),
             VarLoc::StackOff(_) => todo!(),
@@ -522,7 +522,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 hir::ConstKind::Float(_) => todo!(),
                 hir::ConstKind::Int(x) => {
                     let tyidx = self.opt.push_ty(hir::Ty::Int(x.bitw()))?;
-                    self.opt.feed(
+                    self.opt.feed_arg(
                         hir::Const {
                             tyidx,
                             kind: kind.clone(),
@@ -532,7 +532,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
                 hir::ConstKind::Ptr(_) => {
                     let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
-                    self.opt.feed(
+                    self.opt.feed_arg(
                         hir::Const {
                             tyidx,
                             kind: kind.clone(),
@@ -569,7 +569,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         for op in safepoint.lives.iter() {
             let tyidx = self.p_ty(op.type_(self.am))?;
-            self.push_inst_and_link_local(op.to_inst_id(), hir::Arg { tyidx })?;
+            let iidx = self.opt.feed_arg(hir::Arg { tyidx }.into())?;
+            self.frames
+                .last_mut()
+                .unwrap()
+                .set_local(op.to_inst_id(), iidx);
         }
 
         Ok(safepoint)
@@ -595,9 +599,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     .any(|vloc| matches!(vloc, VarLoc::Const(_)))
                 {
                     assert_eq!(fromvlocs.len(), 1);
-                    self.vloc_to_const(fromvlocs.iter().nth(0).unwrap())?
+                    self.vloc_arg_to_const(fromvlocs.iter().nth(0).unwrap())?
                 } else {
-                    self.opt.feed(hir::Arg { tyidx }.into())?
+                    self.opt.feed_arg(hir::Arg { tyidx }.into())?
                 };
                 locals.insert(iid.clone(), iidx);
                 entry_vars.push(fromvlocs.clone());

@@ -95,7 +95,7 @@ impl<'a> X64HirToAsm<'a> {
             #[cfg(test)]
             ModKind::Test { block, .. } => block.insts_len(),
         };
-        num_hir_insts * 12
+        num_hir_insts * 16
     }
 
     pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>, buf: CodeBufInProgress) -> Self {

@@ -37,6 +37,11 @@ pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
     /// instruction may not even be of the same kind as `inst`!
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError>;
 
+    // Feed an argument into the trace. Arguments are either [Arg] or [Inst] instructions, and are
+    // not optimised / deduplicated in any way. Calling this function after the first-non argument
+    // has been passed will lead to undefined behaviour.
+    fn feed_arg(&mut self, inst: Inst) -> Result<InstIdx, CompilationError>;
+
     /// Push a type [ty]. This type may be cached, and thus the [TyIdx] returned may not
     /// monotonically increase.
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError>;

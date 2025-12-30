@@ -211,7 +211,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 let Some(VarLoc::Reg(reg)) =
                     vlocs.iter().find(|vloc| matches!(vloc, VarLoc::Reg(_)))
                 else {
-                    panic!("{iidx:?}")
+                    panic!("{iidx:?} {vlocs:?}")
                 };
                 let bitw = self.b.inst_bitw(self.m, iidx);
                 be.spill(*reg, RegFill::Undefined, stack_off, bitw).unwrap();

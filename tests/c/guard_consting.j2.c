@@ -4,9 +4,10 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     %{{27}}: i1 = icmp sgt %{{_}}, %{{_}}
-//     %{{28}}: i1 = 0
-//     guard true, %{{26}}, [%{{_}}, %{{_}}, %{{_}}, %{{_}}, %{{28}}]
+//     %{{9}}: i1 = 0
+//     ...
+//     %{{24}}: i1 = icmp sgt %{{_}}, %{{_}}
+//     guard true, %{{24}}, [%{{_}}, %{{_}}, %{{_}}, %{{_}}, %{{9}}]
 //     ...
 
 // Check that if a guard's life variables include the condition operand, that
