@@ -104,7 +104,11 @@ use crate::compile::{
 };
 use index_vec::*;
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::{
+    assert_matches::assert_matches,
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // The external-facing part of the optimiser.
@@ -126,6 +130,7 @@ impl FullOpt {
             ],
             inner: OptInternal {
                 insts: IndexVec::new(),
+                consts_map: HashMap::new(),
                 tys: IndexVec::new(),
                 ty_map: HashMap::new(),
             },
@@ -147,18 +152,35 @@ impl FullOpt {
             }
 
             for inst in opt.pre_insts {
-                self.commit_inst(inst);
+                self.commit_inst_dedup_opt(inst);
             }
         }
-        Ok(Some(self.commit_inst(inst)))
+        Ok(Some(self.commit_inst_dedup_opt(inst)))
     }
 
-    /// Commit `inst` to this trace.
+    /// Commit `inst` to this trace, deduplicating constants if they already exist earlier in the
+    /// trace.
+    fn commit_inst_dedup_opt(&mut self, inst: Inst) -> InstIdx {
+        if let Inst::Const(x) = &inst
+            && let Some(x) = self.inner.consts_map.get(&HashableConst(x.to_owned()))
+        {
+            return *x;
+        }
+        self.commit_inst(inst)
+    }
+
+    /// Commit `inst` to this trace, without deduplicating constants.
     fn commit_inst(&mut self, inst: Inst) -> InstIdx {
         let opt = CommitInstOpt { inner: &self.inner };
         let iidx = self.inner.insts.len_idx();
         for pass in &mut self.passes {
             pass.inst_committed(&opt, iidx, &inst);
+        }
+
+        if let Inst::Const(x) = &inst {
+            self.inner
+                .consts_map
+                .insert(HashableConst(x.to_owned()), iidx);
         }
         self.inner.insts.push(InstEquiv {
             inst,
@@ -212,6 +234,11 @@ impl OptT for FullOpt {
         self.feed_internal(inst)
     }
 
+    fn feed_arg(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
+        assert_matches!(inst, Inst::Arg(_) | Inst::Const(_));
+        Ok(self.commit_inst(inst))
+    }
+
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
         self.inner.push_ty(ty)
     }
@@ -228,7 +255,13 @@ impl EquivIIdxT for FullOpt {
 
 struct OptInternal {
     insts: IndexVec<InstIdx, InstEquiv>,
+    /// A map allowing us to deduplicate constants. Note the use of [HashableConst]: constant
+    /// deduplication is "best effort" because of the difficulties imposed by floating point
+    /// numbers.
+    consts_map: HashMap<HashableConst, InstIdx>,
     tys: IndexVec<TyIdx, Ty>,
+    /// A map allowing us to deduplicate types. This guarantees that a given [Ty] appears exactly
+    /// once in a module.
     ty_map: HashMap<Ty, TyIdx>,
 }
 
@@ -265,6 +298,39 @@ impl OptInternal {
         &self.tys[tyidx]
     }
 }
+
+/// A wrapper around [Const]s that allows them to be hashed for deduplication purposes. This struct
+/// is conservative as per [super::super::hir]'s documentation: it treats floating point numbers as
+/// bit patterns. That means, for example, that it will not identify `+0.0` and `-0.0` as
+/// equivalent. This struct should therefore be used with caution!
+struct HashableConst(Const);
+
+impl Hash for HashableConst {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.tyidx.hash(state);
+        match &self.0.kind {
+            ConstKind::Double(x) => x.to_bits().hash(state),
+            ConstKind::Float(x) => x.to_bits().hash(state),
+            ConstKind::Int(x) => x.hash(state),
+            ConstKind::Ptr(x) => x.hash(state),
+        }
+    }
+}
+
+impl PartialEq for HashableConst {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.tyidx == other.0.tyidx
+            && match (&self.0.kind, &other.0.kind) {
+                (ConstKind::Double(x), ConstKind::Double(y)) => x.to_bits() == y.to_bits(),
+                (ConstKind::Float(x), ConstKind::Float(y)) => x.to_bits() == y.to_bits(),
+                (ConstKind::Int(x), ConstKind::Int(y)) => x == y,
+                (ConstKind::Ptr(x), ConstKind::Ptr(y)) => x == y,
+                (_, _) => false,
+            }
+    }
+}
+
+impl Eq for HashableConst {}
 
 /// What an optimisation has managed to make of a given input [Inst].
 #[derive(Debug)]

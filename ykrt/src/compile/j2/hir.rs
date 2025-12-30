@@ -49,11 +49,20 @@
 //! for efficiency reasons. Thus instructions are always numbered 0..*n*.
 //!
 //!
-//! ## Guarantees
+//! ## [TyIdx]s can be replied on for type comparisons
 //!
-//! * HIR must map the same [Ty] to a single [TyIdx] (i.e. no matter how often a given type is
-//!   inserted into a [Module], it must produce the same [TyIdx]). Thus type comparisons are simple
-//!   integer comparisons.
+//! HIR _must_ map the same [Ty] to a single [TyIdx] (i.e. no matter how often a given type is
+//! inserted into a [Module], it must produce the same [TyIdx]). Thus type comparisons are simple
+//! integer comparisons.
+//!
+//!
+//! ## [ConstIdx]s cannot be relied upon for comparisons
+//!
+//! HIR should try to deduplicate [Const]s where possible, but this cannot be relied upon: in
+//! particular, floating point numbers do not a have simple notion of "is equivalent". Where
+//! [Const] deduplication does occur, it must be done with care to ensure that only constants which
+//! in all cases could be considered equal are deduplicated. In practise, this means that floating
+//! point numbers should be considered as bit patterns.
 //!
 //!
 //! ## Modules vs. blocks

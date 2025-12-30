@@ -10,7 +10,7 @@ use crate::compile::{
     },
 };
 use index_vec::*;
-use std::collections::HashMap;
+use std::{assert_matches::assert_matches, collections::HashMap};
 
 pub(in crate::compile::j2) struct NoOpt {
     insts: IndexVec<InstIdx, Inst>,
@@ -62,6 +62,11 @@ impl OptT for NoOpt {
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
         assert_eq!(*inst.ty(self), Ty::Void);
         Ok(Some(self.insts.push(inst)))
+    }
+
+    fn feed_arg(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
+        assert_matches!(inst, Inst::Arg(_) | Inst::Const(_));
+        self.feed(inst)
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
