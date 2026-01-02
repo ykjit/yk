@@ -267,9 +267,6 @@ done
 #
 # Note that --profile-time doesn't work without --bench, so we have to run each
 # benchmark individually.
-#
-# Note: collect_and_decode is hwt-specific.
-#YKB_TRACER=hwt cargo bench --bench collect_and_decode -- --profile-time 1
 YKB_TRACER=swt cargo bench --bench promote -- --profile-time 1
 # Keep j2 honest
 YK_JITC=j2 YKB_TRACER=swt cargo bench --bench promote -- --profile-time 1
