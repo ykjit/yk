@@ -796,26 +796,27 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         assert_eq!(smp_locs.len(), 1, "Multi-locations not yet supported");
         match &smp_locs[0] {
             L::Register(dwarf_reg, _sz, extras) => {
-                let mut out = smallvec![VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill)];
+                let mut vlocs = VarLocs::new();
+                vlocs.push(VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill));
                 for x in extras {
                     if *x >= 0 {
-                        out.push(VarLoc::Reg(
+                        vlocs.push(VarLoc::Reg(
                             Reg::from_dwarf_reg(x.cast_unsigned()),
                             reg_fill,
                         ));
                     } else {
-                        out.push(VarLoc::Stack(u32::from(x.unsigned_abs())));
+                        vlocs.push(VarLoc::Stack(u32::from(x.unsigned_abs())));
                     }
                 }
-                VarLocs::new(out)
+                vlocs
             }
             L::Direct(6, off, _sz) => {
                 assert!(*off <= 0);
-                VarLocs::new(smallvec![VarLoc::StackOff(off.unsigned_abs())])
+                VarLocs::from_smallvec(smallvec![VarLoc::StackOff(off.unsigned_abs())])
             }
             L::Indirect(6, off, _sz) => {
                 assert!(*off <= 0);
-                VarLocs::new(smallvec![VarLoc::Stack(off.unsigned_abs())])
+                VarLocs::from_smallvec(smallvec![VarLoc::Stack(off.unsigned_abs())])
             }
             x => {
                 todo!("{:?}", x);

@@ -83,7 +83,7 @@ use crate::{
 };
 use index_vec::IndexVec;
 use parking_lot::Mutex;
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 use std::{ffi::c_void, sync::Arc};
 
 pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
@@ -349,7 +349,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                     if fromvlocs == tovlocs {
                                         // Optimise away situations where we would just move a
                                         // value from VLoc X to VLoc X.
-                                        tovlocs = VarLocs::new(smallvec![]);
+                                        tovlocs = VarLocs::new();
                                     }
                                     (
                                         aot_op.to_inst_id(),

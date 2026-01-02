@@ -613,11 +613,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // To keep deopt simple, we currently don't make use of the fact that an instruction might
         // be in a register: we assume everything has been spilled.
         if let IState::Stack(stack_off) = self.istates[iidx] {
-            VarLocs::new(smallvec![VarLoc::Stack(stack_off)])
+            VarLocs::from_smallvec(smallvec![VarLoc::Stack(stack_off)])
         } else if let IState::StackOff(stack_off) = self.istates[iidx] {
-            VarLocs::new(smallvec![VarLoc::StackOff(stack_off)])
+            VarLocs::from_smallvec(smallvec![VarLoc::StackOff(stack_off)])
         } else if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
-            VarLocs::new(smallvec![VarLoc::Const(kind.clone())])
+            VarLocs::from_smallvec(smallvec![VarLoc::Const(kind.clone())])
         } else {
             todo!(
                 "{iidx:?} {:?} {:?}\n  {:?}",
@@ -1480,8 +1480,21 @@ pub(super) struct VarLocs<Reg: RegT> {
 }
 
 impl<Reg: RegT> VarLocs<Reg> {
-    pub(super) fn new(vlocs: SmallVec<[VarLoc<Reg>; 1]>) -> Self {
-        Self { raw: vlocs }
+    pub(super) fn new() -> Self {
+        Self {
+            raw: SmallVec::new(),
+        }
+    }
+
+    pub(super) fn from_smallvec(x: SmallVec<[VarLoc<Reg>; 1]>) -> Self {
+        Self { raw: x }
+    }
+
+    #[allow(unused)]
+    pub(super) fn with_capacity(len: usize) -> Self {
+        Self {
+            raw: SmallVec::with_capacity(len),
+        }
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -1494,6 +1507,10 @@ impl<Reg: RegT> VarLocs<Reg> {
 
     pub(super) fn iter(&self) -> impl Iterator<Item = &VarLoc<Reg>> {
         self.raw.iter()
+    }
+
+    pub(super) fn push(&mut self, vloc: VarLoc<Reg>) {
+        self.raw.push(vloc);
     }
 }
 
