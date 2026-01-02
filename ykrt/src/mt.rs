@@ -635,29 +635,6 @@ impl MT {
                     MTThread::set_tracing(IsTracing::None);
                     mtt.pop_tstate();
                     // FIXME: start_recorder needs a way of signalling temporary errors.
-                    #[cfg(tracer_hwt)]
-                    match e.downcast::<hwtracer::HWTracerError>() {
-                        Ok(e) => {
-                            if let hwtracer::HWTracerError::Temporary(_) = *e {
-                                let mut lk = hl.lock();
-                                debug_assert_matches!(lk.kind, HotLocationKind::Tracing(_));
-                                lk.tracecompilation_error(self);
-                                // FIXME: This is stupidly brutal.
-                                lk.kind = HotLocationKind::DontTrace;
-                                drop(lk);
-                                yklog!(
-                                    self.log,
-                                    Verbosity::Warning,
-                                    "start-tracing-abort",
-                                    _loc.hot_location()
-                                );
-                            } else {
-                                todo!("{e:?}");
-                            }
-                        }
-                        Err(e) => todo!("{e:?}"),
-                    }
-                    #[cfg(not(tracer_hwt))]
                     todo!("{e:?}");
                 }
             }
