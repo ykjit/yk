@@ -54,12 +54,15 @@
 
 #[cfg(test)]
 use crate::compile::j2::hir::Ty;
-use crate::compile::{
-    CompilationError,
-    j2::{
-        hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod, ModKind},
-        hir_to_asm::HirToAsmBackend,
+use crate::{
+    compile::{
+        CompilationError,
+        j2::{
+            hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod, ModKind},
+            hir_to_asm::HirToAsmBackend,
+        },
     },
+    varlocs,
 };
 use index_vec::{Idx, IndexVec, index_vec};
 use smallvec::{SmallVec, smallvec};
@@ -613,11 +616,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // To keep deopt simple, we currently don't make use of the fact that an instruction might
         // be in a register: we assume everything has been spilled.
         if let IState::Stack(stack_off) = self.istates[iidx] {
-            VarLocs::from_smallvec(smallvec![VarLoc::Stack(stack_off)])
+            varlocs![VarLoc::Stack(stack_off)]
         } else if let IState::StackOff(stack_off) = self.istates[iidx] {
-            VarLocs::from_smallvec(smallvec![VarLoc::StackOff(stack_off)])
+            varlocs![VarLoc::StackOff(stack_off)]
         } else if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
-            VarLocs::from_smallvec(smallvec![VarLoc::Const(kind.clone())])
+            varlocs![VarLoc::Const(kind.clone())]
         } else {
             todo!(
                 "{iidx:?} {:?} {:?}\n  {:?}",
@@ -1486,6 +1489,7 @@ impl<Reg: RegT> VarLocs<Reg> {
         }
     }
 
+    #[doc(hidden)]
     pub(super) fn from_smallvec(x: SmallVec<[VarLoc<Reg>; 1]>) -> Self {
         Self { raw: x }
     }

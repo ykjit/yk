@@ -36,3 +36,16 @@ pub unsafe extern "C" fn yk_debug_str(msg: *const c_char) {
         mtt.insert_debug_str(unsafe { CStr::from_ptr(msg).to_string_lossy().into_owned() });
     });
 }
+
+#[macro_export]
+macro_rules! varlocs {
+    () => {
+        $crate::compile::j2::regalloc::VarLocs::new()
+    };
+    ($elem:expr; $n:expr) => {
+        $crate::compile::j2::regalloc::VarLocs::from_smallvec(smallvec::smallvec![$elem; $n])
+    };
+    ($($x:expr),+ $(,)?) => {
+        $crate::compile::j2::regalloc::VarLocs::from_smallvec(smallvec::smallvec![$($x),+])
+    };
+}

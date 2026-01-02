@@ -50,11 +50,12 @@ use crate::{
         jitc_yk::aot_ir,
     },
     mt::TraceId,
+    varlocs,
 };
 use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
 use index_vec::IndexVec;
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 use std::{
     assert_matches::{assert_matches, debug_assert_matches},
     collections::HashMap,
@@ -812,11 +813,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             }
             L::Direct(6, off, _sz) => {
                 assert!(*off <= 0);
-                VarLocs::from_smallvec(smallvec![VarLoc::StackOff(off.unsigned_abs())])
+                varlocs![VarLoc::StackOff(off.unsigned_abs())]
             }
             L::Indirect(6, off, _sz) => {
                 assert!(*off <= 0);
-                VarLocs::from_smallvec(smallvec![VarLoc::Stack(off.unsigned_abs())])
+                varlocs![VarLoc::Stack(off.unsigned_abs())]
             }
             x => {
                 todo!("{:?}", x);
