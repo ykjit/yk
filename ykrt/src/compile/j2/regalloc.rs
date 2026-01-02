@@ -144,7 +144,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         assert_eq!(self.istates[iidx], IState::None);
                         self.istates[iidx] = IState::StackOff(*stack_off);
                     }
-                    VarLoc::Reg(_) => (),
+                    VarLoc::Reg(_, _) => (),
                     VarLoc::Const(_) => (),
                 }
             }
@@ -168,7 +168,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             .map(|(x, y)| (InstIdx::from(x), y))
         {
             for vloc in vlocs.iter() {
-                if let VarLoc::Reg(reg) = vloc {
+                if let VarLoc::Reg(reg, fill) = vloc {
                     if let ModKind::Coupler { .. } | ModKind::Loop { .. } = self.m.kind {
                         // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
                         // for details), caller saved registers are potentially corrupted at the very start
@@ -186,7 +186,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             todo!();
                         }
                     }
-                    in_rstate.set_fill_iidxs(*reg, RegFill::Undefined, smallvec![iidx]);
+                    in_rstate.set_fill_iidxs(*reg, *fill, smallvec![iidx]);
                 }
             }
         }
@@ -208,13 +208,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             if let IState::Stack(stack_off) = self.istates[iidx]
                 && !vlocs.iter().any(|vloc| matches!(vloc, VarLoc::Stack(_)))
             {
-                let Some(VarLoc::Reg(reg)) =
-                    vlocs.iter().find(|vloc| matches!(vloc, VarLoc::Reg(_)))
+                let Some(VarLoc::Reg(reg, fill)) =
+                    vlocs.iter().find(|vloc| matches!(vloc, VarLoc::Reg(_, _)))
                 else {
                     panic!("{iidx:?} {vlocs:?}")
                 };
                 let bitw = self.b.inst_bitw(self.m, iidx);
-                be.spill(*reg, RegFill::Undefined, stack_off, bitw).unwrap();
+                be.spill(*reg, *fill, stack_off, bitw).unwrap();
             }
         }
     }
@@ -275,8 +275,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     match vloc {
                         VarLoc::Stack(_) => (),
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(reg) => {
-                            be.move_const(*reg, None, bitw, RegFill::Zeroed, kind)?;
+                        VarLoc::Reg(reg, fill) => {
+                            be.move_const(*reg, None, bitw, *fill, kind)?;
                         }
                         VarLoc::Const(_) => (),
                     }
@@ -301,7 +301,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             be.move_const(tmp_reg, None, bitw, RegFill::Zeroed, kind)?;
                         }
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(_) => (),
+                        VarLoc::Reg(_, _) => (),
                         VarLoc::Const(_) => (),
                     }
                 }
@@ -348,9 +348,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             todo!();
                         }
                     }
-                    VarLoc::Reg(reg) => {
+                    VarLoc::Reg(reg, fill) => {
                         assert!(!self.rstates.iidxs(*reg).contains(iidx));
-                        self.rstates.set_fill(*reg, RegFill::Undefined);
+                        self.rstates.set_fill(*reg, *fill);
                         self.rstates.iidxs_mut(*reg).push(*iidx);
                     }
                     VarLoc::Const(_) => (),
@@ -1509,8 +1509,8 @@ pub(super) enum VarLoc<Reg> {
     /// semi-constant. The pointer is `off` bytes from the base pointer. Whether `off` is "above"
     /// or "below" the base pointer is system dependent.
     StackOff(u32),
-    /// The variable's value is stored in a register.
-    Reg(Reg),
+    /// The variable's value is stored in a register with the given fill.
+    Reg(Reg, RegFill),
     /// The variable's value is a constant.
     Const(ConstKind),
 }
@@ -1520,7 +1520,7 @@ impl<Reg: Display> Display for VarLoc<Reg> {
         match self {
             VarLoc::Stack(x) => write!(f, "Stack(0x{x:X})"),
             VarLoc::StackOff(x) => write!(f, "StackOff(0x{x:X})"),
-            VarLoc::Reg(x) => write!(f, "Reg(\"{x}\")"),
+            VarLoc::Reg(reg, fill) => write!(f, "Reg(\"{reg}\", {fill})"),
             VarLoc::Const(x) => match x {
                 ConstKind::Double(x) => write!(f, "{x}"),
                 ConstKind::Float(x) => write!(f, "{x}"),
@@ -1698,6 +1698,16 @@ impl RegFill {
             RegCnstrFill::Undefined => RegFill::Undefined,
             RegCnstrFill::Zeroed => RegFill::Zeroed,
             RegCnstrFill::Signed => RegFill::Signed,
+        }
+    }
+}
+
+impl Display for RegFill {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegFill::Undefined => write!(f, "Undefined"),
+            RegFill::Zeroed => write!(f, "Zeroed"),
+            RegFill::Signed => write!(f, "Signed"),
         }
     }
 }
@@ -2001,7 +2011,10 @@ pub(crate) mod test {
         type Reg = TestReg;
         type BuildTest = String;
 
-        fn smp_to_vloc(_smp_locs: &SmallVec<[yksmp::Location; 1]>) -> VarLocs<Self::Reg> {
+        fn smp_to_vloc(
+            _smp_locs: &SmallVec<[yksmp::Location; 1]>,
+            _reg_fill: RegFill,
+        ) -> VarLocs<Self::Reg> {
             todo!()
         }
 
@@ -2812,8 +2825,8 @@ pub(crate) mod test {
     fn simple() {
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR0"]
-          %1: i8 = arg [reg "GPR1"]
+          %0: i8 = arg [reg ("GPR0", undefined)]
+          %1: i8 = arg [reg ("GPR1", undefined)]
           %2: i8 = add %0, %1
           blackbox %2
         "#,
@@ -2830,8 +2843,8 @@ pub(crate) mod test {
     fn cycles() {
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR1"]
-          %1: i8 = arg [reg "GPR0"]
+          %0: i8 = arg [reg ("GPR1", undefined)]
+          %1: i8 = arg [reg ("GPR0", undefined)]
           %2: i8 = add %0, %1
           blackbox %2
         "#,
@@ -2854,9 +2867,9 @@ pub(crate) mod test {
 
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR0"]
-          %1: i8 = arg [reg "GPR1"]
-          %2: i8 = arg [reg "GPR2"]
+          %0: i8 = arg [reg ("GPR0", undefined)]
+          %1: i8 = arg [reg ("GPR1", undefined)]
+          %2: i8 = arg [reg ("GPR2", undefined)]
           %3: i8 = add %0, %1
           %4: i8 = add %2, %3
           blackbox %4
@@ -2884,10 +2897,10 @@ pub(crate) mod test {
 
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR3"]
-          %1: i8 = arg [reg "GPR2"]
-          %2: i8 = arg [reg "GPR1"]
-          %3: i8 = arg [reg "GPR0"]
+          %0: i8 = arg [reg ("GPR3", undefined)]
+          %1: i8 = arg [reg ("GPR2", undefined)]
+          %2: i8 = arg [reg ("GPR1", undefined)]
+          %3: i8 = arg [reg ("GPR0", undefined)]
           %4: i8 = add %0, %1
           %5: i8 = add %4, %2
           %6: i8 = add %5, %3
@@ -3079,7 +3092,7 @@ pub(crate) mod test {
     fn arrange_fills_once() {
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR0"]
+          %0: i8 = arg [reg ("GPR0", undefined)]
           %1: i8 = add %0, %0
           blackbox %1
           exit [%0]

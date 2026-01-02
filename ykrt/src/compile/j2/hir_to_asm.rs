@@ -126,7 +126,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let entry_vlocs = rec
                     .live_vals
                     .iter()
-                    .map(|smap| AB::smp_to_vloc(smap))
+                    .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
                 let exit_vlocs = tgt_ctr.entry_vlocs();
 
@@ -186,7 +186,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let entry_vlocs = rec
                     .live_vals
                     .iter()
-                    .map(|smap| AB::smp_to_vloc(smap))
+                    .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
 
                 // Create the backwards jump at the end of a loop trace.
@@ -345,7 +345,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                 .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
                                 .map(|(iidx, (aot_op, smap_loc))| {
                                     let fromvlocs = ra.varlocs_for_deopt(*iidx);
-                                    let mut tovlocs = AB::smp_to_vloc(smap_loc);
+                                    let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
                                     if fromvlocs == tovlocs {
                                         // Optimise away situations where we would just move a
                                         // value from VLoc X to VLoc X.
@@ -748,8 +748,12 @@ pub(super) trait HirToAsmBackend {
     #[cfg(test)]
     type BuildTest;
 
-    /// Convert a yksmp stackmap to one or more `VarLoc`s.
-    fn smp_to_vloc(smp_locs: &SmallVec<[yksmp::Location; 1]>) -> VarLocs<Self::Reg>;
+    /// Convert a yksmp stackmap to one or more `VarLoc`s. Since stack maps do not currently encode
+    /// a register fill, any registers returned by this function will be given the fill `reg_fill`.
+    fn smp_to_vloc(
+        smp_locs: &SmallVec<[yksmp::Location; 1]>,
+        reg_fill: RegFill,
+    ) -> VarLocs<Self::Reg>;
     fn thread_local_off(addr: *const c_void) -> u32;
 
     /// Assemble everything into machine code. If `log` is `true`, return `Some(log)`. For each

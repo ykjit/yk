@@ -265,10 +265,16 @@ Ty -> Result<AstTy, Box<dyn Error>>:
 
 VLoc -> Result<AstVLoc, Box<dyn Error>>:
     "REG" { Ok(AstVLoc::AutoReg) }
-  | "REG" "STRING" { Ok(AstVLoc::Reg($2?.span())) }
+  | "REG" "(" "STRING" "," RegFill ")" { Ok(AstVLoc::Reg($3?.span(), $5?)) }
   | "STACK" { Ok(AstVLoc::AutoStack) }
   | "STACK" "INT" { Ok(AstVLoc::Stack($2?.span())) }
   | "STACKOFF" "INT" { Ok(AstVLoc::StackOff($2?.span())) }
+  ;
+
+RegFill -> Result<RegFill, Box<dyn Error>>:
+    "UNDEFINED" { Ok(RegFill::Undefined) }
+  | "SIGNED" { Ok(RegFill::Signed) }
+  | "ZEROED" { Ok(RegFill::Zeroed) }
   ;
 
 Unmatched -> ():
@@ -277,7 +283,7 @@ Unmatched -> ():
 
 %%
 
-use crate::compile::j2::{hir::IPred, hir_parser::*};
+use crate::compile::j2::{hir::IPred, hir_parser::*, regalloc::RegFill};
 use std::error::Error;
 
 fn flattenr<T>(lhs: Result<Vec<T>, Box<dyn Error>>, rhs: Result<T, Box<dyn Error>>)

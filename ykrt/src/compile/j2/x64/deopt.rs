@@ -7,7 +7,7 @@ use crate::{
         j2::{
             compiled_trace::J2CompiledTrace,
             hir::{ConstKind, GuardRestoreIdx},
-            regalloc::{VarLoc, VarLocs},
+            regalloc::{RegFill, VarLoc, VarLocs},
             x64::x64regalloc::Reg,
         },
         jitc_yk::aot_ir::InstId,
@@ -333,7 +333,7 @@ fn reconstruct(
                         (srcaddr.byte_sub(usize::try_from(*off).unwrap()) as *const u64).read()
                     },
                     VarLoc::StackOff(_) => todo!(),
-                    VarLoc::Reg(_) => todo!(),
+                    VarLoc::Reg(_, _) => todo!(),
                     VarLoc::Const(kind) => match kind {
                         ConstKind::Double(_) => todo!(),
                         ConstKind::Float(_) => todo!(),
@@ -348,7 +348,8 @@ fn reconstruct(
                             (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u64).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(reg) => {
+                        VarLoc::Reg(reg, fill) => {
+                            assert_eq!(*fill, RegFill::Zeroed);
                             if reg.is_gp() {
                                 gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = v;
                             } else {
@@ -366,7 +367,7 @@ fn reconstruct(
                         (srcaddr.byte_sub(usize::try_from(*off).unwrap()) as *const u32).read()
                     },
                     VarLoc::StackOff(_) => todo!(),
-                    VarLoc::Reg(_) => todo!(),
+                    VarLoc::Reg(_, _) => todo!(),
                     VarLoc::Const(kind) => match kind {
                         ConstKind::Double(_) => unreachable!(),
                         ConstKind::Float(_) => unreachable!(),
@@ -381,7 +382,8 @@ fn reconstruct(
                             (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u32).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(reg) => {
+                        VarLoc::Reg(reg, fill) => {
+                            assert_eq!(*fill, RegFill::Zeroed);
                             if reg.is_gp() {
                                 gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = u64::from(v);
                             } else {
@@ -399,7 +401,7 @@ fn reconstruct(
                         (srcaddr.byte_sub(usize::try_from(*off).unwrap()) as *const u16).read()
                     },
                     VarLoc::StackOff(_) => todo!(),
-                    VarLoc::Reg(_) => todo!(),
+                    VarLoc::Reg(_, _) => todo!(),
                     VarLoc::Const(ConstKind::Double(_)) => unreachable!(),
                     VarLoc::Const(ConstKind::Float(_)) => unreachable!(),
                     VarLoc::Const(ConstKind::Int(x)) => x.to_zero_ext_u16().unwrap(),
@@ -414,8 +416,9 @@ fn reconstruct(
                             (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u16).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(reg) => {
+                        VarLoc::Reg(reg, fill) => {
                             assert!(reg.is_gp());
+                            assert_eq!(*fill, RegFill::Zeroed);
                             gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = u64::from(v)
                         }
                         VarLoc::Const(_const_kind) => todo!(),
@@ -428,7 +431,7 @@ fn reconstruct(
                         srcaddr.byte_sub(usize::try_from(*off).unwrap()).read()
                     },
                     VarLoc::StackOff(_) => todo!(),
-                    VarLoc::Reg(_) => todo!(),
+                    VarLoc::Reg(_, _) => todo!(),
                     VarLoc::Const(ConstKind::Double(_)) => unreachable!(),
                     VarLoc::Const(ConstKind::Float(_)) => unreachable!(),
                     VarLoc::Const(ConstKind::Int(x)) => x.to_zero_ext_u8().unwrap(),
@@ -443,8 +446,9 @@ fn reconstruct(
                             tgtaddr.byte_sub(usize::try_from(*off).unwrap()).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(reg) => {
+                        VarLoc::Reg(reg, fill) => {
                             assert!(reg.is_gp());
+                            assert_eq!(*fill, RegFill::Zeroed);
                             gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = u64::from(v)
                         }
                         VarLoc::Const(_const_kind) => todo!(),

@@ -16,7 +16,7 @@ use crate::{
     compile::{
         j2::{
             hir::*,
-            regalloc::{RegT, TestRegIter, VarLoc, VarLocs},
+            regalloc::{RegFill, RegT, TestRegIter, VarLoc, VarLocs},
         },
         jitc_yk::{
             aot_ir::{BBlockId, BBlockIdx, DeoptSafepoint, FuncIdx},
@@ -184,11 +184,14 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                                     );
                                 }
                                 autoregused = true;
-                                VarLoc::Reg(testregiter.next_reg(&self.tys[tyidx]).unwrap_or_else(
-                                    || self.err_span(local, "Exhausted automatic test registers"),
-                                ))
+                                VarLoc::Reg(
+                                    testregiter.next_reg(&self.tys[tyidx]).unwrap_or_else(|| {
+                                        self.err_span(local, "Exhausted automatic test registers")
+                                    }),
+                                    RegFill::Undefined,
+                                )
                             }
-                            AstVLoc::Reg(span) => {
+                            AstVLoc::Reg(span, fill) => {
                                 if autoregused {
                                     self.err_span(
                                         local,
@@ -199,7 +202,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                                 let s =
                                     self.lexer.span_str(*span).trim_prefix('"').trim_suffix('"');
                                 match Reg::from_str(s) {
-                                    Some(reg) => VarLoc::Reg(reg),
+                                    Some(reg) => VarLoc::Reg(reg, *fill),
                                     None => self.err_span(*span, &format!("No such register {s}")),
                                 }
                             }
@@ -1281,7 +1284,7 @@ enum AstTy {
 
 enum AstVLoc {
     AutoReg,
-    Reg(Span),
+    Reg(Span, RegFill),
     AutoStack,
     Stack(Span),
     StackOff(Span),
