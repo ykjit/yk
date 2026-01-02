@@ -1348,8 +1348,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     #[allow(clippy::fn_to_numeric_cast)]
     fn guard_end(
         &mut self,
-        _ra: &mut RegAlloc<Self>,
-        _b: &Block,
         trid: TraceId,
         gridx: GuardRestoreIdx,
     ) -> Result<LabelIdx, CompilationError> {

@@ -324,7 +324,7 @@ fn reconstruct(
         .filter(|(_, _, _, tovlocs)| !tovlocs.is_empty())
     {
         // FIXME: For now, we only deal with 1 fromvloc.
-        assert_eq!(fromvlocs.len(), 1);
+        assert_eq!(fromvlocs.len(), 1, "{fromvlocs:?}");
         let fromvloc = fromvlocs.iter().next().unwrap();
         match bitw {
             33..=64 => {
