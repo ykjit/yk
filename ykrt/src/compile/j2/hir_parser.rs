@@ -16,7 +16,7 @@ use crate::{
     compile::{
         j2::{
             hir::*,
-            regalloc::{RegT, TestRegIter, VarLoc, VarLocs},
+            regalloc::{RegFill, RegT, TestRegIter, VarLoc, VarLocs},
         },
         jitc_yk::{
             aot_ir::{BBlockId, BBlockIdx, DeoptSafepoint, FuncIdx},
@@ -170,12 +170,16 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
-                AstInst::Arg { local, ty, vlocs } => {
+                AstInst::Arg {
+                    local,
+                    ty,
+                    vlocs: ast_vlocs,
+                } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
-                    let vlocs = vlocs
-                        .iter()
-                        .map(|vloc| match vloc {
+                    let mut vlocs = VarLocs::with_capacity(ast_vlocs.len());
+                    for ast_vloc in ast_vlocs {
+                        let vloc = match ast_vloc {
                             AstVLoc::AutoReg => {
                                 if manualregused {
                                     self.err_span(
@@ -184,11 +188,14 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                                     );
                                 }
                                 autoregused = true;
-                                VarLoc::Reg(testregiter.next_reg(&self.tys[tyidx]).unwrap_or_else(
-                                    || self.err_span(local, "Exhausted automatic test registers"),
-                                ))
+                                VarLoc::Reg(
+                                    testregiter.next_reg(&self.tys[tyidx]).unwrap_or_else(|| {
+                                        self.err_span(local, "Exhausted automatic test registers")
+                                    }),
+                                    RegFill::Undefined,
+                                )
                             }
-                            AstVLoc::Reg(span) => {
+                            AstVLoc::Reg(span, fill) => {
                                 if autoregused {
                                     self.err_span(
                                         local,
@@ -196,25 +203,25 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                                     );
                                 }
                                 manualregused = true;
-                                let s =
-                                    self.lexer.span_str(*span).trim_prefix('"').trim_suffix('"');
+                                let s = self.lexer.span_str(span).trim_prefix('"').trim_suffix('"');
                                 match Reg::from_str(s) {
-                                    Some(reg) => VarLoc::Reg(reg),
-                                    None => self.err_span(*span, &format!("No such register {s}")),
+                                    Some(reg) => VarLoc::Reg(reg, fill),
+                                    None => self.err_span(span, &format!("No such register {s}")),
                                 }
                             }
                             AstVLoc::AutoStack => todo!(),
                             AstVLoc::Stack(_span) => todo!(),
                             AstVLoc::StackOff(span) => {
-                                let s = self.lexer.span_str(*span);
+                                let s = self.lexer.span_str(span);
                                 let stack_off = s.parse::<u32>().unwrap_or_else(|e| {
-                                    self.err_span(*span, &format!("Invalid StackOff: {e}"))
+                                    self.err_span(span, &format!("Invalid StackOff: {e}"))
                                 });
                                 VarLoc::StackOff(stack_off)
                             }
-                        })
-                        .collect::<SmallVec<_>>();
-                    entry_vlocs.push(VarLocs::new(vlocs));
+                        };
+                        vlocs.push(vloc);
+                    }
+                    entry_vlocs.push(vlocs);
                     self.insts.push(Arg { tyidx }.into());
                 }
                 AstInst::Call {
@@ -1281,7 +1288,7 @@ enum AstTy {
 
 enum AstVLoc {
     AutoReg,
-    Reg(Span),
+    Reg(Span, RegFill),
     AutoStack,
     Stack(Span),
     StackOff(Span),
