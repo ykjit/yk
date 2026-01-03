@@ -35,9 +35,6 @@ ykaddr = { path = "../ykaddr" }
 yksmp = { path = "../yksmp" }
 zydis = "4.1.0"
 
-[target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
-hwtracer = { path = "../hwtracer" }
-
 [dependencies.object]
 version = "0.37.1"
 default-features = false

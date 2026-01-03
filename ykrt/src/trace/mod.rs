@@ -15,8 +15,6 @@
 use std::{error::Error, fmt, sync::Arc};
 use thiserror::Error;
 
-#[cfg(tracer_hwt)]
-pub(crate) mod hwt;
 #[cfg(tracer_swt)]
 pub(crate) mod swt;
 
@@ -32,10 +30,6 @@ pub(crate) trait Tracer: Send + Sync {
 /// selected on a combination of what the platform can support and other (possibly run-time) user
 /// configuration.
 pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
-    #[cfg(tracer_hwt)]
-    {
-        return Ok(Arc::new(hwt::HWTracer::new()?));
-    }
     #[cfg(tracer_swt)]
     {
         return Ok(Arc::new(swt::SWTracer::new()?));

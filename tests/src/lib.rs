@@ -1,5 +1,3 @@
-mod hwtracer_ykpt;
-
 use std::{
     collections::HashMap,
     env,

@@ -1,5 +1,3 @@
-// ## FIXME: Test hangs with hwt.
-// ignore-if: test "$YKB_TRACER" = "hwt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4

@@ -11,12 +11,10 @@ use {
 pub fn main() {
     println!("cargo::rerun-if-env-changed=YKB_TRACER");
 
-    println!("cargo::rustc-check-cfg=cfg(tracer_hwt)");
     println!("cargo::rustc-check-cfg=cfg(tracer_swt)");
     match env::var("YKB_TRACER") {
         Ok(ref tracer) if tracer == "swt" => println!("cargo::rustc-cfg=tracer_swt"),
         #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-        Ok(ref tracer) if tracer == "hwt" => println!("cargo::rustc-cfg=tracer_hwt"),
         Err(env::VarError::NotPresent) => println!("cargo::rustc-cfg=tracer_swt"),
         Ok(x) => panic!("Unknown tracer {x}"),
         Err(_) => panic!("Invalid value for YKB_TRACER"),
