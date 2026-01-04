@@ -2135,7 +2135,15 @@ pub(crate) mod test {
             todo!()
         }
 
-        fn loop_trace_start(&mut self, _iter0_label: Self::Label, _stack_off: u32) {}
+        fn loop_trace_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {}
+
+        fn return_trace_end(&mut self) -> Result<Self::Label, CompilationError> {
+            todo!()
+        }
+
+        fn return_trace_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {
+            todo!()
+        }
 
         fn side_trace_end(
             &mut self,

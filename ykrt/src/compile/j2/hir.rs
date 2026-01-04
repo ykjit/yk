@@ -240,6 +240,7 @@ impl<Reg: RegT> Mod<Reg> {
         match &self.kind {
             ModKind::Coupler { .. } => todo!(),
             ModKind::Loop { .. } => todo!(),
+            ModKind::Return { .. } => todo!(),
             ModKind::Side { .. } => todo!(),
             #[cfg(test)]
             ModKind::Test { entry_vlocs, block } => {
@@ -258,6 +259,7 @@ impl<Reg: RegT> Display for Mod<Reg> {
         match &self.kind {
             ModKind::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
             ModKind::Loop { entry, .. } => write!(f, "{}", entry.to_string(self)),
+            ModKind::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
             ModKind::Side { entry, .. } => write!(f, "{}", entry.to_string(self)),
             #[cfg(test)]
             ModKind::Test { block, .. } => write!(f, "{}", block.to_string(self)),
@@ -280,16 +282,25 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
 /// The kind of a module.
 #[derive(Debug)]
 pub(super) enum ModKind<Reg: RegT> {
+    /// A trace that starts from a control point and ends by jumping to `tgt_ctr`.
     Coupler {
         entry_safepoint: &'static DeoptSafepoint,
         entry: Block,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,
     },
+    /// A trace that starts from a control point and loops. If `inner` is non-`None`, this loop
+    /// has been peeled: `entry` should be executed once, jump to `inner`, and `inner` then loops.
     Loop {
         entry_safepoint: &'static DeoptSafepoint,
         entry: Block,
         inner: Option<Block>,
     },
+    /// A trace that starts from a control point and then returns early.
+    Return {
+        entry_safepoint: &'static DeoptSafepoint,
+        entry: Block,
+    },
+    /// A trace that starts from the guard `src_gridx` in `src_ctr` and jumps to `tgt_ctr`.
     Side {
         entry_vlocs: Vec<VarLocs<Reg>>,
         entry: Block,

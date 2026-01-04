@@ -92,6 +92,7 @@ impl<'a> X64HirToAsm<'a> {
                 assert!(inner.is_none());
                 entry.insts_len()
             }
+            ModKind::Return { entry, .. } => entry.insts_len(),
             ModKind::Side { entry, .. } => entry.insts_len(),
             #[cfg(test)]
             ModKind::Test { block, .. } => block.insts_len(),
@@ -1285,9 +1286,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(label)
     }
 
-    fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32) {
+    fn loop_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
         let stack_off = i32::try_from(stack_off).unwrap();
-        self.asm.attach_label(iter0_label);
+        self.asm.attach_label(post_stack_label);
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,
             IcedReg::RSP,
@@ -1305,13 +1306,29 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(label)
     }
 
+    fn return_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
+        let stack_off = i32::try_from(stack_off).unwrap();
+        self.asm.attach_label(post_stack_label);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            stack_off.next_multiple_of(16),
+        ));
+        self.asm.block_completed();
+    }
+
+    fn return_trace_end(&mut self) -> Result<Self::Label, CompilationError> {
+        Ok(self.asm.mk_label())
+    }
+
     fn side_trace_end(
         &mut self,
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
         let addr = match &ctr.kind {
             J2CompiledTraceKind::Coupler { sidetrace_off, .. }
-            | J2CompiledTraceKind::Loop { sidetrace_off, .. } => unsafe {
+            | J2CompiledTraceKind::Loop { sidetrace_off, .. }
+            | J2CompiledTraceKind::Return { sidetrace_off, .. } => unsafe {
                 ctr.exe().byte_add(*sidetrace_off)
             },
             J2CompiledTraceKind::Side { .. } => todo!(),

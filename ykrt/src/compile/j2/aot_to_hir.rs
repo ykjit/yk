@@ -229,6 +229,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                         }
                         | J2CompiledTraceKind::Loop {
                             entry_safepoint, ..
+                        }
+                        | J2CompiledTraceKind::Return {
+                            entry_safepoint, ..
                         } => entry_safepoint,
                         J2CompiledTraceKind::Side { .. } => todo!(),
                         #[cfg(test)]
@@ -254,11 +257,20 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 entry,
                 tgt_ctr,
             },
-            BuildModKind::Loop { entry_safepoint } => hir::ModKind::Loop {
-                entry_safepoint,
-                entry,
-                inner: None,
-            },
+            BuildModKind::Loop { entry_safepoint } => {
+                if !early_return {
+                    hir::ModKind::Loop {
+                        entry_safepoint,
+                        entry,
+                        inner: None,
+                    }
+                } else {
+                    hir::ModKind::Return {
+                        entry_safepoint,
+                        entry,
+                    }
+                }
+            }
             BuildModKind::Side {
                 entry_vlocs,
                 src_ctr,
