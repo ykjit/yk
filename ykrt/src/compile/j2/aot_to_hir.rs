@@ -820,7 +820,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 Inst::Promote { .. } => self.p_promote(pc.clone(), bid, inst)?,
                 Inst::PtrAdd { .. } => self.p_ptradd(pc.clone(), inst)?,
                 Inst::Ret { .. } => {
-                    if self.p_ret(pc.clone(), inst)? {
+                    if self.p_return(pc.clone(), inst)? {
                         // We encountered an early return in a side-trace.
                         return Ok(true);
                     }
@@ -1631,7 +1631,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     }
 
     /// Return `true` if this is an early return that should stop examining the trace further.
-    fn p_ret(&mut self, _iid: InstId, inst: &Inst) -> Result<bool, CompilationError> {
+    fn p_return(&mut self, _iid: InstId, inst: &Inst) -> Result<bool, CompilationError> {
         let Inst::Ret { val } = inst else { panic!() };
 
         let val = match val {
