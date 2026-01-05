@@ -134,14 +134,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 self.be.coupler_trace_end(tgt_ctr)?;
 
                 // Assemble the body
-                let (guards, entry_stack_off) = self.p_block(
-                    entry,
-                    base_stack_off,
-                    &entry_vlocs,
-                    exit_vlocs,
-                    true,
-                    logging,
-                )?;
+                let (guards, entry_stack_off) =
+                    self.p_block(entry, base_stack_off, &entry_vlocs, exit_vlocs, logging)?;
                 let instrs_label = self
                     .be
                     .coupler_trace_start(entry_stack_off - base_stack_off)?;
@@ -192,14 +186,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let iter0_label = self.be.loop_trace_end()?;
 
                 // Assemble the body
-                let (guards, entry_stack_off) = self.p_block(
-                    entry,
-                    base_stack_off,
-                    &entry_vlocs,
-                    &entry_vlocs,
-                    true,
-                    logging,
-                )?;
+                let (guards, entry_stack_off) =
+                    self.p_block(entry, base_stack_off, &entry_vlocs, &entry_vlocs, logging)?;
                 self.be
                     .loop_trace_start(iter0_label.clone(), entry_stack_off - base_stack_off);
                 self.asm_guards(entry, guards)?;
@@ -252,7 +240,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     base_stack_off,
                     &entry_vlocs,
                     &entry_vlocs, // FIXME: This isn't needed for return traces
-                    true,
                     logging,
                 )?;
                 let post_stack_label = self.be.return_trace_start(entry_stack_off - base_stack_off);
@@ -282,7 +269,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 // Assemble the body
                 let exit_vlocs = tgt_ctr.entry_vlocs();
                 let (guards, entry_stack_off) =
-                    self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, true, logging)?;
+                    self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?;
                 self.be.side_trace_start(entry_stack_off - src_stack_off);
                 self.asm_guards(entry, guards)?;
                 let modkind = J2CompiledTraceKind::Side {
@@ -323,8 +310,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         match &self.m.kind {
             ModKind::Test { entry_vlocs, block } => {
                 // Assemble the body
-                let (guards, stack_off) =
-                    self.p_block(block, 0, entry_vlocs, entry_vlocs, true, true)?;
+                let (guards, stack_off) = self.p_block(block, 0, entry_vlocs, entry_vlocs, true)?;
                 self.be.side_trace_start(stack_off);
 
                 // Guards
@@ -448,7 +434,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         stack_off: u32,
         entry_vlocs: &[VarLocs<AB::Reg>],
         exit_vlocs: &[VarLocs<AB::Reg>],
-        guards_allowed: bool,
         logging: bool,
     ) -> Result<(Vec<AsmGuardRestore<AB>>, u32), CompilationError> {
         let mut ra = RegAlloc::<AB>::new(self.m, b, stack_off);
@@ -606,7 +591,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         ..
                     },
                 ) => {
-                    assert!(guards_allowed);
                     assert!(grestores.len() < self.m.guard_restores().len());
                     // We now have to be careful about guard indexes due to backwards iteration.
                     // We may already have processed `gridx` (remember: multiple [Guard]s can map
