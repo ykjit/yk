@@ -68,7 +68,7 @@
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{
-        CompilationError, CompiledTrace,
+        CompilationError, CompiledTrace, DeoptSafepoint,
         j2::{
             codebuf::ExeCodeBuf,
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
@@ -218,6 +218,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             ModKind::Return {
                 entry_safepoint,
                 entry,
+                exit_safepoint,
             } => {
                 let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
                 // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
@@ -243,7 +244,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
 
-                let post_stack_label = self.be.return_trace_end()?;
+                let post_stack_label = self.be.return_trace_end(exit_safepoint)?;
 
                 // Assemble the body
                 let (guards, entry_stack_off) = self.p_block(
@@ -513,26 +514,45 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_dynptradd(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::Exit(Exit(exit_vars)) => {
-                    let is_loop = match &self.m.kind {
-                        ModKind::Loop { .. } => true,
-                        ModKind::Side { .. } | ModKind::Coupler { .. } => false,
-                        ModKind::Return { .. } => unreachable!(),
-                        #[cfg(test)]
-                        ModKind::Test {
-                            entry_vlocs: _,
-                            block: _,
-                        } => false,
-                    };
-                    ra.set_exit_vlocs(
-                        &mut self.be,
-                        is_loop,
-                        entry_vlocs,
-                        iidx,
-                        exit_vars,
-                        exit_vlocs,
-                    )?;
-                }
+                Inst::Exit(Exit(exit_vars)) => match &self.m.kind {
+                    ModKind::Loop { .. } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            true,
+                            entry_vlocs,
+                            iidx,
+                            exit_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                    ModKind::Side { .. } | ModKind::Coupler { .. } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            false,
+                            entry_vlocs,
+                            iidx,
+                            exit_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                    ModKind::Return { .. } => {
+                        assert_eq!(exit_vars.len(), 0);
+                    }
+                    #[cfg(test)]
+                    ModKind::Test {
+                        entry_vlocs: _,
+                        block: _,
+                    } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            false,
+                            entry_vlocs,
+                            iidx,
+                            exit_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                },
                 Inst::FAdd(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fadd(&mut ra, b, iidx, x)?;
@@ -664,11 +684,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     if ra.is_used(iidx) {
                         self.be.i_ptrtoint(&mut ra, b, iidx, x)?;
                     }
-                }
-                Inst::Return(x) => {
-                    #[cfg(not(test))]
-                    std::assert_matches::assert_matches!(self.m.kind, ModKind::Return { .. });
-                    self.be.i_return(&mut ra, b, iidx, x)?;
                 }
                 Inst::SDiv(x) => {
                     if ra.is_used(iidx) {
@@ -947,8 +962,12 @@ pub(super) trait HirToAsmBackend {
 
     // The functions called for return traces.
 
-    /// Return the label for the end of a return trace.
-    fn return_trace_end(&mut self) -> Result<Self::Label, CompilationError>;
+    /// Generate code for the end of a return trace, where the safepoint for the `return` is
+    /// `exit_safepoint`.
+    fn return_trace_end(
+        &mut self,
+        exit_safepoint: &'static DeoptSafepoint,
+    ) -> Result<Self::Label, CompilationError>;
     /// The current body of a return trace has been completed and has consumed `stack_off` additional
     /// bytes of stack space. `post_stack_label` must be attached to the first instruction after the
     /// stack is adjusted.
@@ -1209,14 +1228,6 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &PtrToInt,
-    ) -> Result<(), CompilationError>;
-
-    fn i_return(
-        &mut self,
-        ra: &mut RegAlloc<Self>,
-        b: &Block,
-        iidx: InstIdx,
-        inst: &Return,
     ) -> Result<(), CompilationError>;
 
     fn i_sdiv(

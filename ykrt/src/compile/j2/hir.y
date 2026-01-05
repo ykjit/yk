@@ -143,9 +143,6 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "MEMSET" "LOCAL" "," "LOCAL" "," "LOCAL" "," Bool {
       Ok(AstInst::MemSet { dst: $2?.span(), val: $4?.span(), len: $6?.span(), volatile: $8? })
     }
-  | "RETURN" {
-      Ok(AstInst::Return)
-    }
   | "LOCAL" ":" Ty "=" "SDIV" "LOCAL" "," "LOCAL" {
        Ok(AstInst::SDiv { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }

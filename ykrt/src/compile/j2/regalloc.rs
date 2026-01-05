@@ -1786,6 +1786,7 @@ pub(crate) mod test {
     use super::*;
     use crate::{
         compile::{
+            DeoptSafepoint,
             j2::{
                 codebuf::ExeCodeBuf, compiled_trace::J2CompiledTrace, hir::Mod, hir::*,
                 hir_parser::str_to_mod, hir_to_asm::*,
@@ -2137,7 +2138,10 @@ pub(crate) mod test {
 
         fn loop_trace_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {}
 
-        fn return_trace_end(&mut self) -> Result<Self::Label, CompilationError> {
+        fn return_trace_end(
+            &mut self,
+            _exit_safepoint: &'static DeoptSafepoint,
+        ) -> Result<Self::Label, CompilationError> {
             todo!()
         }
 
@@ -2533,16 +2537,6 @@ pub(crate) mod test {
             _inst: &crate::compile::j2::hir::PtrToInt,
         ) -> Result<(), CompilationError> {
             todo!()
-        }
-
-        fn i_return(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Return,
-        ) -> Result<(), CompilationError> {
-            todo!();
         }
 
         fn i_sdiv(

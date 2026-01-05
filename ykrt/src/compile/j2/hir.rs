@@ -299,6 +299,7 @@ pub(super) enum ModKind<Reg: RegT> {
     Return {
         entry_safepoint: &'static DeoptSafepoint,
         entry: Block,
+        exit_safepoint: &'static DeoptSafepoint,
     },
     /// A trace that starts from the guard `src_gridx` in `src_ctr` and jumps to `tgt_ctr`.
     Side {
@@ -640,7 +641,6 @@ pub(super) enum Inst {
     Or,
     PtrAdd,
     PtrToInt,
-    Return,
     SDiv,
     Select,
     SExt,
@@ -2720,46 +2720,6 @@ impl InstT for PtrToInt {
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
         m.ty(self.tyidx)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct Return {
-    pub safepoint: &'static DeoptSafepoint,
-}
-
-impl InstT for Return {
-    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
-
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
-
-    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
-    }
-
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([].into_iter())
-    }
-
-    #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
-    where
-        F: FnMut(InstIdx) -> InstIdx,
-    {
-    }
-
-    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        "return".to_owned()
-    }
-
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Void
-    }
-}
-
-impl PartialEq for Return {
-    fn eq(&self, _other: &Self) -> bool {
-        panic!();
     }
 }
 

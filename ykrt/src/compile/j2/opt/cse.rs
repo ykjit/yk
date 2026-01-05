@@ -65,7 +65,6 @@ impl PassT for CSE {
         | Inst::Load(_)
         | Inst::MemCpy(_)
         | Inst::MemSet(_)
-        | Inst::Return(_)
         | Inst::Store(_) = inst
         {
             return OptOutcome::Rewritten(inst);
