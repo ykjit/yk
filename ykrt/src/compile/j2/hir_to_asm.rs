@@ -244,7 +244,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
 
-                let post_stack_label = self.be.return_trace_end(exit_safepoint)?;
+                self.be.return_trace_end(exit_safepoint)?;
 
                 // Assemble the body
                 let (guards, entry_stack_off) = self.p_block(
@@ -255,8 +255,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     true,
                     logging,
                 )?;
-                self.be
-                    .return_trace_start(post_stack_label.clone(), entry_stack_off - base_stack_off);
+                let post_stack_label = self.be.return_trace_start(entry_stack_off - base_stack_off);
                 self.asm_guards(entry, guards)?;
                 let (buf, guards, log, label_offs) =
                     self.be.build_exe(logging, &[post_stack_label])?;
@@ -967,11 +966,11 @@ pub(super) trait HirToAsmBackend {
     fn return_trace_end(
         &mut self,
         exit_safepoint: &'static DeoptSafepoint,
-    ) -> Result<Self::Label, CompilationError>;
-    /// The current body of a return trace has been completed and has consumed `stack_off` additional
-    /// bytes of stack space. `post_stack_label` must be attached to the first instruction after the
-    /// stack is adjusted.
-    fn return_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32);
+    ) -> Result<(), CompilationError>;
+    /// The current body of a return trace has been completed and has consumed `stack_off`
+    /// additional bytes of stack space. The label returned must be attached to the first
+    /// instruction after the stack is adjusted.
+    fn return_trace_start(&mut self, stack_off: u32) -> Self::Label;
 
     // The functions called for side traces.
 

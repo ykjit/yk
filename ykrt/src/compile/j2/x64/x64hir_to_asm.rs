@@ -1306,7 +1306,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(label)
     }
 
-    fn return_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
+    fn return_trace_start(&mut self, stack_off: u32) -> Self::Label {
+        let post_stack_label = self.asm.mk_label();
         let stack_off = i32::try_from(stack_off).unwrap();
         self.asm.attach_label(post_stack_label);
         self.asm.push_inst(IcedInst::with2(
@@ -1315,12 +1316,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             stack_off.next_multiple_of(16),
         ));
         self.asm.block_completed();
+        post_stack_label
     }
 
     fn return_trace_end(
         &mut self,
         exit_safepoint: &'static DeoptSafepoint,
-    ) -> Result<Self::Label, CompilationError> {
+    ) -> Result<(), CompilationError> {
         #[cfg(not(test))]
         let csrs = {
             let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
@@ -1354,7 +1356,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RBP,
         ));
 
-        Ok(self.asm.mk_label())
+        Ok(())
     }
 
     fn side_trace_end(

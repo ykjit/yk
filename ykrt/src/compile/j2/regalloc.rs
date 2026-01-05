@@ -2141,11 +2141,11 @@ pub(crate) mod test {
         fn return_trace_end(
             &mut self,
             _exit_safepoint: &'static DeoptSafepoint,
-        ) -> Result<Self::Label, CompilationError> {
+        ) -> Result<(), CompilationError> {
             todo!()
         }
 
-        fn return_trace_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {
+        fn return_trace_start(&mut self, _stack_off: u32) -> Self::Label {
             todo!()
         }
 
