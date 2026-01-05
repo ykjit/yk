@@ -110,9 +110,6 @@ impl KnownBits {
         OptOutcome::Rewritten(inst.into())
     }
 
-    // The `or` operation adds new information in the form of set ones.  E.g. `unknown | (1)` sets
-    // the least significant bit to one. If the result has no new set ones, that means this op is
-    // useless.
     fn opt_or(&mut self, opt: &PassOpt, mut inst: Or) -> OptOutcome {
         inst.canonicalise(opt);
         let Or {
@@ -135,8 +132,9 @@ impl KnownBits {
                 }));
             }
 
-            // If no new information (set ones) was gained, that means this
-            // op is useless.
+            // The `or` operation adds new information in the form of set ones. E.g. `unknown | (1)`
+            // sets the least significant bit to one. If the result has no new set ones, that means
+            // this op is useless.
             if rhs_b.all_known()
                 && rhs_b
                     .known_ones()
