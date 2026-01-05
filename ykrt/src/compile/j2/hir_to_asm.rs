@@ -68,7 +68,7 @@
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{
-        CompilationError, CompiledTrace,
+        CompilationError, CompiledTrace, DeoptSafepoint,
         j2::{
             codebuf::ExeCodeBuf,
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
@@ -208,6 +208,61 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     panic!()
                 };
                 let modkind = J2CompiledTraceKind::Loop {
+                    entry_vlocs,
+                    entry_safepoint,
+                    stack_off: entry_stack_off,
+                    sidetrace_off: *sidetrace_off,
+                };
+                (buf, guards, log, modkind)
+            }
+            ModKind::Return {
+                entry_safepoint,
+                entry,
+                exit_safepoint,
+            } => {
+                let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+                // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
+                let base_stack_off = u32::try_from({
+                    let (smap, prologue) = aot_smaps.get(0);
+                    if prologue.hasfp {
+                        // FIXME: This needs porting! https://github.com/ykjit/yk/issues/1936
+                        #[cfg(not(target_arch = "x86_64"))]
+                        panic!();
+                        // The frame size includes RBP, but we only want to include the
+                        // local variables.
+                        smap.size - 8
+                    } else {
+                        smap.size
+                    }
+                })
+                .unwrap();
+
+                let (rec, _) = aot_smaps.get(usize::try_from(entry_safepoint.id).unwrap());
+                let entry_vlocs = rec
+                    .live_vals
+                    .iter()
+                    .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
+                    .collect::<Vec<_>>();
+
+                self.be.return_trace_end(exit_safepoint)?;
+
+                // Assemble the body
+                let (guards, entry_stack_off) = self.p_block(
+                    entry,
+                    base_stack_off,
+                    &entry_vlocs,
+                    &entry_vlocs, // FIXME: This isn't needed for return traces
+                    true,
+                    logging,
+                )?;
+                let post_stack_label = self.be.return_trace_start(entry_stack_off - base_stack_off);
+                self.asm_guards(entry, guards)?;
+                let (buf, guards, log, label_offs) =
+                    self.be.build_exe(logging, &[post_stack_label])?;
+                let [sidetrace_off] = &*label_offs else {
+                    panic!()
+                };
+                let modkind = J2CompiledTraceKind::Return {
                     entry_vlocs,
                     entry_safepoint,
                     stack_off: entry_stack_off,
@@ -458,25 +513,45 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_dynptradd(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::Exit(Exit(exit_vars)) => {
-                    let is_loop = match &self.m.kind {
-                        ModKind::Loop { .. } => true,
-                        ModKind::Side { .. } | ModKind::Coupler { .. } => false,
-                        #[cfg(test)]
-                        ModKind::Test {
-                            entry_vlocs: _,
-                            block: _,
-                        } => false,
-                    };
-                    ra.set_exit_vlocs(
-                        &mut self.be,
-                        is_loop,
-                        entry_vlocs,
-                        iidx,
-                        exit_vars,
-                        exit_vlocs,
-                    )?;
-                }
+                Inst::Exit(Exit(exit_vars)) => match &self.m.kind {
+                    ModKind::Loop { .. } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            true,
+                            entry_vlocs,
+                            iidx,
+                            exit_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                    ModKind::Side { .. } | ModKind::Coupler { .. } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            false,
+                            entry_vlocs,
+                            iidx,
+                            exit_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                    ModKind::Return { .. } => {
+                        assert_eq!(exit_vars.len(), 0);
+                    }
+                    #[cfg(test)]
+                    ModKind::Test {
+                        entry_vlocs: _,
+                        block: _,
+                    } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            false,
+                            entry_vlocs,
+                            iidx,
+                            exit_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                },
                 Inst::FAdd(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fadd(&mut ra, b, iidx, x)?;
@@ -608,9 +683,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     if ra.is_used(iidx) {
                         self.be.i_ptrtoint(&mut ra, b, iidx, x)?;
                     }
-                }
-                Inst::Return(x) => {
-                    self.be.i_return(&mut ra, b, iidx, x)?;
                 }
                 Inst::SDiv(x) => {
                     if ra.is_used(iidx) {
@@ -883,9 +955,22 @@ pub(super) trait HirToAsmBackend {
     /// Produce code for the backwards jump that finishes a loop trace.
     fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError>;
     /// The current body of a loop trace has been completed and has consumed `stack_off` additional
-    /// bytes of stack space. `iter0_label` must be attached to the first instruction after the
+    /// bytes of stack space. `post_stack_label` must be attached to the first instruction after the
     /// stack is adjusted.
-    fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32);
+    fn loop_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32);
+
+    // The functions called for return traces.
+
+    /// Generate code for the end of a return trace, where the safepoint for the `return` is
+    /// `exit_safepoint`.
+    fn return_trace_end(
+        &mut self,
+        exit_safepoint: &'static DeoptSafepoint,
+    ) -> Result<(), CompilationError>;
+    /// The current body of a return trace has been completed and has consumed `stack_off`
+    /// additional bytes of stack space. The label returned must be attached to the first
+    /// instruction after the stack is adjusted.
+    fn return_trace_start(&mut self, stack_off: u32) -> Self::Label;
 
     // The functions called for side traces.
 
@@ -1142,14 +1227,6 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &PtrToInt,
-    ) -> Result<(), CompilationError>;
-
-    fn i_return(
-        &mut self,
-        ra: &mut RegAlloc<Self>,
-        b: &Block,
-        iidx: InstIdx,
-        inst: &Return,
     ) -> Result<(), CompilationError>;
 
     fn i_sdiv(

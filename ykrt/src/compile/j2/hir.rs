@@ -240,6 +240,7 @@ impl<Reg: RegT> Mod<Reg> {
         match &self.kind {
             ModKind::Coupler { .. } => todo!(),
             ModKind::Loop { .. } => todo!(),
+            ModKind::Return { .. } => todo!(),
             ModKind::Side { .. } => todo!(),
             #[cfg(test)]
             ModKind::Test { entry_vlocs, block } => {
@@ -258,6 +259,7 @@ impl<Reg: RegT> Display for Mod<Reg> {
         match &self.kind {
             ModKind::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
             ModKind::Loop { entry, .. } => write!(f, "{}", entry.to_string(self)),
+            ModKind::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
             ModKind::Side { entry, .. } => write!(f, "{}", entry.to_string(self)),
             #[cfg(test)]
             ModKind::Test { block, .. } => write!(f, "{}", block.to_string(self)),
@@ -280,16 +282,26 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
 /// The kind of a module.
 #[derive(Debug)]
 pub(super) enum ModKind<Reg: RegT> {
+    /// A trace that starts from a control point and ends by jumping to `tgt_ctr`.
     Coupler {
         entry_safepoint: &'static DeoptSafepoint,
         entry: Block,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,
     },
+    /// A trace that starts from a control point and loops. If `inner` is non-`None`, this loop
+    /// has been peeled: `entry` should be executed once, jump to `inner`, and `inner` then loops.
     Loop {
         entry_safepoint: &'static DeoptSafepoint,
         entry: Block,
         inner: Option<Block>,
     },
+    /// A trace that starts from a control point and then returns early.
+    Return {
+        entry_safepoint: &'static DeoptSafepoint,
+        entry: Block,
+        exit_safepoint: &'static DeoptSafepoint,
+    },
+    /// A trace that starts from the guard `src_gridx` in `src_ctr` and jumps to `tgt_ctr`.
     Side {
         entry_vlocs: Vec<VarLocs<Reg>>,
         entry: Block,
@@ -629,7 +641,6 @@ pub(super) enum Inst {
     Or,
     PtrAdd,
     PtrToInt,
-    Return,
     SDiv,
     Select,
     SExt,
@@ -2709,46 +2720,6 @@ impl InstT for PtrToInt {
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
         m.ty(self.tyidx)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct Return {
-    pub safepoint: &'static DeoptSafepoint,
-}
-
-impl InstT for Return {
-    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
-
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
-
-    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
-    }
-
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([].into_iter())
-    }
-
-    #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
-    where
-        F: FnMut(InstIdx) -> InstIdx,
-    {
-    }
-
-    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        "return".to_owned()
-    }
-
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Void
-    }
-}
-
-impl PartialEq for Return {
-    fn eq(&self, _other: &Self) -> bool {
-        panic!();
     }
 }
 

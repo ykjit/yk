@@ -66,7 +66,8 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
     pub(super) fn entry_vlocs(&self) -> &[VarLocs<Reg>] {
         match &self.kind {
             J2CompiledTraceKind::Coupler { entry_vlocs, .. }
-            | J2CompiledTraceKind::Loop { entry_vlocs, .. } => entry_vlocs,
+            | J2CompiledTraceKind::Loop { entry_vlocs, .. }
+            | J2CompiledTraceKind::Return { entry_vlocs, .. } => entry_vlocs,
             J2CompiledTraceKind::Side { stack_off: _ } => todo!(),
             #[cfg(test)]
             J2CompiledTraceKind::Test => todo!(),
@@ -81,6 +82,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         match self.kind {
             J2CompiledTraceKind::Coupler { stack_off, .. }
             | J2CompiledTraceKind::Loop { stack_off, .. }
+            | J2CompiledTraceKind::Return { stack_off, .. }
             | J2CompiledTraceKind::Side { stack_off } => {
                 stack_off + self.guard_restores[gridx].extra_stack_len
             }
@@ -94,6 +96,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
     pub(super) fn entry_stack_off(&self) -> u32 {
         match self.kind {
             J2CompiledTraceKind::Coupler { stack_off, .. }
+            | J2CompiledTraceKind::Return { stack_off, .. }
             | J2CompiledTraceKind::Loop { stack_off, .. } => stack_off,
             J2CompiledTraceKind::Side { .. } => todo!(),
             #[cfg(test)]
@@ -196,6 +199,24 @@ pub(super) enum J2CompiledTraceKind<Reg: RegT> {
         /// trace guarantees to accept variables being set in accordance with
         /// `entry_safepoint.lives`, it is also happy with a non-strict subset of those. That means
         /// that other traces jumping to this loop trace only need to deal with the subset recorded
+        /// in `entry_vlocs` (i.e. they can ignore the superset in `entry_safepoint.lives`).
+        entry_vlocs: Vec<VarLocs<Reg>>,
+        stack_off: u32,
+        /// The offset into the compiled trace that sidetraces should jump to.
+        sidetrace_off: usize,
+    },
+    /// A return trace.
+    Return {
+        /// The entry safepoint. See [entry_vlocs].
+        entry_safepoint: &'static DeoptSafepoint,
+        /// Every entry in `entry_safepoint.lives` will have an entry in `entry_vlocs`, in order.
+        /// In other words, `entry_safepoint.lives.iter().zip(entry_vlocs.iter())` is guaranteed to
+        /// work as expected.
+        ///
+        /// However, some variables will have empty `VarLocs`. In other words, while this return
+        /// trace guarantees to accept variables being set in accordance with
+        /// `entry_safepoint.lives`, it is also happy with a non-strict subset of those. That means
+        /// that other traces jumping to this return trace only need to deal with the subset recorded
         /// in `entry_vlocs` (i.e. they can ignore the superset in `entry_safepoint.lives`).
         entry_vlocs: Vec<VarLocs<Reg>>,
         stack_off: u32,

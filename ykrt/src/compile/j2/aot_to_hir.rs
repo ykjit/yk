@@ -214,10 +214,10 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             BuildModKind::Side { prev_bid, .. } => Some(*prev_bid),
         };
 
-        // If we encounter a return in a side-trace, [early_return] will be set to true, and no
+        // If we encounter a return in a side-trace, [return_safepoint] will be `Some`, and no
         // further processing of the trace should occur.
-        let early_return = self.p_blocks()?;
-        if !early_return {
+        let return_safepoint = self.p_blocks()?;
+        if return_safepoint.is_none() {
             assert_eq!(self.promotions_off, self.promotions.len());
             assert_eq!(self.frames.len(), 1);
             let exit_safepoint = match &bmk {
@@ -228,6 +228,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                             entry_safepoint, ..
                         }
                         | J2CompiledTraceKind::Loop {
+                            entry_safepoint, ..
+                        }
+                        | J2CompiledTraceKind::Return {
                             entry_safepoint, ..
                         } => entry_safepoint,
                         J2CompiledTraceKind::Side { .. } => todo!(),
@@ -254,10 +257,17 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 entry,
                 tgt_ctr,
             },
-            BuildModKind::Loop { entry_safepoint } => hir::ModKind::Loop {
-                entry_safepoint,
-                entry,
-                inner: None,
+            BuildModKind::Loop { entry_safepoint } => match return_safepoint {
+                None => hir::ModKind::Loop {
+                    entry_safepoint,
+                    entry,
+                    inner: None,
+                },
+                Some(x) => hir::ModKind::Return {
+                    entry_safepoint,
+                    entry,
+                    exit_safepoint: x,
+                },
             },
             BuildModKind::Side {
                 entry_vlocs,
@@ -753,9 +763,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         }
     }
 
-    /// Returns `true` if an early return was encountered: parent code should stop examining the
-    /// trace at this point.
-    fn p_blocks(&mut self) -> Result<bool, CompilationError> {
+    /// Returns `Some(safepoint)` if an early return was encountered: parent code should stop
+    /// examining the trace at this point.
+    fn p_blocks(&mut self) -> Result<Option<&'static DeoptSafepoint>, CompilationError> {
         loop {
             let (pc, bid, blk) = {
                 let mut pc = self.frames.last().unwrap().pc.clone().unwrap();
@@ -763,7 +773,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 let mut blk = self.am.bblock(&bid);
                 if usize::from(pc.iidx()) == blk.insts.len() {
                     let Some(ta) = self.ta_iter.next() else {
-                        return Ok(false);
+                        return Ok(None);
                     };
                     let cnd_bid = self.ta_to_bid(&ta?).unwrap();
                     blk = self.am.bblock(&cnd_bid);
@@ -820,9 +830,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 Inst::Promote { .. } => self.p_promote(pc.clone(), bid, inst)?,
                 Inst::PtrAdd { .. } => self.p_ptradd(pc.clone(), inst)?,
                 Inst::Ret { .. } => {
-                    if self.p_ret(pc.clone(), inst)? {
-                        // We encountered an early return in a side-trace.
-                        return Ok(true);
+                    if let Some(x) = self.p_return(pc.clone(), inst)? {
+                        // We encountered an early return.
+                        return Ok(Some(x));
                     }
                 }
                 Inst::Select { .. } => self.p_select(pc.clone(), inst)?,
@@ -1630,8 +1640,13 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         Ok(())
     }
 
-    /// Return `true` if this is an early return that should stop examining the trace further.
-    fn p_ret(&mut self, _iid: InstId, inst: &Inst) -> Result<bool, CompilationError> {
+    /// Return `Some(safepoint)` if this is an early return: this must stop further examination of
+    /// the trace.
+    fn p_return(
+        &mut self,
+        _iid: InstId,
+        inst: &Inst,
+    ) -> Result<Option<&'static DeoptSafepoint>, CompilationError> {
         let Inst::Ret { val } = inst else { panic!() };
 
         let val = match val {
@@ -1645,7 +1660,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 let frame = self.frames.last_mut().unwrap();
                 frame.set_local(frame.pc.clone().unwrap(), val_iidx);
             }
-            Ok(false)
+            Ok(None)
         } else {
             // We've returned out of the function that started tracing. Stop processing any
             // remaining blocks and emit a return instruction that naturally returns from a
@@ -1653,8 +1668,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let safepoint = frame.pc_safepoint.unwrap();
             // We currently don't support passing values back during early returns.
             assert!(val.is_none());
-            self.opt.feed_void(hir::Return { safepoint }.into())?;
-            Ok(true)
+            self.opt.feed_void(hir::Exit(Vec::new()).into())?;
+            Ok(Some(safepoint))
         }
     }
 

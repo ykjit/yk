@@ -35,7 +35,7 @@
 use crate::aotsmp::AOT_STACKMAPS;
 use crate::{
     compile::{
-        CompilationError,
+        CompilationError, DeoptSafepoint,
         j2::{
             codebuf::{CodeBufInProgress, ExeCodeBuf},
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
@@ -92,6 +92,7 @@ impl<'a> X64HirToAsm<'a> {
                 assert!(inner.is_none());
                 entry.insts_len()
             }
+            ModKind::Return { entry, .. } => entry.insts_len(),
             ModKind::Side { entry, .. } => entry.insts_len(),
             #[cfg(test)]
             ModKind::Test { block, .. } => block.insts_len(),
@@ -1285,9 +1286,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(label)
     }
 
-    fn loop_trace_start(&mut self, iter0_label: Self::Label, stack_off: u32) {
+    fn loop_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
         let stack_off = i32::try_from(stack_off).unwrap();
-        self.asm.attach_label(iter0_label);
+        self.asm.attach_label(post_stack_label);
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,
             IcedReg::RSP,
@@ -1305,13 +1306,67 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(label)
     }
 
+    fn return_trace_start(&mut self, stack_off: u32) -> Self::Label {
+        let post_stack_label = self.asm.mk_label();
+        let stack_off = i32::try_from(stack_off).unwrap();
+        self.asm.attach_label(post_stack_label);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            stack_off.next_multiple_of(16),
+        ));
+        self.asm.block_completed();
+        post_stack_label
+    }
+
+    fn return_trace_end(
+        &mut self,
+        exit_safepoint: &'static DeoptSafepoint,
+    ) -> Result<(), CompilationError> {
+        #[cfg(not(test))]
+        let csrs = {
+            let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+            let (_, prologue) = aot_smaps.get(usize::try_from(exit_safepoint.id).unwrap());
+            &prologue.csrs
+        };
+
+        #[cfg(test)]
+        let csrs = {
+            assert_eq!(exit_safepoint.id, 0);
+            [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
+        };
+
+        self.asm.push_inst(Ok(IcedInst::with(Code::Retnq)));
+        self.asm
+            .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RBP));
+        for (reg, _) in csrs.iter().rev() {
+            self.asm.push_inst(IcedInst::with1(
+                Code::Pop_r64,
+                Reg::from_dwarf_reg(*reg).to_reg64(),
+            ));
+        }
+        self.asm.push_inst(IcedInst::with2(
+            Code::Sub_rm64_imm32,
+            IcedReg::RSP,
+            i32::try_from(csrs.len() * 8).unwrap(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_rm64,
+            IcedReg::RSP,
+            IcedReg::RBP,
+        ));
+
+        Ok(())
+    }
+
     fn side_trace_end(
         &mut self,
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
         let addr = match &ctr.kind {
             J2CompiledTraceKind::Coupler { sidetrace_off, .. }
-            | J2CompiledTraceKind::Loop { sidetrace_off, .. } => unsafe {
+            | J2CompiledTraceKind::Loop { sidetrace_off, .. }
+            | J2CompiledTraceKind::Return { sidetrace_off, .. } => unsafe {
                 ctr.exe().byte_add(*sidetrace_off)
             },
             J2CompiledTraceKind::Side { .. } => todo!(),
@@ -3011,48 +3066,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 regs: &NORMAL_GP_REGS,
             }],
         )?;
-        Ok(())
-    }
-
-    fn i_return(
-        &mut self,
-        _ra: &mut RegAlloc<Self>,
-        _b: &Block,
-        _iidx: InstIdx,
-        Return { safepoint }: &Return,
-    ) -> Result<(), CompilationError> {
-        #[cfg(not(test))]
-        let csrs = {
-            let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-            let (_, prologue) = aot_smaps.get(usize::try_from(safepoint.id).unwrap());
-            &prologue.csrs
-        };
-
-        #[cfg(test)]
-        let csrs = {
-            assert_eq!(safepoint.id, 0);
-            [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
-        };
-
-        self.asm.push_inst(Ok(IcedInst::with(Code::Retnq)));
-        self.asm
-            .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RBP));
-        for (reg, _) in csrs.iter().rev() {
-            self.asm.push_inst(IcedInst::with1(
-                Code::Pop_r64,
-                Reg::from_dwarf_reg(*reg).to_reg64(),
-            ));
-        }
-        self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
-            IcedReg::RSP,
-            i32::try_from(csrs.len() * 8).unwrap(),
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_r64_rm64,
-            IcedReg::RSP,
-            IcedReg::RBP,
-        ));
         Ok(())
     }
 
@@ -6619,29 +6632,6 @@ mod test {
               ; %3: ptr = inttoptr %2
               ; exit [%3]
             "#],
-        );
-    }
-
-    #[test]
-    fn cg_return() {
-        codegen_and_test(
-            "
-              %0: i8 = arg [reg]
-              return
-            ",
-            &["
-              ...
-              ; return
-              mov rsp, rbp
-              sub rsp, 0x28
-              pop rbx
-              pop r12
-              pop r13
-              pop r14
-              pop r15
-              pop rbp
-              ret
-            "],
         );
     }
 

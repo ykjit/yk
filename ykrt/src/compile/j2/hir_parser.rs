@@ -19,7 +19,7 @@ use crate::{
             regalloc::{RegFill, RegT, TestRegIter, VarLoc, VarLocs},
         },
         jitc_yk::{
-            aot_ir::{BBlockId, BBlockIdx, DeoptSafepoint, FuncIdx},
+            aot_ir::{BBlockId, BBlockIdx, FuncIdx},
             arbbitint::ArbBitInt,
         },
     },
@@ -34,14 +34,6 @@ use std::{collections::HashMap, ffi::CString, marker::PhantomData};
 lrlex_mod!("compile/j2/hir.l");
 lrpar_mod!("compile/j2/hir.y");
 type StorageT = u16;
-
-/// In unit test mode, there are are no [DeoptSafepoint]s, since we're running as a normal Rust
-/// binary, not a ykllvm compiled C program. If we want to use a [DeoptSafepoint] in tests, we have
-/// to create a dummy.
-static TEST_DEOPT_SAFEPOINT: DeoptSafepoint = DeoptSafepoint {
-    id: 0,
-    lives: Vec::new(),
-};
 
 struct HirParser<'lexer, 'input: 'lexer, Reg: RegT> {
     lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
@@ -663,14 +655,6 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let val = self.p_local(val);
                     self.insts.push(PtrToInt { tyidx, val }.into());
                 }
-                AstInst::Return => {
-                    self.insts.push(
-                        Return {
-                            safepoint: &TEST_DEOPT_SAFEPOINT,
-                        }
-                        .into(),
-                    );
-                }
                 AstInst::SDiv {
                     local,
                     ty,
@@ -1190,7 +1174,6 @@ enum AstInst {
         ty: AstTy,
         val: Span,
     },
-    Return,
     SDiv {
         local: Span,
         ty: AstTy,
