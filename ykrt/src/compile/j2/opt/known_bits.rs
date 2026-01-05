@@ -5,7 +5,7 @@
 
 use crate::compile::{
     j2::{
-        hir::{And, Const, ConstKind, Inst, InstIdx, InstT, Or, Ty},
+        hir::*,
         opt::{
             BlockLikeT,
             fullopt::{CommitInstOpt, OptOutcome, PassOpt, PassT},
@@ -33,6 +33,8 @@ impl PassT for KnownBits {
             Inst::And(x) => self.opt_and(opt, x),
             Inst::Const(x) => self.opt_const(x),
             Inst::Or(x) => self.opt_or(opt, x),
+            Inst::SExt(x) => self.opt_sext(opt, x),
+            Inst::ZExt(x) => self.opt_zext(opt, x),
             _ => OptOutcome::Rewritten(inst),
         }
     }
@@ -149,6 +151,26 @@ impl KnownBits {
         }
         OptOutcome::Rewritten(inst.into())
     }
+
+    fn opt_sext(&mut self, opt: &PassOpt, inst: SExt) -> OptOutcome {
+        let SExt { tyidx, val } = inst;
+        if let Some(val_b) = self.as_knownbits(opt, val) {
+            let dst_bitw = opt.ty(tyidx).bitw();
+            let res = val_b.sign_extend(dst_bitw);
+            self.set_pending(res.clone());
+        }
+        OptOutcome::Rewritten(inst.into())
+    }
+
+    fn opt_zext(&mut self, opt: &PassOpt, inst: ZExt) -> OptOutcome {
+        let ZExt { tyidx, val } = inst;
+        if let Some(val_b) = self.as_knownbits(opt, val) {
+            let dst_bitw = opt.ty(tyidx).bitw();
+            let res = val_b.zero_extend(dst_bitw);
+            self.set_pending(res.clone());
+        }
+        OptOutcome::Rewritten(inst.into())
+    }
 }
 
 /// Known bits for a single value.
@@ -237,6 +259,24 @@ impl KnownBitValue {
             .unknowns
             .bitor(&other.unknowns)
             .bitand(&set_ones.bitneg());
+        KnownBitValue {
+            ones: set_ones,
+            unknowns,
+        }
+    }
+
+    fn sign_extend(&self, bitw: u32) -> KnownBitValue {
+        let set_ones = self.ones.sign_extend(bitw);
+        let unknowns = self.unknowns.sign_extend(bitw);
+        KnownBitValue {
+            ones: set_ones,
+            unknowns,
+        }
+    }
+
+    fn zero_extend(&self, bitw: u32) -> KnownBitValue {
+        let set_ones = self.ones.zero_extend(bitw);
+        let unknowns = self.unknowns.zero_extend(bitw);
         KnownBitValue {
             ones: set_ones,
             unknowns,
@@ -392,6 +432,94 @@ mod test {
           %3: i8 = 3
           %4: i8 = 3
           blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_sext() {
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i16 = sext %2
+          %4: i16 = 32768
+          %5: i16 = or %3, %4
+          blackbox %5
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i16 = sext %2
+          %4: i16 = 32768
+          blackbox %3
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i8 = and %0, %1
+          %3: i16 = sext %2
+          %4: i16 = 32768
+          %5: i16 = and %3, %4
+          blackbox %5
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 1
+          %2: i8 = and %0, %1
+          %3: i16 = sext %2
+          %4: i16 = 32768
+          %5: i16 = 0
+          blackbox %5
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_zext() {
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i16 = zext %2
+          %4: i16 = 32768
+          %5: i16 = and %3, %4
+          blackbox %5
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i16 = zext %2
+          %4: i16 = 32768
+          %5: i16 = 0
+          blackbox %5
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i16 = zext %2
+          %4: i16 = 128
+          %5: i16 = or %3, %4
+          blackbox %5
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i16 = zext %2
+          %4: i16 = 128
+          blackbox %3
         ",
         );
     }
