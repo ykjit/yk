@@ -50,11 +50,12 @@ use crate::{
         jitc_yk::aot_ir,
     },
     mt::TraceId,
+    varlocs,
 };
 use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
 use index_vec::IndexVec;
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 use std::{
     assert_matches::{assert_matches, debug_assert_matches},
     collections::HashMap,
@@ -788,28 +789,35 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     #[cfg(test)]
     type BuildTest = String;
 
-    fn smp_to_vloc(smp_locs: &SmallVec<[yksmp::Location; 1]>) -> VarLocs<Self::Reg> {
+    fn smp_to_vloc(
+        smp_locs: &SmallVec<[yksmp::Location; 1]>,
+        reg_fill: RegFill,
+    ) -> VarLocs<Self::Reg> {
         use yksmp::Location as L;
         assert_eq!(smp_locs.len(), 1, "Multi-locations not yet supported");
         match &smp_locs[0] {
             L::Register(dwarf_reg, _sz, extras) => {
-                let mut out = smallvec![VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg))];
+                let mut vlocs = VarLocs::new();
+                vlocs.push(VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill));
                 for x in extras {
                     if *x >= 0 {
-                        out.push(VarLoc::Reg(Reg::from_dwarf_reg(x.cast_unsigned())));
+                        vlocs.push(VarLoc::Reg(
+                            Reg::from_dwarf_reg(x.cast_unsigned()),
+                            reg_fill,
+                        ));
                     } else {
-                        out.push(VarLoc::Stack(u32::from(x.unsigned_abs())));
+                        vlocs.push(VarLoc::Stack(u32::from(x.unsigned_abs())));
                     }
                 }
-                VarLocs::new(out)
+                vlocs
             }
             L::Direct(6, off, _sz) => {
                 assert!(*off <= 0);
-                VarLocs::new(smallvec![VarLoc::StackOff(off.unsigned_abs())])
+                varlocs![VarLoc::StackOff(off.unsigned_abs())]
             }
             L::Indirect(6, off, _sz) => {
                 assert!(*off <= 0);
-                VarLocs::new(smallvec![VarLoc::Stack(off.unsigned_abs())])
+                varlocs![VarLoc::Stack(off.unsigned_abs())]
             }
             x => {
                 todo!("{:?}", x);
@@ -1340,8 +1348,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     #[allow(clippy::fn_to_numeric_cast)]
     fn guard_end(
         &mut self,
-        _ra: &mut RegAlloc<Self>,
-        _b: &Block,
         trid: TraceId,
         gridx: GuardRestoreIdx,
     ) -> Result<LabelIdx, CompilationError> {
@@ -4638,7 +4644,7 @@ mod test {
             &[
                 r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               mov rdi, r.64.x
               ; %1: ptr = {{addr}}
               ; %2: i32 = call %1(%0)
@@ -4651,7 +4657,7 @@ mod test {
             "#,
                 r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               mov rdi, r.64.x
               ; %1: ptr = {{addr}}
               mov rax, {{addr}}
@@ -4743,17 +4749,17 @@ mod test {
             r#"
               extern f(float, double)
 
-              %0: ptr = arg [reg "rax"]
-              %1: float = arg [reg "xmm15"]
-              %2: double = arg [reg "xmm14"]
+              %0: ptr = arg [reg ("rax", undefined)]
+              %1: float = arg [reg ("xmm15", undefined)]
+              %2: double = arg [reg ("xmm14", undefined)]
               call f %0(%1, %2)
               exit [%0, %1, %2]
             "#,
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("rax")]
-              ; %1: float = arg [Reg("xmm15")]
-              ; %2: double = arg [Reg("xmm14")]
+              ; %0: ptr = arg [Reg("rax", Undefined)]
+              ; %1: float = arg [Reg("xmm15", Undefined)]
+              ; %2: double = arg [Reg("xmm14", Undefined)]
               ...
               movsd xmm1, xmm14
               movsd xmm0, xmm15
@@ -4767,8 +4773,8 @@ mod test {
             r#"
               extern f() -> double
 
-              %0: double = arg [reg "xmm15"]
-              %1: ptr = arg [reg "r15"]
+              %0: double = arg [reg ("xmm15", undefined)]
+              %1: ptr = arg [reg ("r15", undefined)]
               %2: double = call f %1()
               %3: double = fadd %0, %2
               exit [%3, %1]
@@ -4789,8 +4795,8 @@ mod test {
             r#"
               extern f(double) -> double
 
-              %0: double = arg [reg "xmm15"]
-              %1: ptr = arg [reg "r15"]
+              %0: double = arg [reg ("xmm15", undefined)]
+              %1: ptr = arg [reg ("r15", undefined)]
               %2: double = call f %1(%0)
               %3: double = fadd %0, %2
               exit [%3, %1]
@@ -4812,17 +4818,17 @@ mod test {
             r#"
               extern f(float, double, ...)
 
-              %0: ptr = arg [reg "rax"]
-              %1: float = arg [reg "xmm15"]
-              %2: double = arg [reg "xmm14"]
+              %0: ptr = arg [reg ("rax", undefined)]
+              %1: float = arg [reg ("xmm15", undefined)]
+              %2: double = arg [reg ("xmm14", undefined)]
               call f %0(%1, %2)
               exit [%0, %1, %2]
             "#,
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("rax")]
-              ; %1: float = arg [Reg("xmm15")]
-              ; %2: double = arg [Reg("xmm14")]
+              ; %0: ptr = arg [Reg("rax", Undefined)]
+              ; %1: float = arg [Reg("xmm15", Undefined)]
+              ; %2: double = arg [Reg("xmm14", Undefined)]
               ...
               mov r.64.x, rax
               movsd xmm1, xmm14
@@ -4838,8 +4844,8 @@ mod test {
             r#"
               extern f(...) -> double
 
-              %0: double = arg [reg "xmm15"]
-              %1: ptr = arg [reg "r15"]
+              %0: double = arg [reg ("xmm15", undefined)]
+              %1: ptr = arg [reg ("r15", undefined)]
               %2: double = call f %1()
               %3: double = fadd %0, %2
               exit [%3, %1]
@@ -4860,8 +4866,8 @@ mod test {
             r#"
               extern f(double, ...) -> double
 
-              %0: double = arg [reg "xmm15"]
-              %1: ptr = arg [reg "r15"]
+              %0: double = arg [reg ("xmm15", undefined)]
+              %1: ptr = arg [reg ("r15", undefined)]
               %2: double = call f %1(%0)
               %3: double = fadd %0, %2
               exit [%3, %1]
@@ -5531,8 +5537,8 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: double = arg [Reg("fp.128.x")]
-              ; %1: float = arg [Reg("fp.128.y")]
+              ; %0: double = arg [Reg("fp.128.x", Undefined)]
+              ; %1: float = arg [Reg("fp.128.y", Undefined)]
               ; %2: i32 = fptosi %0
               cvttsd2si r.32._, fp.128.x
               ; blackbox %2
@@ -5631,7 +5637,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: i16 = arg [Reg("r.64.x")]
+              ; %0: i16 = arg [Reg("r.64.x", Undefined)]
               and r.32.x, 0xFFFF
               ; %1: i16 = 65244
               ; %2: i1 = icmp eq %0, %1
@@ -5672,8 +5678,8 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: i8 = arg [Reg("r.64.x")]
-              ; %1: i8 = arg [Reg("r.64.y")]
+              ; %0: i8 = arg [Reg("r.64.x", Undefined)]
+              ; %1: i8 = arg [Reg("r.64.y", Undefined)]
               and r.32.x, 0xFF
               and r.32.y, 0xFF
               ; %2: i1 = icmp eq %0, %1
@@ -5695,8 +5701,8 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: i8 = arg [Reg("r.64.x")]
-              ; %1: i8 = arg [Reg("r.64.y")]
+              ; %0: i8 = arg [Reg("r.64.x", Undefined)]
+              ; %1: i8 = arg [Reg("r.64.y", Undefined)]
               movsx r.64.x, r.8.x
               movsx r.64.y, r.8.y
               ; %2: i1 = icmp sgt %0, %1
@@ -5718,8 +5724,8 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: i8 = arg [Reg("r.64.x")]
-              ; %1: i8 = arg [Reg("r.64.y")]
+              ; %0: i8 = arg [Reg("r.64.x", Undefined)]
+              ; %1: i8 = arg [Reg("r.64.y", Undefined)]
               and r.32.x, 0xFF
               and r.32.y, 0xFF
               ; %2: i1 = icmp ugt %0, %1
@@ -5745,8 +5751,8 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
-              ; %1: i32 = arg [Reg("r.64.y")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i32 = arg [Reg("r.64.y", Undefined)]
               ; %2: i32 = load %0
               ; %3: i1 = icmp ugt %2, %1
               ; guard true, %3, []
@@ -5769,8 +5775,8 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
-              ; %1: i64 = arg [Reg("r.64.y")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
               ; %2: i64 = load %0
               ; %3: i1 = icmp ugt %2, %1
               ; guard true, %3, []
@@ -5795,7 +5801,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               ; %1: i8 = load %0
               ; %2: i8 = 7
               ; %3: i1 = icmp ugt %1, %2
@@ -5819,7 +5825,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               ; %1: i16 = load %0
               ; %2: i16 = 7
               ; %3: i1 = icmp ugt %1, %2
@@ -5843,7 +5849,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               ; %1: i32 = load %0
               ; %2: i32 = 7
               ; %3: i1 = icmp ugt %1, %2
@@ -5867,7 +5873,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               ; %1: i64 = load %0
               ; %2: i64 = 7
               ; %3: i1 = icmp ugt %1, %2
@@ -5892,7 +5898,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: i16 = arg [Reg("r.64.x")]
+              ; %0: i16 = arg [Reg("r.64.x", Undefined)]
               and r.32.x, 0xFFFF
               ; %1: i16 = 65244
               ; %2: i1 = icmp eq %0, %1
@@ -5933,7 +5939,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: i32 = arg [Reg("r.64.x")]
+              ; %0: i32 = arg [Reg("r.64.x", Undefined)]
               ......
               mov r.32.x, r.32.x
               ; %1: ptr = inttoptr %0
@@ -5950,7 +5956,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: i64 = arg [Reg("r.64.x")]
+              ; %0: i64 = arg [Reg("r.64.x", Undefined)]
               ......
               ; %1: ptr = inttoptr %0
               ...
@@ -6214,7 +6220,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: i16 = arg [Reg("r.64.x")]
+              ; %0: i16 = arg [Reg("r.64.x", Undefined)]
               ...
               and r.32.x, 0xFFFF
               ...
@@ -6314,9 +6320,9 @@ mod test {
         // i32
         codegen_and_test(
             r#"
-              %0: ptr = arg [reg "rdi"]
-              %1: ptr = arg [reg "rsi"]
-              %2: i32 = arg [reg "rcx"]
+              %0: ptr = arg [reg ("rdi", undefined)]
+              %1: ptr = arg [reg ("rsi", undefined)]
+              %2: i32 = arg [reg ("rcx", undefined)]
               memcpy %0, %1, %2, true
               exit [%0, %1, %2]
             "#,
@@ -6353,9 +6359,9 @@ mod test {
         // i32
         codegen_and_test(
             r#"
-              %0: ptr = arg [reg "rdi"]
-              %1: i8 = arg [reg "rax"]
-              %2: i32 = arg [reg "rcx"]
+              %0: ptr = arg [reg ("rdi", undefined)]
+              %1: i8 = arg [reg ("rax", undefined)]
+              %2: i32 = arg [reg ("rcx", undefined)]
               memset %0, %1, %2, true
               exit [%0, %1, %2]
             "#,
@@ -6392,8 +6398,8 @@ mod test {
         // i8
         codegen_and_test(
             r#"
-              %0: i8 = arg [reg "R8"]
-              %1: i8 = arg [reg "R9"]
+              %0: i8 = arg [reg ("R8", undefined)]
+              %1: i8 = arg [reg ("R9", undefined)]
               %2: i8 = mul %0, %1
               exit [%0, %2]
             "#,
@@ -6673,8 +6679,8 @@ mod test {
             ",
             &[r#"
               ...
-              ; %1: double = arg [Reg("fp.128.x")]
-              ; %2: double = arg [Reg("fp.128.y")]
+              ; %1: double = arg [Reg("fp.128.x", Undefined)]
+              ; %2: double = arg [Reg("fp.128.y", Undefined)]
               ...
               ; %3: double = select %0, %1, %2
               bt r.32._, 0
@@ -7303,7 +7309,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               ; %1: i8 = load %0
               ; %2: i8 = 42
               ; %3: i8 = add %1, %2
@@ -7353,7 +7359,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               ; %1: i16 = load %0
               ; %2: i16 = 42
               ; %3: i16 = add %1, %2
@@ -7403,7 +7409,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               ; %1: i32 = load %0
               ; %2: i32 = 42
               ; %3: i32 = add %1, %2
@@ -7453,7 +7459,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %0: ptr = arg [Reg("r.64.x")]
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
               ; %1: i64 = load %0
               ; %2: i64 = 42
               ; %3: i64 = add %1, %2
@@ -7770,7 +7776,7 @@ mod test {
             &[
                 r#"
               ...
-              ; %0: i64 = arg [Reg("r.64.x")]
+              ; %0: i64 = arg [Reg("r.64.x", Undefined)]
               ; %1: double = uitofp %0
               movq fp.128.x, r.64.x
               punpckldq fp.128.x, l0
@@ -7787,7 +7793,7 @@ mod test {
             "#,
                 r#"
               ...
-              ; %0: i64 = arg [Reg("r.64.x")]
+              ; %0: i64 = arg [Reg("r.64.x", Undefined)]
               ; %1: double = uitofp %0
               movq fp.128.x, r.64.x
               punpckldq fp.128.x, l0

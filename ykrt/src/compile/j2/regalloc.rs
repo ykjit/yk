@@ -83,7 +83,6 @@ pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
     /// The offset of the current stack: this must be exactly equal to the end of the last byte
     /// used in the stack.
     stack_off: u32,
-    snapshots: IndexVec<SnapshotIdx, Snapshot<AB>>,
 }
 
 impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
@@ -95,34 +94,31 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             rstates: RStates::new(),
             is_used: index_vec![InstIdx::from_usize(0); b.insts_len()],
             stack_off,
-            snapshots: index_vec![],
-        }
-    }
-
-    /// Create a new register allocator from a previous [Snapshot] for guard restores.
-    ///
-    /// FIXME: This currently doesn't restore `is_used`! That isn't currently a problem, but it
-    /// might become so in the future.
-    #[allow(clippy::wrong_self_convention)]
-    pub(super) fn from_snapshot(&self, sidx: SnapshotIdx) -> Self {
-        Self {
-            m: self.m,
-            b: self.b,
-            istates: self.snapshots[sidx].istates.clone(),
-            rstates: self.snapshots[sidx].rstates.clone(),
-            is_used: index_vec![], // FIXME!
-            stack_off: self.stack_off,
-            snapshots: index_vec![],
         }
     }
 
     /// Snapshot this register allocator in a way that is suitable for a
     /// [super::hir::GuardRestore].
-    pub(super) fn snapshot(&mut self, iidx: InstIdx) -> SnapshotIdx {
-        self.snapshots.push(Snapshot {
-            istates: self.istates[..iidx].to_vec(),
-            rstates: self.rstates.clone(),
-        })
+    pub(super) fn vlocs_from_iidxs(&mut self, iidxs: &[InstIdx]) -> Vec<VarLocs<AB::Reg>> {
+        let mut out = Vec::with_capacity(iidxs.len());
+        for iidx in iidxs {
+            let mut vlocs = VarLocs::new();
+            if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
+                vlocs.push(VarLoc::Const(kind.clone()));
+            }
+            for (reg, rstate) in self.rstates.iter() {
+                if rstate.iidxs.contains(iidx) {
+                    vlocs.push(VarLoc::Reg(reg, rstate.fill));
+                }
+            }
+            match &self.istates[*iidx] {
+                IState::None => (),
+                IState::Stack(off) => vlocs.push(VarLoc::Stack(*off)),
+                IState::StackOff(off) => vlocs.push(VarLoc::StackOff(*off)),
+            }
+            out.push(vlocs);
+        }
+        out
     }
 
     /// Before processing the main body of a trace, set the stack offset (if any) of entry
@@ -144,7 +140,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         assert_eq!(self.istates[iidx], IState::None);
                         self.istates[iidx] = IState::StackOff(*stack_off);
                     }
-                    VarLoc::Reg(_) => (),
+                    VarLoc::Reg(_, _) => (),
                     VarLoc::Const(_) => (),
                 }
             }
@@ -168,7 +164,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             .map(|(x, y)| (InstIdx::from(x), y))
         {
             for vloc in vlocs.iter() {
-                if let VarLoc::Reg(reg) = vloc {
+                if let VarLoc::Reg(reg, fill) = vloc {
                     if let ModKind::Coupler { .. } | ModKind::Loop { .. } = self.m.kind {
                         // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
                         // for details), caller saved registers are potentially corrupted at the very start
@@ -186,7 +182,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             todo!();
                         }
                     }
-                    in_rstate.set_fill_iidxs(*reg, RegFill::Undefined, smallvec![iidx]);
+                    in_rstate.set_fill_iidxs(*reg, *fill, smallvec![iidx]);
                 }
             }
         }
@@ -208,13 +204,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             if let IState::Stack(stack_off) = self.istates[iidx]
                 && !vlocs.iter().any(|vloc| matches!(vloc, VarLoc::Stack(_)))
             {
-                let Some(VarLoc::Reg(reg)) =
-                    vlocs.iter().find(|vloc| matches!(vloc, VarLoc::Reg(_)))
+                let Some(VarLoc::Reg(reg, fill)) =
+                    vlocs.iter().find(|vloc| matches!(vloc, VarLoc::Reg(_, _)))
                 else {
                     panic!("{iidx:?} {vlocs:?}")
                 };
                 let bitw = self.b.inst_bitw(self.m, iidx);
-                be.spill(*reg, RegFill::Undefined, stack_off, bitw).unwrap();
+                be.spill(*reg, *fill, stack_off, bitw).unwrap();
             }
         }
     }
@@ -275,8 +271,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     match vloc {
                         VarLoc::Stack(_) => (),
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(reg) => {
-                            be.move_const(*reg, None, bitw, RegFill::Zeroed, kind)?;
+                        VarLoc::Reg(reg, fill) => {
+                            be.move_const(*reg, None, bitw, *fill, kind)?;
                         }
                         VarLoc::Const(_) => (),
                     }
@@ -301,7 +297,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             be.move_const(tmp_reg, None, bitw, RegFill::Zeroed, kind)?;
                         }
                         VarLoc::StackOff(_) => todo!(),
-                        VarLoc::Reg(_) => (),
+                        VarLoc::Reg(_, _) => (),
                         VarLoc::Const(_) => (),
                     }
                 }
@@ -348,9 +344,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             todo!();
                         }
                     }
-                    VarLoc::Reg(reg) => {
+                    VarLoc::Reg(reg, fill) => {
                         assert!(!self.rstates.iidxs(*reg).contains(iidx));
-                        self.rstates.set_fill(*reg, RegFill::Undefined);
+                        self.rstates.set_fill(*reg, *fill);
                         self.rstates.iidxs_mut(*reg).push(*iidx);
                     }
                     VarLoc::Const(_) => (),
@@ -603,53 +599,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         self.rstates
             .iter()
             .filter_map(move |(reg, rstate)| rstate.iidxs.contains(&iidx).then_some(reg))
-    }
-
-    /// For an instruction `iidx` in a [GuardRestore], return its [VarLocs].
-    ///
-    /// Note: currently we assume that all instructions in this situation have been spilt. That
-    /// will not always be the case.
-    pub(super) fn varlocs_for_deopt(&self, iidx: InstIdx) -> VarLocs<AB::Reg> {
-        // To keep deopt simple, we currently don't make use of the fact that an instruction might
-        // be in a register: we assume everything has been spilled.
-        if let IState::Stack(stack_off) = self.istates[iidx] {
-            VarLocs::new(smallvec![VarLoc::Stack(stack_off)])
-        } else if let IState::StackOff(stack_off) = self.istates[iidx] {
-            VarLocs::new(smallvec![VarLoc::StackOff(stack_off)])
-        } else if let Inst::Const(Const { kind, .. }) = self.b.inst(iidx) {
-            VarLocs::new(smallvec![VarLoc::Const(kind.clone())])
-        } else {
-            todo!(
-                "{iidx:?} {:?} {:?}\n  {:?}",
-                self.b.inst(iidx),
-                self.iter_reg_for(iidx).collect::<Vec<_>>(),
-                self.rstates
-            );
-        }
-    }
-
-    /// Forcibly spill any unspilt values in `reg` in a way that is *only* suitable for calling at
-    /// the point of a deopt call.
-    pub(super) fn ensure_spilled_for_deopt(
-        &mut self,
-        be: &mut AB,
-        reg: AB::Reg,
-    ) -> Result<(), CompilationError> {
-        for iidx in self.rstates.iidxs(reg) {
-            // We don't need to spill things that are already spilt, or constants.
-            if matches!(&self.istates[*iidx], IState::Stack(_) | IState::StackOff(_))
-                || matches!(self.b.inst(*iidx), Inst::Const(_))
-            {
-                continue;
-            }
-
-            let bitw = self.b.inst_bitw(self.m, *iidx);
-            self.stack_off = be.align_spill(self.stack_off, bitw);
-            assert_eq!(self.istates[*iidx], IState::None);
-            self.istates[*iidx] = IState::Stack(self.stack_off);
-            be.spill(reg, self.rstates.fill(reg), self.stack_off, bitw)?;
-        }
-        Ok(())
     }
 
     /// Allocate registers for the instruction at position `iidx`. Note: this function may leave
@@ -1412,16 +1361,6 @@ impl Default for RState {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct Snapshot<AB: HirToAsmBackend + ?Sized> {
-    istates: IndexVec<InstIdx, IState>,
-    rstates: RStates<AB::Reg>,
-}
-
-index_vec::define_index_type! {
-    pub(super) struct SnapshotIdx = u32;
-}
-
 /// An abstraction of a register.
 ///
 /// The register allocator knows almost nothing about registers except the following:
@@ -1480,8 +1419,22 @@ pub(super) struct VarLocs<Reg: RegT> {
 }
 
 impl<Reg: RegT> VarLocs<Reg> {
-    pub(super) fn new(vlocs: SmallVec<[VarLoc<Reg>; 1]>) -> Self {
-        Self { raw: vlocs }
+    pub(super) fn new() -> Self {
+        Self {
+            raw: SmallVec::new(),
+        }
+    }
+
+    #[doc(hidden)]
+    pub(super) fn from_smallvec(x: SmallVec<[VarLoc<Reg>; 1]>) -> Self {
+        Self { raw: x }
+    }
+
+    #[allow(unused)]
+    pub(super) fn with_capacity(len: usize) -> Self {
+        Self {
+            raw: SmallVec::with_capacity(len),
+        }
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -1494,6 +1447,18 @@ impl<Reg: RegT> VarLocs<Reg> {
 
     pub(super) fn iter(&self) -> impl Iterator<Item = &VarLoc<Reg>> {
         self.raw.iter()
+    }
+
+    pub(super) fn push(&mut self, vloc: VarLoc<Reg>) {
+        self.raw.push(vloc);
+    }
+}
+
+impl<Reg: RegT> FromIterator<VarLoc<Reg>> for VarLocs<Reg> {
+    fn from_iter<T: IntoIterator<Item = VarLoc<Reg>>>(iter: T) -> Self {
+        Self {
+            raw: SmallVec::from_iter(iter),
+        }
     }
 }
 
@@ -1509,8 +1474,8 @@ pub(super) enum VarLoc<Reg> {
     /// semi-constant. The pointer is `off` bytes from the base pointer. Whether `off` is "above"
     /// or "below" the base pointer is system dependent.
     StackOff(u32),
-    /// The variable's value is stored in a register.
-    Reg(Reg),
+    /// The variable's value is stored in a register with the given fill.
+    Reg(Reg, RegFill),
     /// The variable's value is a constant.
     Const(ConstKind),
 }
@@ -1520,7 +1485,7 @@ impl<Reg: Display> Display for VarLoc<Reg> {
         match self {
             VarLoc::Stack(x) => write!(f, "Stack(0x{x:X})"),
             VarLoc::StackOff(x) => write!(f, "StackOff(0x{x:X})"),
-            VarLoc::Reg(x) => write!(f, "Reg(\"{x}\")"),
+            VarLoc::Reg(reg, fill) => write!(f, "Reg(\"{reg}\", {fill})"),
             VarLoc::Const(x) => match x {
                 ConstKind::Double(x) => write!(f, "{x}"),
                 ConstKind::Float(x) => write!(f, "{x}"),
@@ -1698,6 +1663,16 @@ impl RegFill {
             RegCnstrFill::Undefined => RegFill::Undefined,
             RegCnstrFill::Zeroed => RegFill::Zeroed,
             RegCnstrFill::Signed => RegFill::Signed,
+        }
+    }
+}
+
+impl Display for RegFill {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegFill::Undefined => write!(f, "Undefined"),
+            RegFill::Zeroed => write!(f, "Zeroed"),
+            RegFill::Signed => write!(f, "Signed"),
         }
     }
 }
@@ -2001,7 +1976,10 @@ pub(crate) mod test {
         type Reg = TestReg;
         type BuildTest = String;
 
-        fn smp_to_vloc(_smp_locs: &SmallVec<[yksmp::Location; 1]>) -> VarLocs<Self::Reg> {
+        fn smp_to_vloc(
+            _smp_locs: &SmallVec<[yksmp::Location; 1]>,
+            _reg_fill: RegFill,
+        ) -> VarLocs<Self::Reg> {
             todo!()
         }
 
@@ -2170,8 +2148,6 @@ pub(crate) mod test {
 
         fn guard_end(
             &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
             _trid: crate::mt::TraceId,
             _gridx: GuardRestoreIdx,
         ) -> Result<Self::Label, CompilationError> {
@@ -2812,8 +2788,8 @@ pub(crate) mod test {
     fn simple() {
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR0"]
-          %1: i8 = arg [reg "GPR1"]
+          %0: i8 = arg [reg ("GPR0", undefined)]
+          %1: i8 = arg [reg ("GPR1", undefined)]
           %2: i8 = add %0, %1
           blackbox %2
         "#,
@@ -2830,8 +2806,8 @@ pub(crate) mod test {
     fn cycles() {
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR1"]
-          %1: i8 = arg [reg "GPR0"]
+          %0: i8 = arg [reg ("GPR1", undefined)]
+          %1: i8 = arg [reg ("GPR0", undefined)]
           %2: i8 = add %0, %1
           blackbox %2
         "#,
@@ -2854,9 +2830,9 @@ pub(crate) mod test {
 
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR0"]
-          %1: i8 = arg [reg "GPR1"]
-          %2: i8 = arg [reg "GPR2"]
+          %0: i8 = arg [reg ("GPR0", undefined)]
+          %1: i8 = arg [reg ("GPR1", undefined)]
+          %2: i8 = arg [reg ("GPR2", undefined)]
           %3: i8 = add %0, %1
           %4: i8 = add %2, %3
           blackbox %4
@@ -2884,10 +2860,10 @@ pub(crate) mod test {
 
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR3"]
-          %1: i8 = arg [reg "GPR2"]
-          %2: i8 = arg [reg "GPR1"]
-          %3: i8 = arg [reg "GPR0"]
+          %0: i8 = arg [reg ("GPR3", undefined)]
+          %1: i8 = arg [reg ("GPR2", undefined)]
+          %2: i8 = arg [reg ("GPR1", undefined)]
+          %3: i8 = arg [reg ("GPR0", undefined)]
           %4: i8 = add %0, %1
           %5: i8 = add %4, %2
           %6: i8 = add %5, %3
@@ -3079,7 +3055,7 @@ pub(crate) mod test {
     fn arrange_fills_once() {
         build_and_test(
             r#"
-          %0: i8 = arg [reg "GPR0"]
+          %0: i8 = arg [reg ("GPR0", undefined)]
           %1: i8 = add %0, %0
           blackbox %1
           exit [%0]

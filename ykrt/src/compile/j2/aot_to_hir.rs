@@ -516,7 +516,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         match vloc {
             VarLoc::Stack(_) => todo!(),
             VarLoc::StackOff(_) => todo!(),
-            VarLoc::Reg(_) => todo!(),
+            VarLoc::Reg(_, _) => todo!(),
             VarLoc::Const(kind) => match kind {
                 hir::ConstKind::Double(_) => todo!(),
                 hir::ConstKind::Float(_) => todo!(),

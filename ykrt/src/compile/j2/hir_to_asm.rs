@@ -73,7 +73,7 @@ use crate::{
             codebuf::ExeCodeBuf,
             compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
             hir::*,
-            regalloc::{RegAlloc, RegFill, RegT, SnapshotIdx, VarLocs},
+            regalloc::{RegAlloc, RegFill, RegT, VarLoc, VarLocs},
         },
         jitc_yk::aot_ir::{self},
     },
@@ -83,7 +83,7 @@ use crate::{
 };
 use index_vec::IndexVec;
 use parking_lot::Mutex;
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 use std::{ffi::c_void, sync::Arc};
 
 pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
@@ -126,7 +126,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let entry_vlocs = rec
                     .live_vals
                     .iter()
-                    .map(|smap| AB::smp_to_vloc(smap))
+                    .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
                 let exit_vlocs = tgt_ctr.entry_vlocs();
 
@@ -134,7 +134,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 self.be.coupler_trace_end(tgt_ctr)?;
 
                 // Assemble the body
-                let (guards, body_ra) = self.p_block(
+                let (guards, entry_stack_off) = self.p_block(
                     entry,
                     base_stack_off,
                     &entry_vlocs,
@@ -142,11 +142,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     true,
                     logging,
                 )?;
-                let entry_stack_off = body_ra.stack_off();
                 let instrs_label = self
                     .be
                     .coupler_trace_start(entry_stack_off - base_stack_off)?;
-                self.asm_guards(entry, guards, body_ra)?;
+                self.asm_guards(entry, guards)?;
                 let (buf, guards, log, label_offs) = self.be.build_exe(logging, &[instrs_label])?;
                 let [sidetrace_off] = &*label_offs else {
                     panic!()
@@ -186,14 +185,14 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let entry_vlocs = rec
                     .live_vals
                     .iter()
-                    .map(|smap| AB::smp_to_vloc(smap))
+                    .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
 
                 // Create the backwards jump at the end of a loop trace.
                 let iter0_label = self.be.loop_trace_end()?;
 
                 // Assemble the body
-                let (guards, body_ra) = self.p_block(
+                let (guards, entry_stack_off) = self.p_block(
                     entry,
                     base_stack_off,
                     &entry_vlocs,
@@ -201,10 +200,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     true,
                     logging,
                 )?;
-                let entry_stack_off = body_ra.stack_off();
                 self.be
                     .loop_trace_start(iter0_label.clone(), entry_stack_off - base_stack_off);
-                self.asm_guards(entry, guards, body_ra)?;
+                self.asm_guards(entry, guards)?;
                 let (buf, guards, log, label_offs) = self.be.build_exe(logging, &[iter0_label])?;
                 let [sidetrace_off] = &*label_offs else {
                     panic!()
@@ -228,13 +226,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 self.be.side_trace_end(tgt_ctr)?;
                 // Assemble the body
                 let exit_vlocs = tgt_ctr.entry_vlocs();
-                let (guards, body_ra) =
+                let (guards, entry_stack_off) =
                     self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, true, logging)?;
-                let body_stack_off = body_ra.stack_off();
-                self.be.side_trace_start(body_stack_off - src_stack_off);
-                self.asm_guards(entry, guards, body_ra)?;
+                self.be.side_trace_start(entry_stack_off - src_stack_off);
+                self.asm_guards(entry, guards)?;
                 let modkind = J2CompiledTraceKind::Side {
-                    stack_off: body_stack_off,
+                    stack_off: entry_stack_off,
                 };
                 let (buf, guards, log, labels) = self.be.build_exe(logging, &[])?;
                 assert!(labels.is_empty());
@@ -271,21 +268,20 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         match &self.m.kind {
             ModKind::Test { entry_vlocs, block } => {
                 // Assemble the body
-                let (guards, body_ra) =
+                let (guards, stack_off) =
                     self.p_block(block, 0, entry_vlocs, entry_vlocs, true, true)?;
-                self.be.side_trace_start(0);
+                self.be.side_trace_start(stack_off);
 
                 // Guards
-                for (gd, _grestore) in guards.into_iter().rev().zip(self.m.guard_restores()) {
-                    let mut ra = body_ra.from_snapshot(gd.sidx);
-                    let patch_label =
-                        self.be
-                            .guard_end(&mut ra, block, TraceId::testing(), gd.gridx)?;
+                for (asmgrestore, _grestore) in
+                    guards.into_iter().rev().zip(self.m.guard_restores())
+                {
+                    let patch_label = self.be.guard_end(TraceId::testing(), asmgrestore.gridx)?;
                     self.be.guard_completed(
-                        gd.label,
+                        asmgrestore.label,
                         patch_label,
-                        ra.stack_off() - body_ra.stack_off(),
-                        gd.bid,
+                        0,
+                        asmgrestore.bid,
                         SmallVec::new(),
                         None,
                     );
@@ -302,27 +298,31 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         &mut self,
         entry: &Block,
         grestores: Vec<AsmGuardRestore<AB>>,
-        body_ra: RegAlloc<AB>,
     ) -> Result<(), CompilationError> {
         assert_eq!(grestores.len(), self.m.guard_restores().len());
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
         for (asmgrestore, grestore) in grestores.into_iter().rev().zip(self.m.guard_restores()) {
-            let mut ra = body_ra.from_snapshot(asmgrestore.sidx);
-            let exit_var_regs = grestore
-                .exit_frames
-                .iter()
-                .flat_map(|dfr| {
-                    dfr.exit_vars
-                        .iter()
-                        .filter_map(|iidx| ra.iter_reg_for(*iidx).nth(0).map(|x| (*iidx, x)))
-                })
-                .collect::<Vec<_>>();
+            let patch_label = self.be.guard_end(self.m.trid, asmgrestore.gridx)?;
 
-            let patch_label = self
-                .be
-                .guard_end(&mut ra, entry, self.m.trid, asmgrestore.gridx)?;
-            for (_iidx, reg) in exit_var_regs {
-                ra.ensure_spilled_for_deopt(&mut self.be, reg)?;
+            let mut stack_off = asmgrestore.stack_off;
+            assert_eq!(asmgrestore.entry_vars.len(), asmgrestore.entry_vlocs.len());
+            let mut entry_vlocs = asmgrestore.entry_vlocs;
+            for (iidx, vlocs) in asmgrestore.entry_vars.iter().zip(entry_vlocs.iter_mut()) {
+                // If a value only exists in a register(s), we need to pick one of those registers,
+                // and ensure it's spilt.
+                if vlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
+                    let Some(VarLoc::Reg(reg, fill)) = vlocs
+                        .iter()
+                        .find(|x| matches!(x, VarLoc::Reg(_, _)))
+                        .cloned()
+                    else {
+                        panic!("{vlocs:?}")
+                    };
+                    let bitw = entry.inst_bitw(self.m, *iidx);
+                    stack_off = self.be.align_spill(stack_off, bitw);
+                    vlocs.push(VarLoc::Stack(stack_off));
+                    self.be.spill(reg, fill, stack_off, bitw)?;
+                }
             }
 
             let deopt_frames = grestore
@@ -344,12 +344,22 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                 .iter()
                                 .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
                                 .map(|(iidx, (aot_op, smap_loc))| {
-                                    let fromvlocs = ra.varlocs_for_deopt(*iidx);
-                                    let mut tovlocs = AB::smp_to_vloc(smap_loc);
+                                    let fromvlocs = entry_vlocs[asmgrestore
+                                        .entry_vars
+                                        .iter()
+                                        .position(|x| x == iidx)
+                                        .unwrap()]
+                                    .iter()
+                                    // FIXME (optimisation): We don't need to spill everything
+                                    // before deopt / side-traces.
+                                    .filter(|x| !matches!(x, VarLoc::Reg(_, _)))
+                                    .cloned()
+                                    .collect::<VarLocs<_>>();
+                                    let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
                                     if fromvlocs == tovlocs {
                                         // Optimise away situations where we would just move a
                                         // value from VLoc X to VLoc X.
-                                        tovlocs = VarLocs::new(smallvec![]);
+                                        tovlocs = VarLocs::new();
                                     }
                                     (
                                         aot_op.to_inst_id(),
@@ -366,7 +376,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             self.be.guard_completed(
                 asmgrestore.label,
                 patch_label,
-                ra.stack_off() - body_ra.stack_off(),
+                stack_off - asmgrestore.stack_off,
                 asmgrestore.bid,
                 deopt_frames,
                 asmgrestore.switch.map(|x| *x),
@@ -376,7 +386,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         Ok(())
     }
 
-    /// Returns the guards in reverse order.
+    /// Returns the guards (in reverse order) and the stack offset.
     fn p_block(
         &mut self,
         b: &'a Block,
@@ -385,7 +395,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         exit_vlocs: &[VarLocs<AB::Reg>],
         guards_allowed: bool,
         logging: bool,
-    ) -> Result<(Vec<AsmGuardRestore<AB>>, RegAlloc<'a, AB>), CompilationError> {
+    ) -> Result<(Vec<AsmGuardRestore<AB>>, u32), CompilationError> {
         let mut ra = RegAlloc::<AB>::new(self.m, b, stack_off);
         ra.set_entry_stacks_at_end(entry_vlocs);
 
@@ -514,7 +524,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
                 Inst::Guard(
                     x @ Guard {
-                        entry_vars: _,
+                        entry_vars,
                         gridx,
                         bid,
                         switch,
@@ -531,13 +541,15 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     assert!(cnd_idx <= grestores.len());
                     if cnd_idx == grestores.len() {
                         let label = self.be.i_guard(&mut ra, b, iidx, x)?;
-                        let sidx = ra.snapshot(iidx);
+                        let entry_vlocs = ra.vlocs_from_iidxs(entry_vars);
                         grestores.push(AsmGuardRestore {
                             gridx: *gridx,
                             label,
-                            sidx,
+                            entry_vars: entry_vars.clone(),
+                            entry_vlocs,
                             bid: *bid,
                             switch: switch.clone(),
+                            stack_off: ra.stack_off(),
                         });
                     } else {
                         // We're mapping multiple [Guard]s to a single [GuardRestore]. The
@@ -719,7 +731,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
         }
 
-        Ok((grestores, ra))
+        Ok((grestores, ra.stack_off()))
     }
 }
 
@@ -748,8 +760,12 @@ pub(super) trait HirToAsmBackend {
     #[cfg(test)]
     type BuildTest;
 
-    /// Convert a yksmp stackmap to one or more `VarLoc`s.
-    fn smp_to_vloc(smp_locs: &SmallVec<[yksmp::Location; 1]>) -> VarLocs<Self::Reg>;
+    /// Convert a yksmp stackmap to one or more `VarLoc`s. Since stack maps do not currently encode
+    /// a register fill, any registers returned by this function will be given the fill `reg_fill`.
+    fn smp_to_vloc(
+        smp_locs: &SmallVec<[yksmp::Location; 1]>,
+        reg_fill: RegFill,
+    ) -> VarLocs<Self::Reg>;
     fn thread_local_off(addr: *const c_void) -> u32;
 
     /// Assemble everything into machine code. If `log` is `true`, return `Some(log)`. For each
@@ -888,8 +904,6 @@ pub(super) trait HirToAsmBackend {
     /// a side-trace is produced.
     fn guard_end(
         &mut self,
-        ra: &mut RegAlloc<Self>,
-        b: &Block,
         trid: TraceId,
         gridx: GuardRestoreIdx,
     ) -> Result<Self::Label, CompilationError>;
@@ -1275,7 +1289,12 @@ index_vec::define_index_type! {
 struct AsmGuardRestore<AB: HirToAsmBackend + ?Sized> {
     gridx: GuardRestoreIdx,
     label: AB::Label,
-    sidx: SnapshotIdx,
+    /// Will be the same length as `entry_vlocs`.
+    entry_vars: Vec<InstIdx>,
+    /// Will be the same length as `entry_vars`.
+    entry_vlocs: Vec<VarLocs<AB::Reg>>,
     bid: aot_ir::BBlockId,
     switch: Option<Box<Switch>>,
+    /// The stack offset of the register allocator at the entry point of the guard.
+    stack_off: u32,
 }
