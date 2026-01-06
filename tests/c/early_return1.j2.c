@@ -10,7 +10,7 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     exit []
+//     term []
 //     --- End jit-pre-opt ---
 //     ...
 //     return

@@ -602,7 +602,7 @@ pub(in crate::compile::j2::opt) mod test {
           guard true, %5, []
           blackbox %0
           blackbox %4
-          exit [%0]
+          term [%0]
         ",
             "
           %0: i8 = arg
@@ -615,7 +615,7 @@ pub(in crate::compile::j2::opt) mod test {
           guard true, %5, []
           blackbox %2
           blackbox %4
-          exit [%2]
+          term [%2]
         ",
         );
 
@@ -631,7 +631,7 @@ pub(in crate::compile::j2::opt) mod test {
           guard true, %5, []
           blackbox %0
           blackbox %1
-          exit [%0, %1]
+          term [%0, %1]
         ",
             "
           %0: i8 = arg
@@ -644,7 +644,7 @@ pub(in crate::compile::j2::opt) mod test {
           guard true, %5, []
           blackbox %3
           blackbox %3
-          exit [%3, %3]
+          term [%3, %3]
         ",
         );
     }

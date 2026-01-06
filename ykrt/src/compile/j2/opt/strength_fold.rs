@@ -994,13 +994,13 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 0
           %2: i8 = add %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
           %0: i8 = arg
           %1: i8 = 0
-          exit [%0]
+          term [%0]
         ",
         );
     }
@@ -1012,12 +1012,12 @@ mod test {
             "
           %0: i8 = arg [reg]
           %1: i8 = and %0, %0
-          exit [%1]
+          term [%1]
         ",
             "
           ...
           %0: i8 = arg
-          exit [%0]
+          term [%0]
         ",
         );
 
@@ -1056,12 +1056,12 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 0
           %2: i8 = and %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
           %1: i8 = 0
-          exit [%1]
+          term [%1]
         ",
         );
 
@@ -1071,12 +1071,12 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 255
           %2: i8 = and %0, %1
-          exit [%1]
+          term [%1]
         ",
             "
           ...
           %1: i8 = 255
-          exit [%1]
+          term [%1]
         ",
         );
     }
@@ -1505,12 +1505,12 @@ mod test {
           %0: i8 = arg [reg]
           %1: i1 = 1
           guard true, %1, []
-          exit [%0]
+          term [%0]
         ",
             "
           %0: i8 = arg
           %1: i1 = 1
-          exit [%0]
+          term [%0]
         ",
         );
 
@@ -1521,14 +1521,14 @@ mod test {
           %1: i8 = 4
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
-          exit [%0]
+          term [%0]
         ",
             "
           %0: i8 = arg
           %1: i8 = 4
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
-          exit [%1]
+          term [%1]
         ",
         );
 
@@ -1539,14 +1539,14 @@ mod test {
           %1: i8 = 4
           %2: i1 = icmp ne %0, %1
           guard true, %2, []
-          exit [%0]
+          term [%0]
         ",
             "
           %0: i8 = arg
           %1: i8 = 4
           %2: i1 = icmp ne %0, %1
           guard true, %2, []
-          exit [%0]
+          term [%0]
         ",
         );
 
@@ -1563,7 +1563,7 @@ mod test {
           guard true, %5, []
           blackbox %0
           blackbox %1
-          exit [%0, %1]
+          term [%0, %1]
         ",
             "
           %0: i8 = arg
@@ -1576,7 +1576,7 @@ mod test {
           guard true, %5, []
           blackbox %3
           blackbox %3
-          exit [%3, %3]
+          term [%3, %3]
         ",
         );
 
@@ -1586,14 +1586,14 @@ mod test {
           %1: i8 = arg [reg]
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
-          exit [%0, %1]
+          term [%0, %1]
         ",
             "
           %0: i8 = arg
           %1: i8 = arg
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
-          exit [%0, %0]
+          term [%0, %0]
         ",
         );
 
@@ -1612,7 +1612,7 @@ mod test {
           guard true, %6, []
           blackbox %0
           blackbox %1
-          exit [%0, %1]
+          term [%0, %1]
         ",
             "
           %0: i8 = arg
@@ -1626,7 +1626,7 @@ mod test {
           guard true, %5, []
           blackbox %3
           blackbox %3
-          exit [%3, %3]
+          term [%3, %3]
         ",
         );
     }
@@ -2461,13 +2461,13 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 0
           %2: i8 = mul %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
           %0: i8 = arg
           %1: i8 = 0
-          exit [%1]
+          term [%1]
         ",
         );
 
@@ -2477,13 +2477,13 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 1
           %2: i8 = mul %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
           %0: i8 = arg
           %1: i8 = 1
-          exit [%0]
+          term [%0]
         ",
         );
 
@@ -2493,7 +2493,7 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 4
           %2: i8 = mul %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
@@ -2501,7 +2501,7 @@ mod test {
           %1: i8 = 4
           %2: i8 = 2
           %3: i8 = shl %0, %2
-          exit [%3]
+          term [%3]
         ",
         );
     }
@@ -2513,12 +2513,12 @@ mod test {
             "
           %0: i8 = arg [reg]
           %1: i8 = or %0, %0
-          exit [%1]
+          term [%1]
         ",
             "
           ...
           %0: i8 = arg
-          exit [%0]
+          term [%0]
         ",
         );
 
@@ -2543,12 +2543,12 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 0
           %2: i8 = or %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
           %1: i8 = 0
-          exit [%0]
+          term [%0]
         ",
         );
 
@@ -2558,12 +2558,12 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 255
           %2: i8 = or %0, %1
-          exit [%1]
+          term [%1]
         ",
             "
           ...
           %1: i8 = 255
-          exit [%1]
+          term [%1]
         ",
         );
     }
@@ -2810,13 +2810,13 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 0
           %2: i8 = sub %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
           %0: i8 = arg
           %1: i8 = 0
-          exit [%0]
+          term [%0]
         ",
         );
     }
@@ -2880,13 +2880,13 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 1
           %2: i8 = udiv %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
           %0: i8 = arg
           %1: i8 = 1
-          exit [%0]
+          term [%0]
         ",
         );
 
@@ -2896,7 +2896,7 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 4
           %2: i8 = udiv %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
@@ -2904,7 +2904,7 @@ mod test {
           %1: i8 = 4
           %2: i8 = 2
           %3: i8 = lshr %0, %2
-          exit [%3]
+          term [%3]
         ",
         );
     }
@@ -2916,13 +2916,13 @@ mod test {
             "
           %0: i8 = arg [reg]
           %1: i8 = xor %0, %0
-          exit [%1]
+          term [%1]
         ",
             "
           ...
           %0: i8 = arg
           %1: i8 = 0
-          exit [%1]
+          term [%1]
         ",
         );
 
@@ -2947,12 +2947,12 @@ mod test {
           %0: i8 = arg [ reg ]
           %1: i8 = 0
           %2: i8 = xor %0, %1
-          exit [%2]
+          term [%2]
         ",
             "
           ...
           %1: i8 = 0
-          exit [%0]
+          term [%0]
         ",
         );
     }

@@ -353,10 +353,6 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
-                AstInst::Exit { locals } => {
-                    let exit_vars = locals.iter().map(|x| self.p_local(*x)).collect::<Vec<_>>();
-                    self.insts.push(Inst::Exit(Exit(exit_vars)));
-                }
                 AstInst::FAdd {
                     local,
                     ty,
@@ -799,6 +795,10 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
+                AstInst::Term { locals } => {
+                    let term_vars = locals.iter().map(|x| self.p_local(*x)).collect::<Vec<_>>();
+                    self.insts.push(Inst::Term(Term(term_vars)));
+                }
                 AstInst::Trunc { local, ty, val } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -1052,9 +1052,6 @@ enum AstInst {
         num_elems: Span,
         elem_size: Span,
     },
-    Exit {
-        locals: Vec<Span>,
-    },
     FAdd {
         local: Span,
         ty: AstTy,
@@ -1230,6 +1227,9 @@ enum AstInst {
         ty: AstTy,
         lhs: Span,
         rhs: Span,
+    },
+    Term {
+        locals: Vec<Span>,
     },
     Trunc {
         local: Span,
