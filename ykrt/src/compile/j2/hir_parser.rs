@@ -870,7 +870,8 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
         let block = Block { insts: self.insts };
         let m = Mod {
             trid: TraceId::testing(),
-            kind: ModKind::Test { entry_vlocs, block },
+            trace_start: TraceStart::Test,
+            trace_end: TraceEnd::Test { entry_vlocs, block },
             tys: self.tys,
             guard_restores,
             addr_name_map: None,

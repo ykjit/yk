@@ -68,18 +68,32 @@
 //! ## Modules vs. blocks
 //!
 //! A HIR [Module] is a complete, high-level, representation of our intuitive notion of a "trace".
-//! Depending on the kind of trace (loop etc.), the module will contain one or more [Block]s (where
-//! a block is a sequence of instructions). Blocks can (or, more accurately, "will") represent two
-//! subtly different things: "body" blocks represent the core of a trace; "guard" blocks represent
-//! side-exits (note: we currently don't do this!). Only body blocks can contain guards and thus
-//! reference guard blocks.
 //!
-//! All blocks share [Ty]s: thus a [TyIdx] is relative to a module, not a block.
+//! Traces come in different flavours, which we represent as a pair ([TraceStart], [TraceEnd]).
+//! This allows us to subsume the traditional notion of a "loop trace" and so on. 5 of the 6
+//! possibilities are valid ([TraceStart]s in rows, [TraceEnd]s in columns):
+//!
+//! |              | Coupler | Loop | Return |
+//! |--------------|---------|------|--------|
+//! | ControlPoint | ✓       | ✓    | ✓      |
+//! | Guard        | ✓       | ✗    | ✓      |
+//!
+//! Note: this doesn't mean that a guard trace can't end up back at the start of the loop the guard
+//! was in. It does mean that we don't need to treat this as a special option: it is a guard
+//! coupler that happens to end up back at the same trace.
+//!
+//! Depending on the kind of trace (loop etc.), the [TraceEnd] will contain one or more [Block]s
+//! (where a block is a sequence of instructions). Blocks can (or, more accurately, "will")
+//! represent two subtly different things: "body" blocks (including peeled blocks) represent the
+//! core of a trace; "guard" blocks represent side-exits (note: we currently don't do this!). Only
+//! body blocks can contain guards and thus reference guard blocks.
 //!
 //! All blocks have an entry and exit point, with corresponding [VarLocs], though the details
 //! differ between body and guard blocks. Body blocks start with 0 or more [Arg] / [Const]
 //! instructions and end with a [Term] instruction. Guard blocks' entry is defined by the
 //! corresponding [Guard] instruction and their exit by the relevant AOT [DeoptSafepoint].
+//!
+//! All blocks share [Ty]s: thus a [TyIdx] is relative to a module, not a block.
 //!
 //!
 //! ## Arguments
@@ -219,7 +233,8 @@ pub(super) trait BlockLikeT {
 #[derive(Debug)]
 pub(super) struct Mod<Reg: RegT> {
     pub trid: TraceId,
-    pub kind: ModKind<Reg>,
+    pub trace_start: TraceStart<Reg>,
+    pub trace_end: TraceEnd<Reg>,
     pub tys: IndexVec<TyIdx, Ty>,
     pub guard_restores: IndexVec<GuardRestoreIdx, GuardRestore>,
     /// A map of names to pointers. Will be `None` if logging was disabled.
@@ -237,13 +252,10 @@ impl<Reg: RegT> Mod<Reg> {
             }
         }
 
-        match &self.kind {
-            ModKind::Coupler { .. } => todo!(),
-            ModKind::Loop { .. } => todo!(),
-            ModKind::Return { .. } => todo!(),
-            ModKind::Side { .. } => todo!(),
+        match &self.trace_end {
+            TraceEnd::Coupler { .. } | TraceEnd::Loop { .. } | TraceEnd::Return { .. } => todo!(),
             #[cfg(test)]
-            ModKind::Test { entry_vlocs, block } => {
+            TraceEnd::Test { entry_vlocs, block } => {
                 block.assert_well_formed(self, entry_vlocs, entry_vlocs);
             }
         }
@@ -256,13 +268,12 @@ impl<Reg: RegT> Mod<Reg> {
 
 impl<Reg: RegT> Display for Mod<Reg> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match &self.kind {
-            ModKind::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            ModKind::Loop { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            ModKind::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            ModKind::Side { entry, .. } => write!(f, "{}", entry.to_string(self)),
+        match &self.trace_end {
+            TraceEnd::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
+            TraceEnd::Loop { entry, .. } => write!(f, "{}", entry.to_string(self)),
+            TraceEnd::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
             #[cfg(test)]
-            ModKind::Test { block, .. } => write!(f, "{}", block.to_string(self)),
+            TraceEnd::Test { block, .. } => write!(f, "{}", block.to_string(self)),
         }
     }
 }
@@ -279,38 +290,42 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
     }
 }
 
-/// The kind of a module.
+/// Where did this trace start from?
 #[derive(Debug)]
-pub(super) enum ModKind<Reg: RegT> {
-    /// A trace that starts from a control point and ends by jumping to `tgt_ctr`.
-    Coupler {
+pub(super) enum TraceStart<Reg: RegT> {
+    /// This trace started from a control point.
+    ControlPoint {
         entry_safepoint: &'static DeoptSafepoint,
+    },
+    /// This trace started from a guard failing.
+    Guard {
+        src_ctr: Arc<J2CompiledTrace<Reg>>,
+        src_gridx: GuardRestoreIdx,
+        entry_vlocs: Vec<VarLocs<Reg>>,
+    },
+    /// This is a trace intended for unit testing.
+    #[cfg(test)]
+    Test,
+}
+
+/// Where did this trace end?
+#[derive(Debug)]
+pub(super) enum TraceEnd<Reg: RegT> {
+    /// This trace ended at a different [crate::location::Location] than it started from.
+    Coupler {
         entry: Block,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,
     },
-    /// A trace that starts from a control point and loops. If `inner` is non-`None`, this loop
-    /// has been peeled: `entry` should be executed once, jump to `inner`, and `inner` then loops.
-    Loop {
-        entry_safepoint: &'static DeoptSafepoint,
-        entry: Block,
-        inner: Option<Block>,
-    },
-    /// A trace that starts from a control point and then returns early.
+    /// This trace ended at the same [crate::location::Location] that it started from, thus forming
+    /// a loop.
+    Loop { entry: Block, peel: Option<Block> },
+    /// This trace ended up early when a `return` statement in the control point loop was
+    /// encountered.
     Return {
-        entry_safepoint: &'static DeoptSafepoint,
         entry: Block,
         exit_safepoint: &'static DeoptSafepoint,
     },
-    /// A trace that starts from the guard `src_gridx` in `src_ctr` and jumps to `tgt_ctr`.
-    Side {
-        entry_vlocs: Vec<VarLocs<Reg>>,
-        entry: Block,
-        src_ctr: Arc<J2CompiledTrace<Reg>>,
-        src_gridx: GuardRestoreIdx,
-        tgt_ctr: Arc<J2CompiledTrace<Reg>>,
-    },
-    /// A test module: this creates a non-executable block that doesn't jump to another trace.
-    /// It is suitable for pretty printing.
+    /// This is a trace intended for unit testing.
     #[cfg(test)]
     Test {
         entry_vlocs: Vec<VarLocs<Reg>>,
@@ -4814,10 +4829,10 @@ mod test {
         for ty in m.tys {
             opt.push_ty(ty).unwrap();
         }
-        let ModKind::Test {
+        let TraceEnd::Test {
             entry_vlocs: _,
             block: Block { insts },
-        } = m.kind
+        } = m.trace_end
         else {
             panic!()
         };

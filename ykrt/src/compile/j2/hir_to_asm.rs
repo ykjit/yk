@@ -12,9 +12,13 @@
 //! we first process the trace's main body and then process guard bodies.
 //!
 //!
-//! ## Coupler traces
+//! ### Output format of different trace kinds
 //!
-//! Coupler traces are of the form:
+//! Traces are represented as ([TraceStart], [TraceEnd]) pairs.
+//!
+//! ## (ControlPoint, Coupler) traces
+//!
+//! These traces take the form:
 //!
 //! ```text
 //! <stack adjustment>
@@ -28,9 +32,9 @@
 //! <data>
 //! ```
 //!
-//! ## Loop traces
+//! ## (ControlPoint, Loop) traces
 //!
-//! Loop traces are of the form:
+//! These traces take the form:
 //!
 //! ```text
 //! <stack adjustment>
@@ -50,9 +54,28 @@
 //! `iter1_label`.
 //!
 //!
-//! ## Side traces
+//! ## (ControlPoint, Return) traces
 //!
-//! Side traces are of the form:
+//! These traces take the form:
+//!
+//! ```text
+//! <stack adjustment>
+//! iter0_label:
+//! <instrs>
+//! return
+//! <guard body n>
+//! ...
+//! <guard body 1>
+//! call __yk_j2_deopt
+//! <data>
+//! ```
+//!
+//! Where `return` is a machine level `return`.
+//!
+//!
+//! ## (Guard, Coupler) traces
+//!
+//! These traces take the form:
 //!
 //! ```text
 //! <instrs>
@@ -71,7 +94,7 @@ use crate::{
         CompilationError, CompiledTrace, DeoptSafepoint,
         j2::{
             codebuf::ExeCodeBuf,
-            compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
+            compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2TraceStart},
             hir::*,
             regalloc::{RegAlloc, RegFill, RegT, VarLoc, VarLocs},
         },
@@ -99,115 +122,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
     pub(super) fn build(mut self, mt: Arc<MT>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let logging = should_log_ir(IRPhase::Asm);
-        let (buf, guards, log, modkind) = match &self.m.kind {
-            ModKind::Coupler {
-                entry_safepoint,
-                entry,
-                tgt_ctr,
-            } => {
-                let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-                // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
-                let base_stack_off = u32::try_from({
-                    let (smap, prologue) = aot_smaps.get(0);
-                    if prologue.hasfp {
-                        // FIXME: This needs porting! https://github.com/ykjit/yk/issues/1936
-                        #[cfg(not(target_arch = "x86_64"))]
-                        panic!();
-                        // The frame size includes RBP, but we only want to include the
-                        // local variables.
-                        smap.size - 8
-                    } else {
-                        smap.size
-                    }
-                })
-                .unwrap();
-
-                let (rec, _) = aot_smaps.get(usize::try_from(entry_safepoint.id).unwrap());
-                let entry_vlocs = rec
-                    .live_vals
-                    .iter()
-                    .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
-                    .collect::<Vec<_>>();
-                let exit_vlocs = tgt_ctr.entry_vlocs();
-
-                // Create the backwards jump at the end of a loop trace.
-                self.be.coupler_trace_end(tgt_ctr)?;
-
-                // Assemble the body
-                let (guards, entry_stack_off) =
-                    self.p_block(entry, base_stack_off, &entry_vlocs, exit_vlocs, logging)?;
-                let instrs_label = self
-                    .be
-                    .coupler_trace_start(entry_stack_off - base_stack_off)?;
-                self.asm_guards(entry, guards)?;
-                let (buf, guards, log, label_offs) = self.be.build_exe(logging, &[instrs_label])?;
-                let [sidetrace_off] = &*label_offs else {
-                    panic!()
-                };
-                let modkind = J2CompiledTraceKind::Coupler {
-                    entry_vlocs,
-                    entry_safepoint,
-                    stack_off: entry_stack_off,
-                    sidetrace_off: *sidetrace_off,
-                };
-                (buf, guards, log, modkind)
-            }
-            ModKind::Loop {
-                entry_safepoint,
-                entry,
-                inner: body,
-            } => {
-                let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-                // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
-                let base_stack_off = u32::try_from({
-                    let (smap, prologue) = aot_smaps.get(0);
-                    if prologue.hasfp {
-                        // FIXME: This needs porting! https://github.com/ykjit/yk/issues/1936
-                        #[cfg(not(target_arch = "x86_64"))]
-                        panic!();
-                        // The frame size includes RBP, but we only want to include the
-                        // local variables.
-                        smap.size - 8
-                    } else {
-                        smap.size
-                    }
-                })
-                .unwrap();
-
-                assert!(body.is_none());
-                let (rec, _) = aot_smaps.get(usize::try_from(entry_safepoint.id).unwrap());
-                let entry_vlocs = rec
-                    .live_vals
-                    .iter()
-                    .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
-                    .collect::<Vec<_>>();
-
-                // Create the backwards jump at the end of a loop trace.
-                let iter0_label = self.be.loop_trace_end()?;
-
-                // Assemble the body
-                let (guards, entry_stack_off) =
-                    self.p_block(entry, base_stack_off, &entry_vlocs, &entry_vlocs, logging)?;
-                self.be
-                    .loop_trace_start(iter0_label.clone(), entry_stack_off - base_stack_off);
-                self.asm_guards(entry, guards)?;
-                let (buf, guards, log, label_offs) = self.be.build_exe(logging, &[iter0_label])?;
-                let [sidetrace_off] = &*label_offs else {
-                    panic!()
-                };
-                let modkind = J2CompiledTraceKind::Loop {
-                    entry_vlocs,
-                    entry_safepoint,
-                    stack_off: entry_stack_off,
-                    sidetrace_off: *sidetrace_off,
-                };
-                (buf, guards, log, modkind)
-            }
-            ModKind::Return {
-                entry_safepoint,
-                entry,
-                exit_safepoint,
-            } => {
+        let (buf, guards, log, trace_start) = match &self.m.trace_start {
+            TraceStart::ControlPoint { entry_safepoint } => {
                 let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
                 // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
                 let base_stack_off = u32::try_from({
@@ -232,55 +148,91 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
 
-                self.be.return_trace_end(exit_safepoint)?;
+                let (post_stack_label, entry_stack_off) = match &self.m.trace_end {
+                    TraceEnd::Coupler { entry, tgt_ctr } => {
+                        let exit_vlocs = tgt_ctr.entry_vlocs();
+                        self.be.coupler_trace_end(tgt_ctr)?;
+                        let (guards, entry_stack_off) =
+                            self.p_block(entry, base_stack_off, &entry_vlocs, exit_vlocs, logging)?;
+                        let post_stack_label = self
+                            .be
+                            .coupler_trace_start(entry_stack_off - base_stack_off)?;
+                        self.asm_guards(entry, guards)?;
+                        (post_stack_label, entry_stack_off)
+                    }
+                    TraceEnd::Loop { entry, peel } => {
+                        assert!(peel.is_none());
+                        let iter0_label = self.be.loop_trace_end()?;
+                        let (guards, entry_stack_off) = self.p_block(
+                            entry,
+                            base_stack_off,
+                            &entry_vlocs,
+                            &entry_vlocs,
+                            logging,
+                        )?;
+                        self.be.loop_trace_start(
+                            iter0_label.clone(),
+                            entry_stack_off - base_stack_off,
+                        );
+                        self.asm_guards(entry, guards)?;
+                        (iter0_label, entry_stack_off)
+                    }
+                    TraceEnd::Return {
+                        entry,
+                        exit_safepoint,
+                    } => {
+                        self.be.return_trace_end(exit_safepoint)?;
+                        let (guards, entry_stack_off) =
+                            self.p_block(entry, base_stack_off, &entry_vlocs, &[], logging)?;
+                        let post_stack_label =
+                            self.be.return_trace_start(entry_stack_off - base_stack_off);
+                        self.asm_guards(entry, guards)?;
+                        (post_stack_label, entry_stack_off)
+                    }
+                    #[cfg(test)]
+                    TraceEnd::Test { .. } => todo!(),
+                };
 
-                // Assemble the body
-                let (guards, entry_stack_off) = self.p_block(
-                    entry,
-                    base_stack_off,
-                    &entry_vlocs,
-                    &entry_vlocs, // FIXME: This isn't needed for return traces
-                    logging,
-                )?;
-                let post_stack_label = self.be.return_trace_start(entry_stack_off - base_stack_off);
-                self.asm_guards(entry, guards)?;
                 let (buf, guards, log, label_offs) =
                     self.be.build_exe(logging, &[post_stack_label])?;
                 let [sidetrace_off] = &*label_offs else {
                     panic!()
                 };
-                let modkind = J2CompiledTraceKind::Return {
+                let trace_start = J2TraceStart::ControlPoint {
                     entry_vlocs,
                     entry_safepoint,
                     stack_off: entry_stack_off,
                     sidetrace_off: *sidetrace_off,
                 };
-                (buf, guards, log, modkind)
+                (buf, guards, log, trace_start)
             }
-            ModKind::Side {
-                entry_vlocs,
-                entry,
+            TraceStart::Guard {
                 src_ctr,
                 src_gridx,
-                tgt_ctr,
-            } => {
-                let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
-                self.be.side_trace_end(tgt_ctr)?;
-                // Assemble the body
-                let exit_vlocs = tgt_ctr.entry_vlocs();
-                let (guards, entry_stack_off) =
-                    self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?;
-                self.be.side_trace_start(entry_stack_off - src_stack_off);
-                self.asm_guards(entry, guards)?;
-                let modkind = J2CompiledTraceKind::Side {
-                    stack_off: entry_stack_off,
-                };
-                let (buf, guards, log, labels) = self.be.build_exe(logging, &[])?;
-                assert!(labels.is_empty());
-                (buf, guards, log, modkind)
-            }
+                entry_vlocs,
+            } => match &self.m.trace_end {
+                TraceEnd::Coupler { entry, tgt_ctr } => {
+                    let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
+                    self.be.side_trace_end(tgt_ctr)?;
+                    let exit_vlocs = tgt_ctr.entry_vlocs();
+                    let (guards, entry_stack_off) =
+                        self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?;
+                    self.be.side_trace_start(entry_stack_off - src_stack_off);
+                    self.asm_guards(entry, guards)?;
+                    let modkind = J2TraceStart::Guard {
+                        stack_off: entry_stack_off,
+                    };
+                    let (buf, guards, log, labels) = self.be.build_exe(logging, &[])?;
+                    assert!(labels.is_empty());
+                    (buf, guards, log, modkind)
+                }
+                TraceEnd::Loop { .. } => unreachable!(),
+                TraceEnd::Return { .. } => todo!(),
+                #[cfg(test)]
+                TraceEnd::Test { .. } => todo!(),
+            },
             #[cfg(test)]
-            ModKind::Test { .. } => panic!(),
+            TraceStart::Test => unreachable!(),
         };
 
         if logging {
@@ -301,37 +253,33 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             Arc::downgrade(&self.hl),
             buf,
             guards,
-            modkind,
+            trace_start,
         )))
     }
 
     #[cfg(test)]
     pub(super) fn build_test(mut self) -> Result<AB::BuildTest, CompilationError> {
-        match &self.m.kind {
-            ModKind::Test { entry_vlocs, block } => {
-                // Assemble the body
-                let (guards, stack_off) = self.p_block(block, 0, entry_vlocs, entry_vlocs, true)?;
-                self.be.side_trace_start(stack_off);
+        let TraceEnd::Test { entry_vlocs, block } = &self.m.trace_end else {
+            panic!()
+        };
+        // Assemble the body
+        let (guards, stack_off) = self.p_block(block, 0, entry_vlocs, entry_vlocs, true)?;
+        self.be.side_trace_start(stack_off);
 
-                // Guards
-                for (asmgrestore, _grestore) in
-                    guards.into_iter().rev().zip(self.m.guard_restores())
-                {
-                    let patch_label = self.be.guard_end(TraceId::testing(), asmgrestore.gridx)?;
-                    self.be.guard_completed(
-                        asmgrestore.label,
-                        patch_label,
-                        0,
-                        asmgrestore.bid,
-                        SmallVec::new(),
-                        None,
-                    );
-                }
-
-                Ok(self.be.build_test(&[]))
-            }
-            _ => unreachable!(),
+        // Guards
+        for (asmgrestore, _grestore) in guards.into_iter().rev().zip(self.m.guard_restores()) {
+            let patch_label = self.be.guard_end(TraceId::testing(), asmgrestore.gridx)?;
+            self.be.guard_completed(
+                asmgrestore.label,
+                patch_label,
+                0,
+                asmgrestore.bid,
+                SmallVec::new(),
+                None,
+            );
         }
+
+        Ok(self.be.build_test(&[]))
     }
 
     /// Assemble guards.
@@ -675,38 +623,14 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_sub(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::Term(Term(term_vars)) => match &self.m.kind {
-                    ModKind::Loop { .. } => {
-                        ra.set_exit_vlocs(
-                            &mut self.be,
-                            true,
-                            entry_vlocs,
-                            iidx,
-                            term_vars,
-                            exit_vlocs,
-                        )?;
-                    }
-                    ModKind::Side { .. } | ModKind::Coupler { .. } => {
-                        ra.set_exit_vlocs(
-                            &mut self.be,
-                            false,
-                            entry_vlocs,
-                            iidx,
-                            term_vars,
-                            exit_vlocs,
-                        )?;
-                    }
-                    ModKind::Return { .. } => {
+                Inst::Term(Term(term_vars)) => match self.m.trace_end {
+                    TraceEnd::Return { .. } => {
                         assert_eq!(term_vars.len(), 0);
                     }
-                    #[cfg(test)]
-                    ModKind::Test {
-                        entry_vlocs: _,
-                        block: _,
-                    } => {
+                    _ => {
                         ra.set_exit_vlocs(
                             &mut self.be,
-                            false,
+                            matches!(self.m.trace_end, TraceEnd::Loop { .. }),
                             entry_vlocs,
                             iidx,
                             term_vars,
@@ -923,7 +847,7 @@ pub(super) trait HirToAsmBackend {
         tmp_reg: Self::Reg,
     );
 
-    // The functions called for coupler traces.
+    // The functions called for (ControlPoint, Coupler) traces.
 
     /// Produce code for the jump to `tgt_ctr` at the end of a coupler trace.
     fn coupler_trace_end(
@@ -934,37 +858,37 @@ pub(super) trait HirToAsmBackend {
     /// additional bytes of stack space.
     fn coupler_trace_start(&mut self, stack_off: u32) -> Result<Self::Label, CompilationError>;
 
-    // The functions called for loop traces.
+    // The functions called for (ControlPoint, Loop) traces.
 
-    /// Produce code for the backwards jump that finishes a loop trace.
+    /// Produce code for the backwards jump that finishes a (ControlPoint, Loop) trace.
     fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError>;
-    /// The current body of a loop trace has been completed and has consumed `stack_off` additional
-    /// bytes of stack space. `post_stack_label` must be attached to the first instruction after the
-    /// stack is adjusted.
+    /// The current body of a (ControlPoint, Loop) trace has been completed and has consumed
+    /// `stack_off` additional bytes of stack space. `post_stack_label` must be attached to the
+    /// first instruction after the stack is adjusted.
     fn loop_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32);
 
-    // The functions called for return traces.
+    // The functions called for (ControlPoint, Return) traces.
 
-    /// Generate code for the end of a return trace, where the safepoint for the `return` is
-    /// `exit_safepoint`.
+    /// Generate code for the end of a (ControlPoint, Return) trace, where the safepoint for the
+    /// `return` is `exit_safepoint`.
     fn return_trace_end(
         &mut self,
         exit_safepoint: &'static DeoptSafepoint,
     ) -> Result<(), CompilationError>;
-    /// The current body of a return trace has been completed and has consumed `stack_off`
-    /// additional bytes of stack space. The label returned must be attached to the first
-    /// instruction after the stack is adjusted.
+    /// The current body of a (ControlPoint, Return) trace has been completed and has consumed
+    /// `stack_off` additional bytes of stack space. The label returned must be attached to the
+    /// first instruction after the stack is adjusted.
     fn return_trace_start(&mut self, stack_off: u32) -> Self::Label;
 
-    // The functions called for side traces.
+    // The functions called for (Guard, Coupler) traces.
 
-    /// Produce code for the jump to `tgt_ctr` at the end of a side trace.
+    /// Produce code for the jump to `tgt_ctr` at the end of a (Guard, Coupler) trace.
     fn side_trace_end(
         &mut self,
         tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError>;
-    /// The current body of a sidetrace trace has been completed and has consumed `stack_off` additional
-    /// bytes of stack space.
+    /// The current body of a (Guard, Coupler) trace has been completed and has consumed
+    /// `stack_off` additional bytes of stack space.
     fn side_trace_start(&mut self, stack_off: u32);
 
     // Functions for guards.

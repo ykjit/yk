@@ -29,7 +29,7 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     pub hl: Weak<Mutex<HotLocation>>,
     codebuf: ExeCodeBuf,
     pub guard_restores: IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
-    pub kind: J2CompiledTraceKind<Reg>,
+    pub trace_start: J2TraceStart<Reg>,
 }
 
 impl<Reg: RegT> J2CompiledTrace<Reg> {
@@ -39,7 +39,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         hl: Weak<Mutex<HotLocation>>,
         codebuf: ExeCodeBuf,
         guards: IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
-        kind: J2CompiledTraceKind<Reg>,
+        trace_start: J2TraceStart<Reg>,
     ) -> Self {
         Self {
             mt,
@@ -47,7 +47,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
             hl,
             codebuf,
             guard_restores: guards,
-            kind,
+            trace_start,
         }
     }
 
@@ -64,13 +64,9 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
     }
 
     pub(super) fn entry_vlocs(&self) -> &[VarLocs<Reg>] {
-        match &self.kind {
-            J2CompiledTraceKind::Coupler { entry_vlocs, .. }
-            | J2CompiledTraceKind::Loop { entry_vlocs, .. }
-            | J2CompiledTraceKind::Return { entry_vlocs, .. } => entry_vlocs,
-            J2CompiledTraceKind::Side { stack_off: _ } => todo!(),
-            #[cfg(test)]
-            J2CompiledTraceKind::Test => todo!(),
+        match &self.trace_start {
+            J2TraceStart::ControlPoint { entry_vlocs, .. } => entry_vlocs,
+            J2TraceStart::Guard { stack_off: _ } => todo!(),
         }
     }
 
@@ -79,28 +75,20 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
     }
 
     pub(super) fn guard_stack_off(&self, gridx: GuardRestoreIdx) -> u32 {
-        match self.kind {
-            J2CompiledTraceKind::Coupler { stack_off, .. }
-            | J2CompiledTraceKind::Loop { stack_off, .. }
-            | J2CompiledTraceKind::Return { stack_off, .. }
-            | J2CompiledTraceKind::Side { stack_off } => {
+        match self.trace_start {
+            J2TraceStart::ControlPoint { stack_off, .. }
+            | J2TraceStart::Guard { stack_off, .. } => {
                 stack_off + self.guard_restores[gridx].extra_stack_len
             }
-            #[cfg(test)]
-            J2CompiledTraceKind::Test => todo!(),
         }
     }
 
     /// Return the size of the stack of the entry block. This is used by side-traces to set the
     /// stack pointer to the right value just before jumping to a loop / coupler trace.
     pub(super) fn entry_stack_off(&self) -> u32 {
-        match self.kind {
-            J2CompiledTraceKind::Coupler { stack_off, .. }
-            | J2CompiledTraceKind::Return { stack_off, .. }
-            | J2CompiledTraceKind::Loop { stack_off, .. } => stack_off,
-            J2CompiledTraceKind::Side { .. } => todo!(),
-            #[cfg(test)]
-            J2CompiledTraceKind::Test => todo!(),
+        match self.trace_start {
+            J2TraceStart::ControlPoint { stack_off, .. }
+            | J2TraceStart::Guard { stack_off, .. } => stack_off,
         }
     }
 }
@@ -165,12 +153,10 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     }
 }
 
-/// What kind of [J2CompiledTrace] is this trace?
+/// Where did this J2 compiled trace start?
 #[derive(Debug)]
-pub(super) enum J2CompiledTraceKind<Reg: RegT> {
-    /// A coupler trace.
-    Coupler {
-        /// The entry safepoint. See [entry_vlocs].
+pub(super) enum J2TraceStart<Reg: RegT> {
+    ControlPoint {
         entry_safepoint: &'static DeoptSafepoint,
         /// Every entry in `entry_safepoint.lives` will have an entry in `entry_vlocs`, in order.
         /// In other words, `entry_safepoint.lives.iter().zip(entry_vlocs.iter())` is guaranteed to
@@ -187,48 +173,9 @@ pub(super) enum J2CompiledTraceKind<Reg: RegT> {
         /// The offset into the compiled trace that sidetraces should jump to.
         sidetrace_off: usize,
     },
-    /// A loop trace.
-    Loop {
-        /// The entry safepoint. See [entry_vlocs].
-        entry_safepoint: &'static DeoptSafepoint,
-        /// Every entry in `entry_safepoint.lives` will have an entry in `entry_vlocs`, in order.
-        /// In other words, `entry_safepoint.lives.iter().zip(entry_vlocs.iter())` is guaranteed to
-        /// work as expected.
-        ///
-        /// However, some variables will have empty `VarLocs`. In other words, while this loop
-        /// trace guarantees to accept variables being set in accordance with
-        /// `entry_safepoint.lives`, it is also happy with a non-strict subset of those. That means
-        /// that other traces jumping to this loop trace only need to deal with the subset recorded
-        /// in `entry_vlocs` (i.e. they can ignore the superset in `entry_safepoint.lives`).
-        entry_vlocs: Vec<VarLocs<Reg>>,
-        stack_off: u32,
-        /// The offset into the compiled trace that sidetraces should jump to.
-        sidetrace_off: usize,
-    },
-    /// A return trace.
-    Return {
-        /// The entry safepoint. See [entry_vlocs].
-        entry_safepoint: &'static DeoptSafepoint,
-        /// Every entry in `entry_safepoint.lives` will have an entry in `entry_vlocs`, in order.
-        /// In other words, `entry_safepoint.lives.iter().zip(entry_vlocs.iter())` is guaranteed to
-        /// work as expected.
-        ///
-        /// However, some variables will have empty `VarLocs`. In other words, while this return
-        /// trace guarantees to accept variables being set in accordance with
-        /// `entry_safepoint.lives`, it is also happy with a non-strict subset of those. That means
-        /// that other traces jumping to this return trace only need to deal with the subset recorded
-        /// in `entry_vlocs` (i.e. they can ignore the superset in `entry_safepoint.lives`).
-        entry_vlocs: Vec<VarLocs<Reg>>,
-        stack_off: u32,
-        /// The offset into the compiled trace that sidetraces should jump to.
-        sidetrace_off: usize,
-    },
-    Side {
+    Guard {
         stack_off: u32,
     },
-    #[cfg(test)]
-    #[allow(dead_code)]
-    Test,
 }
 
 #[derive(Debug)]

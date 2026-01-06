@@ -20,7 +20,7 @@ use crate::{
         CompilationError, CompiledTrace, GuardId,
         j2::{
             J2,
-            compiled_trace::{J2CompiledTrace, J2CompiledTraceKind},
+            compiled_trace::{J2CompiledTrace, J2TraceStart},
             hir::{self, GuardRestore, GuardRestoreIdx},
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
@@ -223,19 +223,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let exit_safepoint = match &bmk {
                 BuildModKind::Loop { entry_safepoint } => entry_safepoint,
                 BuildModKind::Coupler { tgt_ctr, .. } | BuildModKind::Side { tgt_ctr, .. } => {
-                    match &tgt_ctr.kind {
-                        J2CompiledTraceKind::Coupler {
-                            entry_safepoint, ..
-                        }
-                        | J2CompiledTraceKind::Loop {
-                            entry_safepoint, ..
-                        }
-                        | J2CompiledTraceKind::Return {
+                    match &tgt_ctr.trace_start {
+                        J2TraceStart::ControlPoint {
                             entry_safepoint, ..
                         } => entry_safepoint,
-                        J2CompiledTraceKind::Side { .. } => todo!(),
-                        #[cfg(test)]
-                        J2CompiledTraceKind::Test => unreachable!(),
+                        J2TraceStart::Guard { .. } => todo!(),
                     }
                 }
             };
@@ -248,26 +240,26 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         }
 
         let (entry, tys) = self.opt.build();
-        let mk = match bmk {
+        let (trace_start, trace_end) = match bmk {
             BuildModKind::Coupler {
                 entry_safepoint,
                 tgt_ctr,
-            } => hir::ModKind::Coupler {
-                entry_safepoint,
-                entry,
-                tgt_ctr,
-            },
+            } => (
+                hir::TraceStart::ControlPoint { entry_safepoint },
+                hir::TraceEnd::Coupler { entry, tgt_ctr },
+            ),
             BuildModKind::Loop { entry_safepoint } => match return_safepoint {
-                None => hir::ModKind::Loop {
-                    entry_safepoint,
-                    entry,
-                    inner: None,
-                },
-                Some(x) => hir::ModKind::Return {
-                    entry_safepoint,
-                    entry,
-                    exit_safepoint: x,
-                },
+                None => (
+                    hir::TraceStart::ControlPoint { entry_safepoint },
+                    hir::TraceEnd::Loop { entry, peel: None },
+                ),
+                Some(exit_safepoint) => (
+                    hir::TraceStart::ControlPoint { entry_safepoint },
+                    hir::TraceEnd::Return {
+                        entry,
+                        exit_safepoint,
+                    },
+                ),
             },
             BuildModKind::Side {
                 entry_vlocs,
@@ -275,18 +267,20 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 src_gridx,
                 tgt_ctr,
                 ..
-            } => hir::ModKind::Side {
-                entry,
-                entry_vlocs,
-                src_ctr,
-                src_gridx,
-                tgt_ctr,
-            },
+            } => (
+                hir::TraceStart::Guard {
+                    entry_vlocs,
+                    src_ctr,
+                    src_gridx,
+                },
+                hir::TraceEnd::Coupler { entry, tgt_ctr },
+            ),
         };
 
         let m = hir::Mod {
             trid: self.trid,
-            kind: mk,
+            trace_start,
+            trace_end,
             tys,
             addr_name_map: self.addr_name_map,
             guard_restores: self.guard_restores,
@@ -554,7 +548,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         }
     }
 
-    /// Process the start of a loop trace.
+    /// Process the start of a (ControlPoint, Coupler | Loop | Return) trace.
     fn p_start_loop(
         &mut self,
         cp_bid: &BBlockId,
@@ -589,7 +583,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         Ok(safepoint)
     }
 
-    /// Process the beginning of a side-trace.
+    /// Process the beginning of a (Guard, Coupler | Return) trace.
     fn p_start_side(
         &mut self,
         src_ctr: &Arc<J2CompiledTrace<Reg>>,
