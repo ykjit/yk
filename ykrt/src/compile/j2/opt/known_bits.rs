@@ -32,6 +32,7 @@ impl PassT for KnownBits {
         match inst {
             Inst::And(x) => self.opt_and(opt, x),
             Inst::Const(x) => self.opt_const(x),
+            Inst::ICmp(x) => self.opt_icmp(opt, x),
             Inst::Or(x) => self.opt_or(opt, x),
             Inst::SExt(x) => self.opt_sext(opt, x),
             Inst::ZExt(x) => self.opt_zext(opt, x),
@@ -110,6 +111,38 @@ impl KnownBits {
             self.set_pending(KnownBitValue::from_const(kind.clone()))
         }
         OptOutcome::Rewritten(inst.into())
+    }
+
+    fn opt_icmp(&mut self, opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
+        inst.canonicalise(opt);
+        let ICmp {
+            pred,
+            lhs,
+            rhs,
+            samesign: _samesign,
+        } = inst;
+        if let Some(lhs_b) = self.as_knownbits(opt, lhs)
+            && let Some(rhs_b) = self.as_knownbits(opt, rhs)
+        {
+            let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
+            match pred {
+                IPred::Eq if lhs_b.definitely_ne(&rhs_b) => {
+                    OptOutcome::Rewritten(Inst::Const(Const {
+                        tyidx,
+                        kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
+                    }))
+                }
+                IPred::Ne if lhs_b.definitely_ne(&rhs_b) => {
+                    OptOutcome::Rewritten(Inst::Const(Const {
+                        tyidx,
+                        kind: ConstKind::Int(ArbBitInt::from_u64(1, 1)),
+                    }))
+                }
+                _ => OptOutcome::Rewritten(inst.into()),
+            }
+        } else {
+            OptOutcome::Rewritten(inst.into())
+        }
     }
 
     fn opt_or(&mut self, opt: &PassOpt, mut inst: Or) -> OptOutcome {
@@ -238,6 +271,16 @@ impl KnownBitValue {
         self.knowns().bitand(&self.ones)
     }
 
+    /// Bitwidth of the underlying value.
+    ///
+    /// # Panics
+    ///
+    /// If the ones' and unknowns' bitwidth do not match.
+    fn bitw(&self) -> u32 {
+        assert_eq!(self.ones.bitw(), self.unknowns.bitw());
+        self.ones.bitw()
+    }
+
     fn bitand(&self, other: &KnownBitValue) -> KnownBitValue {
         let set_ones = self.ones.bitand(&other.ones);
         let set_zeroes = self.zeroes().bitor(&other.zeroes());
@@ -261,6 +304,20 @@ impl KnownBitValue {
             ones: set_ones,
             unknowns,
         }
+    }
+
+    /// Two `KnownBitValue` are not equal only if the known parts of their bits are different.
+    ///
+    /// Note that we do not implement the `PartialEq` trait because this violates the invariant
+    /// of the that trait that `eq == !ne`. In this case, `!ne` does not mean `eq`.
+    ///
+    /// # Panics
+    ///
+    /// If the bitwidths are different.
+    fn definitely_ne(&self, other: &Self) -> bool {
+        assert_eq!(self.bitw(), other.bitw());
+        let knowns = self.knowns().bitand(&other.knowns());
+        knowns.bitand(&self.ones) != knowns.bitand(&other.ones)
     }
 
     fn sign_extend(&self, bitw: u32) -> KnownBitValue {
@@ -430,6 +487,81 @@ mod test {
           %3: i8 = 3
           %4: i8 = 3
           blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_icmp() {
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = and %0, %1
+          %3: i8 = 1
+          %4: i1 = icmp eq %2, %3
+          blackbox %3
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 128
+          %2: i8 = and %0, %1
+          %3: i8 = 1
+          %4: i1 = 0
+          blackbox %3
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i8 = and %0, %1
+          %3: i1 = icmp eq %2, %1
+          blackbox %3
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 1
+          %2: i8 = and %0, %1
+          %3: i1 = icmp eq %2, %1
+          blackbox %3
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = and %0, %1
+          %3: i8 = 1
+          %4: i1 = icmp ne %2, %3
+          blackbox %3
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 128
+          %2: i8 = and %0, %1
+          %3: i8 = 1
+          %4: i1 = 1
+          blackbox %3
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i8 = and %0, %1
+          %3: i1 = icmp ne %2, %1
+          blackbox %3
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 1
+          %2: i8 = and %0, %1
+          %3: i1 = icmp ne %2, %1
+          blackbox %3
         ",
         );
     }
