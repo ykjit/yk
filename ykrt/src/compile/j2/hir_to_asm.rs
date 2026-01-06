@@ -498,45 +498,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_dynptradd(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::Exit(Exit(exit_vars)) => match &self.m.kind {
-                    ModKind::Loop { .. } => {
-                        ra.set_exit_vlocs(
-                            &mut self.be,
-                            true,
-                            entry_vlocs,
-                            iidx,
-                            exit_vars,
-                            exit_vlocs,
-                        )?;
-                    }
-                    ModKind::Side { .. } | ModKind::Coupler { .. } => {
-                        ra.set_exit_vlocs(
-                            &mut self.be,
-                            false,
-                            entry_vlocs,
-                            iidx,
-                            exit_vars,
-                            exit_vlocs,
-                        )?;
-                    }
-                    ModKind::Return { .. } => {
-                        assert_eq!(exit_vars.len(), 0);
-                    }
-                    #[cfg(test)]
-                    ModKind::Test {
-                        entry_vlocs: _,
-                        block: _,
-                    } => {
-                        ra.set_exit_vlocs(
-                            &mut self.be,
-                            false,
-                            entry_vlocs,
-                            iidx,
-                            exit_vars,
-                            exit_vlocs,
-                        )?;
-                    }
-                },
                 Inst::FAdd(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fadd(&mut ra, b, iidx, x)?;
@@ -714,6 +675,45 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_sub(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::Term(Term(term_vars)) => match &self.m.kind {
+                    ModKind::Loop { .. } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            true,
+                            entry_vlocs,
+                            iidx,
+                            term_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                    ModKind::Side { .. } | ModKind::Coupler { .. } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            false,
+                            entry_vlocs,
+                            iidx,
+                            term_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                    ModKind::Return { .. } => {
+                        assert_eq!(term_vars.len(), 0);
+                    }
+                    #[cfg(test)]
+                    ModKind::Test {
+                        entry_vlocs: _,
+                        block: _,
+                    } => {
+                        ra.set_exit_vlocs(
+                            &mut self.be,
+                            false,
+                            entry_vlocs,
+                            iidx,
+                            term_vars,
+                            exit_vlocs,
+                        )?;
+                    }
+                },
                 Inst::ThreadLocal(ThreadLocal(addr)) => {
                     if ra.is_used(iidx) {
                         let tloff = AB::thread_local_off(*addr);

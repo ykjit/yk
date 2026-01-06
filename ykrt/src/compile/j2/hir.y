@@ -50,9 +50,6 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "CALL" "ID" "LOCAL" "(" Locals ")" {
       Ok(AstInst::Call { local: None, ty: None, extern_: $2?.span(), tgt: $3?.span(), args: $5? })
     }
-  | "EXIT" "[" Locals "]" {
-      Ok(AstInst::Exit { locals: $3? })
-    }
   | "GUARD" Bool "," "LOCAL" "," "[" Locals "]" {
        Ok(AstInst::Guard { expect: $2?, cond: $4?.span(), entry_vars: $7? })
     }
@@ -187,6 +184,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
     }
   | "LOCAL" ":" Ty "=" "ZEXT" "LOCAL" {
       Ok(AstInst::ZExt { local: $1?.span(), ty: $3?, val: $6?.span() })
+    }
+  | "TERM" "[" Locals "]" {
+      Ok(AstInst::Term { locals: $3? })
     }
   ;
 

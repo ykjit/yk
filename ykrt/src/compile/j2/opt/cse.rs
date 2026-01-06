@@ -60,12 +60,12 @@ impl PassT for CSE {
         if let Inst::Arg(_)
         | Inst::Call(_)
         | Inst::Const(_)
-        | Inst::Exit(_)
         | Inst::Guard(_)
         | Inst::Load(_)
         | Inst::MemCpy(_)
         | Inst::MemSet(_)
-        | Inst::Store(_) = inst
+        | Inst::Store(_)
+        | Inst::Term(_) = inst
         {
             return OptOutcome::Rewritten(inst);
         }

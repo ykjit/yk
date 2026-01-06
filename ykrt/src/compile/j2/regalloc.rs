@@ -215,7 +215,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
     }
 
-    /// Set the [VarLocs] of a [super::hir::Exit] instruction.
+    /// Set the [VarLocs] of a [super::hir::Term] instruction.
     pub(super) fn set_exit_vlocs(
         &mut self,
         be: &mut AB,
@@ -237,7 +237,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // ...
         // ; spill %2
         // call f(%1)
-        // exit [%10]
+        // term [%10]
         // ```
         //
         // At the trace's end, %2 needs to be spilt into `stack_off=16`, but we can't do that until
@@ -3060,7 +3060,7 @@ pub(crate) mod test {
           %0: i8 = arg [reg ("GPR0", undefined)]
           %1: i8 = add %0, %0
           blackbox %1
-          exit [%0]
+          term [%0]
         "#,
             |_| true,
             &["
@@ -3081,7 +3081,7 @@ pub(crate) mod test {
           %0: i8 = 2
           %1: i8 = add %0, %0
           blackbox %1
-          exit []
+          term []
         "#,
             |_| true,
             &["
@@ -3101,7 +3101,7 @@ pub(crate) mod test {
           blackbox %1
           %3: i8 = add %0, %0
           blackbox %3
-          exit []
+          term []
         "#,
             |_| true,
             &["
@@ -3123,7 +3123,7 @@ pub(crate) mod test {
           %1: double = 1.0double
           %2: double = fadd %0, %1
           blackbox %2
-          exit []
+          term []
         "#,
             |_| true,
             &["
@@ -3142,7 +3142,7 @@ pub(crate) mod test {
           %1: i64 = arg [reg]
           %2: i64 = add %0, %1
           blackbox %2
-          exit [%1, %0]
+          term [%1, %0]
         "#,
             |_| true,
             &["
@@ -3167,7 +3167,7 @@ pub(crate) mod test {
           %0: i64 = arg [reg]
           %1: i32 = trunc %0
           blackbox %1
-          exit [%0]
+          term [%0]
         "#,
             |_| true,
             &["
@@ -3182,7 +3182,7 @@ pub(crate) mod test {
           %0: i64 = arg [reg]
           %1: i32 = trunc %0
           %2: i64 = zext %1
-          exit [%2]
+          term [%2]
         "#,
             |_| true,
             &["
@@ -3198,7 +3198,7 @@ pub(crate) mod test {
           %1: i32 = trunc %0
           %2: i16 = trunc %1
           blackbox %2
-          exit [%0]
+          term [%0]
         "#,
             |_| true,
             &["
@@ -3215,7 +3215,7 @@ pub(crate) mod test {
           %1: i16 = zext %0
           %2: i32 = zext %1
           %3: i8 = trunc %2
-          exit [%3]
+          term [%3]
         "#,
             |_| true,
             &["
@@ -3232,7 +3232,7 @@ pub(crate) mod test {
           %1: i32 = trunc %0
           %2: i64 = zext %1
           blackbox %2
-          exit [%0]
+          term [%0]
         "#,
             |_| true,
             &["

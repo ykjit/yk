@@ -244,7 +244,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 .iter()
                 .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
                 .collect::<Vec<_>>();
-            self.opt.feed_void(hir::Inst::Exit(hir::Exit(exit_vars)))?;
+            self.opt.feed_void(hir::Inst::Term(hir::Term(exit_vars)))?;
         }
 
         let (entry, tys) = self.opt.build();
@@ -1668,7 +1668,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let safepoint = frame.pc_safepoint.unwrap();
             // We currently don't support passing values back during early returns.
             assert!(val.is_none());
-            self.opt.feed_void(hir::Exit(Vec::new()).into())?;
+            self.opt.feed_void(hir::Term(Vec::new()).into())?;
             Ok(Some(safepoint))
         }
     }

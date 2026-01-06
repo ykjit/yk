@@ -78,7 +78,7 @@
 //!
 //! All blocks have an entry and exit point, with corresponding [VarLocs], though the details
 //! differ between body and guard blocks. Body blocks start with 0 or more [Arg] / [Const]
-//! instructions and end with an [Exit] instruction. Guard blocks' entry is defined by the
+//! instructions and end with a [Term] instruction. Guard blocks' entry is defined by the
 //! corresponding [Guard] instruction and their exit by the relevant AOT [DeoptSafepoint].
 //!
 //!
@@ -342,28 +342,28 @@ impl Block {
             } else if let Inst::Arg(_) = inst {
                 panic!("%{iidx:?}: 'arg' instructions cannot appear after trace entry");
             } else if iidx == self.insts.last_idx()
-                && let Inst::Exit(Exit(exit_vars)) = inst
+                && let Inst::Term(Term(term_vars)) = inst
             {
                 assert_eq!(
                     exit_vlocs.len(),
-                    exit_vars.len(),
-                    "%{iidx:?}: number of exit vars does not match number of exit VarLocs"
+                    term_vars.len(),
+                    "%{iidx:?}: number of term vars does not match number of term VarLocs"
                 );
 
                 for (i, (x, y)) in entry_vlocs.iter().zip(exit_vlocs.iter()).enumerate() {
                     let entry_ty = self.insts[InstIdx::from(i)].ty(m);
-                    let exit_ty = self.insts[exit_vars[i]].ty(m);
+                    let exit_ty = self.insts[term_vars[i]].ty(m);
                     if entry_ty != exit_ty {
                         panic!(
-                            "%{iidx:?}: exit var '%{:?}' at position '{i}' does match type of %{i}",
-                            exit_vars[i]
+                            "%{iidx:?}: term var '%{:?}' at position '{i}' does match type of %{i}",
+                            term_vars[i]
                         );
                     }
 
                     if x != y {
                         panic!(
-                            "%{iidx:?}: exit var '%{:?}' at position '{i}' does not match entry VarLoc",
-                            exit_vars[i]
+                            "%{iidx:?}: term var '%{:?}' at position '{i}' does not match entry VarLoc",
+                            term_vars[i]
                         );
                     }
                 }
@@ -375,11 +375,11 @@ impl Block {
                     "%{iidx:?}: forward reference to %{op_iidx:?}"
                 )
             }
-            if let Inst::Exit(_) = inst {
+            if let Inst::Term(_) = inst {
                 assert_eq!(
                     iidx,
                     self.insts.last_idx(),
-                    "%{iidx:?}: exit must be the last instruction in a trace"
+                    "%{iidx:?}: term must be the last instruction in a trace"
                 );
             }
             inst.assert_well_formed(m, self, iidx);
@@ -620,7 +620,6 @@ pub(super) enum Inst {
     Const,
     CtPop,
     DynPtrAdd,
-    Exit,
     FAdd,
     FCmp,
     FDiv,
@@ -651,6 +650,7 @@ pub(super) enum Inst {
     SRem,
     Store,
     Sub,
+    Term,
     ThreadLocal,
     Trunc,
     UDiv,
@@ -1314,52 +1314,6 @@ impl InstT for DynPtrAdd {
 
     fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
         &Ty::Ptr(0)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct Exit(pub(super) Vec<InstIdx>);
-
-impl InstT for Exit {
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
-        for x in self.0.iter_mut() {
-            *x = opt.equiv_iidx(*x);
-        }
-    }
-
-    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
-    }
-
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
-        Box::new(self.0.iter().cloned())
-    }
-
-    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!(
-            "exit [{}]",
-            self.0
-                .iter()
-                .map(|x| format!("%{}", usize::from(*x)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-
-    #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
-    where
-        F: FnMut(InstIdx) -> InstIdx,
-    {
-        for x in self.0.iter_mut() {
-            *x = iidx_map(*x);
-        }
-    }
-
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        // `Exit` is a pseudo-instruction, but it makes various things simpler if we pretend it has
-        // a type.
-        &Ty::Void
     }
 }
 
@@ -3375,6 +3329,53 @@ impl InstT for Sub {
     }
 }
 
+/// A block terminator.
+#[derive(Clone, Debug)]
+pub(super) struct Term(pub(super) Vec<InstIdx>);
+
+impl InstT for Term {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+        for x in self.0.iter_mut() {
+            *x = opt.equiv_iidx(*x);
+        }
+    }
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        panic!();
+    }
+
+    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+        Box::new(self.0.iter().cloned())
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "term [{}]",
+            self.0
+                .iter()
+                .map(|x| format!("%{}", usize::from(*x)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        for x in self.0.iter_mut() {
+            *x = iidx_map(*x);
+        }
+    }
+
+    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
+        // `Term` is a pseudo-instruction, but it makes various things simpler if we pretend it has
+        // a type.
+        &Ty::Void
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct ThreadLocal(pub *const c_void);
 
@@ -3847,41 +3848,6 @@ mod test {
           %1: i8 = 1
           %2: i16 = sext %0
           %3: i8 = arg [reg]
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "%1: exit must be the last instruction in a trace")]
-    fn exit_must_come_last() {
-        str_to_mod::<DummyReg>(
-            "
-          %0: i8 = arg [reg]
-          exit [%0]
-          %2: i8 = add %0, %0
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "%1: number of exit vars does not match number of exit VarLocs")]
-    fn exit_vars_must_match_exit_vlocs_in_number() {
-        str_to_mod::<DummyReg>(
-            "
-          %0: i8 = arg [reg]
-          exit []
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "%2: exit var '%1' at position '0' does match type of %0")]
-    fn exit_vars_must_match_exit_vlocs_types() {
-        str_to_mod::<DummyReg>(
-            "
-          %0: i8 = arg [reg]
-          %1: i1 = arg [reg]
-          exit [%1, %1]
         ",
         );
     }
@@ -4657,6 +4623,41 @@ mod test {
           %0: i8 = arg [reg]
           %1: i8 = arg [reg]
           %2: i16 = sub %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: term must be the last instruction in a trace")]
+    fn term_must_come_last() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          term [%0]
+          %2: i8 = add %0, %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: number of term vars does not match number of term VarLocs")]
+    fn term_vars_must_match_exit_vlocs_in_number() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          term []
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: term var '%1' at position '0' does match type of %0")]
+    fn term_vars_must_match_exit_vlocs_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i1 = arg [reg]
+          term [%1, %1]
         ",
         );
     }
