@@ -1269,7 +1269,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         &mut self,
         tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
-        self.side_trace_end(tgt_ctr)
+        self.guard_coupler_end(tgt_ctr)
     }
 
     fn coupler_trace_start(&mut self, stack_off: u32) -> Result<Self::Label, CompilationError> {
@@ -1285,7 +1285,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(label)
     }
 
-    fn loop_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
+    fn controlpoint_loop_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
         let stack_off = i32::try_from(stack_off).unwrap();
         self.asm.attach_label(post_stack_label);
         self.asm.push_inst(IcedInst::with2(
@@ -1296,7 +1296,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm.block_completed();
     }
 
-    fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError> {
+    fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
         let label = self.asm.mk_label();
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
@@ -1305,7 +1305,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(label)
     }
 
-    fn return_trace_start(&mut self, stack_off: u32) -> Self::Label {
+    fn controlpoint_return_start(&mut self, stack_off: u32) -> Self::Label {
         let post_stack_label = self.asm.mk_label();
         let stack_off = i32::try_from(stack_off).unwrap();
         self.asm.attach_label(post_stack_label);
@@ -1318,7 +1318,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         post_stack_label
     }
 
-    fn return_trace_end(
+    fn controlpoint_return_end(
         &mut self,
         exit_safepoint: &'static DeoptSafepoint,
     ) -> Result<(), CompilationError> {
@@ -1358,7 +1358,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn side_trace_end(
+    fn guard_coupler_end(
         &mut self,
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
@@ -1385,7 +1385,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn side_trace_start(&mut self, stack_off: u32) {
+    fn guard_coupler_start(&mut self, stack_off: u32) {
         let stack_off = i32::try_from(stack_off).unwrap();
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,

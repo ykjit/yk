@@ -162,7 +162,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                     TraceEnd::Loop { entry, peel } => {
                         assert!(peel.is_none());
-                        let iter0_label = self.be.loop_trace_end()?;
+                        let iter0_label = self.be.controlpoint_loop_end()?;
                         let (guards, entry_stack_off) = self.p_block(
                             entry,
                             base_stack_off,
@@ -170,7 +170,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             &entry_vlocs,
                             logging,
                         )?;
-                        self.be.loop_trace_start(
+                        self.be.controlpoint_loop_start(
                             iter0_label.clone(),
                             entry_stack_off - base_stack_off,
                         );
@@ -181,11 +181,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         entry,
                         exit_safepoint,
                     } => {
-                        self.be.return_trace_end(exit_safepoint)?;
+                        self.be.controlpoint_return_end(exit_safepoint)?;
                         let (guards, entry_stack_off) =
                             self.p_block(entry, base_stack_off, &entry_vlocs, &[], logging)?;
-                        let post_stack_label =
-                            self.be.return_trace_start(entry_stack_off - base_stack_off);
+                        let post_stack_label = self
+                            .be
+                            .controlpoint_return_start(entry_stack_off - base_stack_off);
                         self.asm_guards(entry, guards)?;
                         (post_stack_label, entry_stack_off)
                     }
@@ -214,7 +215,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
                 let (entry, guards, entry_stack_off) = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
-                        self.be.side_trace_end(tgt_ctr)?;
+                        self.be.guard_coupler_end(tgt_ctr)?;
                         let exit_vlocs = tgt_ctr.entry_vlocs();
                         let (guards, entry_stack_off) =
                             self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?;
@@ -225,7 +226,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         entry,
                         exit_safepoint,
                     } => {
-                        self.be.return_trace_end(exit_safepoint)?;
+                        self.be.controlpoint_return_end(exit_safepoint)?;
                         let (guards, entry_stack_off) =
                             self.p_block(entry, src_stack_off, entry_vlocs, &[], logging)?;
                         (entry, guards, entry_stack_off)
@@ -233,7 +234,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     #[cfg(test)]
                     TraceEnd::Test { .. } => todo!(),
                 };
-                self.be.side_trace_start(entry_stack_off - src_stack_off);
+                self.be.guard_coupler_start(entry_stack_off - src_stack_off);
                 self.asm_guards(entry, guards)?;
                 let modkind = J2TraceStart::Guard {
                     stack_off: entry_stack_off,
@@ -275,7 +276,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         };
         // Assemble the body
         let (guards, stack_off) = self.p_block(block, 0, entry_vlocs, entry_vlocs, true)?;
-        self.be.side_trace_start(stack_off);
+        self.be.guard_coupler_start(stack_off);
 
         // Guards
         for (asmgrestore, _grestore) in guards.into_iter().rev().zip(self.m.guard_restores()) {
@@ -872,35 +873,35 @@ pub(super) trait HirToAsmBackend {
     // The functions called for (ControlPoint, Loop) traces.
 
     /// Produce code for the backwards jump that finishes a (ControlPoint, Loop) trace.
-    fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError>;
+    fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError>;
     /// The current body of a (ControlPoint, Loop) trace has been completed and has consumed
     /// `stack_off` additional bytes of stack space. `post_stack_label` must be attached to the
     /// first instruction after the stack is adjusted.
-    fn loop_trace_start(&mut self, post_stack_label: Self::Label, stack_off: u32);
+    fn controlpoint_loop_start(&mut self, post_stack_label: Self::Label, stack_off: u32);
 
     // The functions called for (ControlPoint, Return) traces.
 
     /// Generate code for the end of a (ControlPoint, Return) trace, where the safepoint for the
     /// `return` is `exit_safepoint`.
-    fn return_trace_end(
+    fn controlpoint_return_end(
         &mut self,
         exit_safepoint: &'static DeoptSafepoint,
     ) -> Result<(), CompilationError>;
     /// The current body of a (ControlPoint, Return) trace has been completed and has consumed
     /// `stack_off` additional bytes of stack space. The label returned must be attached to the
     /// first instruction after the stack is adjusted.
-    fn return_trace_start(&mut self, stack_off: u32) -> Self::Label;
+    fn controlpoint_return_start(&mut self, stack_off: u32) -> Self::Label;
 
     // The functions called for (Guard, Coupler) traces.
 
     /// Produce code for the jump to `tgt_ctr` at the end of a (Guard, Coupler) trace.
-    fn side_trace_end(
+    fn guard_coupler_end(
         &mut self,
         tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError>;
     /// The current body of a (Guard, Coupler) trace has been completed and has consumed
     /// `stack_off` additional bytes of stack space.
-    fn side_trace_start(&mut self, stack_off: u32);
+    fn guard_coupler_start(&mut self, stack_off: u32);
 
     // Functions for guards.
 
