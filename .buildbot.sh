@@ -61,7 +61,7 @@ export RUSTUP_HOME
 export RUSTUP_INIT_SKIP_PATH_CHECK="yes"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh
 sh rustup.sh --default-host x86_64-unknown-linux-gnu \
-    --default-toolchain nightly-2025-08-17 \
+    --default-toolchain nightly \
     --no-modify-path \
     --profile default \
     -y
