@@ -151,7 +151,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let (post_stack_label, entry_stack_off) = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
                         let exit_vlocs = tgt_ctr.entry_vlocs();
-                        self.be.coupler_trace_end(tgt_ctr)?;
+                        self.be.star_coupler_end(tgt_ctr)?;
                         let (guards, entry_stack_off) =
                             self.p_block(entry, base_stack_off, &entry_vlocs, exit_vlocs, logging)?;
                         let post_stack_label = self.be.controlpoint_coupler_or_return_start(
@@ -215,7 +215,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
                 let (entry, guards, entry_stack_off) = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
-                        self.be.guard_coupler_end(tgt_ctr)?;
+                        self.be.star_coupler_end(tgt_ctr)?;
                         let exit_vlocs = tgt_ctr.entry_vlocs();
                         let (guards, entry_stack_off) =
                             self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?;
@@ -859,14 +859,6 @@ pub(super) trait HirToAsmBackend {
         tmp_reg: Self::Reg,
     );
 
-    // The functions called for (ControlPoint, Coupler) traces.
-
-    /// Produce code for the jump to `tgt_ctr` at the end of a coupler trace.
-    fn coupler_trace_end(
-        &mut self,
-        tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
-    ) -> Result<(), CompilationError>;
-
     /// The current body of a (ControlPoint, Return) trace has been completed and has consumed
     /// `stack_off` additional bytes of stack space. The label returned must be attached to the
     /// first instruction after the stack is adjusted.
@@ -886,8 +878,8 @@ pub(super) trait HirToAsmBackend {
 
     // The functions called for (Guard, Coupler) traces.
 
-    /// Produce code for the jump to `tgt_ctr` at the end of a (Guard, Coupler) trace.
-    fn guard_coupler_end(
+    /// Produce code for the jump to `tgt_ctr` at the end of a (*, Coupler) trace.
+    fn star_coupler_end(
         &mut self,
         tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError>;

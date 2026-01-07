@@ -1265,13 +1265,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
-    fn coupler_trace_end(
-        &mut self,
-        tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
-    ) -> Result<(), CompilationError> {
-        self.guard_coupler_end(tgt_ctr)
-    }
-
     fn controlpoint_coupler_or_return_start(
         &mut self,
         stack_off: u32,
@@ -1348,7 +1341,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn guard_coupler_end(
+    fn star_coupler_end(
         &mut self,
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {

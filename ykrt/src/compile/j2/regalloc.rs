@@ -2118,13 +2118,6 @@ pub(crate) mod test {
             todo!()
         }
 
-        fn coupler_trace_end(
-            &mut self,
-            _tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
         fn controlpoint_coupler_or_return_start(
             &mut self,
             _stack_off: u32,
@@ -2145,7 +2138,7 @@ pub(crate) mod test {
             todo!()
         }
 
-        fn guard_coupler_end(
+        fn star_coupler_end(
             &mut self,
             _ctr: &std::sync::Arc<J2CompiledTrace<Self::Reg>>,
         ) -> Result<(), CompilationError> {
