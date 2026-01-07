@@ -2138,7 +2138,7 @@ pub(crate) mod test {
 
         fn controlpoint_loop_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {}
 
-        fn controlpoint_return_end(
+        fn star_return_end(
             &mut self,
             _exit_safepoint: &'static DeoptSafepoint,
         ) -> Result<(), CompilationError> {

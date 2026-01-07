@@ -1318,7 +1318,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         post_stack_label
     }
 
-    fn controlpoint_return_end(
+    fn star_return_end(
         &mut self,
         exit_safepoint: &'static DeoptSafepoint,
     ) -> Result<(), CompilationError> {

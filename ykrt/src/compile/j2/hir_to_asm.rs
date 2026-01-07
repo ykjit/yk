@@ -181,7 +181,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         entry,
                         exit_safepoint,
                     } => {
-                        self.be.controlpoint_return_end(exit_safepoint)?;
+                        self.be.star_return_end(exit_safepoint)?;
                         let (guards, entry_stack_off) =
                             self.p_block(entry, base_stack_off, &entry_vlocs, &[], logging)?;
                         let post_stack_label = self
@@ -226,7 +226,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         entry,
                         exit_safepoint,
                     } => {
-                        self.be.controlpoint_return_end(exit_safepoint)?;
+                        self.be.star_return_end(exit_safepoint)?;
                         let (guards, entry_stack_off) =
                             self.p_block(entry, src_stack_off, entry_vlocs, &[], logging)?;
                         (entry, guards, entry_stack_off)
@@ -881,12 +881,6 @@ pub(super) trait HirToAsmBackend {
 
     // The functions called for (ControlPoint, Return) traces.
 
-    /// Generate code for the end of a (ControlPoint, Return) trace, where the safepoint for the
-    /// `return` is `exit_safepoint`.
-    fn controlpoint_return_end(
-        &mut self,
-        exit_safepoint: &'static DeoptSafepoint,
-    ) -> Result<(), CompilationError>;
     /// The current body of a (ControlPoint, Return) trace has been completed and has consumed
     /// `stack_off` additional bytes of stack space. The label returned must be attached to the
     /// first instruction after the stack is adjusted.
@@ -902,6 +896,15 @@ pub(super) trait HirToAsmBackend {
     /// The current body of a (Guard, Coupler) trace has been completed and has consumed
     /// `stack_off` additional bytes of stack space.
     fn guard_coupler_start(&mut self, stack_off: u32);
+
+    // The functions called for (*, Return) traces.
+
+    /// Generate code for the end of a (*, Return) trace, where the safepoint for the
+    /// `return` is `exit_safepoint`.
+    fn star_return_end(
+        &mut self,
+        exit_safepoint: &'static DeoptSafepoint,
+    ) -> Result<(), CompilationError>;
 
     // Functions for guards.
 
