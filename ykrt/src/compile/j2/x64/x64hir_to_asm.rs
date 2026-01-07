@@ -1272,7 +1272,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.guard_coupler_end(tgt_ctr)
     }
 
-    fn coupler_trace_start(&mut self, stack_off: u32) -> Result<Self::Label, CompilationError> {
+    fn controlpoint_coupler_or_return_start(
+        &mut self,
+        stack_off: u32,
+    ) -> Result<Self::Label, CompilationError> {
         let stack_off = i32::try_from(stack_off).unwrap();
         let label = self.asm.mk_label();
         self.asm.attach_label(label);
@@ -1303,19 +1306,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             RelocKind::RipRelativeWithLabel(label),
         );
         Ok(label)
-    }
-
-    fn controlpoint_return_start(&mut self, stack_off: u32) -> Self::Label {
-        let post_stack_label = self.asm.mk_label();
-        let stack_off = i32::try_from(stack_off).unwrap();
-        self.asm.attach_label(post_stack_label);
-        self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
-            IcedReg::RSP,
-            stack_off.next_multiple_of(16),
-        ));
-        self.asm.block_completed();
-        post_stack_label
     }
 
     fn star_return_end(

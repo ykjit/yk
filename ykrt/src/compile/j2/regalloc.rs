@@ -2125,7 +2125,7 @@ pub(crate) mod test {
             todo!()
         }
 
-        fn coupler_trace_start(
+        fn controlpoint_coupler_or_return_start(
             &mut self,
             _stack_off: u32,
         ) -> Result<Self::Label, CompilationError> {
@@ -2142,10 +2142,6 @@ pub(crate) mod test {
             &mut self,
             _exit_safepoint: &'static DeoptSafepoint,
         ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn controlpoint_return_start(&mut self, _stack_off: u32) -> Self::Label {
             todo!()
         }
 

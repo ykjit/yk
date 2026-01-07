@@ -154,9 +154,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.coupler_trace_end(tgt_ctr)?;
                         let (guards, entry_stack_off) =
                             self.p_block(entry, base_stack_off, &entry_vlocs, exit_vlocs, logging)?;
-                        let post_stack_label = self
-                            .be
-                            .coupler_trace_start(entry_stack_off - base_stack_off)?;
+                        let post_stack_label = self.be.controlpoint_coupler_or_return_start(
+                            entry_stack_off - base_stack_off,
+                        )?;
                         self.asm_guards(entry, guards)?;
                         (post_stack_label, entry_stack_off)
                     }
@@ -184,9 +184,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.star_return_end(exit_safepoint)?;
                         let (guards, entry_stack_off) =
                             self.p_block(entry, base_stack_off, &entry_vlocs, &[], logging)?;
-                        let post_stack_label = self
-                            .be
-                            .controlpoint_return_start(entry_stack_off - base_stack_off);
+                        let post_stack_label = self.be.controlpoint_coupler_or_return_start(
+                            entry_stack_off - base_stack_off,
+                        )?;
                         self.asm_guards(entry, guards)?;
                         (post_stack_label, entry_stack_off)
                     }
@@ -866,9 +866,14 @@ pub(super) trait HirToAsmBackend {
         &mut self,
         tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError>;
-    /// The current body of a coupler trace has been completed and has consumed `stack_off`
-    /// additional bytes of stack space.
-    fn coupler_trace_start(&mut self, stack_off: u32) -> Result<Self::Label, CompilationError>;
+
+    /// The current body of a (ControlPoint, Return) trace has been completed and has consumed
+    /// `stack_off` additional bytes of stack space. The label returned must be attached to the
+    /// first instruction after the stack is adjusted.
+    fn controlpoint_coupler_or_return_start(
+        &mut self,
+        stack_off: u32,
+    ) -> Result<Self::Label, CompilationError>;
 
     // The functions called for (ControlPoint, Loop) traces.
 
@@ -878,13 +883,6 @@ pub(super) trait HirToAsmBackend {
     /// `stack_off` additional bytes of stack space. `post_stack_label` must be attached to the
     /// first instruction after the stack is adjusted.
     fn controlpoint_loop_start(&mut self, post_stack_label: Self::Label, stack_off: u32);
-
-    // The functions called for (ControlPoint, Return) traces.
-
-    /// The current body of a (ControlPoint, Return) trace has been completed and has consumed
-    /// `stack_off` additional bytes of stack space. The label returned must be attached to the
-    /// first instruction after the stack is adjusted.
-    fn controlpoint_return_start(&mut self, stack_off: u32) -> Self::Label;
 
     // The functions called for (Guard, Coupler) traces.
 
