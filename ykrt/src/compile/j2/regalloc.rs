@@ -2118,45 +2118,34 @@ pub(crate) mod test {
             todo!()
         }
 
-        fn coupler_trace_end(
-            &mut self,
-            _tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn coupler_trace_start(
+        fn controlpoint_coupler_or_return_start(
             &mut self,
             _stack_off: u32,
         ) -> Result<Self::Label, CompilationError> {
             todo!();
         }
 
-        fn loop_trace_end(&mut self) -> Result<Self::Label, CompilationError> {
+        fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
             todo!()
         }
 
-        fn loop_trace_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {}
+        fn controlpoint_loop_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {}
 
-        fn return_trace_end(
+        fn star_return_end(
             &mut self,
             _exit_safepoint: &'static DeoptSafepoint,
         ) -> Result<(), CompilationError> {
             todo!()
         }
 
-        fn return_trace_start(&mut self, _stack_off: u32) -> Self::Label {
-            todo!()
-        }
-
-        fn side_trace_end(
+        fn star_coupler_end(
             &mut self,
             _ctr: &std::sync::Arc<J2CompiledTrace<Self::Reg>>,
         ) -> Result<(), CompilationError> {
             todo!()
         }
 
-        fn side_trace_start(&mut self, _stack_off: u32) {}
+        fn guard_coupler_start(&mut self, _stack_off: u32) {}
 
         fn guard_end(
             &mut self,
