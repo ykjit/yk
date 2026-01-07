@@ -859,38 +859,37 @@ pub(super) trait HirToAsmBackend {
         tmp_reg: Self::Reg,
     );
 
-    /// The current body of a (ControlPoint, Return) trace has been completed and has consumed
-    /// `stack_off` additional bytes of stack space. The label returned must be attached to the
-    /// first instruction after the stack is adjusted.
+    // Functions for the start and end of various kinds of traces. Note that some functions are
+    // used by more than one (x, y) trace kind.
+
+    /// Produce code for the completed body of a (ControlPoint, Coupler | Return) trace. It has
+    /// consumed `stack_off` additional bytes of stack space. The label returned must be attached
+    /// to the first instruction after the stack is adjusted.
     fn controlpoint_coupler_or_return_start(
         &mut self,
         stack_off: u32,
     ) -> Result<Self::Label, CompilationError>;
 
-    // The functions called for (ControlPoint, Loop) traces.
-
-    /// Produce code for the backwards jump that finishes a (ControlPoint, Loop) trace.
+    /// Produce code for the backwards jump at the end of a (ControlPoint, Loop) trace.
     fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError>;
-    /// The current body of a (ControlPoint, Loop) trace has been completed and has consumed
+
+    /// Produce code for the completed body of a (ControlPoint, Loop) trace. It has consumed
     /// `stack_off` additional bytes of stack space. `post_stack_label` must be attached to the
     /// first instruction after the stack is adjusted.
     fn controlpoint_loop_start(&mut self, post_stack_label: Self::Label, stack_off: u32);
-
-    // The functions called for (Guard, Coupler) traces.
 
     /// Produce code for the jump to `tgt_ctr` at the end of a (*, Coupler) trace.
     fn star_coupler_end(
         &mut self,
         tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError>;
-    /// The current body of a (Guard, Coupler) trace has been completed and has consumed
+
+    /// Produce code for the completed body of a (Guard, Coupler) trace. It has consumed
     /// `stack_off` additional bytes of stack space.
     fn guard_coupler_start(&mut self, stack_off: u32);
 
-    // The functions called for (*, Return) traces.
-
-    /// Generate code for the end of a (*, Return) trace, where the safepoint for the
-    /// `return` is `exit_safepoint`.
+    /// Produce code for the end of a (*, Return) trace. The safepoint of the `return` is
+    /// `exit_safepoint`.
     fn star_return_end(
         &mut self,
         exit_safepoint: &'static DeoptSafepoint,
