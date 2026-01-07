@@ -30,11 +30,14 @@ impl PassT for KnownBits {
     fn feed(&mut self, opt: &mut PassOpt, inst: Inst) -> OptOutcome {
         self.pending_commit = None;
         match inst {
+            Inst::AShr(x) => self.opt_ashr(opt, x),
             Inst::And(x) => self.opt_and(opt, x),
             Inst::Const(x) => self.opt_const(x),
             Inst::ICmp(x) => self.opt_icmp(opt, x),
+            Inst::LShr(x) => self.opt_lshr(opt, x),
             Inst::Or(x) => self.opt_or(opt, x),
             Inst::SExt(x) => self.opt_sext(opt, x),
+            Inst::Shl(x) => self.opt_shl(opt, x),
             Inst::ZExt(x) => self.opt_zext(opt, x),
             _ => OptOutcome::Rewritten(inst),
         }
@@ -70,6 +73,23 @@ impl KnownBits {
 
     fn set_pending(&mut self, bits: KnownBitValue) {
         self.pending_commit = Some(bits);
+    }
+
+    fn opt_ashr(&mut self, opt: &PassOpt, inst: AShr) -> OptOutcome {
+        let AShr {
+            tyidx: _,
+            lhs,
+            rhs,
+            exact: _,
+        } = inst;
+        if let Some(lhs_b) = self.as_knownbits(opt, lhs)
+            && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+            && let Some(rhs_int) = rhs_c.to_zero_ext_u32()
+            && let Some(res) = lhs_b.checked_ashr(rhs_int)
+        {
+            self.set_pending(res.clone());
+        }
+        OptOutcome::Rewritten(inst.into())
     }
 
     fn opt_and(&mut self, opt: &mut PassOpt, mut inst: And) -> OptOutcome {
@@ -145,6 +165,23 @@ impl KnownBits {
         }
     }
 
+    fn opt_lshr(&mut self, opt: &PassOpt, inst: LShr) -> OptOutcome {
+        let LShr {
+            tyidx: _,
+            lhs,
+            rhs,
+            exact: _,
+        } = inst;
+        if let Some(lhs_b) = self.as_knownbits(opt, lhs)
+            && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+            && let Some(rhs_int) = rhs_c.to_zero_ext_u32()
+            && let Some(res) = lhs_b.checked_lshr(rhs_int)
+        {
+            self.set_pending(res.clone());
+        }
+        OptOutcome::Rewritten(inst.into())
+    }
+
     fn opt_or(&mut self, opt: &PassOpt, mut inst: Or) -> OptOutcome {
         inst.canonicalise(opt);
         let Or {
@@ -188,6 +225,24 @@ impl KnownBits {
         if let Some(val_b) = self.as_knownbits(opt, val) {
             let dst_bitw = opt.ty(tyidx).bitw();
             let res = val_b.sign_extend(dst_bitw);
+            self.set_pending(res.clone());
+        }
+        OptOutcome::Rewritten(inst.into())
+    }
+
+    fn opt_shl(&mut self, opt: &PassOpt, inst: Shl) -> OptOutcome {
+        let Shl {
+            tyidx: _,
+            lhs,
+            rhs,
+            nuw: _,
+            nsw: _,
+        } = inst;
+        if let Some(lhs_b) = self.as_knownbits(opt, lhs)
+            && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+            && let Some(rhs_int) = rhs_c.to_zero_ext_u32()
+            && let Some(res) = lhs_b.checked_shl(rhs_int)
+        {
             self.set_pending(res.clone());
         }
         OptOutcome::Rewritten(inst.into())
@@ -306,6 +361,33 @@ impl KnownBitValue {
         }
     }
 
+    fn checked_ashr(&self, bits: u32) -> Option<KnownBitValue> {
+        let set_ones = self.ones.checked_ashr(bits)?;
+        let unknowns = self.unknowns.checked_ashr(bits)?;
+        Some(KnownBitValue {
+            ones: set_ones,
+            unknowns,
+        })
+    }
+
+    fn checked_lshr(&self, bits: u32) -> Option<KnownBitValue> {
+        let set_ones = self.ones.checked_lshr(bits)?;
+        let unknowns = self.unknowns.checked_lshr(bits)?;
+        Some(KnownBitValue {
+            ones: set_ones,
+            unknowns,
+        })
+    }
+
+    fn checked_shl(&self, bits: u32) -> Option<KnownBitValue> {
+        let set_ones = self.ones.checked_shl(bits)?;
+        let unknowns = self.unknowns.checked_shl(bits)?;
+        Some(KnownBitValue {
+            ones: set_ones,
+            unknowns,
+        })
+    }
+
     /// Two `KnownBitValue` are not equal only if the known parts of their bits are different.
     ///
     /// Note that we do not implement the `PartialEq` trait because this violates the invariant
@@ -361,6 +443,54 @@ mod test {
             },
             |opt, iidx, inst| known_bits.borrow_mut().inst_committed(opt, iidx, inst),
             ptn,
+        );
+    }
+
+    #[test]
+    fn opt_ashr() {
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i8 = 2
+          %4: i8 = ashr %2, %3
+          %5: i8 = 96
+          %6: i8 = or %4, %5
+          blackbox %5
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i8 = 2
+          %4: i8 = ashr %2, %3
+          %5: i8 = 96
+          blackbox %5
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 64
+          %2: i8 = or %0, %1
+          %3: i8 = 2
+          %4: i8 = ashr %2, %3
+          %5: i8 = 96
+          %6: i8 = or %4, %5
+          blackbox %5
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 64
+          %2: i8 = or %0, %1
+          %3: i8 = 2
+          %4: i8 = ashr %2, %3
+          %5: i8 = 96
+          %6: i8 = or %4, %5
+          blackbox %5
+        ",
         );
     }
 
@@ -567,6 +697,52 @@ mod test {
     }
 
     #[test]
+    fn opt_lshr() {
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i8 = 1
+          %4: i8 = lshr %2, %3
+          %5: i8 = or %4, %1
+          blackbox %5
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i8 = 1
+          %4: i8 = lshr %2, %3
+          %5: i8 = or %4, %1
+          blackbox %5
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i8 = 2
+          %4: i8 = lshr %2, %3
+          %5: i8 = 32
+          %6: i8 = or %4, %5
+          blackbox %5
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i8 = 2
+          %4: i8 = lshr %2, %3
+          %5: i8 = 32
+          blackbox %5
+        ",
+        );
+    }
+
+    #[test]
     fn opt_sext() {
         test_known_bits(
             "
@@ -606,6 +782,43 @@ mod test {
           %4: i16 = 32768
           %5: i16 = 0
           blackbox %5
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_shl() {
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i8 = shl %0, %1
+          %3: i8 = and %2, %1
+          blackbox %3
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 1
+          %2: i8 = shl %0, %1
+          %3: i8 = 0
+          blackbox %3
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i8 = shl %0, %1
+          %3: i8 = or %2, %1
+          blackbox %3
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 1
+          %2: i8 = shl %0, %1
+          %3: i8 = or %2, %1
+          blackbox %3
         ",
         );
     }
