@@ -57,7 +57,7 @@ use crate::compile::j2::hir::Ty;
 use crate::compile::{
     CompilationError,
     j2::{
-        hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod, ModKind},
+        hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod, TraceStart},
         hir_to_asm::HirToAsmBackend,
     },
 };
@@ -165,10 +165,10 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         {
             for vloc in vlocs.iter() {
                 if let VarLoc::Reg(reg, fill) = vloc {
-                    if let ModKind::Coupler { .. } | ModKind::Loop { .. } = self.m.kind {
+                    if let TraceStart::ControlPoint { .. } = self.m.trace_start {
                         // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
                         // for details), caller saved registers are potentially corrupted at the very start
-                        // of a loop trace.
+                        // of ControlPoint traces
                         //
                         // FIXME: This is a horrible hack and assumes that all [Block]s in a loop
                         // trace are subject to the same restriction.
@@ -2908,9 +2908,8 @@ pub(crate) mod test {
     #[test]
     fn toposort() {
         let m = str_to_mod::<TestReg>("");
-        let b = match &m.kind {
-            ModKind::Test { block, .. } => block,
-            _ => panic!(),
+        let TraceEnd::Test { block: b, .. } = &m.trace_end else {
+            panic!()
         };
 
         // Encoding all the possible outcomes below is annoying, particularly if the current code

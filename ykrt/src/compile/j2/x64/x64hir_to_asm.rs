@@ -38,7 +38,7 @@ use crate::{
         CompilationError, DeoptSafepoint,
         j2::{
             codebuf::{CodeBufInProgress, ExeCodeBuf},
-            compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2CompiledTraceKind},
+            compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2TraceStart},
             hir::*,
             hir_to_asm::HirToAsmBackend,
             regalloc::{AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
@@ -86,16 +86,15 @@ impl<'a> X64HirToAsm<'a> {
         //
         // On that basis, we therefore over-guess that each HIR instruction needs 12 bytes of
         // storage. We thus request that, and free what's unused at the end.
-        let num_hir_insts = match &m.kind {
-            ModKind::Coupler { entry, .. } => entry.insts_len(),
-            ModKind::Loop { entry, inner, .. } => {
-                assert!(inner.is_none());
+        let num_hir_insts = match &m.trace_end {
+            TraceEnd::Coupler { entry, .. } => entry.insts_len(),
+            TraceEnd::Loop { entry, peel } => {
+                assert!(peel.is_none());
                 entry.insts_len()
             }
-            ModKind::Return { entry, .. } => entry.insts_len(),
-            ModKind::Side { entry, .. } => entry.insts_len(),
+            TraceEnd::Return { entry, .. } => entry.insts_len(),
             #[cfg(test)]
-            ModKind::Test { block, .. } => block.insts_len(),
+            TraceEnd::Test { block, .. } => block.insts_len(),
         };
         num_hir_insts * 16
     }
@@ -1363,15 +1362,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         &mut self,
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
-        let addr = match &ctr.kind {
-            J2CompiledTraceKind::Coupler { sidetrace_off, .. }
-            | J2CompiledTraceKind::Loop { sidetrace_off, .. }
-            | J2CompiledTraceKind::Return { sidetrace_off, .. } => unsafe {
+        let addr = match &ctr.trace_start {
+            J2TraceStart::ControlPoint { sidetrace_off, .. } => unsafe {
                 ctr.exe().byte_add(*sidetrace_off)
             },
-            J2CompiledTraceKind::Side { .. } => todo!(),
-            #[cfg(test)]
-            J2CompiledTraceKind::Test => unreachable!(),
+            J2TraceStart::Guard { .. } => todo!(),
         };
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
@@ -3887,7 +3882,7 @@ mod test {
     use crate::{
         compile::j2::{
             codebuf::CodeBufInProgress,
-            hir::{InstIdx, Mod, ModKind},
+            hir::{InstIdx, Mod, TraceEnd},
             hir_parser::str_to_mod,
             hir_to_asm::HirToAsm,
             x64::x64regalloc::Reg,
@@ -4100,7 +4095,7 @@ mod test {
         );
 
         let Mod {
-            kind: ModKind::Test { block: b, .. },
+            trace_end: TraceEnd::Test { block: b, .. },
             ..
         } = &m
         else {
@@ -4138,7 +4133,7 @@ mod test {
         );
 
         let Mod {
-            kind: ModKind::Test { block: b, .. },
+            trace_end: TraceEnd::Test { block: b, .. },
             ..
         } = &m
         else {
@@ -4206,7 +4201,7 @@ mod test {
         );
 
         let Mod {
-            kind: ModKind::Test { block: b, .. },
+            trace_end: TraceEnd::Test { block: b, .. },
             ..
         } = &m
         else {

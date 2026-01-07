@@ -489,10 +489,10 @@ pub(in crate::compile::j2::opt) mod test {
         let m = str_to_mod::<TestReg>(mod_s);
         let mut fopt = Box::new(FullOpt::new());
         fopt.inner.tys = m.tys;
-        let ModKind::Test {
+        let TraceEnd::Test {
             entry_vlocs,
             block: Block { insts },
-        } = m.kind
+        } = m.trace_end
         else {
             panic!()
         };
@@ -553,7 +553,8 @@ pub(in crate::compile::j2::opt) mod test {
         let (block, tys) = fopt.build();
         let m = Mod {
             trid: m.trid,
-            kind: ModKind::Test { entry_vlocs, block },
+            trace_start: TraceStart::Test,
+            trace_end: TraceEnd::Test { entry_vlocs, block },
             tys,
             guard_restores: IndexVec::new(),
             addr_name_map: None,
