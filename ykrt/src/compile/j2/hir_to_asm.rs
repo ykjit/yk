@@ -210,27 +210,38 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 src_ctr,
                 src_gridx,
                 entry_vlocs,
-            } => match &self.m.trace_end {
-                TraceEnd::Coupler { entry, tgt_ctr } => {
-                    let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
-                    self.be.side_trace_end(tgt_ctr)?;
-                    let exit_vlocs = tgt_ctr.entry_vlocs();
-                    let (guards, entry_stack_off) =
-                        self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?;
-                    self.be.side_trace_start(entry_stack_off - src_stack_off);
-                    self.asm_guards(entry, guards)?;
-                    let modkind = J2TraceStart::Guard {
-                        stack_off: entry_stack_off,
-                    };
-                    let (buf, guards, log, labels) = self.be.build_exe(logging, &[])?;
-                    assert!(labels.is_empty());
-                    (buf, guards, log, modkind)
-                }
-                TraceEnd::Loop { .. } => unreachable!(),
-                TraceEnd::Return { .. } => todo!(),
-                #[cfg(test)]
-                TraceEnd::Test { .. } => todo!(),
-            },
+            } => {
+                let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
+                let (entry, guards, entry_stack_off) = match &self.m.trace_end {
+                    TraceEnd::Coupler { entry, tgt_ctr } => {
+                        self.be.side_trace_end(tgt_ctr)?;
+                        let exit_vlocs = tgt_ctr.entry_vlocs();
+                        let (guards, entry_stack_off) =
+                            self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?;
+                        (entry, guards, entry_stack_off)
+                    }
+                    TraceEnd::Loop { .. } => unreachable!(),
+                    TraceEnd::Return {
+                        entry,
+                        exit_safepoint,
+                    } => {
+                        self.be.return_trace_end(exit_safepoint)?;
+                        let (guards, entry_stack_off) =
+                            self.p_block(entry, src_stack_off, entry_vlocs, &[], logging)?;
+                        (entry, guards, entry_stack_off)
+                    }
+                    #[cfg(test)]
+                    TraceEnd::Test { .. } => todo!(),
+                };
+                self.be.side_trace_start(entry_stack_off - src_stack_off);
+                self.asm_guards(entry, guards)?;
+                let modkind = J2TraceStart::Guard {
+                    stack_off: entry_stack_off,
+                };
+                let (buf, guards, log, labels) = self.be.build_exe(logging, &[])?;
+                assert!(labels.is_empty());
+                (buf, guards, log, modkind)
+            }
             #[cfg(test)]
             TraceStart::Test => unreachable!(),
         };
