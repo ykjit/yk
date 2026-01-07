@@ -267,14 +267,27 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 src_gridx,
                 tgt_ctr,
                 ..
-            } => (
-                hir::TraceStart::Guard {
-                    entry_vlocs,
-                    src_ctr,
-                    src_gridx,
-                },
-                hir::TraceEnd::Coupler { entry, tgt_ctr },
-            ),
+            } => match return_safepoint {
+                None => (
+                    hir::TraceStart::Guard {
+                        entry_vlocs,
+                        src_ctr,
+                        src_gridx,
+                    },
+                    hir::TraceEnd::Coupler { entry, tgt_ctr },
+                ),
+                Some(exit_safepoint) => (
+                    hir::TraceStart::Guard {
+                        entry_vlocs,
+                        src_ctr,
+                        src_gridx,
+                    },
+                    hir::TraceEnd::Return {
+                        entry,
+                        exit_safepoint,
+                    },
+                ),
+            },
         };
 
         let m = hir::Mod {
