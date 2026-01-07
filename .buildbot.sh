@@ -203,7 +203,7 @@ race:core::sync::atomic::atomic_
 # count_to_hot_location moves something into a mutex, at which point accesses
 # to it are safe, but thread sanitiser doesn't seem to pick up the link between
 # the two.
-race:ykrt::location::Location::count_to_hot_location
+race:<ykrt::location::Location>::count_to_hot_location
 EOF
 
 for tracer in $TRACERS; do
