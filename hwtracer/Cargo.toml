@@ -12,8 +12,6 @@ intervaltree = "0.2.7"
 leb128 = "0.2.5"
 libc = "0.2.148"
 memmap2 = "0.9.4"
-strum = { version = "0.27.1", features = ["derive"] }
-strum_macros = "0.27.1"
 thiserror = "2.0.12"
 ykaddr = { path = "../ykaddr" }
 

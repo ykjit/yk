@@ -7,7 +7,6 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 array-concat = "0.5.5"
-atomic_enum = "0.3.0"
 byteorder = "1.4.3"
 enum_dispatch = "0.3.13"
 deku = { version = "0.18.1", features = ["std"] }
