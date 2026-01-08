@@ -1921,20 +1921,11 @@ impl InstT for FPToSI {
 pub(super) struct Guard {
     pub expect: bool,
     pub cond: InstIdx,
-    pub bid: aot_ir::BBlockId,
     /// The variables used on entry to the guard. Note these may be different than those used
     /// at the end of the [GuardBody].
     pub entry_vars: Vec<InstIdx>,
     /// The [Guardextra] that this guard maps to.
     pub geidx: GuardExtraIdx,
-    /// If this guard:
-    ///
-    ///   1. is the first guard in a trace,
-    ///   2. relates to an LLVM-level `switch`,
-    ///
-    /// then this records the information necessary for subsequent sidetraces to deal with the
-    /// switch properly.
-    pub switch: Option<Box<Switch>>,
 }
 
 impl InstT for Guard {
@@ -1997,6 +1988,15 @@ impl InstT for Guard {
 /// Extra information for guard instructions that is too big to fit into [Guard].
 #[derive(Debug)]
 pub(super) struct GuardExtra {
+    pub bid: aot_ir::BBlockId,
+    /// If this guard:
+    ///
+    ///   1. is the first guard in a trace,
+    ///   2. relates to an LLVM-level `switch`,
+    ///
+    /// then this records the information necessary for subsequent sidetraces to deal with the
+    /// switch properly.
+    pub switch: Option<Switch>,
     /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
     /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
     /// *except* that the most recent call frame is replaced with the deopt information for the
@@ -3841,7 +3841,7 @@ mod test {
         // for the future when we better understand the real-world impact.
         assert_eq!(
             std::mem::size_of::<Inst>(),
-            std::mem::size_of::<usize>() * 7
+            std::mem::size_of::<usize>() * 5
         );
     }
 

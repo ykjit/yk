@@ -283,11 +283,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             let patch_label = self
                 .be
                 .guard_end(TraceId::testing(), AsmGuardIdx::from(i))?;
+            let gextra = self.m.guard_extra(guard.geidx);
             self.be.guard_completed(
                 guard.label,
                 patch_label,
                 0,
-                guard.bid,
+                gextra.bid,
                 SmallVec::new(),
                 None,
             );
@@ -328,9 +329,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let deopt_frames = self
-                .m
-                .guard_extra(guard.geidx)
+            let gextra = self.m.guard_extra(guard.geidx);
+            let deopt_frames = gextra
                 .exit_frames
                 .iter()
                 .map(
@@ -379,9 +379,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 guard.label,
                 patch_label,
                 stack_off - guard.stack_off,
-                guard.bid,
+                gextra.bid,
                 deopt_frames,
-                guard.switch.map(|x| *x),
+                gextra.switch.clone(),
             );
         }
 
@@ -506,11 +506,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
                 Inst::Guard(
                     x @ Guard {
-                        entry_vars,
-                        geidx,
-                        bid,
-                        switch,
-                        ..
+                        entry_vars, geidx, ..
                     },
                 ) => {
                     let label = self.be.i_guard(&mut ra, b, iidx, x)?;
@@ -520,8 +516,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         label,
                         entry_vars: entry_vars.clone(),
                         entry_vlocs,
-                        bid: *bid,
-                        switch: switch.clone(),
                         stack_off: ra.stack_off(),
                     });
                 }
@@ -1268,8 +1262,6 @@ struct AsmGuard<AB: HirToAsmBackend + ?Sized> {
     entry_vars: Vec<InstIdx>,
     /// Will be the same length as `entry_vars`.
     entry_vlocs: Vec<VarLocs<AB::Reg>>,
-    bid: aot_ir::BBlockId,
-    switch: Option<Box<Switch>>,
     /// The stack offset of the register allocator at the entry point of the guard.
     stack_off: u32,
 }

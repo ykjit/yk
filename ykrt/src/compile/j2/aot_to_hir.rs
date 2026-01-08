@@ -398,6 +398,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             .flat_map(|hir::Frame { exit_vars, .. }| exit_vars.to_owned())
             .collect::<Vec<_>>();
         let gridx = self.guard_extras.push(hir::GuardExtra {
+            bid,
+            switch,
             exit_frames: deopt_frames,
         });
         let hinst = hir::Guard {
@@ -405,8 +407,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             cond: cond_iidx,
             entry_vars,
             geidx: gridx,
-            bid,
-            switch: switch.map(Box::new),
         };
 
         // We now try pushing the guard instruction...

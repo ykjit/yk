@@ -81,7 +81,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
         }
 
         let mut entry_vlocs = Vec::new();
-        let mut guard_restores = IndexVec::new();
+        let mut guards = IndexVec::new();
         let mut testregiter = Reg::iter_test_regs();
         let mut autoregused = false;
         let mut manualregused = false;
@@ -468,16 +468,16 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
                     let bid = BBlockId::new(FuncIdx::from(0), BBlockIdx::from(0));
-                    let gridx = guard_restores.push(GuardExtra {
+                    let geidx = guards.push(GuardExtra {
+                        bid,
+                        switch: None,
                         exit_frames: SmallVec::new(),
                     });
                     self.insts.push(Inst::Guard(Guard {
                         expect,
                         cond,
                         entry_vars,
-                        geidx: gridx,
-                        bid,
-                        switch: None,
+                        geidx,
                     }));
                 }
                 AstInst::ICmp {
@@ -873,7 +873,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             trace_start: TraceStart::Test,
             trace_end: TraceEnd::Test { entry_vlocs, block },
             tys: self.tys,
-            guard_extras: guard_restores,
+            guard_extras: guards,
             addr_name_map: None,
         };
         m.assert_well_formed();
