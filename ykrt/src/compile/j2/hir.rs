@@ -2000,7 +2000,9 @@ pub(super) struct GuardExtra {
     /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
     /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
     /// *except* that the most recent call frame is replaced with the deopt information for the
-    /// branch (etc) that failed.
+    /// branch (etc) that failed. Brief experiments suggest that, depending on the benchmark and
+    /// interpreter, between 50-90% of guards exist in the controlpoint frame, so the `1` in the
+    /// `SmallVec` means that we usefully avoid allocating memory in many cases.
     pub exit_frames: SmallVec<[Frame; 1]>,
 }
 
