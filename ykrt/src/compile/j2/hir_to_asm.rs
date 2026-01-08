@@ -298,7 +298,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     fn asm_guards(
         &mut self,
         entry: &Block,
-        grestores: Vec<AsmGuardRestore<AB>>,
+        grestores: Vec<AsmGuard<AB>>,
     ) -> Result<(), CompilationError> {
         assert_eq!(grestores.len(), self.m.guard_extras().len());
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
@@ -395,7 +395,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         entry_vlocs: &[VarLocs<AB::Reg>],
         exit_vlocs: &[VarLocs<AB::Reg>],
         logging: bool,
-    ) -> Result<(Vec<AsmGuardRestore<AB>>, u32), CompilationError> {
+    ) -> Result<(Vec<AsmGuard<AB>>, u32), CompilationError> {
         let mut ra = RegAlloc::<AB>::new(self.m, b, stack_off);
         ra.set_entry_stacks_at_end(entry_vlocs);
 
@@ -522,7 +522,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     if cnd_idx == grestores.len() {
                         let label = self.be.i_guard(&mut ra, b, iidx, x)?;
                         let entry_vlocs = ra.vlocs_from_iidxs(entry_vars);
-                        grestores.push(AsmGuardRestore {
+                        grestores.push(AsmGuard {
                             geidx: *geidx,
                             label,
                             entry_vars: entry_vars.clone(),
@@ -1275,7 +1275,7 @@ index_vec::define_index_type! {
 }
 
 #[derive(Debug)]
-struct AsmGuardRestore<AB: HirToAsmBackend + ?Sized> {
+struct AsmGuard<AB: HirToAsmBackend + ?Sized> {
     geidx: GuardExtraIdx,
     label: AB::Label,
     /// Will be the same length as `entry_vlocs`.
