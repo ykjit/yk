@@ -1996,7 +1996,7 @@ pub(crate) mod test {
             (
                 ExeCodeBuf,
                 IndexVec<
-                    GuardExtraIdx,
+                    AsmGuardIdx,
                     crate::compile::j2::compiled_trace::J2CompiledGuard<Self::Reg>,
                 >,
                 Option<String>,
@@ -2150,7 +2150,7 @@ pub(crate) mod test {
         fn guard_end(
             &mut self,
             _trid: crate::mt::TraceId,
-            _gridx: GuardExtraIdx,
+            _gridx: AsmGuardIdx,
         ) -> Result<Self::Label, CompilationError> {
             Ok(TestLabelIdx::new(0))
         }

@@ -22,6 +22,7 @@ use crate::{
             J2,
             compiled_trace::{J2CompiledTrace, J2TraceStart},
             hir::{self, GuardExtra, GuardExtraIdx},
+            hir_to_asm::AsmGuardIdx,
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
         },
@@ -70,7 +71,7 @@ pub(super) struct AotToHir<Reg: RegT> {
     /// not built with ykllvm.
     globals: &'static [*const ()],
     opt: Box<dyn OptT>,
-    guard_restores: IndexVec<GuardExtraIdx, GuardExtra>,
+    guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     /// Initially set to `None` until we find the locations for this trace's arguments.
     frames: Vec<Frame>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
@@ -116,7 +117,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             promotions_off: 0,
             globals,
             opt,
-            guard_restores: IndexVec::new(),
+            guard_extras: IndexVec::new(),
             frames: Vec::new(),
             addr_name_map: should_log_any_ir().then_some(HashMap::new()),
             phantom: PhantomData,
@@ -178,18 +179,18 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     .as_any()
                     .downcast::<J2CompiledTrace<Reg>>()
                     .unwrap();
-                let src_gridx = hir::GuardExtraIdx::from(usize::from(*src_gid));
-                let prev_bid = src_ctr.bid(src_gridx);
+                let src_gidx = AsmGuardIdx::from(usize::from(*src_gid));
+                let prev_bid = src_ctr.bid(src_gidx);
                 self.prev_bid = Some(prev_bid);
                 let tgt_ctr = Arc::clone(tgt_ctr)
                     .as_any()
                     .downcast::<J2CompiledTrace<Reg>>()
                     .unwrap();
-                let entry_vlocs = self.p_start_side(&src_ctr, src_gridx, &tgt_ctr)?;
+                let entry_vlocs = self.p_start_side(&src_ctr, src_gidx, &tgt_ctr)?;
                 if let Some(hir::Switch {
                     iid,
                     seen_bbidxs: seen_blocks,
-                }) = src_ctr.switch(src_gridx)
+                }) = src_ctr.switch(src_gidx)
                 {
                     // In the past, we saw cases where parts of switch blocks were retraced. I
                     // suspect that was an hwt artefact, but I'm not 100% sure, so guard against it
@@ -203,7 +204,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     prev_bid,
                     entry_vlocs,
                     src_ctr,
-                    src_gridx,
+                    src_gidx,
                     tgt_ctr,
                 }
             }
@@ -264,7 +265,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             BuildModKind::Side {
                 entry_vlocs,
                 src_ctr,
-                src_gridx,
+                src_gidx,
                 tgt_ctr,
                 ..
             } => match return_safepoint {
@@ -272,7 +273,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     hir::TraceStart::Guard {
                         entry_vlocs,
                         src_ctr,
-                        src_gridx,
+                        src_gidx,
                     },
                     hir::TraceEnd::Coupler { entry, tgt_ctr },
                 ),
@@ -280,7 +281,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     hir::TraceStart::Guard {
                         entry_vlocs,
                         src_ctr,
-                        src_gridx,
+                        src_gidx,
                     },
                     hir::TraceEnd::Return {
                         entry,
@@ -296,7 +297,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             trace_end,
             tys,
             addr_name_map: self.addr_name_map,
-            guard_extras: self.guard_restores,
+            guard_extras: self.guard_extras,
         };
 
         let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -396,7 +397,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             .iter()
             .flat_map(|hir::Frame { exit_vars, .. }| exit_vars.to_owned())
             .collect::<Vec<_>>();
-        let gridx = self.guard_restores.push(hir::GuardExtra {
+        let gridx = self.guard_extras.push(hir::GuardExtra {
             exit_frames: deopt_frames,
         });
         let hinst = hir::Guard {
@@ -413,8 +414,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         // ...but if it turned into a non-guard then it means the guard was optimised away and we
         // should remove the corresponding [GuardRestore].
         if iidx.is_none() {
-            self.guard_restores
-                .remove(self.guard_restores.len_idx() - 1);
+            self.guard_extras.remove(self.guard_extras.len_idx() - 1);
         }
         Ok(())
     }
@@ -600,11 +600,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     fn p_start_side(
         &mut self,
         src_ctr: &Arc<J2CompiledTrace<Reg>>,
-        src_gridx: hir::GuardExtraIdx,
+        src_gidx: AsmGuardIdx,
         _tgt_ctr: &Arc<J2CompiledTrace<Reg>>,
     ) -> Result<Vec<VarLocs<Reg>>, CompilationError> {
         assert!(self.frames.is_empty());
-        let dframes = src_ctr.deopt_frames(src_gridx);
+        let dframes = src_ctr.deopt_frames(src_gidx);
         let mut entry_vars = Vec::new();
         for dframe in dframes {
             assert_eq!(dframe.vars.len(), dframe.pc_safepoint.lives.len());
@@ -1880,7 +1880,7 @@ enum BuildModKind<Reg: RegT> {
         prev_bid: BBlockId,
         entry_vlocs: Vec<VarLocs<Reg>>,
         src_ctr: Arc<J2CompiledTrace<Reg>>,
-        src_gridx: hir::GuardExtraIdx,
+        src_gidx: AsmGuardIdx,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,
     },
 }
