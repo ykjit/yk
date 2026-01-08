@@ -61,7 +61,7 @@ export RUSTUP_HOME
 export RUSTUP_INIT_SKIP_PATH_CHECK="yes"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh
 sh rustup.sh --default-host x86_64-unknown-linux-gnu \
-    --default-toolchain nightly-2025-08-17 \
+    --default-toolchain nightly \
     --no-modify-path \
     --profile default \
     -y
@@ -203,19 +203,22 @@ race:core::sync::atomic::atomic_
 # count_to_hot_location moves something into a mutex, at which point accesses
 # to it are safe, but thread sanitiser doesn't seem to pick up the link between
 # the two.
-race:ykrt::location::Location::count_to_hot_location
+race:<ykrt::location::Location>::count_to_hot_location
 EOF
 
 for tracer in $TRACERS; do
     export YKB_TRACER="${tracer}"
     cargo build
     ASAN_SYMBOLIZER_PATH="${YKLLVM_BIN_DIR}/llvm-symbolizer" \
-      RUSTFLAGS="-Z sanitizer=address" cargo test \
+      RUSTFLAGS="-Z sanitizer=address" \
+      RUSTDOCFLAGS="-Z sanitizer=address" \
+      cargo test \
       -Z build-std \
       --target x86_64-unknown-linux-gnu
 
     RUST_TEST_THREADS=1 \
       RUSTFLAGS="-Z sanitizer=thread" \
+      RUSTDOCFLAGS="-Z sanitizer=thread" \
       TSAN_OPTIONS="suppressions=$suppressions_path" \
       cargo test \
       -Z build-std \
