@@ -210,12 +210,15 @@ for tracer in $TRACERS; do
     export YKB_TRACER="${tracer}"
     cargo build
     ASAN_SYMBOLIZER_PATH="${YKLLVM_BIN_DIR}/llvm-symbolizer" \
-      RUSTFLAGS="-Z sanitizer=address" cargo test \
+      RUSTFLAGS="-Z sanitizer=address" \
+      RUSTDOCFLAGS="-Z sanitizer=address" \
+      cargo test \
       -Z build-std \
       --target x86_64-unknown-linux-gnu
 
     RUST_TEST_THREADS=1 \
       RUSTFLAGS="-Z sanitizer=thread" \
+      RUSTDOCFLAGS="-Z sanitizer=thread" \
       TSAN_OPTIONS="suppressions=$suppressions_path" \
       cargo test \
       -Z build-std \
