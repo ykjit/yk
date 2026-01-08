@@ -236,13 +236,14 @@ pub(super) struct Mod<Reg: RegT> {
     pub trace_start: TraceStart<Reg>,
     pub trace_end: TraceEnd<Reg>,
     pub tys: IndexVec<TyIdx, Ty>,
-    pub guard_restores: IndexVec<GuardRestoreIdx, GuardRestore>,
+    /// Extra information that is too big to fit in a [Guard] instruction.
+    pub guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     /// A map of names to pointers. Will be `None` if logging was disabled.
     pub addr_name_map: Option<HashMap<usize, String>>,
 }
 
 impl<Reg: RegT> Mod<Reg> {
-    /// Check that this module is well-formed, panicing if it is not.
+    /// Check that this module is well-formed, panicking if it is not.
     #[allow(dead_code)]
     pub(super) fn assert_well_formed(&self) {
         // Guarantee that a given [Ty] appears only once in `self.tys`.
@@ -261,8 +262,8 @@ impl<Reg: RegT> Mod<Reg> {
         }
     }
 
-    pub(super) fn guard_restores(&self) -> &[GuardRestore] {
-        self.guard_restores.as_raw_slice()
+    pub(super) fn guard_extras(&self) -> &[GuardExtra] {
+        self.guard_extras.as_raw_slice()
     }
 }
 
@@ -300,7 +301,7 @@ pub(super) enum TraceStart<Reg: RegT> {
     /// This trace started from a guard failing.
     Guard {
         src_ctr: Arc<J2CompiledTrace<Reg>>,
-        src_gridx: GuardRestoreIdx,
+        src_gridx: GuardExtraIdx,
         entry_vlocs: Vec<VarLocs<Reg>>,
     },
     /// This is a trace intended for unit testing.
@@ -555,7 +556,8 @@ index_vec::define_index_type! {
 }
 
 index_vec::define_index_type! {
-    pub(super) struct GuardRestoreIdx = u16;
+    /// The index type for extra information about guards that doesn't fit into a [Guard] object.
+    pub(super) struct GuardExtraIdx = u16;
 }
 
 // Note: if you change the `u32` here, `MAX` must also be updated.
@@ -1918,9 +1920,8 @@ pub(super) struct Guard {
     /// The variables used on entry to the guard. Note these may be different than those used
     /// at the end of the [GuardBody].
     pub entry_vars: Vec<InstIdx>,
-    /// The [GuardRestore] that this guard maps to. Note: multiple [Guard]s may map to a single
-    /// [GuardRestore] (but not vice versa).
-    pub gridx: GuardRestoreIdx,
+    /// The [Guardextra] that this guard maps to.
+    pub geidx: GuardExtraIdx,
     /// If this guard:
     ///
     ///   1. is the first guard in a trace,
@@ -1990,7 +1991,7 @@ impl InstT for Guard {
 
 /// Extra information for guard instructions that is too big to fit into [Guard].
 #[derive(Debug)]
-pub(super) struct GuardRestore {
+pub(super) struct GuardExtra {
     /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
     /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
     /// *except* that the most recent call frame is replaced with the deopt information for the

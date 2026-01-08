@@ -556,7 +556,7 @@ pub(in crate::compile::j2::opt) mod test {
             trace_start: TraceStart::Test,
             trace_end: TraceEnd::Test { entry_vlocs, block },
             tys,
-            guard_restores: IndexVec::new(),
+            guard_extras: IndexVec::new(),
             addr_name_map: None,
         };
         let s = m.to_string();

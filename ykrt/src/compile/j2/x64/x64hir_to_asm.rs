@@ -70,7 +70,7 @@ pub(in crate::compile::j2) struct X64HirToAsm<'a> {
     /// The data section: we map any given (align, byte sequence) pair to [LabelIdx]s, which will
     /// eventually be output as their own pseudo-block.
     data_sec: HashMap<Vec<u8>, (u32, LabelIdx)>,
-    guards: IndexVec<GuardRestoreIdx, IntermediateGuard>,
+    guards: IndexVec<GuardExtraIdx, IntermediateGuard>,
 }
 
 impl<'a> X64HirToAsm<'a> {
@@ -854,7 +854,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     ) -> Result<
         (
             ExeCodeBuf,
-            IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
+            IndexVec<GuardExtraIdx, J2CompiledGuard<Reg>>,
             Option<String>,
             Vec<usize>,
         ),
@@ -1382,7 +1382,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn guard_end(
         &mut self,
         trid: TraceId,
-        gridx: GuardRestoreIdx,
+        gridx: GuardExtraIdx,
     ) -> Result<LabelIdx, CompilationError> {
         self.asm
             .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));

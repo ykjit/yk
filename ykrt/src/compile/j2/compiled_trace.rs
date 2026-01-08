@@ -4,7 +4,7 @@ use crate::{
         guard::{Guard, GuardId},
         j2::{
             codebuf::ExeCodeBuf,
-            hir::{GuardRestoreIdx, Switch},
+            hir::{GuardExtraIdx, Switch},
             regalloc::{RegT, VarLocs},
         },
         jitc_yk::aot_ir::{self, DeoptSafepoint, InstId},
@@ -28,7 +28,7 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     pub trid: TraceId,
     pub hl: Weak<Mutex<HotLocation>>,
     codebuf: ExeCodeBuf,
-    pub guard_restores: IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
+    pub guard_restores: IndexVec<GuardExtraIdx, J2CompiledGuard<Reg>>,
     pub trace_start: J2TraceStart<Reg>,
 }
 
@@ -38,7 +38,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         trid: TraceId,
         hl: Weak<Mutex<HotLocation>>,
         codebuf: ExeCodeBuf,
-        guards: IndexVec<GuardRestoreIdx, J2CompiledGuard<Reg>>,
+        guards: IndexVec<GuardExtraIdx, J2CompiledGuard<Reg>>,
         trace_start: J2TraceStart<Reg>,
     ) -> Self {
         Self {
@@ -51,15 +51,15 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         }
     }
 
-    pub(super) fn bid(&self, gridx: GuardRestoreIdx) -> aot_ir::BBlockId {
+    pub(super) fn bid(&self, gridx: GuardExtraIdx) -> aot_ir::BBlockId {
         self.guard_restores[gridx].bid()
     }
 
-    pub(super) fn switch(&self, gridx: GuardRestoreIdx) -> Option<&Switch> {
+    pub(super) fn switch(&self, gridx: GuardExtraIdx) -> Option<&Switch> {
         self.guard_restores[gridx].switch.as_ref()
     }
 
-    pub(super) fn deopt_frames(&self, gridx: GuardRestoreIdx) -> &[DeoptFrame<Reg>] {
+    pub(super) fn deopt_frames(&self, gridx: GuardExtraIdx) -> &[DeoptFrame<Reg>] {
         self.guard_restores[gridx].deopt_frames()
     }
 
@@ -74,7 +74,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         self.codebuf.as_ptr() as *mut c_void
     }
 
-    pub(super) fn guard_stack_off(&self, gridx: GuardRestoreIdx) -> u32 {
+    pub(super) fn guard_stack_off(&self, gridx: GuardExtraIdx) -> u32 {
         match self.trace_start {
             J2TraceStart::ControlPoint { stack_off, .. }
             | J2TraceStart::Guard { stack_off, .. } => {
@@ -107,7 +107,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     }
 
     fn guard(&self, gid: GuardId) -> &Guard {
-        let gridx = GuardRestoreIdx::from(usize::from(gid));
+        let gridx = GuardExtraIdx::from(usize::from(gid));
         self.guard_restores[gridx].guard()
     }
 
@@ -115,7 +115,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     // / J2CompiledTrace makes this awkward.
     #[cfg(target_arch = "x86_64")]
     fn patch_guard(&self, gid: GuardId, tgt: *const std::ffi::c_void) {
-        let gridx = GuardRestoreIdx::from(usize::from(gid));
+        let gridx = GuardExtraIdx::from(usize::from(gid));
         let patch_off = usize::try_from(self.guard_restores[gridx].patch_off()).unwrap();
         self.codebuf.patch(patch_off, 5, |patch_addr| {
             assert_eq!(unsafe { patch_addr.read() }, 0xE9);

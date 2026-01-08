@@ -21,7 +21,7 @@ use crate::{
         j2::{
             J2,
             compiled_trace::{J2CompiledTrace, J2TraceStart},
-            hir::{self, GuardRestore, GuardRestoreIdx},
+            hir::{self, GuardExtra, GuardExtraIdx},
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
         },
@@ -70,7 +70,7 @@ pub(super) struct AotToHir<Reg: RegT> {
     /// not built with ykllvm.
     globals: &'static [*const ()],
     opt: Box<dyn OptT>,
-    guard_restores: IndexVec<GuardRestoreIdx, GuardRestore>,
+    guard_restores: IndexVec<GuardExtraIdx, GuardExtra>,
     /// Initially set to `None` until we find the locations for this trace's arguments.
     frames: Vec<Frame>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
@@ -178,7 +178,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     .as_any()
                     .downcast::<J2CompiledTrace<Reg>>()
                     .unwrap();
-                let src_gridx = hir::GuardRestoreIdx::from(usize::from(*src_gid));
+                let src_gridx = hir::GuardExtraIdx::from(usize::from(*src_gid));
                 let prev_bid = src_ctr.bid(src_gridx);
                 self.prev_bid = Some(prev_bid);
                 let tgt_ctr = Arc::clone(tgt_ctr)
@@ -296,7 +296,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             trace_end,
             tys,
             addr_name_map: self.addr_name_map,
-            guard_restores: self.guard_restores,
+            guard_extras: self.guard_restores,
         };
 
         let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -396,14 +396,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             .iter()
             .flat_map(|hir::Frame { exit_vars, .. }| exit_vars.to_owned())
             .collect::<Vec<_>>();
-        let gridx = self.guard_restores.push(hir::GuardRestore {
+        let gridx = self.guard_restores.push(hir::GuardExtra {
             exit_frames: deopt_frames,
         });
         let hinst = hir::Guard {
             expect: expect_true,
             cond: cond_iidx,
             entry_vars,
-            gridx,
+            geidx: gridx,
             bid,
             switch: switch.map(Box::new),
         };
@@ -600,7 +600,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     fn p_start_side(
         &mut self,
         src_ctr: &Arc<J2CompiledTrace<Reg>>,
-        src_gridx: hir::GuardRestoreIdx,
+        src_gridx: hir::GuardExtraIdx,
         _tgt_ctr: &Arc<J2CompiledTrace<Reg>>,
     ) -> Result<Vec<VarLocs<Reg>>, CompilationError> {
         assert!(self.frames.is_empty());
@@ -1880,7 +1880,7 @@ enum BuildModKind<Reg: RegT> {
         prev_bid: BBlockId,
         entry_vlocs: Vec<VarLocs<Reg>>,
         src_ctr: Arc<J2CompiledTrace<Reg>>,
-        src_gridx: hir::GuardRestoreIdx,
+        src_gridx: hir::GuardExtraIdx,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,
     },
 }

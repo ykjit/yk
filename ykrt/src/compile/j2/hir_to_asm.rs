@@ -279,8 +279,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         self.be.guard_coupler_start(stack_off);
 
         // Guards
-        for (asmgrestore, _grestore) in guards.into_iter().rev().zip(self.m.guard_restores()) {
-            let patch_label = self.be.guard_end(TraceId::testing(), asmgrestore.gridx)?;
+        for (asmgrestore, _gextra) in guards.into_iter().rev().zip(self.m.guard_extras()) {
+            let patch_label = self.be.guard_end(TraceId::testing(), asmgrestore.geidx)?;
             self.be.guard_completed(
                 asmgrestore.label,
                 patch_label,
@@ -300,10 +300,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         entry: &Block,
         grestores: Vec<AsmGuardRestore<AB>>,
     ) -> Result<(), CompilationError> {
-        assert_eq!(grestores.len(), self.m.guard_restores().len());
+        assert_eq!(grestores.len(), self.m.guard_extras().len());
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-        for (asmgrestore, grestore) in grestores.into_iter().rev().zip(self.m.guard_restores()) {
-            let patch_label = self.be.guard_end(self.m.trid, asmgrestore.gridx)?;
+        for (asmgrestore, gextra) in grestores.into_iter().rev().zip(self.m.guard_extras()) {
+            let patch_label = self.be.guard_end(self.m.trid, asmgrestore.geidx)?;
 
             let mut stack_off = asmgrestore.stack_off;
             assert_eq!(asmgrestore.entry_vars.len(), asmgrestore.entry_vlocs.len());
@@ -326,7 +326,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let deopt_frames = grestore
+            let deopt_frames = gextra
                 .exit_frames
                 .iter()
                 .map(
@@ -506,24 +506,24 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 Inst::Guard(
                     x @ Guard {
                         entry_vars,
-                        gridx,
+                        geidx,
                         bid,
                         switch,
                         ..
                     },
                 ) => {
-                    assert!(grestores.len() < self.m.guard_restores().len());
+                    assert!(grestores.len() < self.m.guard_extras().len());
                     // We now have to be careful about guard indexes due to backwards iteration.
-                    // We may already have processed `gridx` (remember: multiple [Guard]s can map
-                    // to a single [GuardRestore]), so we need to check for that, but `gridx` will
+                    // We may already have processed `geidx` (remember: multiple [Guard]s can map
+                    // to a single [GuardRestore]), so we need to check for that, but `geidx` will
                     // be a "forwards" index, and `grestores` will have a "backwards" index.
-                    let cnd_idx = self.m.guard_restores().len() - usize::from(*gridx) - 1;
+                    let cnd_idx = self.m.guard_extras().len() - usize::from(*geidx) - 1;
                     assert!(cnd_idx <= grestores.len());
                     if cnd_idx == grestores.len() {
                         let label = self.be.i_guard(&mut ra, b, iidx, x)?;
                         let entry_vlocs = ra.vlocs_from_iidxs(entry_vars);
                         grestores.push(AsmGuardRestore {
-                            gridx: *gridx,
+                            geidx: *geidx,
                             label,
                             entry_vars: entry_vars.clone(),
                             entry_vlocs,
@@ -770,7 +770,7 @@ pub(super) trait HirToAsmBackend {
     ) -> Result<
         (
             ExeCodeBuf,
-            IndexVec<GuardRestoreIdx, J2CompiledGuard<Self::Reg>>,
+            IndexVec<GuardExtraIdx, J2CompiledGuard<Self::Reg>>,
             Option<String>,
             Vec<usize>,
         ),
@@ -902,7 +902,7 @@ pub(super) trait HirToAsmBackend {
     fn guard_end(
         &mut self,
         trid: TraceId,
-        gridx: GuardRestoreIdx,
+        gridx: GuardExtraIdx,
     ) -> Result<Self::Label, CompilationError>;
 
     /// The current guard has been completed:
@@ -1276,7 +1276,7 @@ index_vec::define_index_type! {
 
 #[derive(Debug)]
 struct AsmGuardRestore<AB: HirToAsmBackend + ?Sized> {
-    gridx: GuardRestoreIdx,
+    geidx: GuardExtraIdx,
     label: AB::Label,
     /// Will be the same length as `entry_vlocs`.
     entry_vars: Vec<InstIdx>,
