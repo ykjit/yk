@@ -52,10 +52,6 @@ fn main() {
     unsafe {
         env::set_var("YKB_TRACER", "swt")
     };
-    #[cfg(tracer_hwt)]
-    unsafe {
-        env::set_var("YKB_TRACER", "hwt")
-    };
 
     LangTester::new()
         .comment_prefix(COMMENT_PREFIX)

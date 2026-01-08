@@ -1742,8 +1742,6 @@ impl TraceBuilder {
         }
 
         // FIXME: this section of code needs to be refactored.
-        #[cfg(tracer_hwt)]
-        let mut last_blk_is_return = false;
         while let Some(b) = trace_iter.next() {
             if self.finish_early {
                 // We don't need to process any remaining blocks. This is because we are finishing
@@ -1754,13 +1752,6 @@ impl TraceBuilder {
                 Some(bid) => {
                     // MappedAOTBBlock block
                     if let Some(prev_mbid) = &prev_mappable_bid {
-                        // Due to the way HWT works, when you return from a call, you see the same
-                        // basic block again. We skip it.
-                        // FIXME: trace builder should be tracer agnostic.
-                        #[cfg(tracer_hwt)]
-                        if *prev_mbid == bid {
-                            continue;
-                        }
                         // Check the control flow is regular, bailing out if we detect e.g.
                         // longjmp().
                         //
@@ -1815,22 +1806,6 @@ impl TraceBuilder {
                         }
                     } else {
                         // We are not outlining. Process blocks normally.
-                        #[cfg(tracer_hwt)]
-                        if last_blk_is_return {
-                            // If the last block had a return terminator, we are returning
-                            // from a call, which means the HWT will have recorded an
-                            // additional caller block that we'll have to skip.
-                            // FIXME: This only applies to the HWT as the SWT doesn't
-                            // record these extra blocks.
-                            last_blk_is_return = false;
-                            prev_bid = Some(bid.clone());
-                            prev_mappable_bid = Some(bid);
-                            continue;
-                        }
-                        #[cfg(tracer_hwt)]
-                        if self.aot_mod.bblock(&bid).is_return() {
-                            last_blk_is_return = true;
-                        }
                     }
 
                     // In order to emit guards for conditional branches we need to peek at the next
