@@ -404,7 +404,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // [self.m.guard_restores]. However, because we're iterating backwards over the trace,
         // that means that the indexes will be backwards too! This causes us to do some indexing
         // acrobatics in the treatment of [Guard]s below.
-        let mut grestores = Vec::new();
+        let mut guards = Vec::new();
         let mut insts_iter = b.insts_iter(..).rev().peekable();
         for _ in entry_vlocs.len()..b.insts_len() {
             let Some((iidx, hinst)) = insts_iter.next() else {
@@ -511,7 +511,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 ) => {
                     let label = self.be.i_guard(&mut ra, b, iidx, x)?;
                     let entry_vlocs = ra.vlocs_from_iidxs(entry_vars);
-                    grestores.push(AsmGuard {
+                    guards.push(AsmGuard {
                         geidx: *geidx,
                         label,
                         entry_vars: entry_vars.clone(),
@@ -616,7 +616,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         assert_eq!(term_vars.len(), 0);
                     }
                     _ => {
-                        ra.set_exit_vlocs(
+                        ra.set_term_vlocs(
                             &mut self.be,
                             matches!(self.m.trace_end, TraceEnd::Loop { .. }),
                             entry_vlocs,
@@ -699,7 +699,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
         }
 
-        Ok((grestores, ra.stack_off()))
+        Ok((guards, ra.stack_off()))
     }
 }
 
