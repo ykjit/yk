@@ -616,7 +616,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         assert_eq!(term_vars.len(), 0);
                     }
                     _ => {
-                        ra.set_exit_vlocs(
+                        ra.set_term_vlocs(
                             &mut self.be,
                             matches!(self.m.trace_end, TraceEnd::Loop { .. }),
                             entry_vlocs,
