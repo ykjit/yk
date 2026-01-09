@@ -232,12 +232,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     }
                 }
             };
-            let exit_vars = exit_safepoint
+            let term_vars = exit_safepoint
                 .lives
                 .iter()
                 .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
                 .collect::<Vec<_>>();
-            self.opt.feed_void(hir::Inst::Term(hir::Term(exit_vars)))?;
+            self.opt.feed_void(hir::Inst::Term(hir::Term(term_vars)))?;
         }
 
         let (entry, tys) = self.opt.build();
