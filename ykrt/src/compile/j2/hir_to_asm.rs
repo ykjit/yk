@@ -209,7 +209,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
             TraceStart::Guard {
                 src_ctr,
-                src_gridx,
+                src_gidx: src_gridx,
                 entry_vlocs,
             } => {
                 let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
@@ -279,13 +279,16 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         self.be.guard_coupler_start(stack_off);
 
         // Guards
-        for (asmgrestore, _grestore) in guards.into_iter().rev().zip(self.m.guard_restores()) {
-            let patch_label = self.be.guard_end(TraceId::testing(), asmgrestore.gridx)?;
+        for (i, guard) in guards.into_iter().enumerate() {
+            let patch_label = self
+                .be
+                .guard_end(TraceId::testing(), AsmGuardIdx::from(i))?;
+            let gextra = self.m.guard_extra(guard.geidx);
             self.be.guard_completed(
-                asmgrestore.label,
+                guard.label,
                 patch_label,
                 0,
-                asmgrestore.bid,
+                gextra.bid,
                 SmallVec::new(),
                 None,
             );
@@ -298,17 +301,17 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     fn asm_guards(
         &mut self,
         entry: &Block,
-        grestores: Vec<AsmGuardRestore<AB>>,
+        guards: Vec<AsmGuard<AB>>,
     ) -> Result<(), CompilationError> {
-        assert_eq!(grestores.len(), self.m.guard_restores().len());
+        assert_eq!(guards.len(), self.m.guard_extras().len());
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-        for (asmgrestore, grestore) in grestores.into_iter().rev().zip(self.m.guard_restores()) {
-            let patch_label = self.be.guard_end(self.m.trid, asmgrestore.gridx)?;
+        for (i, guard) in guards.into_iter().enumerate() {
+            let patch_label = self.be.guard_end(self.m.trid, AsmGuardIdx::from(i))?;
 
-            let mut stack_off = asmgrestore.stack_off;
-            assert_eq!(asmgrestore.entry_vars.len(), asmgrestore.entry_vlocs.len());
-            let mut entry_vlocs = asmgrestore.entry_vlocs;
-            for (iidx, vlocs) in asmgrestore.entry_vars.iter().zip(entry_vlocs.iter_mut()) {
+            let mut stack_off = guard.stack_off;
+            assert_eq!(guard.entry_vars.len(), guard.entry_vlocs.len());
+            let mut entry_vlocs = guard.entry_vlocs;
+            for (iidx, vlocs) in guard.entry_vars.iter().zip(entry_vlocs.iter_mut()) {
                 // If a value only exists in a register(s), we need to pick one of those registers,
                 // and ensure it's spilt.
                 if vlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
@@ -326,7 +329,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let deopt_frames = grestore
+            let gextra = self.m.guard_extra(guard.geidx);
+            let deopt_frames = gextra
                 .exit_frames
                 .iter()
                 .map(
@@ -345,11 +349,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                 .iter()
                                 .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
                                 .map(|(iidx, (aot_op, smap_loc))| {
-                                    let fromvlocs = entry_vlocs[asmgrestore
-                                        .entry_vars
-                                        .iter()
-                                        .position(|x| x == iidx)
-                                        .unwrap()]
+                                    let fromvlocs = entry_vlocs
+                                        [guard.entry_vars.iter().position(|x| x == iidx).unwrap()]
                                     .iter()
                                     // FIXME (optimisation): We don't need to spill everything
                                     // before deopt / side-traces.
@@ -375,12 +376,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 )
                 .collect::<SmallVec<[_; 1]>>();
             self.be.guard_completed(
-                asmgrestore.label,
+                guard.label,
                 patch_label,
-                stack_off - asmgrestore.stack_off,
-                asmgrestore.bid,
+                stack_off - guard.stack_off,
+                gextra.bid,
                 deopt_frames,
-                asmgrestore.switch.map(|x| *x),
+                gextra.switch.clone(),
             );
         }
 
@@ -395,7 +396,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         entry_vlocs: &[VarLocs<AB::Reg>],
         exit_vlocs: &[VarLocs<AB::Reg>],
         logging: bool,
-    ) -> Result<(Vec<AsmGuardRestore<AB>>, u32), CompilationError> {
+    ) -> Result<(Vec<AsmGuard<AB>>, u32), CompilationError> {
         let mut ra = RegAlloc::<AB>::new(self.m, b, stack_off);
         ra.set_entry_stacks_at_end(entry_vlocs);
 
@@ -505,43 +506,18 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
                 Inst::Guard(
                     x @ Guard {
-                        entry_vars,
-                        gridx,
-                        bid,
-                        switch,
-                        ..
+                        entry_vars, geidx, ..
                     },
                 ) => {
-                    assert!(grestores.len() < self.m.guard_restores().len());
-                    // We now have to be careful about guard indexes due to backwards iteration.
-                    // We may already have processed `gridx` (remember: multiple [Guard]s can map
-                    // to a single [GuardRestore]), so we need to check for that, but `gridx` will
-                    // be a "forwards" index, and `grestores` will have a "backwards" index.
-                    let cnd_idx = self.m.guard_restores().len() - usize::from(*gridx) - 1;
-                    assert!(cnd_idx <= grestores.len());
-                    if cnd_idx == grestores.len() {
-                        let label = self.be.i_guard(&mut ra, b, iidx, x)?;
-                        let entry_vlocs = ra.vlocs_from_iidxs(entry_vars);
-                        grestores.push(AsmGuardRestore {
-                            gridx: *gridx,
-                            label,
-                            entry_vars: entry_vars.clone(),
-                            entry_vlocs,
-                            bid: *bid,
-                            switch: switch.clone(),
-                            stack_off: ra.stack_off(),
-                        });
-                    } else {
-                        // We're mapping multiple [Guard]s to a single [GuardRestore]. The
-                        // challenge then becomes that the register allocator's snapshot might --
-                        // and almost certainly will! -- be different at each guard. In such cases
-                        // we will need to create an intermediate piece of code which harmonises
-                        // the machine state so that they can then all use the same side-trace. [As
-                        // an optimisation we could allow them to have different machine states for
-                        // deopt, and only harmonise the machine state when a side-trace is
-                        // present, but that's probably quite a lot of effort for not much gain.]
-                        todo!()
-                    }
+                    let label = self.be.i_guard(&mut ra, b, iidx, x)?;
+                    let entry_vlocs = ra.vlocs_from_iidxs(entry_vars);
+                    grestores.push(AsmGuard {
+                        geidx: *geidx,
+                        label,
+                        entry_vars: entry_vars.clone(),
+                        entry_vlocs,
+                        stack_off: ra.stack_off(),
+                    });
                 }
                 Inst::ICmp(x) => {
                     if ra.is_used(iidx) {
@@ -770,7 +746,7 @@ pub(super) trait HirToAsmBackend {
     ) -> Result<
         (
             ExeCodeBuf,
-            IndexVec<GuardRestoreIdx, J2CompiledGuard<Self::Reg>>,
+            IndexVec<AsmGuardIdx, J2CompiledGuard<Self::Reg>>,
             Option<String>,
             Vec<usize>,
         ),
@@ -902,7 +878,7 @@ pub(super) trait HirToAsmBackend {
     fn guard_end(
         &mut self,
         trid: TraceId,
-        gridx: GuardRestoreIdx,
+        gidx: AsmGuardIdx,
     ) -> Result<Self::Label, CompilationError>;
 
     /// The current guard has been completed:
@@ -1274,16 +1250,18 @@ index_vec::define_index_type! {
     pub(super) struct FrameIdx = u16;
 }
 
+index_vec::define_index_type! {
+    pub(super) struct AsmGuardIdx = u16;
+}
+
 #[derive(Debug)]
-struct AsmGuardRestore<AB: HirToAsmBackend + ?Sized> {
-    gridx: GuardRestoreIdx,
+struct AsmGuard<AB: HirToAsmBackend + ?Sized> {
+    geidx: GuardExtraIdx,
     label: AB::Label,
     /// Will be the same length as `entry_vlocs`.
     entry_vars: Vec<InstIdx>,
     /// Will be the same length as `entry_vars`.
     entry_vlocs: Vec<VarLocs<AB::Reg>>,
-    bid: aot_ir::BBlockId,
-    switch: Option<Box<Switch>>,
     /// The stack offset of the register allocator at the entry point of the guard.
     stack_off: u32,
 }

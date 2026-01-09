@@ -156,6 +156,7 @@ use crate::{
     compile::{
         j2::{
             compiled_trace::J2CompiledTrace,
+            hir_to_asm::AsmGuardIdx,
             opt::EquivIIdxT,
             regalloc::{RegT, VarLocs},
         },
@@ -236,13 +237,14 @@ pub(super) struct Mod<Reg: RegT> {
     pub trace_start: TraceStart<Reg>,
     pub trace_end: TraceEnd<Reg>,
     pub tys: IndexVec<TyIdx, Ty>,
-    pub guard_restores: IndexVec<GuardRestoreIdx, GuardRestore>,
+    /// Extra information that is too big to fit in a [Guard] instruction.
+    pub guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     /// A map of names to pointers. Will be `None` if logging was disabled.
     pub addr_name_map: Option<HashMap<usize, String>>,
 }
 
 impl<Reg: RegT> Mod<Reg> {
-    /// Check that this module is well-formed, panicing if it is not.
+    /// Check that this module is well-formed, panicking if it is not.
     #[allow(dead_code)]
     pub(super) fn assert_well_formed(&self) {
         // Guarantee that a given [Ty] appears only once in `self.tys`.
@@ -261,8 +263,12 @@ impl<Reg: RegT> Mod<Reg> {
         }
     }
 
-    pub(super) fn guard_restores(&self) -> &[GuardRestore] {
-        self.guard_restores.as_raw_slice()
+    pub(super) fn guard_extra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
+        &self.guard_extras[geidx]
+    }
+
+    pub(super) fn guard_extras(&self) -> &[GuardExtra] {
+        self.guard_extras.as_raw_slice()
     }
 }
 
@@ -300,7 +306,7 @@ pub(super) enum TraceStart<Reg: RegT> {
     /// This trace started from a guard failing.
     Guard {
         src_ctr: Arc<J2CompiledTrace<Reg>>,
-        src_gridx: GuardRestoreIdx,
+        src_gidx: AsmGuardIdx,
         entry_vlocs: Vec<VarLocs<Reg>>,
     },
     /// This is a trace intended for unit testing.
@@ -485,15 +491,6 @@ impl BlockLikeT for Block {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct GuardRestore {
-    /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
-    /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
-    /// *except* that the most recent call frame is replaced with the deopt information for the
-    /// branch (etc) that failed.
-    pub exit_frames: SmallVec<[Frame; 1]>,
-}
-
 /// A HIR type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) enum Ty {
@@ -564,7 +561,8 @@ index_vec::define_index_type! {
 }
 
 index_vec::define_index_type! {
-    pub(super) struct GuardRestoreIdx = u16;
+    /// The index type for extra information about guards that doesn't fit into a [Guard] object.
+    pub(super) struct GuardExtraIdx = u16;
 }
 
 // Note: if you change the `u32` here, `MAX` must also be updated.
@@ -1923,21 +1921,11 @@ impl InstT for FPToSI {
 pub(super) struct Guard {
     pub expect: bool,
     pub cond: InstIdx,
-    pub bid: aot_ir::BBlockId,
     /// The variables used on entry to the guard. Note these may be different than those used
     /// at the end of the [GuardBody].
     pub entry_vars: Vec<InstIdx>,
-    /// The [GuardRestore] that this guard maps to. Note: multiple [Guard]s may map to a single
-    /// [GuardRestore] (but not vice versa).
-    pub gridx: GuardRestoreIdx,
-    /// If this guard:
-    ///
-    ///   1. is the first guard in a trace,
-    ///   2. relates to an LLVM-level `switch`,
-    ///
-    /// then this records the information necessary for subsequent sidetraces to deal with the
-    /// switch properly.
-    pub switch: Option<Box<Switch>>,
+    /// The [Guardextra] that this guard maps to.
+    pub geidx: GuardExtraIdx,
 }
 
 impl InstT for Guard {
@@ -1995,6 +1983,27 @@ impl InstT for Guard {
     fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
         &Ty::Void
     }
+}
+
+/// Extra information for guard instructions that is too big to fit into [Guard].
+#[derive(Debug)]
+pub(super) struct GuardExtra {
+    pub bid: aot_ir::BBlockId,
+    /// If this guard:
+    ///
+    ///   1. is the first guard in a trace,
+    ///   2. relates to an LLVM-level `switch`,
+    ///
+    /// then this records the information necessary for subsequent sidetraces to deal with the
+    /// switch properly.
+    pub switch: Option<Switch>,
+    /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
+    /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
+    /// *except* that the most recent call frame is replaced with the deopt information for the
+    /// branch (etc) that failed. Brief experiments suggest that, depending on the benchmark and
+    /// interpreter, between 50-90% of guards exist in the controlpoint frame, so the `1` in the
+    /// `SmallVec` means that we usefully avoid allocating memory in many cases.
+    pub exit_frames: SmallVec<[Frame; 1]>,
 }
 
 /// If a guard relates to an AOT `switch`, this struct records the extra information we need to
@@ -3834,7 +3843,7 @@ mod test {
         // for the future when we better understand the real-world impact.
         assert_eq!(
             std::mem::size_of::<Inst>(),
-            std::mem::size_of::<usize>() * 7
+            std::mem::size_of::<usize>() * 5
         );
     }
 

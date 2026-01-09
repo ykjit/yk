@@ -25,7 +25,7 @@
 //     yk-execution: enter-jit-code
 //     2
 //     1
-//     yk-execution: deoptimise TraceId(0) GuardId(1)
+//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     return
 //     exit

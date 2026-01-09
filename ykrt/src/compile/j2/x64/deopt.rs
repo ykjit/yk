@@ -6,7 +6,8 @@ use crate::{
         CompiledTrace, GuardId,
         j2::{
             compiled_trace::J2CompiledTrace,
-            hir::{ConstKind, GuardRestoreIdx},
+            hir::ConstKind,
+            hir_to_asm::AsmGuardIdx,
             regalloc::{RegFill, VarLoc, VarLocs},
             x64::x64regalloc::Reg,
         },
@@ -141,7 +142,7 @@ thread_local! {
 #[unsafe(no_mangle)]
 pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> ! {
     let gid = GuardId::from(usize::try_from(gid).unwrap());
-    let gridx = GuardRestoreIdx::from(usize::from(gid));
+    let gidx = AsmGuardIdx::from(usize::from(gid));
     let ctr = MTThread::with_borrow(|mtt| mtt.compiled_trace(TraceId::from_u64(trid)))
         .as_any()
         .downcast::<J2CompiledTrace<Reg>>()
@@ -158,7 +159,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     mt.deopt();
 
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-    let deopt_frames = &ctr.deopt_frames(gridx);
+    let deopt_frames = &ctr.deopt_frames(gidx);
 
     // We write to the buffer backwards, starting at `stkptr + stklen`. Eventually the contents of
     // this buffer (viewed from low to high address) will be:
