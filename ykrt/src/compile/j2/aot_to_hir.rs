@@ -349,7 +349,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         switch: Option<hir::Switch>,
     ) -> Result<(), CompilationError> {
         self.frames.last_mut().unwrap().pc_safepoint = Some(guard_safepoint);
-        let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
+        let mut exit_frames = SmallVec::with_capacity(self.frames.len());
         for (
             i,
             frame @ Frame {
@@ -363,7 +363,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             } else {
                 iid.clone()
             };
-            deopt_frames.push(hir::Frame {
+            exit_frames.push(hir::Frame {
                 pc,
                 pc_safepoint,
                 exit_vars: pc_safepoint
@@ -387,20 +387,20 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             )?;
             // This `let` is only needed because type inference goes a bit wonky, at least on
             // rust-1.91.
-            let last: &mut hir::Frame = deopt_frames.last_mut().unwrap();
+            let last: &mut hir::Frame = exit_frames.last_mut().unwrap();
             *last.exit_vars.last_mut().unwrap() = ciidx;
         }
 
         // This is temporary, since we currently don't put any instructions in the guard body:
         // when we do, entry_vars and exit_vars will, in general, be different to each other.
-        let entry_vars = deopt_frames
+        let entry_vars = exit_frames
             .iter()
             .flat_map(|hir::Frame { exit_vars, .. }| exit_vars.to_owned())
             .collect::<Vec<_>>();
         let gridx = self.guard_extras.push(hir::GuardExtra {
             bid,
             switch,
-            exit_frames: deopt_frames,
+            exit_frames,
         });
         let hinst = hir::Guard {
             expect: expect_true,
