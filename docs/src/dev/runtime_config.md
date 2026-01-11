@@ -17,6 +17,9 @@ The following environment variables are available:
   compilation entirely. When disabled, the hot location counter will not
   increment, preventing any tracing or compilation from occurring. When not set,
   defaults to JIT compilation enabled.
+* `YK_JOBS`: specifies the number of threads for compilation. Negative values
+  will lead to an error; a value of 0 will be treated as a value of 1. Defaults
+  to `num_cpus - 1`.
 * `YK_SIDETRACE_THRESHOLD`: an integer from 0..4294967295 (both inclusive) that
   determines how many times a guard needs to fail before a sidetrace is created.
   Defaults to 5.
