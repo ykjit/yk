@@ -119,27 +119,25 @@ impl J2 {
                     0,
                 ) as *const c_void
             };
-            if buf == MAP_FAILED {
-                todo!();
-            }
+            if buf != MAP_FAILED {
+                let is_near = if !hint_ptr.is_null() {
+                    #[cfg(target_arch = "x86_64")]
+                    let is_near = unsafe { hint_ptr.offset_from(buf) }.abs() < 0x80000000;
 
-            let is_near = if !hint_ptr.is_null() {
-                #[cfg(target_arch = "x86_64")]
-                let is_near = unsafe { hint_ptr.offset_from(buf) }.abs() < 0x80000000;
+                    is_near
+                } else {
+                    // If `hint_ptr` is null -- e.g. during testing -- we give up and say "this'll do".
+                    true
+                };
 
-                is_near
-            } else {
-                // If `hint_ptr` is null -- e.g. during testing -- we give up and say "this'll do".
-                true
-            };
+                if is_near {
+                    *lk = SyncSafePtr(unsafe { buf.byte_add(len) });
+                    return CodeBufInProgress::new(buf as *mut u8, len);
+                }
 
-            if is_near {
-                *lk = SyncSafePtr(unsafe { buf.byte_add(len) });
-                return CodeBufInProgress::new(buf as *mut u8, len);
-            }
-
-            if unsafe { munmap(buf as *mut c_void, len) } == -1 {
-                todo!();
+                if unsafe { munmap(buf as *mut c_void, len) } == -1 {
+                    todo!();
+                }
             }
 
             // Should we use a different heuristic for the first call? When `hint_ptr` is `main`'s
@@ -149,7 +147,21 @@ impl J2 {
             hint_ptr = unsafe { hint_ptr.byte_add(64 * 1024) };
         }
 
-        todo!();
+        let buf = unsafe {
+            mmap(
+                std::ptr::null_mut(),
+                len,
+                PROT_READ | PROT_WRITE,
+                MAP_ANON | MAP_PRIVATE,
+                -1,
+                0,
+            ) as *const c_void
+        };
+        if buf == MAP_FAILED {
+            todo!();
+        }
+        *lk = SyncSafePtr(unsafe { buf.byte_add(len) });
+        CodeBufInProgress::new(buf as *mut u8, len)
     }
 
     /// Convert a symbol name to an address. This is a caching front-end to [libc::dlsym].
