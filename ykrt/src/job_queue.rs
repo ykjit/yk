@@ -3,11 +3,10 @@
 
 use crate::mt::{MT, TraceId};
 use parking_lot::{Condvar, Mutex, MutexGuard};
-#[cfg(feature = "yk_testing")]
-use std::env;
 use std::{
     cmp,
     collections::VecDeque,
+    env,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -62,7 +61,15 @@ impl JobQueue {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
-            max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
+            max_worker_threads: AtomicUsize::new(cmp::max(
+                1,
+                match env::var("YK_JOBS") {
+                    Ok(x) => x
+                        .parse::<usize>()
+                        .unwrap_or_else(|x| panic!("Invalid value for YK_JOBS: {x}")),
+                    _ => num_cpus::get() - 1,
+                },
+            )),
             worker_threads: Mutex::new(Vec::new()),
             idle_worker_threads: AtomicUsize::new(0),
         })
