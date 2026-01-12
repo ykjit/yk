@@ -131,6 +131,7 @@ impl FullOpt {
             inner: OptInternal {
                 insts: IndexVec::new(),
                 consts_map: HashMap::new(),
+                guard_extras: IndexVec::new(),
                 tys: IndexVec::new(),
                 ty_map: HashMap::new(),
             },
@@ -206,7 +207,13 @@ impl BlockLikeT for FullOpt {
 }
 
 impl OptT for FullOpt {
-    fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>) {
+    fn build(
+        self: Box<Self>,
+    ) -> (
+        Block,
+        IndexVec<GuardExtraIdx, GuardExtra>,
+        IndexVec<TyIdx, Ty>,
+    ) {
         (
             Block {
                 insts: self
@@ -216,6 +223,7 @@ impl OptT for FullOpt {
                     .map(|x| x.inst)
                     .collect::<IndexVec<_, _>>(),
             },
+            self.inner.guard_extras,
             self.inner.tys,
         )
     }
@@ -239,6 +247,26 @@ impl OptT for FullOpt {
         Ok(self.commit_inst(inst))
     }
 
+    fn feed_guard(
+        &mut self,
+        inst: Guard,
+        gextra: GuardExtra,
+    ) -> Result<Option<InstIdx>, CompilationError> {
+        assert_eq!(inst.geidx, GuardExtraIdx::MAX);
+        match self.feed_internal(inst.into())? {
+            Some(iidx) => {
+                if let &mut Inst::Guard(Guard { ref mut geidx, .. }) =
+                    &mut self.inner.insts[iidx].inst
+                    && *geidx == GuardExtraIdx::MAX
+                {
+                    *geidx = self.inner.guard_extras.push(gextra);
+                }
+                Ok(Some(iidx))
+            }
+            None => Ok(None),
+        }
+    }
+
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
         self.inner.push_ty(ty)
     }
@@ -259,6 +287,7 @@ struct OptInternal {
     /// deduplication is "best effort" because of the difficulties imposed by floating point
     /// numbers.
     consts_map: HashMap<HashableConst, InstIdx>,
+    guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     tys: IndexVec<TyIdx, Ty>,
     /// A map allowing us to deduplicate types. This guarantees that a given [Ty] appears exactly
     /// once in a module.
@@ -550,13 +579,13 @@ pub(in crate::compile::j2::opt) mod test {
                 equiv: InstIdx::MAX,
             });
         }
-        let (block, tys) = fopt.build();
+        let (block, guard_extras, tys) = fopt.build();
         let m = Mod {
             trid: m.trid,
             trace_start: TraceStart::Test,
             trace_end: TraceEnd::Test { entry_vlocs, block },
             tys,
-            guard_extras: IndexVec::new(),
+            guard_extras,
             addr_name_map: None,
         };
         let s = m.to_string();

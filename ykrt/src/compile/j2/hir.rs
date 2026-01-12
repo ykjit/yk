@@ -565,6 +565,11 @@ index_vec::define_index_type! {
     pub(super) struct GuardExtraIdx = u16;
 }
 
+impl GuardExtraIdx {
+    /// The maximum representable [GuardExtraIdx].
+    pub(super) const MAX: GuardExtraIdx = GuardExtraIdx::from_raw_unchecked(u16::MAX);
+}
+
 // Note: if you change the `u32` here, `MAX` must also be updated.
 index_vec::define_index_type! {
     pub(super) struct InstIdx = u32;
@@ -1924,7 +1929,8 @@ pub(super) struct Guard {
     /// The variables used on entry to the guard. Note these may be different than those used
     /// at the end of the [GuardBody].
     pub entry_vars: Vec<InstIdx>,
-    /// The [Guardextra] that this guard maps to.
+    /// The [Guardextra] that this guard maps to. Before optimisation, this will be set to
+    /// [GuardExtra::MAX].
     pub geidx: GuardExtraIdx,
 }
 
