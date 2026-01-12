@@ -202,6 +202,10 @@ pub(super) trait ModLikeT {
     /// If logging was enabled, returns `Some(linker_name)` if `addr` has a known name, or `None`
     /// otherwise.
     fn addr_to_name(&self, addr: usize) -> Option<&str>;
+
+    /// Adds an address to the address to name mapping. This may be required when new addresses
+    /// appear post-optimization.
+    fn add_addr_to_name(&mut self, addr: usize, name: String);
 }
 
 /// A representation of a "block like" object.
@@ -283,6 +287,12 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
         self.addr_name_map
             .as_ref()
             .and_then(|x| x.get(&addr).map(|y| y.as_str()))
+    }
+
+    fn add_addr_to_name(&mut self, addr: usize, name: String) {
+        self.addr_name_map
+            .as_mut()
+            .map(|map| map.insert(addr, name));
     }
 
     fn ty(&self, tyidx: TyIdx) -> &Ty {

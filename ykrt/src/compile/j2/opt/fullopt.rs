@@ -102,6 +102,7 @@ use crate::compile::{
         },
     },
 };
+use crate::log::should_log_any_ir;
 use index_vec::*;
 use smallvec::SmallVec;
 use std::{
@@ -117,6 +118,8 @@ pub(in crate::compile::j2) struct FullOpt {
     /// The ordered set of optimisation passes that all instructions will be fed through.
     passes: [Box<dyn PassT>; 4],
     inner: OptInternal,
+    /// A map of names to pointers. Will be `None` if logging was disabled.
+    pub addr_name_map: Option<HashMap<usize, String>>,
 }
 
 impl FullOpt {
@@ -134,6 +137,7 @@ impl FullOpt {
                 tys: IndexVec::new(),
                 ty_map: HashMap::new(),
             },
+            addr_name_map: should_log_any_ir().then_some(HashMap::new()),
         }
     }
 
@@ -181,6 +185,19 @@ impl FullOpt {
             self.inner
                 .consts_map
                 .insert(HashableConst(x.to_owned()), iidx);
+            // If we find a new pointer through constant folding or otherwise,
+            // add the pointer to the symbol table.
+            if let Const {
+                tyidx: _,
+                kind: ConstKind::Ptr(addr),
+            } = x
+                && self.addr_to_name(*addr).is_none()
+                && let Some(dlinfo) = ykaddr::addr::dladdr(*addr)
+                && let Some(cstr) = dlinfo.dli_sname()
+                && let Ok(str) = cstr.to_str()
+            {
+                self.add_addr_to_name(*addr, str.to_string())
+            };
         }
         self.inner.insts.push(InstEquiv {
             inst,
@@ -190,8 +207,16 @@ impl FullOpt {
 }
 
 impl ModLikeT for FullOpt {
-    fn addr_to_name(&self, _addr: usize) -> Option<&str> {
-        panic!("Not available in optimiser");
+    fn addr_to_name(&self, addr: usize) -> Option<&str> {
+        self.addr_name_map
+            .as_ref()
+            .and_then(|x| x.get(&addr).map(|y| y.as_str()))
+    }
+
+    fn add_addr_to_name(&mut self, addr: usize, name: String) {
+        self.addr_name_map
+            .as_mut()
+            .map(|map| map.insert(addr, name));
     }
 
     fn ty(&self, tyidx: TyIdx) -> &Ty {
@@ -206,7 +231,7 @@ impl BlockLikeT for FullOpt {
 }
 
 impl OptT for FullOpt {
-    fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>) {
+    fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>, Option<HashMap<usize, String>>) {
         (
             Block {
                 insts: self
@@ -217,6 +242,7 @@ impl OptT for FullOpt {
                     .collect::<IndexVec<_, _>>(),
             },
             self.inner.tys,
+            self.addr_name_map,
         )
     }
 
@@ -427,6 +453,10 @@ impl ModLikeT for PassOpt<'_> {
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
         todo!()
     }
+
+    fn add_addr_to_name(&mut self, _addr: usize, _name: String) {
+        todo!()
+    }
 }
 
 impl EquivIIdxT for PassOpt<'_> {
@@ -452,6 +482,10 @@ impl ModLikeT for CommitInstOpt<'_> {
     }
 
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
+        todo!()
+    }
+
+    fn add_addr_to_name(&mut self, _addr: usize, _name: String) {
         todo!()
     }
 }
@@ -550,7 +584,7 @@ pub(in crate::compile::j2::opt) mod test {
                 equiv: InstIdx::MAX,
             });
         }
-        let (block, tys) = fopt.build();
+        let (block, tys, _) = fopt.build();
         let m = Mod {
             trid: m.trid,
             trace_start: TraceStart::Test,

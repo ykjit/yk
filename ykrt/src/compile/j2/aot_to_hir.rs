@@ -239,7 +239,17 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             self.opt.feed_void(hir::Inst::Term(hir::Term(exit_vars)))?;
         }
 
-        let (entry, tys) = self.opt.build();
+        let (entry, tys, new_addr_to_name) = self.opt.build();
+
+        // Add any new names we found after optimisation passes into the address name map.
+        if let Some(map2) = new_addr_to_name {
+            for (k, v) in map2.into_iter() {
+                if !self.addr_name_map.as_ref().unwrap().contains_key(&k) {
+                    self.addr_name_map.as_mut().map(|m| m.insert(k, v));
+                }
+            }
+        };
+
         let (trace_start, trace_end) = match bmk {
             BuildModKind::Coupler {
                 entry_safepoint,

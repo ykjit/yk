@@ -34,6 +34,10 @@ impl ModLikeT for NoOpt {
         panic!("Not available in optimiser");
     }
 
+    fn add_addr_to_name(&mut self, _addr: usize, _name: String) {
+        todo!()
+    }
+
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         &self.tys[tyidx]
     }
@@ -46,8 +50,8 @@ impl BlockLikeT for NoOpt {
 }
 
 impl OptT for NoOpt {
-    fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>) {
-        (Block { insts: self.insts }, self.tys)
+    fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>, Option<HashMap<usize, String>>) {
+        (Block { insts: self.insts }, self.tys, None)
     }
 
     fn peel(self) -> (Block, Block) {

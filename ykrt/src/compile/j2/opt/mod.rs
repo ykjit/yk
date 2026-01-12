@@ -7,6 +7,7 @@
 
 use crate::compile::{CompilationError, j2::hir::*};
 use index_vec::IndexVec;
+use std::collections::HashMap;
 
 mod cse;
 pub(super) mod fullopt;
@@ -20,7 +21,9 @@ mod strength_fold;
 pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
     /// The block is now complete and the optimiser should turn it into a [Block] and a set of
     /// types (suitable for putting in a [Mod]).
-    fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>);
+    /// Also returns a mapping of newly discovered addresses to names if logging is enabled, and if
+    /// the optimizer supports it.
+    fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>, Option<HashMap<usize, String>>);
 
     #[allow(dead_code)]
     fn peel(self) -> (Block, Block);
