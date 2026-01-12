@@ -592,7 +592,7 @@ pub(super) trait InstT: std::fmt::Debug {
 
     /// Canonicalise this instruction. This rewrites operands to their most recent equivalent
     /// [InstIdx]s and performs other, basic, canonicalisation on a per-instruction kind basis.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _be: &mut T);
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T);
 
     /// For the purposes of common subexpression elimination is `other` equivalent to `self`?
     /// `other` must be canonicalised for this comparison to return true in all cases where
@@ -886,7 +886,7 @@ pub(super) struct Arg {
 }
 
 impl InstT for Arg {
-    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _be: &mut T) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
 
     fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([].into_iter())
@@ -1158,7 +1158,7 @@ impl InstT for Const {
         }
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _be: &mut T) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Const(Const { kind, .. }) = other
@@ -3406,7 +3406,7 @@ pub(super) struct ThreadLocal(pub *const c_void);
 impl InstT for ThreadLocal {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _be: &mut T) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::ThreadLocal(ThreadLocal(x)) = other
