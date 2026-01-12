@@ -1,3 +1,4 @@
+// ignore-if: test "$YK_JITC" != "j2" # formatting specific to j2
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
