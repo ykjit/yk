@@ -525,7 +525,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             Ty::Float(_float_ty) => todo!(),
             Ty::Unimplemented(_) => todo!(),
         };
-        self.promotions_off += usize::try_from(bitw.next_multiple_of(8) / 8).unwrap();
+        self.promotions_off += usize::try_from(bitw.div_ceil(8)).unwrap();
         Ok(iidx)
     }
 
