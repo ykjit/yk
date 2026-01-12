@@ -138,6 +138,33 @@ impl FullOpt {
         }
     }
 
+    #[cfg(test)]
+    pub(in crate::compile::j2) fn new_testing(
+        guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
+        tys: IndexVec<TyIdx, Ty>,
+    ) -> Self {
+        let ty_map = HashMap::from_iter(
+            tys.iter()
+                .enumerate()
+                .map(|(x, y)| (y.to_owned(), TyIdx::from(x))),
+        );
+        Self {
+            passes: [
+                Box::new(KnownBits::new()),
+                Box::new(StrengthFold::new()),
+                Box::new(LoadStore::new()),
+                Box::new(CSE::new()),
+            ],
+            inner: OptInternal {
+                insts: IndexVec::new(),
+                consts_map: HashMap::new(),
+                guard_extras,
+                tys,
+                ty_map,
+            },
+        }
+    }
+
     /// Used by [Self::feed] and [Self::feed_void].
     fn feed_internal(
         &mut self,
@@ -206,6 +233,14 @@ impl FullOpt {
 impl ModLikeT for FullOpt {
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
         panic!("Not available in optimiser");
+    }
+
+    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
+        &self.inner.guard_extras[geidx]
+    }
+
+    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra {
+        &mut self.inner.guard_extras[geidx]
     }
 
     fn ty(&self, tyidx: TyIdx) -> &Ty {
@@ -456,6 +491,22 @@ impl ModLikeT for PassOpt<'_> {
         self.optinternal.ty(tyidx)
     }
 
+    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
+        if geidx == GuardExtraIdx::MAX {
+            self.inner.gextra.as_ref().unwrap()
+        } else {
+            &self.optinternal.guard_extras[geidx]
+        }
+    }
+
+    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra {
+        if geidx == GuardExtraIdx::MAX {
+            self.inner.gextra.as_mut().unwrap()
+        } else {
+            &mut self.optinternal.guard_extras[geidx]
+        }
+    }
+
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
         todo!()
     }
@@ -504,6 +555,14 @@ impl ModLikeT for CommitInstOpt<'_> {
         self.inner.ty(tyidx)
     }
 
+    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
+        todo!();
+    }
+
+    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
+        todo!();
+    }
+
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
         todo!()
     }
@@ -541,6 +600,7 @@ pub(in crate::compile::j2::opt) mod test {
     {
         let m = str_to_mod::<TestReg>(mod_s);
         let mut fopt = Box::new(FullOpt::new());
+        fopt.inner.guard_extras = m.guard_extras;
         fopt.inner.tys = m.tys;
         let TraceEnd::Test {
             entry_vlocs,
@@ -565,7 +625,7 @@ pub(in crate::compile::j2::opt) mod test {
         // instruction to the optimiser.
         let mut opt_map = IndexVec::with_capacity(insts.len());
         for mut inst in insts.into_iter() {
-            inst.rewrite_iidxs(|x| opt_map[x]);
+            inst.rewrite_iidxs(&mut *fopt, |x| opt_map[x]);
             let mut popt_inner = PassOptInner::new();
             let mut opt = PassOpt {
                 optinternal: &mut fopt.inner,

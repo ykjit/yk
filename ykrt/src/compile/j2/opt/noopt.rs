@@ -36,6 +36,14 @@ impl ModLikeT for NoOpt {
         panic!("Not available in optimiser");
     }
 
+    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
+        todo!();
+    }
+
+    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
+        todo!();
+    }
+
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         &self.tys[tyidx]
     }

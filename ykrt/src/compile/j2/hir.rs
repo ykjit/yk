@@ -200,6 +200,12 @@ pub(super) trait ModLikeT {
         x
     }
 
+    /// Return a reference to the [GuardExtra] `geidx`.
+    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra;
+
+    /// Return a mutable reference to the [GuardExtra] `geidx`.
+    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra;
+
     /// If logging was enabled, returns `Some(linker_name)` if `addr` has a known name, or `None`
     /// otherwise.
     fn addr_to_name(&self, addr: usize) -> Option<&str>;
@@ -289,6 +295,14 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
         self.addr_name_map
             .as_ref()
             .and_then(|x| x.get(&addr).map(|y| y.as_str()))
+    }
+
+    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
+        &self.guard_extras[geidx]
+    }
+
+    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra {
+        &mut self.guard_extras[geidx]
     }
 
     fn ty(&self, tyidx: TyIdx) -> &Ty {
@@ -390,7 +404,7 @@ impl Block {
                 }
             }
 
-            for op_iidx in inst.iter_iidxs() {
+            for op_iidx in inst.iter_iidxs(m) {
                 assert!(
                     op_iidx < iidx,
                     "%{iidx:?}: forward reference to %{op_iidx:?}"
@@ -608,12 +622,12 @@ pub(super) trait InstT: std::fmt::Debug {
     fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool;
 
     /// Produce each of this instruction's operands: note no order is guaranteed.
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a>;
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a>;
 
     /// Apply the function `iidx_map` to each of this instruction's operands, mutating `self` with
     /// the result.
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, m: &mut dyn ModLikeT, iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx;
 
@@ -715,12 +729,12 @@ impl InstT for Abs {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -796,12 +810,12 @@ impl InstT for Add {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -860,12 +874,12 @@ impl InstT for And {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -893,7 +907,7 @@ pub(super) struct Arg {
 impl InstT for Arg {
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([].into_iter())
     }
 
@@ -902,7 +916,7 @@ impl InstT for Arg {
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -960,12 +974,12 @@ impl InstT for AShr {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1004,12 +1018,12 @@ impl InstT for BlackBox {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1077,12 +1091,12 @@ impl InstT for Call {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+    fn iter_iidxs<'a>(&'a self, _m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
         Box::new([self.tgt].into_iter().chain(self.args.iter().cloned()))
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1175,12 +1189,12 @@ impl InstT for Const {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1245,12 +1259,12 @@ impl InstT for CtPop {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1308,12 +1322,12 @@ impl InstT for DynPtrAdd {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.ptr, self.num_elems].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1371,12 +1385,12 @@ impl InstT for FAdd {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1434,12 +1448,12 @@ impl InstT for FCmp {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1541,12 +1555,12 @@ impl InstT for FDiv {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1604,12 +1618,12 @@ impl InstT for Floor {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1661,12 +1675,12 @@ impl InstT for FMul {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1719,12 +1733,12 @@ impl InstT for FNeg {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1776,12 +1790,12 @@ impl InstT for FSub {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1841,12 +1855,12 @@ impl InstT for FPExt {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1899,12 +1913,12 @@ impl InstT for FPToSI {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1926,9 +1940,6 @@ impl InstT for FPToSI {
 pub(super) struct Guard {
     pub expect: bool,
     pub cond: InstIdx,
-    /// The variables used on entry to the guard. Note these may be different than those used
-    /// at the end of the [GuardBody].
-    pub entry_vars: Vec<InstIdx>,
     /// The [Guardextra] that this guard maps to. Before optimisation, this will be set to
     /// [GuardExtra::MAX].
     pub geidx: GuardExtraIdx,
@@ -1945,40 +1956,45 @@ impl InstT for Guard {
 
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.cond = opt.equiv_iidx(self.cond);
-        for x in self.entry_vars.iter_mut() {
+        // To avoid allocating, we swap in an empty vec, mutate what we've taken out, and put it
+        // back in just below.
+        let mut entry_vars = std::mem::take(&mut opt.gextra_mut(self.geidx).entry_vars);
+        for x in entry_vars.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
+        opt.gextra_mut(self.geidx).entry_vars = entry_vars;
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
         Box::new(
             [self.cond]
                 .into_iter()
-                .chain(self.entry_vars.iter().cloned()),
+                .chain(m.gextra(self.geidx).entry_vars.iter().cloned()),
         )
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
         self.cond = iidx_map(self.cond);
-        for x in self.entry_vars.iter_mut() {
+        for x in m.gextra_mut(self.geidx).entry_vars.iter_mut() {
             *x = iidx_map(*x);
         }
     }
 
-    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, m: &M, _b: &B) -> String {
         format!(
             "guard {}, %{}, [{}]",
             if self.expect { "true" } else { "false" },
             usize::from(self.cond),
-            self.entry_vars
+            m.gextra(self.geidx)
+                .entry_vars
                 .iter()
                 .map(|iidx| format!("%{}", usize::from(*iidx)))
                 .collect::<Vec<_>>()
@@ -1992,7 +2008,7 @@ impl InstT for Guard {
 }
 
 /// Extra information for guard instructions that is too big to fit into [Guard].
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct GuardExtra {
     pub bid: aot_ir::BBlockId,
     /// If this guard:
@@ -2003,6 +2019,9 @@ pub(super) struct GuardExtra {
     /// then this records the information necessary for subsequent sidetraces to deal with the
     /// switch properly.
     pub switch: Option<Switch>,
+    /// The variables used on entry to the guard. Note these may be different than those used
+    /// at the end of the [GuardBody].
+    pub entry_vars: Vec<InstIdx>,
     /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
     /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
     /// *except* that the most recent call frame is replaced with the deopt information for the
@@ -2075,12 +2094,12 @@ impl InstT for ICmp {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2179,12 +2198,12 @@ impl InstT for IntToPtr {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2224,12 +2243,12 @@ impl InstT for Load {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.ptr].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2288,12 +2307,12 @@ impl InstT for LShr {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2346,12 +2365,12 @@ impl InstT for MemCpy {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.dst, self.src, self.len].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2413,12 +2432,12 @@ impl InstT for MemSet {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.dst, self.val, self.len].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2494,12 +2513,12 @@ impl InstT for Mul {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2565,12 +2584,12 @@ impl InstT for Or {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2628,12 +2647,12 @@ impl InstT for PtrAdd {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.ptr].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2686,12 +2705,12 @@ impl InstT for PtrToInt {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2750,12 +2769,12 @@ impl InstT for SDiv {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2823,12 +2842,12 @@ impl InstT for Select {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.cond, self.truev, self.falsev].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2893,12 +2912,12 @@ impl InstT for SExt {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2960,12 +2979,12 @@ impl InstT for Shl {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3019,12 +3038,12 @@ impl InstT for SIToFP {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3082,12 +3101,12 @@ impl InstT for SMax {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3150,12 +3169,12 @@ impl InstT for SMin {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3212,12 +3231,12 @@ impl InstT for SRem {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3265,12 +3284,12 @@ impl InstT for Store {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val, self.ptr].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3337,12 +3356,12 @@ impl InstT for Sub {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3374,7 +3393,7 @@ impl InstT for Term {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+    fn iter_iidxs<'a>(&'a self, _m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
         Box::new(self.0.iter().cloned())
     }
 
@@ -3390,7 +3409,7 @@ impl InstT for Term {
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3424,12 +3443,12 @@ impl InstT for ThreadLocal {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3498,12 +3517,12 @@ impl InstT for Trunc {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3562,12 +3581,12 @@ impl InstT for UDiv {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3627,12 +3646,12 @@ impl InstT for UIToFP {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3690,12 +3709,12 @@ impl InstT for Xor {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3754,12 +3773,12 @@ impl InstT for ZExt {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -4840,10 +4859,7 @@ mod test {
 ",
         );
 
-        let mut opt = FullOpt::new();
-        for ty in m.tys {
-            opt.push_ty(ty).unwrap();
-        }
+        let mut opt = FullOpt::new_testing(m.guard_extras, m.tys);
         let TraceEnd::Test {
             entry_vlocs: _,
             block: Block { insts },

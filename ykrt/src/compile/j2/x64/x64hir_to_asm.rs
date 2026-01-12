@@ -260,9 +260,9 @@ impl<'a> X64HirToAsm<'a> {
         b: &Block,
         iidx: InstIdx,
         Guard {
+            geidx,
             expect,
             cond,
-            entry_vars,
             ..
         }: &Guard,
     ) -> Result<LabelIdx, CompilationError> {
@@ -275,6 +275,7 @@ impl<'a> X64HirToAsm<'a> {
         else {
             panic!()
         };
+        let GuardExtra { entry_vars, .. } = self.m.gextra(*geidx);
 
         let bitw = b.inst_bitw(self.m, *lhs);
         let (imm, mut in_fill) = if pred.is_signed() {
@@ -2528,9 +2529,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         b: &Block,
         iidx: InstIdx,
         ginst @ Guard {
+            geidx,
             expect,
             cond,
-            entry_vars,
             ..
         }: &Guard,
     ) -> Result<Self::Label, CompilationError> {
@@ -2538,6 +2539,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             return self.i_icmp_guard(ra, b, iidx, ginst);
         }
 
+        let GuardExtra { entry_vars, .. } = self.m.gextra(*geidx);
         let [cndr, _] = ra.alloc(
             self,
             iidx,

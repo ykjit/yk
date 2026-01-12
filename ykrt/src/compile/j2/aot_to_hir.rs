@@ -397,12 +397,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let hinst = hir::Guard {
             expect: expect_true,
             cond: cond_iidx,
-            entry_vars,
             geidx: hir::GuardExtraIdx::MAX,
         };
         let gextra = hir::GuardExtra {
             bid,
             switch,
+            entry_vars,
             exit_frames,
         };
 

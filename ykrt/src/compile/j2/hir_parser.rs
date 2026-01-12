@@ -471,13 +471,13 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let geidx = guards.push(GuardExtra {
                         bid,
                         switch: None,
+                        entry_vars,
                         exit_frames: SmallVec::new(),
                     });
                     self.insts.push(Inst::Guard(Guard {
+                        geidx,
                         expect,
                         cond,
-                        entry_vars,
-                        geidx,
                     }));
                 }
                 AstInst::ICmp {
