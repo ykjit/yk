@@ -139,11 +139,15 @@ impl FullOpt {
     }
 
     /// Used by [Self::feed] and [Self::feed_void].
-    fn feed_internal(&mut self, mut inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
+    fn feed_internal(
+        &mut self,
+        mut popt_inner: PassOptInner,
+        mut inst: Inst,
+    ) -> Result<Option<InstIdx>, CompilationError> {
         for i in 0..self.passes.len() {
             let mut opt = PassOpt {
-                inner: &mut self.inner,
-                pre_insts: SmallVec::new(),
+                optinternal: &mut self.inner,
+                inner: &mut popt_inner,
             };
 
             match self.passes[i].feed(&mut opt, inst) {
@@ -152,10 +156,19 @@ impl FullOpt {
                 OptOutcome::Equiv(iidx) => return Ok(Some(iidx)),
             }
 
-            for inst in opt.pre_insts {
+            for inst in popt_inner.pre_insts.drain(..) {
                 self.commit_inst_dedup_opt(inst);
             }
         }
+
+        if let Inst::Guard(Guard { ref mut geidx, .. }) = inst
+            && *geidx == GuardExtraIdx::MAX
+        {
+            *geidx = self.inner.guard_extras.push(popt_inner.gextra.unwrap());
+        } else {
+            assert!(popt_inner.gextra.is_none());
+        }
+
         Ok(Some(self.commit_inst_dedup_opt(inst)))
     }
 
@@ -234,12 +247,13 @@ impl OptT for FullOpt {
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         assert_ne!(*inst.ty(self), Ty::Void);
-        self.feed_internal(inst).map(|x| x.unwrap())
+        self.feed_internal(PassOptInner::new(), inst)
+            .map(|x| x.unwrap())
     }
 
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
         assert_eq!(*inst.ty(self), Ty::Void);
-        self.feed_internal(inst)
+        self.feed_internal(PassOptInner::new(), inst)
     }
 
     fn feed_arg(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
@@ -253,18 +267,7 @@ impl OptT for FullOpt {
         gextra: GuardExtra,
     ) -> Result<Option<InstIdx>, CompilationError> {
         assert_eq!(inst.geidx, GuardExtraIdx::MAX);
-        match self.feed_internal(inst.into())? {
-            Some(iidx) => {
-                if let &mut Inst::Guard(Guard { ref mut geidx, .. }) =
-                    &mut self.inner.insts[iidx].inst
-                    && *geidx == GuardExtraIdx::MAX
-                {
-                    *geidx = self.inner.guard_extras.push(gextra);
-                }
-                Ok(Some(iidx))
-            }
-            None => Ok(None),
-        }
+        self.feed_internal(PassOptInner::with_gextra(gextra), inst.into())
     }
 
     fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
@@ -398,8 +401,8 @@ pub(super) trait PassT {
 
 /// The object passed to [PassT::feed] so that they can interact with the optimiser.
 pub(super) struct PassOpt<'a> {
-    inner: &'a mut OptInternal,
-    pre_insts: SmallVec<[Inst; 1]>,
+    optinternal: &'a mut OptInternal,
+    inner: &'a mut PassOptInner,
 }
 
 impl PassOpt<'_> {
@@ -414,7 +417,7 @@ impl PassOpt<'_> {
 
     /// Push `ty`: this is safe for passes to call at any point.
     pub(super) fn push_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
-        self.inner.push_ty(ty)
+        self.optinternal.push_ty(ty)
     }
 
     /// Add the "pre-instruction" `preinst`: when the current pass has completed, `inst` will be
@@ -423,8 +426,8 @@ impl PassOpt<'_> {
     /// the current pass, [InstIdx] is invalid, and attempting any operations with it will lead to
     /// undefined behaviour.
     pub(super) fn push_pre_inst(&mut self, preinst: Inst) -> InstIdx {
-        let iidx = InstIdx::from_usize(self.inner.insts.len() + self.pre_insts.len());
-        self.pre_insts.push(preinst);
+        let iidx = InstIdx::from_usize(self.optinternal.insts.len() + self.inner.pre_insts.len());
+        self.inner.pre_insts.push(preinst);
         iidx
     }
 
@@ -436,21 +439,21 @@ impl PassOpt<'_> {
         assert_eq!(equiv_to, self.equiv_iidx(equiv_to));
         match (self.inst(iidx), self.inst(equiv_to)) {
             (Inst::Const(_), Inst::Const(_)) => (),
-            (_, Inst::Const(_)) => self.inner.insts.get_mut(iidx).unwrap().equiv = equiv_to,
-            (_, _) => self.inner.insts.get_mut(equiv_to).unwrap().equiv = iidx,
+            (_, Inst::Const(_)) => self.optinternal.insts.get_mut(iidx).unwrap().equiv = equiv_to,
+            (_, _) => self.optinternal.insts.get_mut(equiv_to).unwrap().equiv = iidx,
         }
     }
 }
 
 impl BlockLikeT for PassOpt<'_> {
     fn inst(&self, iidx: InstIdx) -> &Inst {
-        self.inner.inst(iidx)
+        self.optinternal.inst(iidx)
     }
 }
 
 impl ModLikeT for PassOpt<'_> {
     fn ty(&self, tyidx: TyIdx) -> &Ty {
-        self.inner.ty(tyidx)
+        self.optinternal.ty(tyidx)
     }
 
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
@@ -460,7 +463,28 @@ impl ModLikeT for PassOpt<'_> {
 
 impl EquivIIdxT for PassOpt<'_> {
     fn equiv_iidx(&self, iidx: InstIdx) -> InstIdx {
-        self.inner.equiv_iidx(iidx)
+        self.optinternal.equiv_iidx(iidx)
+    }
+}
+
+struct PassOptInner {
+    pre_insts: SmallVec<[Inst; 1]>,
+    gextra: Option<GuardExtra>,
+}
+
+impl PassOptInner {
+    fn new() -> Self {
+        Self {
+            pre_insts: SmallVec::new(),
+            gextra: None,
+        }
+    }
+
+    fn with_gextra(gextra: GuardExtra) -> Self {
+        Self {
+            pre_insts: SmallVec::new(),
+            gextra: Some(gextra),
+        }
     }
 }
 
@@ -542,9 +566,10 @@ pub(in crate::compile::j2::opt) mod test {
         let mut opt_map = IndexVec::with_capacity(insts.len());
         for mut inst in insts.into_iter() {
             inst.rewrite_iidxs(|x| opt_map[x]);
+            let mut popt_inner = PassOptInner::new();
             let mut opt = PassOpt {
-                inner: &mut fopt.inner,
-                pre_insts: SmallVec::new(),
+                optinternal: &mut fopt.inner,
+                inner: &mut popt_inner,
             };
             match feed_f(&mut opt, inst) {
                 OptOutcome::NotNeeded => {
@@ -560,7 +585,7 @@ pub(in crate::compile::j2::opt) mod test {
                 }
             }
 
-            for inst in opt.pre_insts {
+            for inst in popt_inner.pre_insts.drain(..) {
                 let iidx = fopt.inner.insts.len_idx();
                 let opt = CommitInstOpt { inner: &fopt.inner };
                 committed_f(&opt, iidx, &inst);
