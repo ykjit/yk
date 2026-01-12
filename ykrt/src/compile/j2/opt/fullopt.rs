@@ -92,17 +92,19 @@
 //! side-effectful instructions of any kind, one should be extremely cautious about committing them
 //! as preinstructions.
 
-use crate::compile::{
-    CompilationError,
-    j2::{
-        hir::*,
-        opt::{
-            EquivIIdxT, OptT, cse::CSE, known_bits::KnownBits, load_store::LoadStore,
-            strength_fold::StrengthFold,
+use crate::{
+    compile::{
+        CompilationError,
+        j2::{
+            hir::*,
+            opt::{
+                EquivIIdxT, OptT, cse::CSE, known_bits::KnownBits, load_store::LoadStore,
+                strength_fold::StrengthFold,
+            },
         },
     },
+    log::should_log_any_ir,
 };
-use crate::log::should_log_any_ir;
 use index_vec::*;
 use smallvec::SmallVec;
 use std::{
