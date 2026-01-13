@@ -622,7 +622,7 @@ pub(super) trait InstT: std::fmt::Debug {
     fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool;
 
     /// Produce each of this instruction's operands: note no order is guaranteed.
-    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a>;
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a>;
 
     /// Apply the function `iidx_map` to each of this instruction's operands, mutating `self` with
     /// the result.
@@ -729,8 +729,8 @@ impl InstT for Abs {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -810,8 +810,8 @@ impl InstT for Add {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -874,8 +874,8 @@ impl InstT for And {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -907,8 +907,8 @@ pub(super) struct Arg {
 impl InstT for Arg {
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::none(m)
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
@@ -974,8 +974,8 @@ impl InstT for AShr {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -1018,8 +1018,8 @@ impl InstT for BlackBox {
         panic!();
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -1091,8 +1091,8 @@ impl InstT for Call {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self, _m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
-        Box::new([self.tgt].into_iter().chain(self.args.iter().cloned()))
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::with_kind(m, IterIidxsIteratorKind::Call(self))
     }
 
     #[cfg(test)]
@@ -1189,8 +1189,8 @@ impl InstT for Const {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::none(m)
     }
 
     #[cfg(test)]
@@ -1259,8 +1259,8 @@ impl InstT for CtPop {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -1322,8 +1322,8 @@ impl InstT for DynPtrAdd {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.ptr, self.num_elems].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.ptr, self.num_elems)
     }
 
     #[cfg(test)]
@@ -1385,8 +1385,8 @@ impl InstT for FAdd {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -1448,8 +1448,8 @@ impl InstT for FCmp {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -1555,8 +1555,8 @@ impl InstT for FDiv {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -1618,8 +1618,8 @@ impl InstT for Floor {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -1675,8 +1675,8 @@ impl InstT for FMul {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -1733,8 +1733,8 @@ impl InstT for FNeg {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -1790,8 +1790,8 @@ impl InstT for FSub {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -1855,8 +1855,8 @@ impl InstT for FPExt {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -1913,8 +1913,8 @@ impl InstT for FPToSI {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -1969,12 +1969,8 @@ impl InstT for Guard {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
-        Box::new(
-            [self.cond]
-                .into_iter()
-                .chain(m.gextra(self.geidx).entry_vars.iter().cloned()),
-        )
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::with_kind(m, IterIidxsIteratorKind::Guard(self))
     }
 
     #[cfg(test)]
@@ -2094,8 +2090,8 @@ impl InstT for ICmp {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -2198,8 +2194,8 @@ impl InstT for IntToPtr {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -2243,8 +2239,8 @@ impl InstT for Load {
         panic!();
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.ptr].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.ptr)
     }
 
     #[cfg(test)]
@@ -2307,8 +2303,8 @@ impl InstT for LShr {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -2365,8 +2361,8 @@ impl InstT for MemCpy {
         panic!();
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.dst, self.src, self.len].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::three(m, self.dst, self.src, self.len)
     }
 
     #[cfg(test)]
@@ -2432,8 +2428,8 @@ impl InstT for MemSet {
         panic!();
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.dst, self.val, self.len].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::three(m, self.dst, self.val, self.len)
     }
 
     #[cfg(test)]
@@ -2513,8 +2509,8 @@ impl InstT for Mul {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -2584,8 +2580,8 @@ impl InstT for Or {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -2647,8 +2643,8 @@ impl InstT for PtrAdd {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.ptr].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.ptr)
     }
 
     #[cfg(test)]
@@ -2705,8 +2701,8 @@ impl InstT for PtrToInt {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -2769,8 +2765,8 @@ impl InstT for SDiv {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -2842,8 +2838,8 @@ impl InstT for Select {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.cond, self.truev, self.falsev].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::three(m, self.cond, self.truev, self.falsev)
     }
 
     #[cfg(test)]
@@ -2912,8 +2908,8 @@ impl InstT for SExt {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -2979,8 +2975,8 @@ impl InstT for Shl {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -3038,8 +3034,8 @@ impl InstT for SIToFP {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -3101,8 +3097,8 @@ impl InstT for SMax {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -3169,8 +3165,8 @@ impl InstT for SMin {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -3231,8 +3227,8 @@ impl InstT for SRem {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -3284,8 +3280,8 @@ impl InstT for Store {
         panic!();
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val, self.ptr].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.val, self.ptr)
     }
 
     #[cfg(test)]
@@ -3356,8 +3352,8 @@ impl InstT for Sub {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -3393,8 +3389,8 @@ impl InstT for Term {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self, _m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
-        Box::new(self.0.iter().cloned())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::with_kind(m, IterIidxsIteratorKind::Term(self))
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
@@ -3443,8 +3439,8 @@ impl InstT for ThreadLocal {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::none(m)
     }
 
     #[cfg(test)]
@@ -3517,8 +3513,8 @@ impl InstT for Trunc {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -3581,8 +3577,8 @@ impl InstT for UDiv {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -3646,8 +3642,8 @@ impl InstT for UIToFP {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -3709,8 +3705,8 @@ impl InstT for Xor {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.lhs, self.rhs].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(m, self.lhs, self.rhs)
     }
 
     #[cfg(test)]
@@ -3773,8 +3769,8 @@ impl InstT for ZExt {
         }
     }
 
-    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
-        Box::new([self.val].into_iter())
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(m, self.val)
     }
 
     #[cfg(test)]
@@ -3792,6 +3788,132 @@ impl InstT for ZExt {
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
         m.ty(self.tyidx)
     }
+}
+
+/// An iterator over a HIR instruction's [InstIdx]s.
+pub(super) struct IterIidxsIterator<'a> {
+    m: &'a dyn ModLikeT,
+    kind: IterIidxsIteratorKind<'a>,
+    /// The current offset of the iterator: this must be interpreted with respect to `Self::kind`.
+    i: usize,
+}
+
+impl<'a> IterIidxsIterator<'a> {
+    /// Create an [IterIidxsIterator] with an arbitrary [IterIidxsIteratorKind].
+    fn with_kind(m: &'a dyn ModLikeT, kind: IterIidxsIteratorKind<'a>) -> IterIidxsIterator<'a> {
+        IterIidxsIterator { m, kind, i: 0 }
+    }
+
+    /// Create an [IterIidxsIterator] with no [InstIdx]s.
+    fn none(m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        Self::with_kind(m, IterIidxsIteratorKind::None)
+    }
+
+    /// Create an [IterIidxsIterator] with one [InstIdx]s.
+    fn one(m: &'a dyn ModLikeT, iidx1: InstIdx) -> IterIidxsIterator<'a> {
+        Self::with_kind(m, IterIidxsIteratorKind::One(iidx1))
+    }
+
+    /// Create an [IterIidxsIterator] with two [InstIdx]s.
+    fn two(m: &'a dyn ModLikeT, iidx1: InstIdx, iidx2: InstIdx) -> IterIidxsIterator<'a> {
+        Self::with_kind(m, IterIidxsIteratorKind::Two(iidx1, iidx2))
+    }
+
+    /// Create an [IterIidxsIterator] with three [InstIdx]s.
+    fn three(
+        m: &'a dyn ModLikeT,
+        iidx1: InstIdx,
+        iidx2: InstIdx,
+        iidx3: InstIdx,
+    ) -> IterIidxsIterator<'a> {
+        Self::with_kind(m, IterIidxsIteratorKind::Three(iidx1, iidx2, iidx3))
+    }
+}
+
+impl<'a> Iterator for IterIidxsIterator<'a> {
+    type Item = InstIdx;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.i += 1;
+        match self.kind {
+            IterIidxsIteratorKind::None => (),
+            IterIidxsIteratorKind::One(iidx1) => {
+                if self.i == 1 {
+                    return Some(iidx1);
+                }
+            }
+            IterIidxsIteratorKind::Two(iidx1, iidx2) => {
+                if self.i == 1 {
+                    return Some(iidx1);
+                } else if self.i == 2 {
+                    return Some(iidx2);
+                }
+            }
+            IterIidxsIteratorKind::Three(iidx1, iidx2, iidx3) => {
+                if self.i == 1 {
+                    return Some(iidx1);
+                } else if self.i == 2 {
+                    return Some(iidx2);
+                } else if self.i == 3 {
+                    return Some(iidx3);
+                }
+            }
+            IterIidxsIteratorKind::Call(Call {
+                tgt,
+                func_tyidx: _,
+                args,
+            }) => {
+                if self.i == 1 {
+                    return Some(*tgt);
+                } else if self.i - 1 <= args.len() {
+                    return Some(args[self.i - 2]);
+                }
+            }
+            IterIidxsIteratorKind::Guard(Guard {
+                expect: _,
+                cond,
+                geidx,
+            }) => {
+                if self.i == 1 {
+                    return Some(*cond);
+                } else {
+                    let GuardExtra {
+                        bid: _,
+                        switch: _,
+                        entry_vars,
+                        exit_frames: _,
+                    } = self.m.gextra(*geidx);
+                    if self.i - 1 <= entry_vars.len() {
+                        return Some(entry_vars[self.i - 2]);
+                    }
+                }
+            }
+            IterIidxsIteratorKind::Term(Term(vars)) => {
+                if self.i <= vars.len() {
+                    return Some(vars[self.i - 1]);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// The kind of an [IterIidxsIterator].
+///
+/// Note this `enum` is a trade-off. It would be more memory efficient to store variants for every
+/// IR instruction kind. Most obviously doing so would bloat `IterIidxIterator::next`. Less
+/// obviously, it would make it a little easier to introduce errors later: most IR elements have
+/// 0..=3 [InstIdx]s, which is directly encoded in their `inst_iidxs` functions. In other words, if
+///   someone edits one of those instructions, they (and the compiler) are more likely to realise
+///   that their `inst_iidxs` function needs editing.
+enum IterIidxsIteratorKind<'a> {
+    None,
+    One(InstIdx),
+    Two(InstIdx, InstIdx),
+    Three(InstIdx, InstIdx, InstIdx),
+    Call(&'a Call),
+    Guard(&'a Guard),
+    Term(&'a Term),
 }
 
 /// Information about a guard necessary for deopt and side-tracing.
@@ -3869,6 +3991,143 @@ mod test {
         assert_eq!(
             std::mem::size_of::<Inst>(),
             std::mem::size_of::<usize>() * 5
+        );
+    }
+
+    #[test]
+    fn iter_iidxs() {
+        // The `None` case.
+        let m = str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+        ",
+        );
+        let TraceEnd::Test { block, .. } = &m.trace_end else {
+            panic!()
+        };
+        assert!(
+            block
+                .inst(InstIdx::new(0))
+                .iter_iidxs(&m)
+                .collect::<Vec<_>>()
+                .is_empty()
+        );
+
+        // The `One` case.
+        let m = str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = zext %0
+        ",
+        );
+        let TraceEnd::Test { block, .. } = &m.trace_end else {
+            panic!()
+        };
+        assert_eq!(
+            block
+                .inst(InstIdx::new(1))
+                .iter_iidxs(&m)
+                .collect::<Vec<_>>(),
+            [InstIdx::new(0)]
+        );
+
+        // The `Two` case.
+        let m = str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = add %0, %1
+        ",
+        );
+        let TraceEnd::Test { block, .. } = &m.trace_end else {
+            panic!()
+        };
+        assert_eq!(
+            block
+                .inst(InstIdx::new(2))
+                .iter_iidxs(&m)
+                .collect::<Vec<_>>(),
+            [InstIdx::new(0), InstIdx::new(1)]
+        );
+
+        // The `Three` case.
+        let m = str_to_mod::<DummyReg>(
+            "
+          %0: ptr = arg [reg]
+          %1: ptr = arg [reg]
+          %2: i64 = arg [reg]
+          memcpy %0, %1, %2, true
+        ",
+        );
+        let TraceEnd::Test { block, .. } = &m.trace_end else {
+            panic!()
+        };
+        assert_eq!(
+            block
+                .inst(InstIdx::new(3))
+                .iter_iidxs(&m)
+                .collect::<Vec<_>>(),
+            [InstIdx::new(0), InstIdx::new(1), InstIdx::new(2)]
+        );
+
+        // The `Call` case.
+        let m = str_to_mod::<DummyReg>(
+            "
+          extern f(i8)
+
+          %0: ptr = arg [reg]
+          %1: i8 = arg [reg]
+          call f %0(%1)
+        ",
+        );
+        let TraceEnd::Test { block, .. } = &m.trace_end else {
+            panic!()
+        };
+        assert_eq!(
+            block
+                .inst(InstIdx::new(2))
+                .iter_iidxs(&m)
+                .collect::<Vec<_>>(),
+            [InstIdx::new(0), InstIdx::new(1),]
+        );
+
+        // The `Guard` case.
+        let m = str_to_mod::<DummyReg>(
+            "
+          %0: i1 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = arg [reg]
+          guard true, %0, [%1, %2]
+        ",
+        );
+        let TraceEnd::Test { block, .. } = &m.trace_end else {
+            panic!()
+        };
+        assert_eq!(
+            block
+                .inst(InstIdx::new(3))
+                .iter_iidxs(&m)
+                .collect::<Vec<_>>(),
+            [InstIdx::new(0), InstIdx::new(1), InstIdx::new(2)]
+        );
+
+        // The `Term` case.
+        let m = str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          term [%0, %1]
+        ",
+        );
+        let TraceEnd::Test { block, .. } = &m.trace_end else {
+            panic!()
+        };
+        assert_eq!(
+            block
+                .inst(InstIdx::new(2))
+                .iter_iidxs(&m)
+                .collect::<Vec<_>>(),
+            [InstIdx::new(0), InstIdx::new(1)]
         );
     }
 
