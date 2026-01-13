@@ -64,10 +64,12 @@ fn opt_abs(opt: &mut PassOpt, mut inst: Abs) -> OptOutcome {
         int_min_poison,
     } = inst;
     assert!(int_min_poison);
-    if let Some(ConstKind::Int(val_c)) = opt.as_constkind(val) {
+    if let Some(ConstKind::Int(val_c)) = opt.as_constkind(val)
+        && let Some(c) = val_c.checked_abs()
+    {
         return OptOutcome::Rewritten(Inst::Const(Const {
             tyidx,
-            kind: ConstKind::Int(val_c.bitabs()),
+            kind: ConstKind::Int(c),
         }));
     }
     OptOutcome::Rewritten(inst.into())

@@ -280,16 +280,22 @@ impl ArbBitInt {
     }
 
     /// Return a new [ArbBitInt] that performs an `abs` on `self`.
-    pub(crate) fn bitabs(&self) -> Self {
-        Self {
+    /// If called on a value that may overflow, return None.
+    pub(crate) fn checked_abs(&self) -> Option<Self> {
+        // Note: Rust's checked_abs() is dependent on the integer type.
+        // As such, we must sign extend to the correct integer type first before
+        // doing the checked_abs.
+        let val = match self.bitw {
+            64 => self.to_sign_ext_i64()?.checked_abs()?.cast_unsigned(),
+            32 => u64::from(self.to_sign_ext_i32()?.checked_abs()?.cast_unsigned()),
+            16 => u64::from(self.to_sign_ext_i16()?.checked_abs()?.cast_unsigned()),
+            8 => u64::from(self.to_sign_ext_i8()?.checked_abs()?.cast_unsigned()),
+            _ => todo!(),
+        };
+        Some(Self {
             bitw: self.bitw,
-            val: self
-                .truncate(self.bitw)
-                .to_sign_ext_i64()
-                .unwrap()
-                .abs()
-                .cast_unsigned(),
-        }
+            val,
+        })
     }
 
     /// Return a new [ArbBitInt] that performs bitwise `AND` on `self` and `other`.
@@ -529,16 +535,16 @@ mod tests {
                 Some(x.wrapping_mul(y))
             );
 
-            // bitabs
+            // checked_abs
             // i8
             assert_eq!(
-                ArbBitInt::from_i64(16, x as i64).bitabs().to_sign_ext_i8(),
-                i8::try_from(x.abs()).ok()
+                ArbBitInt::from_i64(16, x as i64).checked_abs().map(|x| x.to_sign_ext_i8()),
+                x.checked_abs().map(|x| i8::try_from(x).ok())
             );
             // i16
             assert_eq!(
-                ArbBitInt::from_i64(16, x as i64).bitabs().to_sign_ext_i16(),
-                Some(x.abs())
+                ArbBitInt::from_i64(16, x as i64).checked_abs().map(|x| x.to_sign_ext_i16()),
+                x.checked_abs().map(Some)
             );
 
             // bitand
@@ -678,21 +684,21 @@ mod tests {
                 Some(x.wrapping_mul(y))
             );
 
-            // bitabs
+            // checked_abs
             // i8
             assert_eq!(
-                ArbBitInt::from_i64(32, x as i64).bitabs().to_sign_ext_i8(),
-                i8::try_from(x.abs()).ok()
+                ArbBitInt::from_i64(32, x as i64).checked_abs().map(|x| x.to_sign_ext_i8()),
+                x.checked_abs().map(|x| i8::try_from(x).ok())
             );
             // i16
             assert_eq!(
-                ArbBitInt::from_i64(32, x as i64).bitabs().to_sign_ext_i16(),
-                i16::try_from(x.abs()).ok()
+                ArbBitInt::from_i64(32, x as i64).checked_abs().map(|x| x.to_sign_ext_i16()),
+                x.checked_abs().map(|x| i16::try_from(x).ok())
             );
             // i32
             assert_eq!(
-                ArbBitInt::from_i64(32, x as i64).bitabs().to_sign_ext_i32(),
-                Some(x.abs())
+                ArbBitInt::from_i64(32, x as i64).checked_abs().map(|x| x.to_sign_ext_i32()),
+                x.checked_abs().map(Some)
             );
 
             // bitand
@@ -879,27 +885,27 @@ mod tests {
                 Some(x.wrapping_mul(y))
             );
 
-            // bitabs
+            // checked_abs
             // i8
             assert_eq!(
-                ArbBitInt::from_i64(64, x).bitabs().to_sign_ext_i8(),
-                i8::try_from(x.abs()).ok()
+                ArbBitInt::from_i64(64, x).checked_abs().map(|x| x.to_sign_ext_i8()),
+               x.checked_abs().map(|x| i8::try_from(x).ok())
             );
             // i16
             assert_eq!(
-                ArbBitInt::from_i64(64, x).bitabs().to_sign_ext_i16(),
-                i16::try_from(x.abs()).ok()
+                ArbBitInt::from_i64(64, x).checked_abs().map(|x| x.to_sign_ext_i16()),
+                x.checked_abs().map(|x| i16::try_from(x).ok())
             );
             // i32
             assert_eq!(
-                ArbBitInt::from_i64(64, x).bitabs().to_sign_ext_i32(),
-                i32::try_from(x.abs()).ok()
+                ArbBitInt::from_i64(64, x).checked_abs().map(|x| x.to_sign_ext_i32()),
+                x.checked_abs().map(|x| i32::try_from(x).ok())
             );
             // i64
             assert_eq!(
                 ArbBitInt::from_i64(64, x)
-                    .bitabs().to_sign_ext_i64(),
-                Some(x.abs())
+                    .checked_abs().map(|x| x.to_sign_ext_i64()),
+                x.checked_abs().map(Some)
             );
 
             // bitand
@@ -1287,5 +1293,15 @@ mod tests {
                 x.checked_div(y)
             );
         }
+    }
+
+    #[test]
+    fn arbbitint_16bit_checked_abs() {
+        assert_eq!(
+            ArbBitInt::from_i64(16, -32768)
+                .checked_abs()
+                .map(|x| x.to_sign_ext_i16()),
+            (-32768i16).checked_abs().map(Some)
+        );
     }
 }
