@@ -246,7 +246,7 @@ pub(super) struct Mod<Reg: RegT> {
     /// Extra information that is too big to fit in a [Guard] instruction.
     pub guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     /// A map of names to pointers. Will be `None` if logging was disabled.
-    pub addr_name_map: Option<HashMap<usize, String>>,
+    pub addr_name_map: Option<HashMap<usize, Option<String>>>,
 }
 
 impl<Reg: RegT> Mod<Reg> {
@@ -294,7 +294,8 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
     fn addr_to_name(&self, addr: usize) -> Option<&str> {
         self.addr_name_map
             .as_ref()
-            .and_then(|x| x.get(&addr).map(|y| y.as_str()))
+            .and_then(|x| x.get(&addr))
+            .and_then(|x| x.as_ref().map(|y| y.as_str()))
     }
 
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
