@@ -20,7 +20,13 @@ mod strength_fold;
 pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
     /// The block is now complete and the optimiser should turn it into a [Block] and a set of
     /// types (suitable for putting in a [Mod]).
-    fn build(self: Box<Self>) -> (Block, IndexVec<TyIdx, Ty>);
+    fn build(
+        self: Box<Self>,
+    ) -> (
+        Block,
+        IndexVec<GuardExtraIdx, GuardExtra>,
+        IndexVec<TyIdx, Ty>,
+    );
 
     #[allow(dead_code)]
     fn peel(self) -> (Block, Block);
@@ -41,6 +47,14 @@ pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
     // not optimised / deduplicated in any way. Calling this function after the first-non argument
     // has been passed will lead to undefined behaviour.
     fn feed_arg(&mut self, inst: Inst) -> Result<InstIdx, CompilationError>;
+
+    /// Feed a [Guard], and its associated [GuardExtra] into the optimiser. The [Guard] must have
+    /// its `geidx` value set to `GuardExtraIdx::MAX` or the optimiser will panic.
+    fn feed_guard(
+        &mut self,
+        inst: Guard,
+        gextra: GuardExtra,
+    ) -> Result<Option<InstIdx>, CompilationError>;
 
     /// Push a type [ty]. This type may be cached, and thus the [TyIdx] returned may not
     /// monotonically increase.

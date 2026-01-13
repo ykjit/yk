@@ -79,7 +79,7 @@ impl PassT for CSE {
 
         // Work out what the maximum iidx this instruction refers to: we know there's no point
         // going further back than that.
-        let max_ref = inst.iter_iidxs().max().unwrap_or(InstIdx::from(0));
+        let max_ref = inst.iter_iidxs(opt).max().unwrap_or(InstIdx::from(0));
         let mut cur = self.heads[InstDiscriminants::from(&inst) as usize];
         while cur != InstIdx::MAX_INDEX && cur >= max_ref {
             let equiv = opt.equiv_iidx(cur);

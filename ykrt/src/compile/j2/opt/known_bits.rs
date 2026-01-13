@@ -59,7 +59,7 @@ impl KnownBits {
     }
 
     /// Returns what we know about the bits of `iidx`.
-    fn as_knownbits(&self, opt: &PassOpt, iidx: InstIdx) -> Option<KnownBitValue> {
+    fn as_knownbits(&self, opt: &mut PassOpt, iidx: InstIdx) -> Option<KnownBitValue> {
         match opt.inst(iidx).ty(opt) {
             Ty::Func(_) => None,
             Ty::Void => None,
@@ -75,7 +75,7 @@ impl KnownBits {
         self.pending_commit = Some(bits);
     }
 
-    fn opt_ashr(&mut self, opt: &PassOpt, inst: AShr) -> OptOutcome {
+    fn opt_ashr(&mut self, opt: &mut PassOpt, inst: AShr) -> OptOutcome {
         let AShr {
             tyidx: _,
             lhs,
@@ -165,7 +165,7 @@ impl KnownBits {
         }
     }
 
-    fn opt_lshr(&mut self, opt: &PassOpt, inst: LShr) -> OptOutcome {
+    fn opt_lshr(&mut self, opt: &mut PassOpt, inst: LShr) -> OptOutcome {
         let LShr {
             tyidx: _,
             lhs,
@@ -182,7 +182,7 @@ impl KnownBits {
         OptOutcome::Rewritten(inst.into())
     }
 
-    fn opt_or(&mut self, opt: &PassOpt, mut inst: Or) -> OptOutcome {
+    fn opt_or(&mut self, opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
         inst.canonicalise(opt);
         let Or {
             tyidx,
@@ -220,7 +220,7 @@ impl KnownBits {
         OptOutcome::Rewritten(inst.into())
     }
 
-    fn opt_sext(&mut self, opt: &PassOpt, inst: SExt) -> OptOutcome {
+    fn opt_sext(&mut self, opt: &mut PassOpt, inst: SExt) -> OptOutcome {
         let SExt { tyidx, val } = inst;
         if let Some(val_b) = self.as_knownbits(opt, val) {
             let dst_bitw = opt.ty(tyidx).bitw();
@@ -230,7 +230,7 @@ impl KnownBits {
         OptOutcome::Rewritten(inst.into())
     }
 
-    fn opt_shl(&mut self, opt: &PassOpt, inst: Shl) -> OptOutcome {
+    fn opt_shl(&mut self, opt: &mut PassOpt, inst: Shl) -> OptOutcome {
         let Shl {
             tyidx: _,
             lhs,
@@ -248,7 +248,7 @@ impl KnownBits {
         OptOutcome::Rewritten(inst.into())
     }
 
-    fn opt_zext(&mut self, opt: &PassOpt, inst: ZExt) -> OptOutcome {
+    fn opt_zext(&mut self, opt: &mut PassOpt, inst: ZExt) -> OptOutcome {
         let ZExt { tyidx, val } = inst;
         if let Some(val_b) = self.as_knownbits(opt, val) {
             let dst_bitw = opt.ty(tyidx).bitw();

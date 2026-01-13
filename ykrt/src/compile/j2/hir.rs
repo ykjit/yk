@@ -200,6 +200,12 @@ pub(super) trait ModLikeT {
         x
     }
 
+    /// Return a reference to the [GuardExtra] `geidx`.
+    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra;
+
+    /// Return a mutable reference to the [GuardExtra] `geidx`.
+    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra;
+
     /// If logging was enabled, returns `Some(linker_name)` if `addr` has a known name, or `None`
     /// otherwise.
     fn addr_to_name(&self, addr: usize) -> Option<&str>;
@@ -289,6 +295,14 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
         self.addr_name_map
             .as_ref()
             .and_then(|x| x.get(&addr).map(|y| y.as_str()))
+    }
+
+    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
+        &self.guard_extras[geidx]
+    }
+
+    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra {
+        &mut self.guard_extras[geidx]
     }
 
     fn ty(&self, tyidx: TyIdx) -> &Ty {
@@ -390,7 +404,7 @@ impl Block {
                 }
             }
 
-            for op_iidx in inst.iter_iidxs() {
+            for op_iidx in inst.iter_iidxs(m) {
                 assert!(
                     op_iidx < iidx,
                     "%{iidx:?}: forward reference to %{op_iidx:?}"
@@ -565,6 +579,11 @@ index_vec::define_index_type! {
     pub(super) struct GuardExtraIdx = u16;
 }
 
+impl GuardExtraIdx {
+    /// The maximum representable [GuardExtraIdx].
+    pub(super) const MAX: GuardExtraIdx = GuardExtraIdx::from_raw_unchecked(u16::MAX);
+}
+
 // Note: if you change the `u32` here, `MAX` must also be updated.
 index_vec::define_index_type! {
     pub(super) struct InstIdx = u32;
@@ -592,7 +611,7 @@ pub(super) trait InstT: std::fmt::Debug {
 
     /// Canonicalise this instruction. This rewrites operands to their most recent equivalent
     /// [InstIdx]s and performs other, basic, canonicalisation on a per-instruction kind basis.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T);
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T);
 
     /// For the purposes of common subexpression elimination is `other` equivalent to `self`?
     /// `other` must be canonicalised for this comparison to return true in all cases where
@@ -603,12 +622,12 @@ pub(super) trait InstT: std::fmt::Debug {
     fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool;
 
     /// Produce each of this instruction's operands: note no order is guaranteed.
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a>;
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a>;
 
     /// Apply the function `iidx_map` to each of this instruction's operands, mutating `self` with
     /// the result.
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, m: &mut dyn ModLikeT, iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx;
 
@@ -690,7 +709,7 @@ impl InstT for Abs {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -710,12 +729,12 @@ impl InstT for Abs {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -761,7 +780,7 @@ impl InstT for Add {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -791,12 +810,12 @@ impl InstT for Add {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -833,7 +852,7 @@ impl InstT for And {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -855,12 +874,12 @@ impl InstT for And {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -886,9 +905,9 @@ pub(super) struct Arg {
 }
 
 impl InstT for Arg {
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([].into_iter())
     }
 
@@ -897,7 +916,7 @@ impl InstT for Arg {
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -932,7 +951,7 @@ impl InstT for AShr {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -955,12 +974,12 @@ impl InstT for AShr {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -991,7 +1010,7 @@ pub(super) struct BlackBox {
 
 #[cfg(test)]
 impl InstT for BlackBox {
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -999,12 +1018,12 @@ impl InstT for BlackBox {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1061,7 +1080,7 @@ impl InstT for Call {
         }
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.tgt = opt.equiv_iidx(self.tgt);
         for x in self.args.iter_mut() {
             *x = opt.equiv_iidx(*x);
@@ -1072,12 +1091,12 @@ impl InstT for Call {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+    fn iter_iidxs<'a>(&'a self, _m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
         Box::new([self.tgt].into_iter().chain(self.args.iter().cloned()))
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1158,7 +1177,7 @@ impl InstT for Const {
         }
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::Const(Const { kind, .. }) = other
@@ -1170,12 +1189,12 @@ impl InstT for Const {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1225,7 +1244,7 @@ impl InstT for CtPop {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val)
     }
 
@@ -1240,12 +1259,12 @@ impl InstT for CtPop {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1282,7 +1301,7 @@ impl InstT for DynPtrAdd {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.ptr = opt.equiv_iidx(self.ptr);
         self.num_elems = opt.equiv_iidx(self.num_elems);
     }
@@ -1303,12 +1322,12 @@ impl InstT for DynPtrAdd {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.ptr, self.num_elems].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1349,7 +1368,7 @@ impl InstT for FAdd {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1366,12 +1385,12 @@ impl InstT for FAdd {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1412,7 +1431,7 @@ impl InstT for FCmp {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1429,12 +1448,12 @@ impl InstT for FCmp {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1519,7 +1538,7 @@ impl InstT for FDiv {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1536,12 +1555,12 @@ impl InstT for FDiv {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1584,7 +1603,7 @@ impl InstT for Floor {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -1599,12 +1618,12 @@ impl InstT for Floor {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1639,7 +1658,7 @@ impl InstT for FMul {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1656,12 +1675,12 @@ impl InstT for FMul {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1699,7 +1718,7 @@ impl InstT for FNeg {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -1714,12 +1733,12 @@ impl InstT for FNeg {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1754,7 +1773,7 @@ impl InstT for FSub {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -1771,12 +1790,12 @@ impl InstT for FSub {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1821,7 +1840,7 @@ impl InstT for FPExt {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -1836,12 +1855,12 @@ impl InstT for FPExt {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1879,7 +1898,7 @@ impl InstT for FPToSI {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -1894,12 +1913,12 @@ impl InstT for FPToSI {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -1921,10 +1940,8 @@ impl InstT for FPToSI {
 pub(super) struct Guard {
     pub expect: bool,
     pub cond: InstIdx,
-    /// The variables used on entry to the guard. Note these may be different than those used
-    /// at the end of the [GuardBody].
-    pub entry_vars: Vec<InstIdx>,
-    /// The [Guardextra] that this guard maps to.
+    /// The [Guardextra] that this guard maps to. Before optimisation, this will be set to
+    /// [GuardExtra::MAX].
     pub geidx: GuardExtraIdx,
 }
 
@@ -1937,42 +1954,47 @@ impl InstT for Guard {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.cond = opt.equiv_iidx(self.cond);
-        for x in self.entry_vars.iter_mut() {
+        // To avoid allocating, we swap in an empty vec, mutate what we've taken out, and put it
+        // back in just below.
+        let mut entry_vars = std::mem::take(&mut opt.gextra_mut(self.geidx).entry_vars);
+        for x in entry_vars.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
+        opt.gextra_mut(self.geidx).entry_vars = entry_vars;
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
         Box::new(
             [self.cond]
                 .into_iter()
-                .chain(self.entry_vars.iter().cloned()),
+                .chain(m.gextra(self.geidx).entry_vars.iter().cloned()),
         )
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
         self.cond = iidx_map(self.cond);
-        for x in self.entry_vars.iter_mut() {
+        for x in m.gextra_mut(self.geidx).entry_vars.iter_mut() {
             *x = iidx_map(*x);
         }
     }
 
-    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, m: &M, _b: &B) -> String {
         format!(
             "guard {}, %{}, [{}]",
             if self.expect { "true" } else { "false" },
             usize::from(self.cond),
-            self.entry_vars
+            m.gextra(self.geidx)
+                .entry_vars
                 .iter()
                 .map(|iidx| format!("%{}", usize::from(*iidx)))
                 .collect::<Vec<_>>()
@@ -1986,7 +2008,7 @@ impl InstT for Guard {
 }
 
 /// Extra information for guard instructions that is too big to fit into [Guard].
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct GuardExtra {
     pub bid: aot_ir::BBlockId,
     /// If this guard:
@@ -1997,6 +2019,9 @@ pub(super) struct GuardExtra {
     /// then this records the information necessary for subsequent sidetraces to deal with the
     /// switch properly.
     pub switch: Option<Switch>,
+    /// The variables used on entry to the guard. Note these may be different than those used
+    /// at the end of the [GuardBody].
+    pub entry_vars: Vec<InstIdx>,
     /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
     /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
     /// *except* that the most recent call frame is replaced with the deopt information for the
@@ -2040,7 +2065,7 @@ impl InstT for ICmp {
 
     /// For [IPred::Eq] and [IPred::Ne], canonicalise to favour references to constants on the RHS of
     /// the addition.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if (self.pred == IPred::Eq || self.pred == IPred::Ne)
@@ -2069,12 +2094,12 @@ impl InstT for ICmp {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2158,7 +2183,7 @@ impl InstT for IntToPtr {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -2173,12 +2198,12 @@ impl InstT for IntToPtr {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2210,7 +2235,7 @@ impl InstT for Load {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.ptr = opt.equiv_iidx(self.ptr);
     }
 
@@ -2218,12 +2243,12 @@ impl InstT for Load {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.ptr].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2259,7 +2284,7 @@ impl InstT for LShr {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -2282,12 +2307,12 @@ impl InstT for LShr {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2330,7 +2355,7 @@ impl InstT for MemCpy {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.dst = opt.equiv_iidx(self.dst);
         self.src = opt.equiv_iidx(self.src);
         self.len = opt.equiv_iidx(self.len);
@@ -2340,12 +2365,12 @@ impl InstT for MemCpy {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.dst, self.src, self.len].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2397,7 +2422,7 @@ impl InstT for MemSet {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.dst = opt.equiv_iidx(self.dst);
         self.val = opt.equiv_iidx(self.val);
         self.len = opt.equiv_iidx(self.len);
@@ -2407,12 +2432,12 @@ impl InstT for MemSet {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.dst, self.val, self.len].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2458,7 +2483,7 @@ impl InstT for Mul {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -2488,12 +2513,12 @@ impl InstT for Mul {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2531,7 +2556,7 @@ impl InstT for Or {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -2559,12 +2584,12 @@ impl InstT for Or {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2598,7 +2623,7 @@ impl InstT for PtrAdd {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.ptr = opt.equiv_iidx(self.ptr);
     }
 
@@ -2622,12 +2647,12 @@ impl InstT for PtrAdd {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.ptr].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2665,7 +2690,7 @@ impl InstT for PtrToInt {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -2680,12 +2705,12 @@ impl InstT for PtrToInt {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2721,7 +2746,7 @@ impl InstT for SDiv {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -2744,12 +2769,12 @@ impl InstT for SDiv {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2793,7 +2818,7 @@ impl InstT for Select {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.cond = opt.equiv_iidx(self.cond);
         self.truev = opt.equiv_iidx(self.truev);
         self.falsev = opt.equiv_iidx(self.falsev);
@@ -2817,12 +2842,12 @@ impl InstT for Select {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.cond, self.truev, self.falsev].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2872,7 +2897,7 @@ impl InstT for SExt {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -2887,12 +2912,12 @@ impl InstT for SExt {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2929,7 +2954,7 @@ impl InstT for Shl {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -2954,12 +2979,12 @@ impl InstT for Shl {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -2998,7 +3023,7 @@ impl InstT for SIToFP {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -3013,12 +3038,12 @@ impl InstT for SIToFP {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3054,7 +3079,7 @@ impl InstT for SMax {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -3076,12 +3101,12 @@ impl InstT for SMax {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3122,7 +3147,7 @@ impl InstT for SMin {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -3144,12 +3169,12 @@ impl InstT for SMin {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3189,7 +3214,7 @@ impl InstT for SRem {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -3206,12 +3231,12 @@ impl InstT for SRem {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3250,7 +3275,7 @@ impl InstT for Store {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
         self.ptr = opt.equiv_iidx(self.ptr);
     }
@@ -3259,12 +3284,12 @@ impl InstT for Store {
         panic!();
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val, self.ptr].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3306,7 +3331,7 @@ impl InstT for Sub {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -3331,12 +3356,12 @@ impl InstT for Sub {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3358,7 +3383,7 @@ impl InstT for Sub {
 pub(super) struct Term(pub(super) Vec<InstIdx>);
 
 impl InstT for Term {
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         for x in self.0.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
@@ -3368,7 +3393,7 @@ impl InstT for Term {
         panic!();
     }
 
-    fn iter_iidxs<'a>(&'a self) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
+    fn iter_iidxs<'a>(&'a self, _m: &'a dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx> + 'a> {
         Box::new(self.0.iter().cloned())
     }
 
@@ -3384,7 +3409,7 @@ impl InstT for Term {
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3406,7 +3431,7 @@ pub(super) struct ThreadLocal(pub *const c_void);
 impl InstT for ThreadLocal {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, _be: &T) {}
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, other: &Inst) -> bool {
         if let Inst::ThreadLocal(ThreadLocal(x)) = other
@@ -3418,12 +3443,12 @@ impl InstT for ThreadLocal {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, _iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3470,7 +3495,7 @@ impl InstT for Trunc {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -3492,12 +3517,12 @@ impl InstT for Trunc {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3533,7 +3558,7 @@ impl InstT for UDiv {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
     }
@@ -3556,12 +3581,12 @@ impl InstT for UDiv {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3605,7 +3630,7 @@ impl InstT for UIToFP {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -3621,12 +3646,12 @@ impl InstT for UIToFP {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3662,7 +3687,7 @@ impl InstT for Xor {
     }
 
     /// Canonicalise to favour references to constants on the RHS.
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
@@ -3684,12 +3709,12 @@ impl InstT for Xor {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.lhs, self.rhs].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -3733,7 +3758,7 @@ impl InstT for ZExt {
         );
     }
 
-    fn canonicalise<T: BlockLikeT + EquivIIdxT>(&mut self, opt: &T) {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
     }
 
@@ -3748,12 +3773,12 @@ impl InstT for ZExt {
         }
     }
 
-    fn iter_iidxs(&self) -> Box<dyn Iterator<Item = InstIdx>> {
+    fn iter_iidxs(&self, _m: &dyn ModLikeT) -> Box<dyn Iterator<Item = InstIdx>> {
         Box::new([self.val].into_iter())
     }
 
     #[cfg(test)]
-    fn rewrite_iidxs<F>(&mut self, mut iidx_map: F)
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
     {
@@ -4834,10 +4859,7 @@ mod test {
 ",
         );
 
-        let mut opt = FullOpt::new();
-        for ty in m.tys {
-            opt.push_ty(ty).unwrap();
-        }
+        let mut opt = FullOpt::new_testing(m.guard_extras, m.tys);
         let TraceEnd::Test {
             entry_vlocs: _,
             block: Block { insts },

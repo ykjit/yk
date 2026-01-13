@@ -21,7 +21,7 @@ use crate::{
         j2::{
             J2,
             compiled_trace::{J2CompiledTrace, J2TraceStart},
-            hir::{self, GuardExtra, GuardExtraIdx},
+            hir,
             hir_to_asm::AsmGuardIdx,
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
@@ -33,7 +33,6 @@ use crate::{
     mt::{MT, TraceId},
     trace::TraceAction,
 };
-use index_vec::IndexVec;
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
 use std::{
@@ -71,7 +70,6 @@ pub(super) struct AotToHir<Reg: RegT> {
     /// not built with ykllvm.
     globals: &'static [*const ()],
     opt: Box<dyn OptT>,
-    guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     /// Initially set to `None` until we find the locations for this trace's arguments.
     frames: Vec<Frame>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
@@ -117,7 +115,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             promotions_off: 0,
             globals,
             opt,
-            guard_extras: IndexVec::new(),
             frames: Vec::new(),
             addr_name_map: should_log_any_ir().then_some(HashMap::new()),
             phantom: PhantomData,
@@ -240,7 +237,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             self.opt.feed_void(hir::Inst::Term(hir::Term(term_vars)))?;
         }
 
-        let (entry, tys) = self.opt.build();
+        let (entry, guard_extras, tys) = self.opt.build();
         let (trace_start, trace_end) = match bmk {
             BuildModKind::Coupler {
                 entry_safepoint,
@@ -297,7 +294,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             trace_end,
             tys,
             addr_name_map: self.addr_name_map,
-            guard_extras: self.guard_extras,
+            guard_extras,
         };
 
         let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -397,25 +394,19 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             .iter()
             .flat_map(|hir::Frame { exit_vars, .. }| exit_vars.to_owned())
             .collect::<Vec<_>>();
-        let gridx = self.guard_extras.push(hir::GuardExtra {
-            bid,
-            switch,
-            exit_frames,
-        });
         let hinst = hir::Guard {
             expect: expect_true,
             cond: cond_iidx,
+            geidx: hir::GuardExtraIdx::MAX,
+        };
+        let gextra = hir::GuardExtra {
+            bid,
+            switch,
             entry_vars,
-            geidx: gridx,
+            exit_frames,
         };
 
-        // We now try pushing the guard instruction...
-        let iidx = self.opt.feed_void(hinst.into())?;
-        // ...but if it turned into a non-guard then it means the guard was optimised away and we
-        // should remove the corresponding [GuardRestore].
-        if iidx.is_none() {
-            self.guard_extras.remove(self.guard_extras.len_idx() - 1);
-        }
+        self.opt.feed_guard(hinst, gextra)?;
         Ok(())
     }
 

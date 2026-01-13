@@ -307,11 +307,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
         for (i, guard) in guards.into_iter().enumerate() {
             let patch_label = self.be.guard_end(self.m.trid, AsmGuardIdx::from(i))?;
+            let gextra = self.m.guard_extra(guard.geidx);
 
             let mut stack_off = guard.stack_off;
-            assert_eq!(guard.entry_vars.len(), guard.entry_vlocs.len());
+            assert_eq!(gextra.entry_vars.len(), guard.entry_vlocs.len());
             let mut entry_vlocs = guard.entry_vlocs;
-            for (iidx, vlocs) in guard.entry_vars.iter().zip(entry_vlocs.iter_mut()) {
+            for (iidx, vlocs) in gextra.entry_vars.iter().zip(entry_vlocs.iter_mut()) {
                 // If a value only exists in a register(s), we need to pick one of those registers,
                 // and ensure it's spilt.
                 if vlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
@@ -329,7 +330,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let gextra = self.m.guard_extra(guard.geidx);
             let deopt_frames = gextra
                 .exit_frames
                 .iter()
@@ -350,7 +350,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                 .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
                                 .map(|(iidx, (aot_op, smap_loc))| {
                                     let fromvlocs = entry_vlocs
-                                        [guard.entry_vars.iter().position(|x| x == iidx).unwrap()]
+                                        [gextra.entry_vars.iter().position(|x| x == iidx).unwrap()]
                                     .iter()
                                     // FIXME (optimisation): We don't need to spill everything
                                     // before deopt / side-traces.
@@ -504,17 +504,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_fptosi(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::Guard(
-                    x @ Guard {
-                        entry_vars, geidx, ..
-                    },
-                ) => {
+                Inst::Guard(x @ Guard { geidx, .. }) => {
                     let label = self.be.i_guard(&mut ra, b, iidx, x)?;
-                    let entry_vlocs = ra.vlocs_from_iidxs(entry_vars);
+                    let gextra = self.m.gextra(*geidx);
+                    let entry_vlocs = ra.vlocs_from_iidxs(&gextra.entry_vars);
                     guards.push(AsmGuard {
                         geidx: *geidx,
                         label,
-                        entry_vars: entry_vars.clone(),
                         entry_vlocs,
                         stack_off: ra.stack_off(),
                     });
@@ -1258,9 +1254,7 @@ index_vec::define_index_type! {
 struct AsmGuard<AB: HirToAsmBackend + ?Sized> {
     geidx: GuardExtraIdx,
     label: AB::Label,
-    /// Will be the same length as `entry_vlocs`.
-    entry_vars: Vec<InstIdx>,
-    /// Will be the same length as `entry_vars`.
+    /// Will be the same length as the matching [GuardExtra]'s `entry_vars`.
     entry_vlocs: Vec<VarLocs<AB::Reg>>,
     /// The stack offset of the register allocator at the entry point of the guard.
     stack_off: u32,

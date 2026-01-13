@@ -2374,12 +2374,13 @@ pub(crate) mod test {
             _b: &Block,
             iidx: InstIdx,
             Guard {
+                geidx,
                 expect: _,
                 cond,
-                entry_vars,
                 ..
             }: &Guard,
         ) -> Result<Self::Label, CompilationError> {
+            let GuardExtra { entry_vars, .. } = self.m.gextra(*geidx);
             let [cndr, _] = ra.alloc(
                 self,
                 iidx,
