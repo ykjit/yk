@@ -1,4 +1,4 @@
-// ignore-if: test "$YK_JITC" = "j2" # not yet implemented in j2
+// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt,jit-post-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -73,6 +73,10 @@ int main(int argc, char **argv) {
     yk_mt_control_point(mt, &loc);
     snprintf(msg, MAX_MSG, "before fprintf: %d", i);
     yk_debug_str(msg);
+    // We take the address here to prevent the function from being cloned,
+    // which strips the function of its debug strings.
+    void *temp = (void *)&g;
+    NOOPT_VAL(temp);
     f();
     fprintf(stderr, "%d\n", i);
     snprintf(msg, MAX_MSG, "after fprintf: %d", i + 1);

@@ -76,6 +76,10 @@ pub(super) struct AotToHir<Reg: RegT> {
     addr_name_map: Option<HashMap<usize, String>>,
     /// The JIT IR this struct builds.
     phantom: PhantomData<Reg>,
+    /// The strings used by yk_debug_str
+    debug_strs: Vec<String>,
+    /// The next debug string to process, as an index into [Self::debug_strs].
+    debug_strs_seen: usize,
 }
 
 impl<Reg: RegT + 'static> AotToHir<Reg> {
@@ -88,7 +92,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         trid: TraceId,
         bkind: BuildKind,
         promotions: Box<[u8]>,
-        _debug_strs: Vec<String>,
+        debug_strs: Vec<String>,
     ) -> Self {
         let globals = {
             let ptr = j2.dlsym(GLOBAL_PTR_ARRAY_SYM, false).unwrap().0 as *const *const ();
@@ -118,6 +122,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             frames: Vec::new(),
             addr_name_map: should_log_any_ir().then_some(HashMap::new()),
             phantom: PhantomData,
+            debug_strs,
+            debug_strs_seen: 0,
         }
     }
 
@@ -418,6 +424,19 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     ) -> Result<hir::InstIdx, CompilationError> {
         let iidx = self.opt.feed(inst.into())?;
         self.frames.last_mut().unwrap().set_local(iid, iidx);
+        Ok(iidx)
+    }
+
+    /// Same as [push_inst_and_link_local] but for void instructions.
+    fn push_void_inst_and_link_local(
+        &mut self,
+        iid: InstId,
+        inst: impl Into<hir::Inst>,
+    ) -> Result<Option<hir::InstIdx>, CompilationError> {
+        let iidx = self.opt.feed_void(inst.into())?;
+        if let Some(id) = iidx {
+            self.frames.last_mut().unwrap().set_local(iid, id);
+        }
         Ok(iidx)
     }
 
@@ -811,7 +830,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
                 Inst::Cast { .. } => self.p_cast(pc.clone(), inst)?,
                 Inst::CondBr { .. } => self.p_condbr(pc.clone(), bid, inst)?,
-                Inst::DebugStr { .. } => todo!(),
+                Inst::DebugStr { .. } => self.p_debugstr(pc.clone())?,
                 Inst::ExtractValue { .. } => todo!(),
                 Inst::FCmp { .. } => self.p_fcmp(pc.clone(), inst)?,
                 Inst::FNeg { .. } => self.p_fneg(pc.clone(), inst)?,
@@ -1207,6 +1226,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                         self.promotions_off +=
                             usize::try_from(self.am.type_(*tyidx).bytew()).unwrap();
                     }
+                    Inst::DebugStr { .. } => {
+                        self.debug_strs_seen += 1;
+                    }
                     _ => (),
                 }
             }
@@ -1419,6 +1441,15 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             safepoint,
             None,
         )
+    }
+
+    fn p_debugstr(&mut self, iid: InstId) -> Result<(), CompilationError> {
+        assert!(self.debug_strs_seen < self.debug_strs.len());
+        let msg = self.debug_strs[self.debug_strs_seen].clone();
+        self.debug_strs_seen += 1;
+        self.push_void_inst_and_link_local(iid, hir::DebugStr(msg))?
+            .unwrap();
+        Ok(())
     }
 
     fn p_fcmp(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
