@@ -330,51 +330,44 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let deopt_frames = gextra
-                .exit_frames
-                .iter()
-                .map(
-                    |Frame {
-                         pc,
-                         pc_safepoint,
-                         exit_vars,
-                     }| {
-                        let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
-                        assert_eq!(exit_vars.len(), pc_safepoint.lives.len());
-                        assert_eq!(exit_vars.len(), smap.live_vals.len());
-                        DeoptFrame {
-                            pc: pc.clone(),
-                            pc_safepoint,
-                            vars: exit_vars
-                                .iter()
-                                .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
-                                .map(|(iidx, (aot_op, smap_loc))| {
-                                    let fromvlocs = entry_vlocs
-                                        [gextra.entry_vars.iter().position(|x| x == iidx).unwrap()]
-                                    .iter()
-                                    // FIXME (optimisation): We don't need to spill everything
-                                    // before deopt / side-traces.
-                                    .filter(|x| !matches!(x, VarLoc::Reg(_, _)))
-                                    .cloned()
-                                    .collect::<VarLocs<_>>();
-                                    let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
-                                    if fromvlocs == tovlocs {
-                                        // Optimise away situations where we would just move a
-                                        // value from VLoc X to VLoc X.
-                                        tovlocs = VarLocs::new();
-                                    }
-                                    (
-                                        aot_op.to_inst_id(),
-                                        entry.inst_bitw(self.m, *iidx),
-                                        fromvlocs,
-                                        tovlocs,
-                                    )
-                                })
-                                .collect::<Vec<_>>(),
-                        }
-                    },
-                )
-                .collect::<SmallVec<[_; 1]>>();
+            let mut deopt_frames = SmallVec::with_capacity(gextra.exit_frames.len());
+            let mut entry_var_off = 0;
+            for Frame { pc, pc_safepoint } in gextra.exit_frames.iter() {
+                let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
+                let mut vars = Vec::with_capacity(pc_safepoint.lives.len());
+                for (iidx, (aot_op, smap_loc)) in gextra.entry_vars
+                    [entry_var_off..entry_var_off + pc_safepoint.lives.len()]
+                    .iter()
+                    .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
+                {
+                    let fromvlocs = entry_vlocs
+                        [gextra.entry_vars.iter().position(|x| x == iidx).unwrap()]
+                    .iter()
+                    // FIXME (optimisation): We don't need to spill everything
+                    // before deopt / side-traces.
+                    .filter(|x| !matches!(x, VarLoc::Reg(_, _)))
+                    .cloned()
+                    .collect::<VarLocs<_>>();
+                    let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
+                    if fromvlocs == tovlocs {
+                        // Optimise away situations where we would just move a
+                        // value from VLoc X to VLoc X.
+                        tovlocs = VarLocs::new();
+                    }
+                    vars.push((
+                        aot_op.to_inst_id(),
+                        entry.inst_bitw(self.m, *iidx),
+                        fromvlocs,
+                        tovlocs,
+                    ));
+                }
+                entry_var_off += pc_safepoint.lives.len();
+                deopt_frames.push(DeoptFrame {
+                    pc: pc.clone(),
+                    pc_safepoint,
+                    vars,
+                });
+            }
             self.be.guard_completed(
                 guard.label,
                 patch_label,

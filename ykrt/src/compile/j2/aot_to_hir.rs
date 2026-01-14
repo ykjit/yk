@@ -347,6 +347,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     ) -> Result<(), CompilationError> {
         self.frames.last_mut().unwrap().pc_safepoint = Some(guard_safepoint);
         let mut exit_frames = SmallVec::with_capacity(self.frames.len());
+        // The list of variables tends to be long enough that we'll get more than one resizing, so
+        // the precalculation is worth it.
+        let mut entry_vars = Vec::with_capacity(
+            self.frames
+                .iter()
+                .map(|x| x.pc_safepoint.unwrap().lives.len())
+                .sum(),
+        );
         for (
             i,
             frame @ Frame {
@@ -360,15 +368,13 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             } else {
                 iid.clone()
             };
-            exit_frames.push(hir::Frame {
-                pc,
-                pc_safepoint,
-                exit_vars: pc_safepoint
+            entry_vars.extend(
+                pc_safepoint
                     .lives
                     .iter()
-                    .map(|x| frame.get_local(&*self.opt, &x.to_inst_id()))
-                    .collect::<Vec<_>>(),
-            });
+                    .map(|x| frame.get_local(&*self.opt, &x.to_inst_id())),
+            );
+            exit_frames.push(hir::Frame { pc, pc_safepoint });
         }
 
         // In many cases, the last variable in a guards' list of variables is the condition
@@ -382,18 +388,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 tyidx,
                 hir::ConstKind::Int(ArbBitInt::from_u64(1, !u64::from(expect_true) & 0b1)),
             )?;
-            // This `let` is only needed because type inference goes a bit wonky, at least on
-            // rust-1.91.
-            let last: &mut hir::Frame = exit_frames.last_mut().unwrap();
-            *last.exit_vars.last_mut().unwrap() = ciidx;
+            *entry_vars.last_mut().unwrap() = ciidx;
         }
 
-        // This is temporary, since we currently don't put any instructions in the guard body:
-        // when we do, entry_vars and exit_vars will, in general, be different to each other.
-        let entry_vars = exit_frames
-            .iter()
-            .flat_map(|hir::Frame { exit_vars, .. }| exit_vars.to_owned())
-            .collect::<Vec<_>>();
         let hinst = hir::Guard {
             expect: expect_true,
             cond: cond_iidx,

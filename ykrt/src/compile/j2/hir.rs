@@ -2016,8 +2016,18 @@ pub(super) struct GuardExtra {
     /// then this records the information necessary for subsequent sidetraces to deal with the
     /// switch properly.
     pub switch: Option<Switch>,
-    /// The variables used on entry to the guard. Note these may be different than those used
-    /// at the end of the [GuardBody].
+    /// The variables used on entry to the guard. These are stored as an ordered, flat, sequence,
+    /// corresponding to the sequence of `exit_frames`. For example, if `exit_frames` has 2 frames,
+    /// the first of which needs 3 variables and the second 1 variable entry_vars would look as
+    /// follows:
+    /// ```
+    /// [a, b, c, d]
+    ///  ^^^^^^^
+    ///     |     ^
+    ///     |   exit_frames[1] variable
+    ///     |
+    ///  exit_frames[0] variables
+    /// ```
     pub entry_vars: Vec<InstIdx>,
     /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
     /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
@@ -3921,12 +3931,7 @@ enum IterIidxsIteratorKind<'a> {
 #[derive(Clone, Debug)]
 pub(super) struct Frame {
     pub pc: aot_ir::InstId,
-    /// The current safepoint for this frame. This has no initial value at frame entry, and is
-    /// updated at every call site.
     pub pc_safepoint: &'static DeoptSafepoint,
-    /// One [InstIdx] for each live variable in `safepoint.lives`, stored in order relative to
-    /// `safepoint.lives`.
-    pub exit_vars: Vec<InstIdx>,
 }
 
 #[cfg(test)]
