@@ -20,7 +20,7 @@ use crate::{
         CompilationError, CompiledTrace, GuardId,
         j2::{
             J2,
-            compiled_trace::{J2CompiledTrace, J2TraceStart},
+            compiled_trace::{DeoptVar, J2CompiledTrace, J2TraceStart},
             hir,
             hir_to_asm::AsmGuardIdx,
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
@@ -607,7 +607,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         for dframe in dframes {
             assert_eq!(dframe.vars.len(), dframe.pc_safepoint.lives.len());
             let mut locals = HashMap::with_capacity(dframe.vars.len());
-            for (iid, (_bit, fromvlocs, _tovlocs)) in dframe
+            for (iid, DeoptVar { fromvlocs, .. }) in dframe
                 .pc_safepoint
                 .lives
                 .iter()

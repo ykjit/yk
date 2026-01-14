@@ -94,7 +94,9 @@ use crate::{
         CompilationError, CompiledTrace, DeoptSafepoint,
         j2::{
             codebuf::ExeCodeBuf,
-            compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2TraceStart},
+            compiled_trace::{
+                DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace, J2TraceStart,
+            },
             hir::*,
             regalloc::{RegAlloc, RegFill, RegT, VarLoc, VarLocs},
         },
@@ -354,7 +356,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         // value from VLoc X to VLoc X.
                         tovlocs = VarLocs::new();
                     }
-                    vars.push((entry.inst_bitw(self.m, *iidx), fromvlocs, tovlocs));
+                    vars.push(DeoptVar {
+                        bitw: entry.inst_bitw(self.m, *iidx),
+                        fromvlocs,
+                        tovlocs,
+                    });
                 }
                 entry_var_off += pc_safepoint.lives.len();
                 deopt_frames.push(DeoptFrame {

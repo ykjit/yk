@@ -246,5 +246,12 @@ pub(super) struct DeoptFrame<Reg: RegT> {
     /// sense we precalculate this from `self.vars` to (a) avoid us having to carry around a
     /// [hir::Module] (b) optimise how much we need to read/write. It's currently unclear whether
     /// doing this is a good trade memory/performance trade-off or not.
-    pub vars: Vec<(u32, VarLocs<Reg>, VarLocs<Reg>)>,
+    pub vars: Vec<DeoptVar<Reg>>,
+}
+
+#[derive(Debug)]
+pub(super) struct DeoptVar<Reg: RegT> {
+    pub bitw: u32,
+    pub fromvlocs: VarLocs<Reg>,
+    pub tovlocs: VarLocs<Reg>,
 }
