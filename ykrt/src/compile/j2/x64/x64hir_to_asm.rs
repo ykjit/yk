@@ -1428,7 +1428,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         patch_label: Self::Label,
         extra_stack_len: u32,
         bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 1]>,
+        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 2]>,
         switch: Option<Switch>,
     ) {
         let stack_off = i32::try_from(extra_stack_len).unwrap();
@@ -3846,7 +3846,7 @@ enum RegOrMemOp {
 struct IntermediateGuard {
     patch_label: LabelIdx,
     bid: aot_ir::BBlockId,
-    deopt_frames: SmallVec<[DeoptFrame<Reg>; 1]>,
+    deopt_frames: SmallVec<[DeoptFrame<Reg>; 2]>,
     extra_stack_len: u32,
     switch: Option<Switch>,
 }

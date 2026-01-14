@@ -187,7 +187,7 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     // X64 / j2 specific stuff.
     /// The block ID of the guard, needed for `prev_bid` in `aot_to_hir`.
     bid: aot_ir::BBlockId,
-    deopt_frames: SmallVec<[DeoptFrame<Reg>; 1]>,
+    deopt_frames: SmallVec<[DeoptFrame<Reg>; 2]>,
     patch_off: u32,
     /// How much additional space will this guard have consumed relative to the main part of the
     /// trace it was part of?
@@ -205,7 +205,7 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
 impl<Reg: RegT> J2CompiledGuard<Reg> {
     pub(super) fn new(
         bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame<Reg>; 1]>,
+        deopt_frames: SmallVec<[DeoptFrame<Reg>; 2]>,
         patch_off: u32,
         extra_stack_len: u32,
         switch: Option<Switch>,
@@ -224,7 +224,7 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
         self.bid
     }
 
-    pub(super) fn deopt_frames(&self) -> &SmallVec<[DeoptFrame<Reg>; 1]> {
+    pub(super) fn deopt_frames(&self) -> &SmallVec<[DeoptFrame<Reg>; 2]> {
         &self.deopt_frames
     }
 

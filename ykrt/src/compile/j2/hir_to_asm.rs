@@ -881,7 +881,7 @@ pub(super) trait HirToAsmBackend {
         patch_label: Self::Label,
         stack_off: u32,
         bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 1]>,
+        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 2]>,
         switch: Option<Switch>,
     );
 

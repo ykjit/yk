@@ -2161,7 +2161,7 @@ pub(crate) mod test {
             _patch_label: Self::Label,
             _stack_off: u32,
             _bid: aot_ir::BBlockId,
-            _deopt_frames: SmallVec<[crate::compile::j2::compiled_trace::DeoptFrame<Self::Reg>; 1]>,
+            _deopt_frames: SmallVec<[crate::compile::j2::compiled_trace::DeoptFrame<Self::Reg>; 2]>,
             _switch: Option<crate::compile::j2::hir::Switch>,
         ) {
         }

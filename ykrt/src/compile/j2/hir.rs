@@ -2020,7 +2020,7 @@ pub(super) struct GuardExtra {
     /// corresponding to the sequence of `exit_frames`. For example, if `exit_frames` has 2 frames,
     /// the first of which needs 3 variables and the second 1 variable entry_vars would look as
     /// follows:
-    /// ```
+    /// ```text
     /// [a, b, c, d]
     ///  ^^^^^^^
     ///     |     ^
@@ -2033,9 +2033,9 @@ pub(super) struct GuardExtra {
     /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
     /// *except* that the most recent call frame is replaced with the deopt information for the
     /// branch (etc) that failed. Brief experiments suggest that, depending on the benchmark and
-    /// interpreter, between 50-90% of guards exist in the controlpoint frame, so the `1` in the
-    /// `SmallVec` means that we usefully avoid allocating memory in many cases.
-    pub exit_frames: SmallVec<[Frame; 1]>,
+    /// interpreter, the depth of frames decreases exponentially: in ~50-90% (and 90% is more
+    /// common than 50%) of cases there is 1 frame, about 10x fewer have 2 frames, and so on.
+    pub exit_frames: SmallVec<[Frame; 2]>,
 }
 
 /// If a guard relates to an AOT `switch`, this struct records the extra information we need to
