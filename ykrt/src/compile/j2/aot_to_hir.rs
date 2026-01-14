@@ -73,7 +73,7 @@ pub(super) struct AotToHir<Reg: RegT> {
     /// Initially set to `None` until we find the locations for this trace's arguments.
     frames: Vec<Frame>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
-    addr_name_map: Option<HashMap<usize, String>>,
+    addr_name_map: Option<HashMap<usize, Option<String>>>,
     /// The JIT IR this struct builds.
     phantom: PhantomData<Reg>,
 }
@@ -417,6 +417,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         inst: impl Into<hir::Inst>,
     ) -> Result<hir::InstIdx, CompilationError> {
         let iidx = self.opt.feed(inst.into())?;
+        if self.addr_name_map.is_some()
+            && let hir::Inst::Const(hir::Const {
+                tyidx: _,
+                kind: hir::ConstKind::Ptr(addr),
+            }) = self.opt.inst(iidx)
+        {
+            self.addr_name_map
+                .as_mut()
+                .map(|x| x.insert(*addr, self.j2.dladdr(*addr)));
+        }
         self.frames.last_mut().unwrap().set_local(iid, iidx);
         Ok(iidx)
     }
@@ -746,7 +756,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 };
                 self.addr_name_map
                     .as_mut()
-                    .map(|x| x.insert(addr, gl.name().to_owned()));
+                    .map(|x| x.insert(addr, Some(gl.name().to_owned())));
                 inst
             }
             Operand::Func(fidx) => {
@@ -754,7 +764,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 let addr = self.j2.dlsym(func.name(), false).unwrap().0.addr();
                 self.addr_name_map
                     .as_mut()
-                    .map(|x| x.insert(addr, func.name().to_owned()));
+                    .map(|x| x.insert(addr, Some(func.name().to_owned())));
                 let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
                 self.const_to_iidx(tyidx, hir::ConstKind::Ptr(addr))
             }
@@ -1080,7 +1090,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             };
             self.addr_name_map
                 .as_mut()
-                .map(|x| x.insert(addr, fname.to_owned()));
+                .map(|x| x.insert(addr, Some(fname.to_owned())));
             let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
             let tgt_iidx = self.const_to_iidx(tyidx, hir::ConstKind::Ptr(addr))?;
 

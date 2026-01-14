@@ -37,11 +37,15 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     error::Error,
-    ffi::{CString, c_void},
+    ffi::{CStr, CString, c_void},
+    mem::MaybeUninit,
     sync::Arc,
 };
 
 thread_local! {
+    /// A cache of dladdr symbol name results for this thread. The global dladdr cache is held in
+    /// [J2::dladdr_cache].
+    static THREAD_DLADDR_CACHE: RefCell<HashMap<usize, Option<String>>> = RefCell::new(HashMap::new());
     /// A cache of dlsym results for this thread. The global dlsym cache is held in
     /// [J2::dlsym_cache].
     static THREAD_DLSYM_CACHE: RefCell<HashMap<String, Option<SyncSafePtr<*const c_void>>>> = RefCell::new(HashMap::new());
@@ -49,6 +53,8 @@ thread_local! {
 
 #[derive(Debug)]
 pub(super) struct J2 {
+    /// Cache dladdr() lookups.
+    dladdr_cache: Mutex<HashMap<usize, Option<String>>>,
     /// Cache non-thread-local dlsym() lookups.
     global_dlsym_cache: Mutex<HashMap<String, Option<SyncSafePtr<*const c_void>>>>,
     /// The address to pass to the next `mmap` call in the hope that it will place the block close
@@ -84,6 +90,7 @@ impl J2 {
         }
 
         let j2 = Arc::new(Self {
+            dladdr_cache: Mutex::new(HashMap::new()),
             global_dlsym_cache: Mutex::new(HashMap::new()),
             mmap_hint: Mutex::new(SyncSafePtr(mmap_hint)),
         });
@@ -162,6 +169,27 @@ impl J2 {
         }
         *lk = SyncSafePtr(unsafe { buf.byte_add(len) });
         CodeBufInProgress::new(buf as *mut u8, len)
+    }
+
+    /// Convert an address to a symbol name. This is a caching front-end to [libc::dladdr] returning
+    /// `dlinfo.dli_sname`. Returns `None` if no name can be found.
+    fn dladdr(&self, addr: usize) -> Option<String> {
+        THREAD_DLADDR_CACHE.with_borrow_mut(|b| {
+            if let Some(x) = b.get(&addr) {
+                // The optimal case: we have cached `symbol` in this thread's cache.
+                return x.clone();
+            }
+
+            let n = self
+                .dladdr_cache
+                .lock()
+                .entry(addr)
+                .or_insert_with(|| dladdr(addr))
+                .to_owned();
+            // Cache `symbol` in this thread.
+            b.insert(addr, n.clone());
+            n
+        })
     }
 
     /// Convert a symbol name to an address. This is a caching front-end to [libc::dlsym].
@@ -283,6 +311,20 @@ impl Compiler for J2 {
 struct SyncSafePtr<T>(T);
 unsafe impl<T> Send for SyncSafePtr<T> {}
 unsafe impl<T> Sync for SyncSafePtr<T> {}
+
+/// A non-caching wrapper around `dladdr` returning the symbol name for `addr`.
+fn dladdr(addr: usize) -> Option<String> {
+    let mut dlinfo = MaybeUninit::<libc::Dl_info>::uninit();
+    if unsafe { libc::dladdr(addr as *const _, dlinfo.as_mut_ptr()) } != 0 {
+        let dlinfo = unsafe { dlinfo.assume_init() };
+        unsafe { CStr::from_ptr(dlinfo.dli_sname) }
+            .to_str()
+            .ok()
+            .map(|x| x.to_owned())
+    } else {
+        None
+    }
+}
 
 /// A non-caching wrapper around `dlsym`.
 fn dlsym(symbol: &str) -> Option<SyncSafePtr<*const c_void>> {
