@@ -652,6 +652,7 @@ pub(super) enum Inst {
     Call,
     Const,
     CtPop,
+    DebugStr,
     DynPtrAdd,
     FAdd,
     FCmp,
@@ -1278,6 +1279,39 @@ impl InstT for CtPop {
 
     fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
         m.ty(self.tyidx)
+    }
+}
+
+/// Debug strings.
+#[derive(Clone, Debug)]
+pub(super) struct DebugStr(pub String);
+
+impl InstT for DebugStr {
+    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        false
+    }
+
+    fn iter_iidxs<'a>(&'a self, m: &'a dyn ModLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::none(m)
+    }
+
+    #[cfg(test)]
+    fn rewrite_iidxs<F>(&mut self, _m: &mut dyn ModLikeT, _iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("; {}", self.0)
+    }
+
+    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
+        &Ty::Void
     }
 }
 

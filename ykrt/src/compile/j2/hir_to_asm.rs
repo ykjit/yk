@@ -448,6 +448,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_ctpop(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::DebugStr(..) => {}
                 Inst::DynPtrAdd(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_dynptradd(&mut ra, b, iidx, x)?;
