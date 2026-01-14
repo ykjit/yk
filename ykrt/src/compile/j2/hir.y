@@ -51,7 +51,7 @@ Inst -> Result<AstInst, Box<dyn Error>>:
       Ok(AstInst::Call { local: None, ty: None, extern_: $2?.span(), tgt: $3?.span(), args: $5? })
     }
   | "GUARD" Bool "," "LOCAL" "," "[" Locals "]" {
-       Ok(AstInst::Guard { expect: $2?, cond: $4?.span(), entry_vars: $7? })
+       Ok(AstInst::Guard { expect: $2?, cond: $4?.span(), exit_vars: $7? })
     }
   | "LOCAL" ":" Ty "=" "CALL" "ID" "LOCAL" "(" Locals ")" {
       Ok(AstInst::Call { local: Some($1?.span()), ty: Some($3?), extern_: $6?.span(), tgt: $7?.span(), args: $9? })

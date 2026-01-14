@@ -277,7 +277,7 @@ impl<'a> X64HirToAsm<'a> {
         else {
             panic!()
         };
-        let GuardExtra { entry_vars, .. } = self.m.gextra(*geidx);
+        let GuardExtra { exit_vars, .. } = self.m.gextra(*geidx);
 
         let bitw = b.inst_bitw(self.m, *lhs);
         let (imm, mut in_fill) = if pred.is_signed() {
@@ -331,7 +331,7 @@ impl<'a> X64HirToAsm<'a> {
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
-                        RegCnstr::KeepAlive { iidxs: entry_vars },
+                        RegCnstr::KeepAlive { iidxs: exit_vars },
                     ],
                 )?;
                 RegOrMemOp::MemOp(lhsr, off)
@@ -346,7 +346,7 @@ impl<'a> X64HirToAsm<'a> {
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
-                        RegCnstr::KeepAlive { iidxs: entry_vars },
+                        RegCnstr::KeepAlive { iidxs: exit_vars },
                     ],
                 )?;
                 RegOrMemOp::Reg(lhsr)
@@ -378,7 +378,7 @@ impl<'a> X64HirToAsm<'a> {
                                 regs: &NORMAL_GP_REGS,
                                 clobber: false,
                             },
-                            RegCnstr::KeepAlive { iidxs: entry_vars },
+                            RegCnstr::KeepAlive { iidxs: exit_vars },
                         ],
                     )?;
                     (RegOrMemOp::MemOp(lhsr, off), rhsr)
@@ -399,7 +399,7 @@ impl<'a> X64HirToAsm<'a> {
                                 regs: &NORMAL_GP_REGS,
                                 clobber: false,
                             },
-                            RegCnstr::KeepAlive { iidxs: entry_vars },
+                            RegCnstr::KeepAlive { iidxs: exit_vars },
                         ],
                     )?;
                     (RegOrMemOp::Reg(lhsr), rhsr)
@@ -2544,7 +2544,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             return self.i_icmp_guard(ra, b, iidx, ginst);
         }
 
-        let GuardExtra { entry_vars, .. } = self.m.gextra(*geidx);
+        let GuardExtra { exit_vars, .. } = self.m.gextra(*geidx);
         let [cndr, _] = ra.alloc(
             self,
             iidx,
@@ -2555,7 +2555,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
-                RegCnstr::KeepAlive { iidxs: entry_vars },
+                RegCnstr::KeepAlive { iidxs: exit_vars },
             ],
         )?;
 

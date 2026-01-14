@@ -2385,7 +2385,10 @@ pub(crate) mod test {
                 ..
             }: &Guard,
         ) -> Result<Self::Label, CompilationError> {
-            let GuardExtra { entry_vars, .. } = self.m.gextra(*geidx);
+            let GuardExtra {
+                exit_vars: entry_vars,
+                ..
+            } = self.m.gextra(*geidx);
             let [cndr, _] = ra.alloc(
                 self,
                 iidx,

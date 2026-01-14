@@ -349,7 +349,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let mut exit_frames = SmallVec::with_capacity(self.frames.len());
         // The list of variables tends to be long enough that we'll get more than one resizing, so
         // the precalculation is worth it.
-        let mut entry_vars = Vec::with_capacity(
+        let mut exit_vars = Vec::with_capacity(
             self.frames
                 .iter()
                 .map(|x| x.pc_safepoint.unwrap().lives.len())
@@ -368,7 +368,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             } else {
                 iid.clone()
             };
-            entry_vars.extend(
+            exit_vars.extend(
                 pc_safepoint
                     .lives
                     .iter()
@@ -388,7 +388,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 tyidx,
                 hir::ConstKind::Int(ArbBitInt::from_u64(1, !u64::from(expect_true) & 0b1)),
             )?;
-            *entry_vars.last_mut().unwrap() = ciidx;
+            *exit_vars.last_mut().unwrap() = ciidx;
         }
 
         let hinst = hir::Guard {
@@ -399,7 +399,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let gextra = hir::GuardExtra {
             bid,
             switch,
-            entry_vars,
+            exit_vars,
             exit_frames,
         };
 

@@ -460,10 +460,10 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                 AstInst::Guard {
                     expect,
                     cond,
-                    entry_vars,
+                    exit_vars,
                 } => {
                     let cond = self.p_local(cond);
-                    let entry_vars = entry_vars
+                    let exit_vars = exit_vars
                         .into_iter()
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
@@ -471,7 +471,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let geidx = guards.push(GuardExtra {
                         bid,
                         switch: None,
-                        entry_vars,
+                        exit_vars,
                         exit_frames: SmallVec::new(),
                     });
                     self.insts.push(Inst::Guard(Guard {
@@ -1112,7 +1112,7 @@ enum AstInst {
     Guard {
         expect: bool,
         cond: Span,
-        entry_vars: Vec<Span>,
+        exit_vars: Vec<Span>,
     },
     ICmp {
         local: Span,
