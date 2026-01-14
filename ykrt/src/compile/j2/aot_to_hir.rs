@@ -20,7 +20,7 @@ use crate::{
         CompilationError, CompiledTrace, GuardId,
         j2::{
             J2,
-            compiled_trace::{J2CompiledTrace, J2TraceStart},
+            compiled_trace::{DeoptFrame, DeoptVar, J2CompiledTrace, J2TraceStart},
             hir,
             hir_to_asm::AsmGuardIdx,
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
@@ -347,6 +347,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     ) -> Result<(), CompilationError> {
         self.frames.last_mut().unwrap().pc_safepoint = Some(guard_safepoint);
         let mut exit_frames = SmallVec::with_capacity(self.frames.len());
+        // The list of variables tends to be long enough that we'll get more than one resizing, so
+        // the precalculation is worth it.
+        let mut exit_vars = Vec::with_capacity(
+            self.frames
+                .iter()
+                .map(|x| x.pc_safepoint.unwrap().lives.len())
+                .sum(),
+        );
         for (
             i,
             frame @ Frame {
@@ -360,15 +368,13 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             } else {
                 iid.clone()
             };
-            exit_frames.push(hir::Frame {
-                pc,
-                pc_safepoint,
-                exit_vars: pc_safepoint
+            exit_vars.extend(
+                pc_safepoint
                     .lives
                     .iter()
-                    .map(|x| frame.get_local(&*self.opt, &x.to_inst_id()))
-                    .collect::<Vec<_>>(),
-            });
+                    .map(|x| frame.get_local(&*self.opt, &x.to_inst_id())),
+            );
+            exit_frames.push(hir::Frame { pc, pc_safepoint });
         }
 
         // In many cases, the last variable in a guards' list of variables is the condition
@@ -382,18 +388,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 tyidx,
                 hir::ConstKind::Int(ArbBitInt::from_u64(1, !u64::from(expect_true) & 0b1)),
             )?;
-            // This `let` is only needed because type inference goes a bit wonky, at least on
-            // rust-1.91.
-            let last: &mut hir::Frame = exit_frames.last_mut().unwrap();
-            *last.exit_vars.last_mut().unwrap() = ciidx;
+            *exit_vars.last_mut().unwrap() = ciidx;
         }
 
-        // This is temporary, since we currently don't put any instructions in the guard body:
-        // when we do, entry_vars and exit_vars will, in general, be different to each other.
-        let entry_vars = exit_frames
-            .iter()
-            .flat_map(|hir::Frame { exit_vars, .. }| exit_vars.to_owned())
-            .collect::<Vec<_>>();
         let hinst = hir::Guard {
             expect: expect_true,
             cond: cond_iidx,
@@ -402,7 +399,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let gextra = hir::GuardExtra {
             bid,
             switch,
-            entry_vars,
+            exit_vars,
             exit_frames,
         };
 
@@ -605,13 +602,17 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         _tgt_ctr: &Arc<J2CompiledTrace<Reg>>,
     ) -> Result<Vec<VarLocs<Reg>>, CompilationError> {
         assert!(self.frames.is_empty());
-        let dframes = src_ctr.deopt_frames(src_gidx);
-        let mut entry_vars = Vec::new();
-        for dframe in dframes {
-            assert_eq!(dframe.vars.len(), dframe.pc_safepoint.lives.len());
-            let mut locals = HashMap::with_capacity(dframe.vars.len());
-            for (iid, _bitw, fromvlocs, _tovlocs) in &dframe.vars {
-                let tyidx = self.p_ty(self.am.inst(iid).def_type(self.am).unwrap())?;
+        let guard = src_ctr.guard(src_gidx);
+        let mut entry_vars = Vec::with_capacity(guard.deopt_vars.len());
+        let mut deopt_vars_off = 0;
+        for DeoptFrame { pc, pc_safepoint } in &guard.deopt_frames {
+            let mut locals = HashMap::with_capacity(pc_safepoint.lives.len());
+            for (iid, DeoptVar { fromvlocs, .. }) in
+                pc_safepoint.lives.iter().map(|x| x.to_inst_id()).zip(
+                    &guard.deopt_vars[deopt_vars_off..deopt_vars_off + pc_safepoint.lives.len()],
+                )
+            {
+                let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
                 let iidx = if fromvlocs
                     .iter()
                     .any(|vloc| matches!(vloc, VarLoc::Const(_)))
@@ -630,10 +631,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 // there aren't any AOT arguments for any of the frames.
                 args: smallvec![],
                 locals,
-                pc: Some(dframe.pc.clone()),
-                pc_safepoint: Some(dframe.pc_safepoint),
+                pc: Some(pc.clone()),
+                pc_safepoint: Some(pc_safepoint),
                 prev_pc: None,
             });
+            deopt_vars_off += pc_safepoint.lives.len();
         }
         Ok(entry_vars)
     }

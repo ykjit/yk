@@ -60,8 +60,8 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         self.guards[gidx].switch.as_ref()
     }
 
-    pub(super) fn deopt_frames(&self, gidx: AsmGuardIdx) -> &[DeoptFrame<Reg>] {
-        self.guards[gidx].deopt_frames()
+    pub(super) fn guard(&self, gidx: AsmGuardIdx) -> &J2CompiledGuard<Reg> {
+        &self.guards[gidx]
     }
 
     pub(super) fn entry_vlocs(&self) -> &[VarLocs<Reg>] {
@@ -187,7 +187,22 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     // X64 / j2 specific stuff.
     /// The block ID of the guard, needed for `prev_bid` in `aot_to_hir`.
     bid: aot_ir::BBlockId,
-    deopt_frames: SmallVec<[DeoptFrame<Reg>; 1]>,
+    /// The [DeoptFrame]s necessary to reconstruct the stackframes for this guard. See also
+    /// [Self::deopt_vars].
+    pub deopt_frames: SmallVec<[DeoptFrame; 2]>,
+    /// The variables used on entry to the guard. These are stored as an ordered, flat, sequence,
+    /// corresponding to the sequence of [Self::deopt_frames]. For example, if `deopt_frames` has 2
+    /// frames, the first of which needs 3 variables and the second 1 variable entry_vars would
+    /// look as follows:
+    /// ```text
+    /// [a, b, c, d]
+    ///  ^^^^^^^
+    ///     |     ^
+    ///     |   deopt_frames[1] variable
+    ///     |
+    ///  deopt_frames[0] variables
+    /// ```
+    pub deopt_vars: Vec<DeoptVar<Reg>>,
     patch_off: u32,
     /// How much additional space will this guard have consumed relative to the main part of the
     /// trace it was part of?
@@ -205,7 +220,8 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
 impl<Reg: RegT> J2CompiledGuard<Reg> {
     pub(super) fn new(
         bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame<Reg>; 1]>,
+        deopt_frames: SmallVec<[DeoptFrame; 2]>,
+        deopt_vars: Vec<DeoptVar<Reg>>,
         patch_off: u32,
         extra_stack_len: u32,
         switch: Option<Switch>,
@@ -213,6 +229,7 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
         Self {
             bid,
             deopt_frames,
+            deopt_vars,
             guard: Guard::new(),
             patch_off,
             extra_stack_len,
@@ -222,10 +239,6 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
 
     pub(super) fn bid(&self) -> aot_ir::BBlockId {
         self.bid
-    }
-
-    pub(super) fn deopt_frames(&self) -> &SmallVec<[DeoptFrame<Reg>; 1]> {
-        &self.deopt_frames
     }
 
     pub(super) fn guard(&self) -> &Guard {
@@ -239,12 +252,14 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
 
 /// The information about a frame necessary for deopt and side-tracing.
 #[derive(Debug)]
-pub(super) struct DeoptFrame<Reg: RegT> {
+pub(super) struct DeoptFrame {
     pub pc: InstId,
     pub pc_safepoint: &'static DeoptSafepoint,
-    /// The information necessary for deopt and side-tracing: in a sense we precalculate this from
-    /// `self.vars` to (a) avoid us having to carry around a [hir::Module] (b) optimise how much we
-    /// need to read/write. It's currently unclear whether doing this is a good trade
-    /// memory/performance trade-off or not.
-    pub vars: Vec<(InstId, u32, VarLocs<Reg>, VarLocs<Reg>)>,
+}
+
+#[derive(Debug)]
+pub(super) struct DeoptVar<Reg: RegT> {
+    pub bitw: u32,
+    pub fromvlocs: VarLocs<Reg>,
+    pub tovlocs: VarLocs<Reg>,
 }

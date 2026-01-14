@@ -94,7 +94,9 @@ use crate::{
         CompilationError, CompiledTrace, DeoptSafepoint,
         j2::{
             codebuf::ExeCodeBuf,
-            compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2TraceStart},
+            compiled_trace::{
+                DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace, J2TraceStart,
+            },
             hir::*,
             regalloc::{RegAlloc, RegFill, RegT, VarLoc, VarLocs},
         },
@@ -290,6 +292,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 0,
                 gextra.bid,
                 SmallVec::new(),
+                Vec::new(),
                 None,
             );
         }
@@ -305,14 +308,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     ) -> Result<(), CompilationError> {
         assert_eq!(guards.len(), self.m.guard_extras().len());
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-        for (i, guard) in guards.into_iter().enumerate() {
+        for (i, mut guard) in guards.into_iter().enumerate() {
             let patch_label = self.be.guard_end(self.m.trid, AsmGuardIdx::from(i))?;
             let gextra = self.m.guard_extra(guard.geidx);
 
             let mut stack_off = guard.stack_off;
-            assert_eq!(gextra.entry_vars.len(), guard.entry_vlocs.len());
-            let mut entry_vlocs = guard.entry_vlocs;
-            for (iidx, vlocs) in gextra.entry_vars.iter().zip(entry_vlocs.iter_mut()) {
+            assert_eq!(gextra.exit_vars.len(), guard.exit_vlocs.len());
+            for (iidx, vlocs) in gextra.exit_vars.iter().zip(guard.exit_vlocs.iter_mut()) {
                 // If a value only exists in a register(s), we need to pick one of those registers,
                 // and ensure it's spilt.
                 if vlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
@@ -330,57 +332,49 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let deopt_frames = gextra
-                .exit_frames
-                .iter()
-                .map(
-                    |Frame {
-                         pc,
-                         pc_safepoint,
-                         exit_vars,
-                     }| {
-                        let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
-                        assert_eq!(exit_vars.len(), pc_safepoint.lives.len());
-                        assert_eq!(exit_vars.len(), smap.live_vals.len());
-                        DeoptFrame {
-                            pc: pc.clone(),
-                            pc_safepoint,
-                            vars: exit_vars
-                                .iter()
-                                .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
-                                .map(|(iidx, (aot_op, smap_loc))| {
-                                    let fromvlocs = entry_vlocs
-                                        [gextra.entry_vars.iter().position(|x| x == iidx).unwrap()]
-                                    .iter()
-                                    // FIXME (optimisation): We don't need to spill everything
-                                    // before deopt / side-traces.
-                                    .filter(|x| !matches!(x, VarLoc::Reg(_, _)))
-                                    .cloned()
-                                    .collect::<VarLocs<_>>();
-                                    let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
-                                    if fromvlocs == tovlocs {
-                                        // Optimise away situations where we would just move a
-                                        // value from VLoc X to VLoc X.
-                                        tovlocs = VarLocs::new();
-                                    }
-                                    (
-                                        aot_op.to_inst_id(),
-                                        entry.inst_bitw(self.m, *iidx),
-                                        fromvlocs,
-                                        tovlocs,
-                                    )
-                                })
-                                .collect::<Vec<_>>(),
-                        }
-                    },
-                )
-                .collect::<SmallVec<[_; 1]>>();
+            let mut deopt_frames = SmallVec::with_capacity(gextra.exit_frames.len());
+            let mut deopt_vars = Vec::with_capacity(gextra.exit_vars.len());
+            let mut entry_var_off = 0;
+            for Frame { pc, pc_safepoint } in gextra.exit_frames.iter() {
+                let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
+                for (iidx, (_aot_op, smap_loc)) in gextra.exit_vars
+                    [entry_var_off..entry_var_off + pc_safepoint.lives.len()]
+                    .iter()
+                    .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
+                {
+                    let fromvlocs = guard.exit_vlocs
+                        [gextra.exit_vars.iter().position(|x| x == iidx).unwrap()]
+                    .iter()
+                    // FIXME (optimisation): We don't need to spill everything
+                    // before deopt / side-traces.
+                    .filter(|x| !matches!(x, VarLoc::Reg(_, _)))
+                    .cloned()
+                    .collect::<VarLocs<_>>();
+                    let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
+                    if fromvlocs == tovlocs {
+                        // Optimise away situations where we would just move a
+                        // value from VLoc X to VLoc X.
+                        tovlocs = VarLocs::new();
+                    }
+                    deopt_vars.push(DeoptVar {
+                        bitw: entry.inst_bitw(self.m, *iidx),
+                        fromvlocs,
+                        tovlocs,
+                    });
+                }
+                entry_var_off += pc_safepoint.lives.len();
+                deopt_frames.push(DeoptFrame {
+                    pc: pc.clone(),
+                    pc_safepoint,
+                });
+            }
             self.be.guard_completed(
                 guard.label,
                 patch_label,
                 stack_off - guard.stack_off,
                 gextra.bid,
                 deopt_frames,
+                deopt_vars,
                 gextra.switch.clone(),
             );
         }
@@ -507,11 +501,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 Inst::Guard(x @ Guard { geidx, .. }) => {
                     let label = self.be.i_guard(&mut ra, b, iidx, x)?;
                     let gextra = self.m.gextra(*geidx);
-                    let entry_vlocs = ra.vlocs_from_iidxs(&gextra.entry_vars);
+                    let exit_vlocs = ra.vlocs_from_iidxs(&gextra.exit_vars);
                     guards.push(AsmGuard {
                         geidx: *geidx,
                         label,
-                        entry_vlocs,
+                        exit_vlocs,
                         stack_off: ra.stack_off(),
                     });
                 }
@@ -888,7 +882,8 @@ pub(super) trait HirToAsmBackend {
         patch_label: Self::Label,
         stack_off: u32,
         bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 1]>,
+        deopt_frames: SmallVec<[DeoptFrame; 2]>,
+        deopt_vars: Vec<DeoptVar<Self::Reg>>,
         switch: Option<Switch>,
     );
 
@@ -1022,7 +1017,8 @@ pub(super) trait HirToAsmBackend {
         inst: &FPToSI,
     ) -> Result<(), CompilationError>;
 
-    /// The instruction should use [RegCnstr::KeepAlive] for the values in `Guard::entry_vars`.
+    /// The instruction should use [super::regalloc::RegCnstr::KeepAlive] for the values in
+    /// [GuardExtra::exit_vars].
     ///
     /// The label returned should be the jump instruction to the guard body.
     fn i_guard(
@@ -1254,8 +1250,8 @@ index_vec::define_index_type! {
 struct AsmGuard<AB: HirToAsmBackend + ?Sized> {
     geidx: GuardExtraIdx,
     label: AB::Label,
-    /// Will be the same length as the matching [GuardExtra]'s `entry_vars`.
-    entry_vlocs: Vec<VarLocs<AB::Reg>>,
+    /// Will be the same length as the matching [GuardExtra::exit_vars].
+    exit_vlocs: Vec<VarLocs<AB::Reg>>,
     /// The stack offset of the register allocator at the entry point of the guard.
     stack_off: u32,
 }

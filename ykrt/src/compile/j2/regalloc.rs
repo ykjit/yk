@@ -1788,8 +1788,12 @@ pub(crate) mod test {
         compile::{
             DeoptSafepoint,
             j2::{
-                codebuf::ExeCodeBuf, compiled_trace::J2CompiledTrace, hir::Mod, hir::*,
-                hir_parser::str_to_mod, hir_to_asm::*,
+                codebuf::ExeCodeBuf,
+                compiled_trace::{DeoptFrame, DeoptVar, J2CompiledTrace},
+                hir::Mod,
+                hir::*,
+                hir_parser::str_to_mod,
+                hir_to_asm::*,
             },
             jitc_yk::aot_ir,
         },
@@ -2161,8 +2165,9 @@ pub(crate) mod test {
             _patch_label: Self::Label,
             _stack_off: u32,
             _bid: aot_ir::BBlockId,
-            _deopt_frames: SmallVec<[crate::compile::j2::compiled_trace::DeoptFrame<Self::Reg>; 1]>,
-            _switch: Option<crate::compile::j2::hir::Switch>,
+            _deopt_frames: SmallVec<[DeoptFrame; 2]>,
+            _deopt_vars: Vec<DeoptVar<Self::Reg>>,
+            _switch: Option<Switch>,
         ) {
         }
 
@@ -2380,7 +2385,10 @@ pub(crate) mod test {
                 ..
             }: &Guard,
         ) -> Result<Self::Label, CompilationError> {
-            let GuardExtra { entry_vars, .. } = self.m.gextra(*geidx);
+            let GuardExtra {
+                exit_vars: entry_vars,
+                ..
+            } = self.m.gextra(*geidx);
             let [cndr, _] = ra.alloc(
                 self,
                 iidx,
