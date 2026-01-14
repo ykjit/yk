@@ -11,7 +11,6 @@ use crate::{
             regalloc::{RegFill, VarLoc, VarLocs},
             x64::x64regalloc::Reg,
         },
-        jitc_yk::aot_ir::InstId,
     },
     log::Verbosity,
     mt::{MTThread, TraceId},
@@ -314,16 +313,13 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
 /// Reconstruct the stack for a frame, reading from the control point frame `cpfaddr` and writing
 /// to `toaddr`. Note: these two addresses can be the same.
 fn reconstruct(
-    varlocs: &[(InstId, u32, VarLocs<Reg>, VarLocs<Reg>)],
+    varlocs: &[(u32, VarLocs<Reg>, VarLocs<Reg>)],
     gp_regs: &mut [u64; DeoptGpReg::COUNT],
     fp_regs: &mut [u64; DeoptFpReg::COUNT],
     srcaddr: *const u8,
     tgtaddr: *mut u8,
 ) {
-    for (_, bitw, fromvlocs, tovlocs) in varlocs
-        .iter()
-        .filter(|(_, _, _, tovlocs)| !tovlocs.is_empty())
-    {
+    for (bitw, fromvlocs, tovlocs) in varlocs.iter().filter(|(_, _, tovlocs)| !tovlocs.is_empty()) {
         // FIXME: For now, we only deal with 1 fromvloc.
         assert_eq!(fromvlocs.len(), 1, "{fromvlocs:?}");
         let fromvloc = fromvlocs.iter().next().unwrap();

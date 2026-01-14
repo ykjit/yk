@@ -335,7 +335,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             for Frame { pc, pc_safepoint } in gextra.exit_frames.iter() {
                 let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
                 let mut vars = Vec::with_capacity(pc_safepoint.lives.len());
-                for (iidx, (aot_op, smap_loc)) in gextra.entry_vars
+                for (iidx, (_aot_op, smap_loc)) in gextra.entry_vars
                     [entry_var_off..entry_var_off + pc_safepoint.lives.len()]
                     .iter()
                     .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
@@ -354,12 +354,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         // value from VLoc X to VLoc X.
                         tovlocs = VarLocs::new();
                     }
-                    vars.push((
-                        aot_op.to_inst_id(),
-                        entry.inst_bitw(self.m, *iidx),
-                        fromvlocs,
-                        tovlocs,
-                    ));
+                    vars.push((entry.inst_bitw(self.m, *iidx), fromvlocs, tovlocs));
                 }
                 entry_var_off += pc_safepoint.lives.len();
                 deopt_frames.push(DeoptFrame {

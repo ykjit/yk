@@ -242,9 +242,9 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
 pub(super) struct DeoptFrame<Reg: RegT> {
     pub pc: InstId,
     pub pc_safepoint: &'static DeoptSafepoint,
-    /// The information necessary for deopt and side-tracing: in a sense we precalculate this from
-    /// `self.vars` to (a) avoid us having to carry around a [hir::Module] (b) optimise how much we
-    /// need to read/write. It's currently unclear whether doing this is a good trade
-    /// memory/performance trade-off or not.
-    pub vars: Vec<(InstId, u32, VarLocs<Reg>, VarLocs<Reg>)>,
+    /// Information about each variable, stored in the same order as `pc_safepoint.lives`. In a
+    /// sense we precalculate this from `self.vars` to (a) avoid us having to carry around a
+    /// [hir::Module] (b) optimise how much we need to read/write. It's currently unclear whether
+    /// doing this is a good trade memory/performance trade-off or not.
+    pub vars: Vec<(u32, VarLocs<Reg>, VarLocs<Reg>)>,
 }

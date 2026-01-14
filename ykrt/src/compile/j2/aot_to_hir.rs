@@ -607,8 +607,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         for dframe in dframes {
             assert_eq!(dframe.vars.len(), dframe.pc_safepoint.lives.len());
             let mut locals = HashMap::with_capacity(dframe.vars.len());
-            for (iid, _bitw, fromvlocs, _tovlocs) in &dframe.vars {
-                let tyidx = self.p_ty(self.am.inst(iid).def_type(self.am).unwrap())?;
+            for (iid, (_bit, fromvlocs, _tovlocs)) in dframe
+                .pc_safepoint
+                .lives
+                .iter()
+                .map(|x| x.to_inst_id())
+                .zip(dframe.vars.iter())
+            {
+                let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
                 let iidx = if fromvlocs
                     .iter()
                     .any(|vloc| matches!(vloc, VarLoc::Const(_)))
