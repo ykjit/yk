@@ -292,6 +292,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 0,
                 gextra.bid,
                 SmallVec::new(),
+                Vec::new(),
                 None,
             );
         }
@@ -333,10 +334,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
 
             let mut deopt_frames = SmallVec::with_capacity(gextra.exit_frames.len());
+            let mut deopt_vars = Vec::with_capacity(gextra.entry_vars.len());
             let mut entry_var_off = 0;
             for Frame { pc, pc_safepoint } in gextra.exit_frames.iter() {
                 let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
-                let mut vars = Vec::with_capacity(pc_safepoint.lives.len());
                 for (iidx, (_aot_op, smap_loc)) in gextra.entry_vars
                     [entry_var_off..entry_var_off + pc_safepoint.lives.len()]
                     .iter()
@@ -356,7 +357,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         // value from VLoc X to VLoc X.
                         tovlocs = VarLocs::new();
                     }
-                    vars.push(DeoptVar {
+                    deopt_vars.push(DeoptVar {
                         bitw: entry.inst_bitw(self.m, *iidx),
                         fromvlocs,
                         tovlocs,
@@ -366,7 +367,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 deopt_frames.push(DeoptFrame {
                     pc: pc.clone(),
                     pc_safepoint,
-                    vars,
                 });
             }
             self.be.guard_completed(
@@ -375,6 +375,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 stack_off - guard.stack_off,
                 gextra.bid,
                 deopt_frames,
+                deopt_vars,
                 gextra.switch.clone(),
             );
         }
@@ -882,7 +883,8 @@ pub(super) trait HirToAsmBackend {
         patch_label: Self::Label,
         stack_off: u32,
         bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 2]>,
+        deopt_frames: SmallVec<[DeoptFrame; 2]>,
+        deopt_vars: Vec<DeoptVar<Self::Reg>>,
         switch: Option<Switch>,
     );
 

@@ -38,7 +38,9 @@ use crate::{
         CompilationError, DeoptSafepoint,
         j2::{
             codebuf::{CodeBufInProgress, ExeCodeBuf},
-            compiled_trace::{DeoptFrame, J2CompiledGuard, J2CompiledTrace, J2TraceStart},
+            compiled_trace::{
+                DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace, J2TraceStart,
+            },
             hir::*,
             hir_to_asm::{AsmGuardIdx, HirToAsmBackend},
             regalloc::{AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
@@ -905,6 +907,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     IntermediateGuard {
                         bid,
                         deopt_frames,
+                        deopt_vars,
                         extra_stack_len,
                         switch,
                         ..
@@ -914,6 +917,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     J2CompiledGuard::new(
                         bid,
                         deopt_frames,
+                        deopt_vars,
                         u32::try_from(patch_off).unwrap(),
                         extra_stack_len,
                         switch,
@@ -1424,27 +1428,28 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn guard_completed(
         &mut self,
-        entry_label: Self::Label,
+        start_label: Self::Label,
         patch_label: Self::Label,
         extra_stack_len: u32,
         bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame<Self::Reg>; 2]>,
+        deopt_frames: SmallVec<[DeoptFrame; 2]>,
+        deopt_vars: Vec<DeoptVar<Reg>>,
         switch: Option<Switch>,
     ) {
-        let stack_off = i32::try_from(extra_stack_len).unwrap();
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,
             IcedReg::RSP,
-            stack_off.next_multiple_of(16),
+            i32::try_from(extra_stack_len).unwrap().next_multiple_of(16),
         ));
 
-        self.asm.attach_label(entry_label);
+        self.asm.attach_label(start_label);
         self.asm.block_completed();
 
         self.guards.push(IntermediateGuard {
             patch_label,
             bid,
             deopt_frames,
+            deopt_vars,
             extra_stack_len,
             switch,
         });
@@ -3846,7 +3851,8 @@ enum RegOrMemOp {
 struct IntermediateGuard {
     patch_label: LabelIdx,
     bid: aot_ir::BBlockId,
-    deopt_frames: SmallVec<[DeoptFrame<Reg>; 2]>,
+    deopt_frames: SmallVec<[DeoptFrame; 2]>,
+    deopt_vars: Vec<DeoptVar<Reg>>,
     extra_stack_len: u32,
     switch: Option<Switch>,
 }

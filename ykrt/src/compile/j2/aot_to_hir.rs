@@ -20,7 +20,7 @@ use crate::{
         CompilationError, CompiledTrace, GuardId,
         j2::{
             J2,
-            compiled_trace::{DeoptVar, J2CompiledTrace, J2TraceStart},
+            compiled_trace::{DeoptFrame, DeoptVar, J2CompiledTrace, J2TraceStart},
             hir,
             hir_to_asm::AsmGuardIdx,
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
@@ -602,17 +602,15 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         _tgt_ctr: &Arc<J2CompiledTrace<Reg>>,
     ) -> Result<Vec<VarLocs<Reg>>, CompilationError> {
         assert!(self.frames.is_empty());
-        let dframes = src_ctr.deopt_frames(src_gidx);
-        let mut entry_vars = Vec::new();
-        for dframe in dframes {
-            assert_eq!(dframe.vars.len(), dframe.pc_safepoint.lives.len());
-            let mut locals = HashMap::with_capacity(dframe.vars.len());
-            for (iid, DeoptVar { fromvlocs, .. }) in dframe
-                .pc_safepoint
-                .lives
-                .iter()
-                .map(|x| x.to_inst_id())
-                .zip(dframe.vars.iter())
+        let guard = src_ctr.guard(src_gidx);
+        let mut entry_vars = Vec::with_capacity(guard.deopt_vars.len());
+        let mut deopt_vars_off = 0;
+        for DeoptFrame { pc, pc_safepoint } in &guard.deopt_frames {
+            let mut locals = HashMap::with_capacity(pc_safepoint.lives.len());
+            for (iid, DeoptVar { fromvlocs, .. }) in
+                pc_safepoint.lives.iter().map(|x| x.to_inst_id()).zip(
+                    &guard.deopt_vars[deopt_vars_off..deopt_vars_off + pc_safepoint.lives.len()],
+                )
             {
                 let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
                 let iidx = if fromvlocs
@@ -633,10 +631,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 // there aren't any AOT arguments for any of the frames.
                 args: smallvec![],
                 locals,
-                pc: Some(dframe.pc.clone()),
-                pc_safepoint: Some(dframe.pc_safepoint),
+                pc: Some(pc.clone()),
+                pc_safepoint: Some(pc_safepoint),
                 prev_pc: None,
             });
+            deopt_vars_off += pc_safepoint.lives.len();
         }
         Ok(entry_vars)
     }

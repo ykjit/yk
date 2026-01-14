@@ -146,6 +146,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         .as_any()
         .downcast::<J2CompiledTrace<Reg>>()
         .unwrap();
+    let guard = ctr.guard(gidx);
     let mt = Arc::clone(&ctr.mt);
     mt.stats
         .timing_state(crate::log::stats::TimingState::Deopting);
@@ -158,7 +159,6 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     mt.deopt();
 
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-    let deopt_frames = &ctr.deopt_frames(gidx);
 
     // We write to the buffer backwards, starting at `stkptr + stklen`. Eventually the contents of
     // this buffer (viewed from low to high address) will be:
@@ -192,21 +192,30 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     // Deal with the control point frame: this is special because we are adjusting a frame that
     // already exists, rather than creating one from scratch.
     {
-        let frame = &deopt_frames[0];
+        let frame = &guard.deopt_frames[0];
         let (smap, prologue) = aot_smaps.get(usize::try_from(frame.pc_safepoint.id).unwrap());
         if prologue.hasfp {
             // Update RBP to represent this frame's address.
             gp_regs[DeoptGpReg::RBP.idx()] = prev_faddr as u64;
         }
-        reconstruct(&frame.vars, &mut gp_regs, &mut fp_regs, faddr, faddr);
+        reconstruct(
+            &guard.deopt_vars[0..frame.pc_safepoint.lives.len()],
+            &mut gp_regs,
+            &mut fp_regs,
+            faddr,
+            faddr,
+        );
         deoptlen += 8;
         rsp = unsafe { rsp.sub(8) };
         unsafe { (rsp as *mut u64).write(smap.offset) }
         prev_flen = usize::try_from(smap.size).unwrap();
     }
 
+    // How far through `guard.deopt_vars` are we?
+    let mut deopt_vars_off = guard.deopt_frames[0].pc_safepoint.lives.len();
+
     // Deal with all the remaining frames: we create each of these from scratch.
-    for frame in deopt_frames.iter().skip(1) {
+    for frame in guard.deopt_frames.iter().skip(1) {
         let (smap, prologue) = aot_smaps.get(usize::try_from(frame.pc_safepoint.id).unwrap());
 
         // How much room does this frame need?
@@ -264,7 +273,14 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             }
         }
 
-        reconstruct(&frame.vars, &mut gp_regs, &mut fp_regs, faddr, rbp);
+        reconstruct(
+            &guard.deopt_vars[deopt_vars_off..deopt_vars_off + frame.pc_safepoint.lives.len()],
+            &mut gp_regs,
+            &mut fp_regs,
+            faddr,
+            rbp,
+        );
+        deopt_vars_off += frame.pc_safepoint.lives.len();
 
         // Advance RSP
         rsp = unsafe { rbp.byte_sub(usize::try_from(smap.size).unwrap()) };
@@ -289,7 +305,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
 
     let fdst = {
         let (smap, prologue) =
-            aot_smaps.get(usize::try_from(deopt_frames[0].pc_safepoint.id).unwrap());
+            aot_smaps.get(usize::try_from(guard.deopt_frames[0].pc_safepoint.id).unwrap());
         if prologue.hasfp {
             unsafe { faddr.byte_sub(usize::try_from(smap.size - 8).unwrap()) }
         } else {
