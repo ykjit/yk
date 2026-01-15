@@ -477,16 +477,22 @@ impl KnownBitValue {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::opt::fullopt::test::opt_and_test;
+    use crate::compile::j2::opt::{fullopt::test::opt_and_test, strength_fold::StrengthFold};
     use std::{cell::RefCell, rc::Rc};
 
     fn test_known_bits(mod_s: &str, ptn: &str) {
         let known_bits = Rc::new(RefCell::new(KnownBits::new()));
+        let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
         opt_and_test(
             mod_s,
-            |opt, mut inst| {
-                inst.canonicalise(opt);
-                known_bits.borrow_mut().feed(opt, inst)
+            |opt, inst| {
+                match strength_fold.borrow_mut().feed(opt, inst.clone()) {
+                    OptOutcome::Rewritten(mut new_inst) => {
+                        new_inst.canonicalise(opt);
+                        known_bits.borrow_mut().feed(opt, new_inst)
+                    }
+                    x => x,
+                }
             },
             |opt, iidx, inst| known_bits.borrow_mut().inst_committed(opt, iidx, inst),
             ptn,
@@ -689,7 +695,7 @@ mod test {
           %3: i8 = or %1, %2
           %4: i1 = icmp eq %3, %0
           guard true, %4, []
-          blackbox %0
+          blackbox %3
         ",
         );
 
@@ -714,7 +720,7 @@ mod test {
           %4: i1 = icmp eq %3, %0
           guard true, %4, []
           %6: i8 = 1
-          %7: i8 = and %0, %6
+          %7: i8 = and %3, %6
           blackbox %7
         ",
         );
@@ -733,6 +739,26 @@ mod test {
           %1: i8 = arg
           %2: i1 = icmp eq %0, %1
           guard false, %2, []
+        ",
+        );
+
+        // Known bits canonicalises `icmp`.
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          %4: i8 = add %1, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          %4: i8 = add %0, %0
+          blackbox %4
         ",
         );
     }
