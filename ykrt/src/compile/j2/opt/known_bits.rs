@@ -664,6 +664,7 @@ mod test {
 
     #[test]
     fn opt_guard() {
+        // Known bits that passed through guard is correct for `or`.
         test_known_bits(
             "
           %0: i8 = arg [reg]
@@ -686,6 +687,7 @@ mod test {
         ",
         );
 
+        // Known bits that passed through guard is correct for `and`.
         test_known_bits(
             "
           %0: i8 = arg [reg]
