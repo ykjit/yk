@@ -144,12 +144,16 @@ impl KnownBits {
         opt: &mut PassOpt,
         inst @ Guard { expect, cond, .. }: Guard,
     ) -> OptOutcome {
+        if let Some(cond_b) = self.as_knownbits(opt, cond) &&
+            cond_b.all_known() {
+            return OptOutcome::NotNeeded;
+        }
         if expect
             && let cond_inst @ Inst::ICmp(ICmp {
                 pred: IPred::Eq, ..
             }) = opt.inst(cond)
         {
-            let cond_inst = cond_inst.to_owned();
+            let mut cond_inst = cond_inst.to_owned();
             cond_inst.canonicalise(opt);
             let Inst::ICmp(ICmp {
                 pred: IPred::Eq,
@@ -169,6 +173,8 @@ impl KnownBits {
                 self.knownbits_set(rhs, union);
             }
         }
+
+        self.knownbits_set(cond, KnownBitValue::from_const(ArbBitInt::from_u64(1, expect as u64)));
 
         OptOutcome::Rewritten(inst.into())
     }
@@ -710,6 +716,23 @@ mod test {
           %6: i8 = 1
           %7: i8 = and %0, %6
           blackbox %7
+        ",
+        );
+
+        // Known bits guard sets `icmp`'s result.
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          guard false, %2, []
+          guard false, %2, []
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          guard false, %2, []
         ",
         );
     }
