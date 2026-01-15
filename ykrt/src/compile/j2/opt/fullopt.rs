@@ -139,10 +139,7 @@ impl FullOpt {
     }
 
     #[cfg(test)]
-    pub(in crate::compile::j2) fn new_testing(
-        guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
-        tys: IndexVec<TyIdx, Ty>,
-    ) -> Self {
+    pub(in crate::compile::j2) fn new_testing(tys: IndexVec<TyIdx, Ty>) -> Self {
         let ty_map = HashMap::from_iter(
             tys.iter()
                 .enumerate()
@@ -158,7 +155,7 @@ impl FullOpt {
             inner: OptInternal {
                 insts: IndexVec::new(),
                 consts_map: HashMap::new(),
-                guard_extras,
+                guard_extras: IndexVec::new(),
                 tys,
                 ty_map,
             },
@@ -188,9 +185,8 @@ impl FullOpt {
             }
         }
 
-        if let Inst::Guard(Guard { ref mut geidx, .. }) = inst
-            && *geidx == GuardExtraIdx::MAX
-        {
+        if let Inst::Guard(Guard { ref mut geidx, .. }) = inst {
+            assert_eq!(*geidx, GuardExtraIdx::MAX);
             *geidx = self.inner.guard_extras.push(popt_inner.gextra.unwrap());
         } else {
             assert!(popt_inner.gextra.is_none());
@@ -288,6 +284,7 @@ impl OptT for FullOpt {
 
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
         assert_eq!(*inst.ty(self), Ty::Void);
+        assert!(!matches!(inst, Inst::Guard(_)));
         self.feed_internal(PassOptInner::new(), inst)
     }
 

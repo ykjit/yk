@@ -77,6 +77,7 @@ impl OptT for NoOpt {
 
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
         assert_eq!(*inst.ty(self), Ty::Void);
+        assert!(!matches!(inst, Inst::Guard(_)));
         Ok(Some(self.insts.push(inst)))
     }
 
