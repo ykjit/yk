@@ -487,8 +487,7 @@ mod test {
             mod_s,
             |opt, inst| {
                 match strength_fold.borrow_mut().feed(opt, inst.clone()) {
-                    OptOutcome::Rewritten(mut new_inst) => {
-                        new_inst.canonicalise(opt);
+                    OptOutcome::Rewritten(new_inst) => {
                         known_bits.borrow_mut().feed(opt, new_inst)
                     }
                     x => x,
