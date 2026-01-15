@@ -572,10 +572,6 @@ pub(super) struct FuncTy {
 }
 
 index_vec::define_index_type! {
-    pub(super) struct BlockIdx = u16;
-}
-
-index_vec::define_index_type! {
     /// The index type for extra information about guards that doesn't fit into a [Guard] object.
     pub(super) struct GuardExtraIdx = u16;
 }
