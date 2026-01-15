@@ -150,6 +150,7 @@ impl KnownBits {
             }) = opt.inst(cond)
         {
             let cond_inst = cond_inst.to_owned();
+            cond_inst.canonicalise(opt);
             let Inst::ICmp(ICmp {
                 pred: IPred::Eq,
                 lhs,
