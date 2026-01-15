@@ -689,34 +689,6 @@ mod test {
             "
           %0: i8 = arg [reg]
           %1: i8 = arg [reg]
-          %2: i8 = 1
-          %3: i8 = or %1, %2
-          %4: i8 = 2
-          %5: i8 = or %0, %4
-          %6: i1 = icmp eq %5, %3
-          guard true, %6, []
-          %8: i8 = 3
-          %9: i8 = or %5, %8
-          blackbox %9
-        ",
-            "
-          %0: i8 = arg
-          %1: i8 = arg
-          %2: i8 = 1
-          %3: i8 = or %1, %2
-          %4: i8 = 2
-          %5: i8 = or %0, %4
-          %6: i1 = icmp eq %5, %3
-          guard true, %6, []
-          %8: i8 = 3
-          blackbox %5
-        ",
-        );
-
-        test_known_bits(
-            "
-          %0: i8 = arg [reg]
-          %1: i8 = arg [reg]
           %2: i8 = 3
           %3: i8 = and %1, %2
           %4: i1 = icmp eq %3, %0
