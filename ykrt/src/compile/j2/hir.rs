@@ -245,6 +245,7 @@ pub(super) struct Mod<Reg: RegT> {
     pub tys: IndexVec<TyIdx, Ty>,
     /// Extra information that is too big to fit in a [Guard] instruction.
     pub guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
+    pub gblocks: IndexVec<GuardBlockIdx, Block>,
     /// A map of names to pointers. Will be `None` if logging was disabled.
     pub addr_name_map: Option<HashMap<usize, Option<String>>>,
 }
@@ -272,20 +273,29 @@ impl<Reg: RegT> Mod<Reg> {
     pub(super) fn guard_extra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
         &self.guard_extras[geidx]
     }
-
-    pub(super) fn guard_extras(&self) -> &[GuardExtra] {
-        self.guard_extras.as_raw_slice()
-    }
 }
 
 impl<Reg: RegT> Display for Mod<Reg> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let gblocks = self
+            .gblocks
+            .iter_enumerated()
+            .map(|(x, y)| format!("; guard {}\n{}", usize::from(x), y.to_string(self)))
+            .collect::<Vec<_>>();
+        let gblocks = if !gblocks.is_empty() {
+            format!("\n{}", gblocks.join("\n"))
+        } else {
+            "".to_owned()
+        };
         match &self.trace_end {
-            TraceEnd::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            TraceEnd::Loop { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            TraceEnd::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
+            TraceEnd::Coupler { entry, .. } => write!(f, "{}{gblocks}", entry.to_string(self)),
+            TraceEnd::Loop { entry, peel, .. } => {
+                assert!(peel.is_none());
+                write!(f, "{}{gblocks}", entry.to_string(self))
+            }
+            TraceEnd::Return { entry, .. } => write!(f, "{}{gblocks}", entry.to_string(self)),
             #[cfg(test)]
-            TraceEnd::Test { block, .. } => write!(f, "{}", block.to_string(self)),
+            TraceEnd::Test { block, .. } => write!(f, "{}{gblocks}", block.to_string(self)),
         }
     }
 }
@@ -449,6 +459,15 @@ impl Block {
         self.insts.len()
     }
 
+    /// Return a slice of the variables referenced in this block's [Term] instruction (which, by
+    /// definition, must be the last instruction in the [Block]).
+    pub(super) fn term_vars(&self) -> &[InstIdx] {
+        let Inst::Term(Term(x)) = self.insts.last().as_ref().unwrap() else {
+            panic!()
+        };
+        x
+    }
+
     /// Return true if there are heap effects in `range` that interfere with the instruction at
     /// `on`.
     pub(super) fn heap_effects_on<T: RangeBounds<InstIdx>>(&self, _on: InstIdx, range: T) -> bool {
@@ -569,6 +588,11 @@ pub(super) struct FuncTy {
     pub has_varargs: bool,
     /// The function's return type.
     pub rtn_tyidx: TyIdx,
+}
+
+index_vec::define_index_type! {
+    /// The index type for guard blocks.
+    pub(super) struct GuardBlockIdx = u16;
 }
 
 index_vec::define_index_type! {
@@ -2066,6 +2090,9 @@ pub(super) struct GuardExtra {
     ///  exit_frames[0] variables
     /// ```
     pub exit_vars: Vec<InstIdx>,
+    /// What guard [Block] does this [Guard] / [GuardExtra] map to? This will initially be set to
+    /// `None`; hir_to_asm will set it to [Some] when the corresponding guard [Block] is created.
+    pub gbidx: Option<GuardBlockIdx>,
 }
 
 /// If a guard relates to an AOT `switch`, this struct records the extra information we need to
@@ -3923,6 +3950,7 @@ impl<'a> Iterator for IterIidxsIterator<'a> {
                         switch: _,
                         exit_vars,
                         exit_frames: _,
+                        gbidx: _,
                     } = self.m.gextra(*geidx);
                     if self.i - 1 <= exit_vars.len() {
                         return Some(exit_vars[self.i - 2]);

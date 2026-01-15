@@ -1516,6 +1516,7 @@ mod test {
           %0: i8 = arg
           %1: i1 = 1
           term [%0]
+          ...
         ",
         );
 
@@ -1534,6 +1535,7 @@ mod test {
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
           term [%1]
+          ...
         ",
         );
 
@@ -1552,6 +1554,7 @@ mod test {
           %2: i1 = icmp ne %0, %1
           guard true, %2, []
           term [%0]
+          ...
         ",
         );
 
@@ -1582,6 +1585,7 @@ mod test {
           blackbox %3
           blackbox %3
           term [%3, %3]
+          ...
         ",
         );
 
@@ -1599,6 +1603,7 @@ mod test {
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
           term [%0, %0]
+          ...
         ",
         );
 
@@ -1632,6 +1637,7 @@ mod test {
           blackbox %3
           blackbox %3
           term [%3, %3]
+          ...
         ",
         );
     }

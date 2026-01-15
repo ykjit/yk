@@ -57,13 +57,49 @@ impl BlockLikeT for NoOpt {
 
 impl OptT for NoOpt {
     fn build(
-        self: Box<Self>,
-    ) -> (
-        Block,
-        IndexVec<GuardExtraIdx, GuardExtra>,
-        IndexVec<TyIdx, Ty>,
-    ) {
-        (Block { insts: self.insts }, self.guard_extras, self.tys)
+        mut self: Box<Self>,
+    ) -> Result<
+        (
+            Block,
+            IndexVec<GuardExtraIdx, GuardExtra>,
+            IndexVec<GuardBlockIdx, Block>,
+            IndexVec<TyIdx, Ty>,
+        ),
+        CompilationError,
+    > {
+        let mut guards = IndexVec::with_capacity(self.guard_extras.len());
+        // Because we update the `GuardExtra` at the end of each iteration, the borrow checker
+        // won't let us iterate over the `guard_extras` directly _and_ call `self.inst`, so we have
+        // to iterate over the indices.
+        for i in 0..self.guard_extras.len() {
+            let mut ginsts = IndexVec::with_capacity(self.guard_extras[i].exit_vars.len());
+            for iidx in &self.guard_extras[i].exit_vars {
+                match self.inst(*iidx) {
+                    Inst::Const(x) => {
+                        ginsts.push(x.clone().into());
+                    }
+                    Inst::Guard(_) => panic!(),
+                    Inst::Term(_) => panic!(),
+                    x => {
+                        ginsts.push(Inst::Arg(Arg {
+                            tyidx: *self.ty_map.get(x.ty(&*self)).unwrap(),
+                        }));
+                    }
+                }
+            }
+            ginsts.push(Inst::Term(Term(
+                (0..self.guard_extras[i].exit_vars.len())
+                    .map(InstIdx::from)
+                    .collect::<Vec<_>>(),
+            )));
+            self.guard_extras[i].gbidx = Some(guards.push(Block { insts: ginsts }));
+        }
+        Ok((
+            Block { insts: self.insts },
+            self.guard_extras,
+            guards,
+            self.tys,
+        ))
     }
 
     fn peel(self) -> (Block, Block) {
@@ -72,6 +108,7 @@ impl OptT for NoOpt {
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         assert_ne!(*inst.ty(self), Ty::Void);
+        assert!(!matches!(inst, Inst::Guard(_)));
         Ok(self.insts.push(inst))
     }
 
@@ -83,6 +120,7 @@ impl OptT for NoOpt {
 
     fn feed_arg(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         assert_matches!(inst, Inst::Arg(_) | Inst::Const(_));
+        assert!(!matches!(inst, Inst::Guard(_)));
         self.feed(inst)
     }
 

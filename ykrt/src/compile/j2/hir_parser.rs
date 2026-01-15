@@ -82,6 +82,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
 
         let mut entry_vlocs = Vec::new();
         let mut guards = IndexVec::new();
+        let mut gblocks = IndexVec::new();
         let mut testregiter = Reg::iter_test_regs();
         let mut autoregused = false;
         let mut manualregused = false;
@@ -467,12 +468,32 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into_iter()
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
+                    let mut ginsts = IndexVec::with_capacity(exit_vars.len());
+                    for iidx in &exit_vars {
+                        match &self.insts[*iidx] {
+                            Inst::Const(x) => {
+                                ginsts.push(x.clone().into());
+                            }
+                            Inst::Guard(_) => panic!(),
+                            Inst::Term(_) => panic!(),
+                            x => {
+                                ginsts.push(Inst::Arg(Arg {
+                                    tyidx: *self.ty_map.get(x.ty(&self)).unwrap(),
+                                }));
+                            }
+                        }
+                    }
+                    ginsts.push(Inst::Term(Term(
+                        (0..exit_vars.len()).map(InstIdx::from).collect::<Vec<_>>(),
+                    )));
+                    let gbidx = Some(gblocks.push(Block { insts: ginsts }));
                     let bid = BBlockId::new(FuncIdx::from(0), BBlockIdx::from(0));
                     let geidx = guards.push(GuardExtra {
                         bid,
                         switch: None,
                         exit_vars,
                         exit_frames: SmallVec::new(),
+                        gbidx,
                     });
                     self.insts.push(Inst::Guard(Guard {
                         geidx,
@@ -874,6 +895,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             trace_end: TraceEnd::Test { entry_vlocs, block },
             tys: self.tys,
             guard_extras: guards,
+            gblocks,
             addr_name_map: None,
         };
         m.assert_well_formed();
@@ -947,6 +969,24 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             AstTy::Ptr => self.push_ty(Ty::Ptr(0)),
             AstTy::Void => self.push_ty(Ty::Void),
         }
+    }
+}
+
+impl<'lexer, 'input: 'lexer, Reg: RegT> ModLikeT for HirParser<'lexer, 'input, Reg> {
+    fn ty(&self, tyidx: TyIdx) -> &Ty {
+        &self.tys[tyidx]
+    }
+
+    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
+        todo!()
+    }
+
+    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
+        todo!()
+    }
+
+    fn addr_to_name(&self, _addr: usize) -> Option<&str> {
+        todo!()
     }
 }
 

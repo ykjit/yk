@@ -301,6 +301,7 @@ mod test {
           %5: i8 = load %1
           blackbox %4
           blackbox %5
+          term [%0, %1]
         ",
             "
           %0: ptr = arg
@@ -310,6 +311,8 @@ mod test {
           %4: i8 = load %0
           blackbox %4
           blackbox %4
+          term [%0, %0]
+          ...
         ",
         );
     }

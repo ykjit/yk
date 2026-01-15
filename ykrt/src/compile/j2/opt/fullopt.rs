@@ -297,13 +297,44 @@ impl BlockLikeT for FullOpt {
 
 impl OptT for FullOpt {
     fn build(
-        self: Box<Self>,
-    ) -> (
-        Block,
-        IndexVec<GuardExtraIdx, GuardExtra>,
-        IndexVec<TyIdx, Ty>,
-    ) {
+        mut self: Box<Self>,
+    ) -> Result<
         (
+            Block,
+            IndexVec<GuardExtraIdx, GuardExtra>,
+            IndexVec<GuardBlockIdx, Block>,
+            IndexVec<TyIdx, Ty>,
+        ),
+        CompilationError,
+    > {
+        let mut gblocks = IndexVec::with_capacity(self.inner.guard_extras.len());
+        // Because we update the `GuardExtra` at the end of each iteration, the borrow checker
+        // won't let us iterate over the `guard_extras` directly _and_ call `self.inst`, so we have
+        // to iterate over the indices.
+        for i in 0..self.inner.guard_extras.len() {
+            let mut ginsts = IndexVec::with_capacity(self.inner.guard_extras[i].exit_vars.len());
+            for iidx in &self.inner.guard_extras[i].exit_vars {
+                match self.inst(*iidx) {
+                    Inst::Const(x) => {
+                        ginsts.push(x.clone().into());
+                    }
+                    Inst::Guard(_) => panic!(),
+                    Inst::Term(_) => panic!(),
+                    x => {
+                        ginsts.push(Inst::Arg(Arg {
+                            tyidx: *self.inner.ty_map.get(x.ty(&*self)).unwrap(),
+                        }));
+                    }
+                }
+            }
+            ginsts.push(Inst::Term(Term(
+                (0..self.inner.guard_extras[i].exit_vars.len())
+                    .map(InstIdx::from)
+                    .collect::<Vec<_>>(),
+            )));
+            self.inner.guard_extras[i].gbidx = Some(gblocks.push(Block { insts: ginsts }));
+        }
+        Ok((
             Block {
                 insts: self
                     .inner
@@ -313,8 +344,9 @@ impl OptT for FullOpt {
                     .collect::<IndexVec<_, _>>(),
             },
             self.inner.guard_extras,
+            gblocks,
             self.inner.tys,
-        )
+        ))
     }
 
     fn peel(self) -> (Block, Block) {
@@ -638,6 +670,9 @@ pub(in crate::compile::j2::opt) mod test {
         static ref TEXT_RE: Regex = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
     }
 
+    /// Take an input module string `mod_s` and run it through user-defined passes in the function
+    /// `feed_f`. After each call of `feed_f`, `inst_committed` and/or `equiv_committed` will be
+    /// called as appropriate.
     pub(in crate::compile::j2::opt) fn opt_and_test<F, G, H>(
         mod_s: &str,
         feed_f: F,
@@ -653,6 +688,9 @@ pub(in crate::compile::j2::opt) mod test {
         let mut fopt = Box::new(FullOpt::new());
         fopt.inner.guard_extras = m.guard_extras;
         fopt.inner.tys = m.tys;
+        for (tyidx, ty) in fopt.inner.tys.iter_enumerated() {
+            fopt.inner.ty_map.insert(ty.clone(), tyidx);
+        }
         let TraceEnd::Test {
             entry_vlocs,
             block: Block { insts },
@@ -728,13 +766,14 @@ pub(in crate::compile::j2::opt) mod test {
                 equiv: InstIdx::MAX,
             });
         }
-        let (block, guard_extras, tys) = fopt.build();
+        let (block, guard_extras, gblocks, tys) = fopt.build().unwrap();
         let m = Mod {
             trid: m.trid,
             trace_start: TraceStart::Test,
             trace_end: TraceEnd::Test { entry_vlocs, block },
             tys,
             guard_extras,
+            gblocks,
             addr_name_map: None,
         };
         let s = m.to_string();
@@ -796,6 +835,7 @@ pub(in crate::compile::j2::opt) mod test {
           blackbox %4
           blackbox %4
           term [%4]
+          ...
         ",
         );
 
@@ -825,6 +865,46 @@ pub(in crate::compile::j2::opt) mod test {
           blackbox %3
           blackbox %3
           term [%3, %3]
+          ...
+        ",
+        );
+    }
+
+    #[test]
+    fn guard_blocks() {
+        fn test_canon(mod_s: &str, ptn: &str) {
+            opt_and_test(
+                mod_s,
+                |opt, mut inst| {
+                    inst.canonicalise(opt);
+                    OptOutcome::Rewritten(inst)
+                },
+                |_, _, _| (),
+                |_, _| (),
+                ptn,
+            );
+        }
+
+        test_canon(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          %3: i1 = 0
+          guard true, %3, [%0, %3]
+          term [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          %3: i1 = 0
+          guard true, %3, [%0, %3]
+          term [%0, %1]
+          ; guard 0
+          %0: i8 = arg
+          %1: i1 = 0
+          term [%0, %1]
         ",
         );
     }
