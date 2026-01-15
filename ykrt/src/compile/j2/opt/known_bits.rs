@@ -327,7 +327,7 @@ impl KnownBitValue {
         }
     }
 
-    /// Combines the information of `self` with `other`.
+    /// Union all the known ones in `self` with the known ones in `other`.
     fn union(&self, other: &KnownBitValue) -> KnownBitValue {
         let ones = self.ones.bitor(&other.ones);
         let unknowns = self.unknowns.bitand(&other.unknowns);
