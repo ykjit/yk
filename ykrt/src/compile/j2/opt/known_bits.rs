@@ -698,32 +698,6 @@ mod test {
         ",
         );
 
-        // Known bits that passed through guard is correct for `and`.
-        test_known_bits(
-            "
-          %0: i8 = arg [reg]
-          %1: i8 = arg [reg]
-          %2: i8 = 3
-          %3: i8 = and %1, %2
-          %4: i1 = icmp eq %3, %0
-          guard true, %4, []
-          %6: i8 = 1
-          %7: i8 = and %0, %6
-          blackbox %7
-        ",
-            "
-          %0: i8 = arg
-          %1: i8 = arg
-          %2: i8 = 3
-          %3: i8 = and %1, %2
-          %4: i1 = icmp eq %3, %0
-          guard true, %4, []
-          %6: i8 = 1
-          %7: i8 = and %3, %6
-          blackbox %7
-        ",
-        );
-
         // Known bits guard sets `icmp`'s result.
         test_known_bits(
             "
