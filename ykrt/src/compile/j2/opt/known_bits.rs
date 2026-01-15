@@ -174,7 +174,7 @@ impl KnownBits {
             }
         }
 
-        self.knownbits_set(cond, KnownBitValue::from_const(ArbBitInt::from_u64(1, expect as u64)));
+        self.knownbits_set(cond, KnownBitValue::from_const(ArbBitInt::from_u64(1, u64::from(expect))));
 
         OptOutcome::Rewritten(inst.into())
     }
