@@ -55,6 +55,19 @@
 //! optimisation is complete, and a HIR [Module] is created, we throw away all notions of
 //! equivalence: they are by definition baked into the optimised trace.
 //!
+//! Equivalence is identified in two distinct ways:
+//!
+//! 1. When an instruction A is fed into the optimiser, it might be identified as equivalent to an
+//!    existing instruction B, at which point A will be discarded, and the caller informed that B
+//!    can be used instead of A.
+//! 2. During optimisation, two earlier instructions might be identified as equivalent.
+//!
+//! In the case of (1), B is by definition the "winner": A is never inserted. In the case of (2),
+//! the winner is the instruction that will be used henceforth. If A and B are identified as
+//! equivalent, then: if one, but not both, of A or B is a constant, that instruction is the
+//! winner; otherwise B will be the winner. This latter condition is not fundamental, but is
+//! necessary to make writing tests plausible.
+//!
 //!
 //! ## Structure of the optimiser
 //!
@@ -63,24 +76,32 @@
 //! [OptInternal]: the outer and inner parts both have access to this, passing ownership between
 //! themselves as appropriate.
 //!
-//!
-//! ## Preinstructions
-//!
 //! The optimiser API is deliberately simple: an instruction goes into the optimisation chain and
 //! passes operate on it. At the end it is either: committed to the trace; determined to be
 //! equivalent to another instruction; or shown not to be needed at all.
 //!
-//! However, sometimes when transforming an instruction one needs to ensure that other instructions
-//! (typically constants) are present in the trace. This does not fit with the "optimise one
-//! instruction" model. The [PassOpt] API thus has the concept of "preinstructions": that is,
-//! instructions which will be committed to the trace before the current instruction.
-//! Preinstructions should be used carefully:
+//!
+//! ## Committing a pass's results
+//!
+//! As a pass operates, it may wish to add new instructions to the trace and/or identify new
+//! instruction equivalences. To keep passes simple, nothing about a trace is mutated _during_ a
+//! pass: instead a pass can identify changes which will be committed _after_ the pass has
+//! completed. For clarity: if pass A identifies changes, those will be committed before pass B is
+//! run.
+//!
+//!
+//! ### Preinstructions
+//!
+//! Inserting instructions into the trace does not fit with the "optimise one instruction" model.
+//! The [PassOpt] API thus has the concept of "preinstructions": that is, instructions which will
+//! be committed to the trace before the current instruction. Preinstructions should be used
+//! carefully:
 //!
 //! 1. They are only committed at the _end_ of the current pass. In other words, if a pass P calls
 //!    [PassOpt::push_pre_inst] then those instructions are not accessible via [PassOpt::inst] for
 //!    the duration of P. As soon as P has completed, the preinstructions will be committed, and
 //!    subsequent passes will have access to them. Note: it is guaranteed that the [InstIdx]s
-//!    returned by [PassOPt::push_pre_inst] will be valid after the preinstructions are
+//!    returned by [PassOpt::push_pre_inst] will be valid after the preinstructions are
 //!    subsequently committed.
 //!
 //! 2. They are committed unconditionally at the end of a pass, even if a subsequent pass proves
@@ -91,6 +112,14 @@
 //! pressure on dead-code elimination, but not on the eventual compiled trace. However, for
 //! side-effectful instructions of any kind, one should be extremely cautious about committing them
 //! as preinstructions.
+//!
+//!
+//! ### New equivalences
+//!
+//! As a pass operates, it may identify that two previous instructions in the trace are now
+//! equivalent to each other. [PassOpt::push_equiv] can be called as often as desired during a
+//! pass, bearing in mind that these instruction equivalences will only be committed when the pass
+//! completes.
 
 use crate::compile::{
     CompilationError,
@@ -174,14 +203,26 @@ impl FullOpt {
                 inner: &mut popt_inner,
             };
 
-            match self.passes[i].feed(&mut opt, inst) {
-                OptOutcome::NotNeeded => return Ok(None),
-                OptOutcome::Rewritten(new_inst) => inst = new_inst,
-                OptOutcome::Equiv(iidx) => return Ok(Some(iidx)),
-            }
+            let fed = self.passes[i].feed(&mut opt, inst);
 
             for inst in popt_inner.pre_insts.drain(..) {
                 self.commit_inst_dedup_opt(inst);
+            }
+
+            for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
+                assert_eq!(equiv1, self.equiv_iidx(equiv1));
+                assert_eq!(equiv2, self.equiv_iidx(equiv2));
+                match (self.inst(equiv1), self.inst(equiv2)) {
+                    (Inst::Const(_), Inst::Const(_)) => (),
+                    (_, Inst::Const(_)) => self.inner.insts.get_mut(equiv1).unwrap().equiv = equiv2,
+                    (_, _) => self.inner.insts.get_mut(equiv2).unwrap().equiv = equiv1,
+                }
+            }
+
+            match fed {
+                OptOutcome::NotNeeded => return Ok(None),
+                OptOutcome::Rewritten(new_inst) => inst = new_inst,
+                OptOutcome::Equiv(iidx) => return Ok(Some(iidx)),
             }
         }
 
@@ -463,17 +504,17 @@ impl PassOpt<'_> {
         iidx
     }
 
-    /// Henceforth consider `iidx` to be equivalent to `equiv_to` (and/or vice versa). Note: it is
-    /// the caller's job to ensure that `iidx` and `equiv_to` have already been transformed for
-    /// equivalence.
-    pub(super) fn set_equiv(&mut self, iidx: InstIdx, equiv_to: InstIdx) {
-        assert_eq!(iidx, self.equiv_iidx(iidx));
-        assert_eq!(equiv_to, self.equiv_iidx(equiv_to));
-        match (self.inst(iidx), self.inst(equiv_to)) {
-            (Inst::Const(_), Inst::Const(_)) => (),
-            (_, Inst::Const(_)) => self.optinternal.insts.get_mut(iidx).unwrap().equiv = equiv_to,
-            (_, _) => self.optinternal.insts.get_mut(equiv_to).unwrap().equiv = iidx,
-        }
+    /// When the current pass has completed, `equiv1` will be considered equivalent to `equiv2`.
+    /// One of these will necessarily be picked as the "winner" in the sense that, after this pass,
+    /// `equiv1` will always be rewritten to `equiv2` or vice versa. If one, but both, of the
+    /// instructions is a constant, it is guaranteed to be the winner; otherwise `equiv2` will be
+    /// picked as the winner. The latter is not fundamental, but is necessary to make writing tests
+    /// plausible.
+    ///
+    /// Note: it is the caller's job to ensure that `iidx` and `equiv_to` have already been
+    /// transformed for equivalence.
+    pub(super) fn push_equiv(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
+        self.inner.new_equivs.push((equiv1, equiv2));
     }
 }
 
@@ -516,22 +557,25 @@ impl EquivIIdxT for PassOpt<'_> {
 }
 
 struct PassOptInner {
-    pre_insts: SmallVec<[Inst; 1]>,
     gextra: Option<GuardExtra>,
+    new_equivs: SmallVec<[(InstIdx, InstIdx); 1]>,
+    pre_insts: SmallVec<[Inst; 1]>,
 }
 
 impl PassOptInner {
     fn new() -> Self {
         Self {
-            pre_insts: SmallVec::new(),
             gextra: None,
+            new_equivs: SmallVec::new(),
+            pre_insts: SmallVec::new(),
         }
     }
 
     fn with_gextra(gextra: GuardExtra) -> Self {
         Self {
-            pre_insts: SmallVec::new(),
             gextra: Some(gextra),
+            new_equivs: SmallVec::new(),
+            pre_insts: SmallVec::new(),
         }
     }
 }
@@ -628,7 +672,27 @@ pub(in crate::compile::j2::opt) mod test {
                 optinternal: &mut fopt.inner,
                 inner: &mut popt_inner,
             };
-            match feed_f(&mut opt, inst) {
+            let fed = feed_f(&mut opt, inst);
+
+            for inst in popt_inner.pre_insts.drain(..) {
+                let iidx = fopt.inner.insts.len_idx();
+                let opt = CommitInstOpt { inner: &fopt.inner };
+                committed_f(&opt, iidx, &inst);
+                fopt.inner.insts.push(InstEquiv {
+                    inst,
+                    equiv: InstIdx::MAX,
+                });
+            }
+
+            for (iidx, equiv_to) in popt_inner.new_equivs.drain(..) {
+                match (fopt.inst(iidx), fopt.inst(equiv_to)) {
+                    (Inst::Const(_), Inst::Const(_)) => (),
+                    (_, Inst::Const(_)) => fopt.inner.insts.get_mut(iidx).unwrap().equiv = equiv_to,
+                    (_, _) => fopt.inner.insts.get_mut(equiv_to).unwrap().equiv = iidx,
+                }
+            }
+
+            match fed {
                 OptOutcome::NotNeeded => {
                     opt_map.push(InstIdx::MAX);
                     continue;
@@ -640,16 +704,6 @@ pub(in crate::compile::j2::opt) mod test {
                     opt_map.push(iidx);
                     continue;
                 }
-            }
-
-            for inst in popt_inner.pre_insts.drain(..) {
-                let iidx = fopt.inner.insts.len_idx();
-                let opt = CommitInstOpt { inner: &fopt.inner };
-                committed_f(&opt, iidx, &inst);
-                fopt.inner.insts.push(InstEquiv {
-                    inst,
-                    equiv: InstIdx::MAX,
-                });
             }
 
             let iidx = fopt.inner.insts.len_idx();
