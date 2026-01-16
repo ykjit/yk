@@ -97,6 +97,8 @@ impl PassT for CSE {
         self.predecessors.push(prev);
         self.heads[dim_off] = InstIdx::from_usize(self.predecessors.len() - 1);
     }
+
+    fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
 }
 
 #[cfg(test)]
@@ -119,6 +121,7 @@ mod test {
                 }
             },
             |opt, iidx, inst| cse.borrow_mut().inst_committed(opt, iidx, inst),
+            |_, _| (),
             ptn,
         );
     }
