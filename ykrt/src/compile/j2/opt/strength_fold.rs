@@ -385,7 +385,7 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
             return OptOutcome::NotNeeded;
         }
         inst.canonicalise(opt);
-        opt.set_equiv(lhs, rhs);
+        opt.push_equiv(lhs, rhs);
     } else {
         inst.canonicalise(opt);
     }
