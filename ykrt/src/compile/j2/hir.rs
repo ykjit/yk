@@ -5158,7 +5158,11 @@ mod test {
 ",
         );
 
-        let mut opt = FullOpt::new_testing(m.guard_extras, m.tys);
+        // What we're doing here is feeding an "old" module (`m`) into an optimiser: that
+        // optimiser, by definition, doesn't know that we took a "complete" module as input. That
+        // can mean that we need to do a bit of fudging when translating from the "old" module to
+        // the optimiser.
+        let mut opt = FullOpt::new_testing(m.tys);
         let TraceEnd::Test {
             entry_vlocs: _,
             block: Block { insts },
@@ -5167,8 +5171,14 @@ mod test {
             panic!()
         };
         for inst in insts.into_iter() {
-            if let Inst::Guard(_) = inst {
-                opt.feed_void(inst).unwrap();
+            if let Inst::Guard(mut gd) = inst {
+                let old_geidx = gd.geidx;
+                gd.geidx = GuardExtraIdx::MAX;
+                assert!(
+                    opt.feed_guard(gd, m.guard_extras[old_geidx].clone())
+                        .unwrap()
+                        .is_some()
+                );
             } else {
                 opt.feed(inst).unwrap();
             }
