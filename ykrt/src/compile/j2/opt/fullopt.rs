@@ -212,10 +212,14 @@ impl FullOpt {
             for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
                 assert_eq!(equiv1, self.equiv_iidx(equiv1));
                 assert_eq!(equiv2, self.equiv_iidx(equiv2));
-                match (self.inst(equiv1), self.inst(equiv2)) {
-                    (Inst::Const(_), Inst::Const(_)) => (),
-                    (_, Inst::Const(_)) => self.inner.insts.get_mut(equiv1).unwrap().equiv = equiv2,
-                    (_, _) => self.inner.insts.get_mut(equiv2).unwrap().equiv = equiv1,
+                let (equiv1, equiv2) = match (self.inst(equiv1), self.inst(equiv2)) {
+                    (Inst::Const(_), Inst::Const(_)) => panic!(),
+                    (_, Inst::Const(_)) => (equiv1, equiv2),
+                    (_, _) => (equiv2, equiv1),
+                };
+                self.inner.insts.get_mut(equiv1).unwrap().equiv = equiv2;
+                for pass in &mut self.passes {
+                    pass.equiv_committed(equiv1, equiv2);
                 }
             }
 
@@ -470,6 +474,10 @@ pub(super) trait PassT {
     /// no possibility that an optimisation pass will remove it -- this
     /// function will be called on all passes.
     fn inst_committed(&mut self, ci: &CommitInstOpt, iidx: InstIdx, inst: &Inst);
+
+    /// `equiv1` and `equiv2` have been identified as equivalent and henceforth `equiv1` will be
+    /// rewritten to `equiv2`.
+    fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx);
 }
 
 /// The object passed to [PassT::feed] so that they can interact with the optimiser.
@@ -630,14 +638,16 @@ pub(in crate::compile::j2::opt) mod test {
         static ref TEXT_RE: Regex = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
     }
 
-    pub(in crate::compile::j2::opt) fn opt_and_test<F, G>(
+    pub(in crate::compile::j2::opt) fn opt_and_test<F, G, H>(
         mod_s: &str,
         feed_f: F,
-        committed_f: G,
+        inst_committed_f: G,
+        equiv_committed_f: H,
         ptn: &str,
     ) where
         for<'a> F: Fn(&'a mut PassOpt, Inst) -> OptOutcome,
         for<'a> G: Fn(&'a CommitInstOpt, InstIdx, &Inst),
+        for<'a> H: Fn(InstIdx, InstIdx),
     {
         let m = str_to_mod::<TestReg>(mod_s);
         let mut fopt = Box::new(FullOpt::new());
@@ -677,19 +687,22 @@ pub(in crate::compile::j2::opt) mod test {
             for inst in popt_inner.pre_insts.drain(..) {
                 let iidx = fopt.inner.insts.len_idx();
                 let opt = CommitInstOpt { inner: &fopt.inner };
-                committed_f(&opt, iidx, &inst);
+                inst_committed_f(&opt, iidx, &inst);
                 fopt.inner.insts.push(InstEquiv {
                     inst,
                     equiv: InstIdx::MAX,
                 });
             }
 
-            for (iidx, equiv_to) in popt_inner.new_equivs.drain(..) {
-                match (fopt.inst(iidx), fopt.inst(equiv_to)) {
-                    (Inst::Const(_), Inst::Const(_)) => (),
-                    (_, Inst::Const(_)) => fopt.inner.insts.get_mut(iidx).unwrap().equiv = equiv_to,
-                    (_, _) => fopt.inner.insts.get_mut(equiv_to).unwrap().equiv = iidx,
-                }
+            for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
+                assert_eq!(equiv1, fopt.equiv_iidx(equiv1));
+                assert_eq!(equiv2, fopt.equiv_iidx(equiv2));
+                let (equiv1, equiv2) = match (fopt.inst(equiv1), fopt.inst(equiv2)) {
+                    (_, Inst::Const(_)) => (equiv1, equiv2),
+                    (_, _) => (equiv2, equiv1),
+                };
+                fopt.inner.insts.get_mut(equiv1).unwrap().equiv = equiv2;
+                equiv_committed_f(equiv1, equiv2);
             }
 
             match fed {
@@ -709,7 +722,7 @@ pub(in crate::compile::j2::opt) mod test {
             let iidx = fopt.inner.insts.len_idx();
             opt_map.push(iidx);
             let opt = CommitInstOpt { inner: &fopt.inner };
-            committed_f(&opt, iidx, &inst);
+            inst_committed_f(&opt, iidx, &inst);
             fopt.inner.insts.push(InstEquiv {
                 inst,
                 equiv: InstIdx::MAX,
@@ -752,6 +765,7 @@ pub(in crate::compile::j2::opt) mod test {
                     StrengthFold::new().feed(opt, inst)
                 },
                 |_, _, _| (),
+                |_, _| (),
                 ptn,
             );
         }
@@ -779,9 +793,9 @@ pub(in crate::compile::j2::opt) mod test {
           %5: i1 = icmp eq %0, %4
           guard true, %3, []
           guard true, %5, []
-          blackbox %2
           blackbox %4
-          term [%2]
+          blackbox %4
+          term [%4]
         ",
         );
 

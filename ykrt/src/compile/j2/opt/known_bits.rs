@@ -47,6 +47,8 @@ impl PassT for KnownBits {
         assert_eq!(iidx.index(), self.known_bits.len());
         self.known_bits.push(self.pending_commit.clone());
     }
+
+    fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
 }
 
 impl KnownBits {
@@ -442,6 +444,7 @@ mod test {
                 }
             },
             |opt, iidx, inst| known_bits.borrow_mut().inst_committed(opt, iidx, inst),
+            |equiv1, equiv2| known_bits.borrow_mut().equiv_committed(equiv1, equiv2),
             ptn,
         );
     }

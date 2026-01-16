@@ -141,6 +141,8 @@ impl PassT for LoadStore {
             _ => (),
         }
     }
+
+    fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
 }
 
 /// An abstract "address" representing a location in RAM.
@@ -216,6 +218,7 @@ mod test {
                 }
             },
             |opt, iidx, inst| ls.borrow_mut().inst_committed(opt, iidx, inst),
+            |_, _| (),
             ptn,
         );
     }
