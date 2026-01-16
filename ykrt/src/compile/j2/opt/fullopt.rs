@@ -516,22 +516,22 @@ impl EquivIIdxT for PassOpt<'_> {
 }
 
 struct PassOptInner {
-    pre_insts: SmallVec<[Inst; 1]>,
     gextra: Option<GuardExtra>,
+    pre_insts: SmallVec<[Inst; 1]>,
 }
 
 impl PassOptInner {
     fn new() -> Self {
         Self {
-            pre_insts: SmallVec::new(),
             gextra: None,
+            pre_insts: SmallVec::new(),
         }
     }
 
     fn with_gextra(gextra: GuardExtra) -> Self {
         Self {
-            pre_insts: SmallVec::new(),
             gextra: Some(gextra),
+            pre_insts: SmallVec::new(),
         }
     }
 }
