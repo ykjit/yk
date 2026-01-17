@@ -16,17 +16,34 @@ pub(in crate::compile::j2) struct NoOpt {
     insts: IndexVec<InstIdx, Inst>,
     guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     tys: IndexVec<TyIdx, Ty>,
+    /// The [TyIdx] for [Ty::Int(1)].
+    tyidx_int1: TyIdx,
+    /// The [TyIdx] for [Ty::Ptr(0)].
+    tyidx_ptr0: TyIdx,
+    /// The [TyIdx] for [Ty::Void].
+    tyidx_void: TyIdx,
     /// ty_map is used to ensure that only distinct [Ty]s lead to new [TyIdx]s.
     ty_map: HashMap<Ty, TyIdx>,
 }
 
 impl NoOpt {
     pub(in crate::compile::j2) fn new() -> Self {
+        let mut tys = IndexVec::new();
+        let mut ty_map = HashMap::new();
+        let tyidx_void = tys.push(Ty::Void);
+        ty_map.insert(Ty::Void, tyidx_void);
+        let tyidx_ptr0 = tys.push(Ty::Ptr(0));
+        ty_map.insert(Ty::Ptr(0), tyidx_ptr0);
+        let tyidx_int1 = tys.push(Ty::Int(1));
+        ty_map.insert(Ty::Int(1), tyidx_int1);
         Self {
             insts: IndexVec::new(),
             guard_extras: IndexVec::new(),
-            tys: IndexVec::new(),
-            ty_map: HashMap::new(),
+            tys,
+            tyidx_int1,
+            tyidx_ptr0,
+            tyidx_void,
+            ty_map,
         }
     }
 }
@@ -46,6 +63,18 @@ impl ModLikeT for NoOpt {
 
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         &self.tys[tyidx]
+    }
+
+    fn tyidx_int1(&self) -> TyIdx {
+        self.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.tyidx_void
     }
 }
 
@@ -82,7 +111,7 @@ impl OptT for NoOpt {
                     Inst::Term(_) => panic!(),
                     x => {
                         ginsts.push(Inst::Arg(Arg {
-                            tyidx: *self.ty_map.get(x.ty(&*self)).unwrap(),
+                            tyidx: x.tyidx(&*self),
                         }));
                     }
                 }
@@ -107,13 +136,13 @@ impl OptT for NoOpt {
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
-        assert_ne!(*inst.ty(self), Ty::Void);
+        assert_ne!(inst.tyidx(self), self.tyidx_void);
         assert!(!matches!(inst, Inst::Guard(_)));
         Ok(self.insts.push(inst))
     }
 
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
-        assert_eq!(*inst.ty(self), Ty::Void);
+        assert_eq!(inst.tyidx(self), self.tyidx_void);
         assert!(!matches!(inst, Inst::Guard(_)));
         Ok(Some(self.insts.push(inst)))
     }

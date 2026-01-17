@@ -62,7 +62,7 @@ impl KnownBits {
 
     /// Returns what we know about the bits of `iidx`.
     fn as_knownbits(&self, opt: &mut PassOpt, iidx: InstIdx) -> Option<KnownBitValue> {
-        match opt.inst(iidx).ty(opt) {
+        match opt.ty(opt.inst(iidx).tyidx(opt)) {
             Ty::Func(_) => None,
             Ty::Void => None,
             ty => Some(

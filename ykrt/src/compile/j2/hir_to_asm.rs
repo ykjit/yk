@@ -660,7 +660,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
             if logging {
-                let ty = hinst.ty(self.m);
+                let ty = self.m.ty(hinst.tyidx(self.m));
                 if ty == &Ty::Void {
                     self.be.log(hinst.to_string(self.m, b));
                 } else {
@@ -680,7 +680,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         ra.set_entry_vlocs_at_start(&mut self.be, entry_vlocs);
         if logging {
             for (iidx, hinst) in insts_iter {
-                let ty = hinst.ty(self.m);
+                let ty = self.m.ty(hinst.tyidx(self.m));
                 let pp_vlocs = entry_vlocs[usize::from(iidx)]
                     .iter()
                     .map(|x| x.to_string())

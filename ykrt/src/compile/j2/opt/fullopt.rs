@@ -150,30 +150,14 @@ pub(in crate::compile::j2) struct FullOpt {
 
 impl FullOpt {
     pub(in crate::compile::j2) fn new() -> Self {
-        Self {
-            passes: [
-                Box::new(KnownBits::new()),
-                Box::new(StrengthFold::new()),
-                Box::new(LoadStore::new()),
-                Box::new(CSE::new()),
-            ],
-            inner: OptInternal {
-                insts: IndexVec::new(),
-                consts_map: HashMap::new(),
-                guard_extras: IndexVec::new(),
-                tys: IndexVec::new(),
-                ty_map: HashMap::new(),
-            },
-        }
-    }
-
-    #[cfg(test)]
-    pub(in crate::compile::j2) fn new_testing(tys: IndexVec<TyIdx, Ty>) -> Self {
-        let ty_map = HashMap::from_iter(
-            tys.iter()
-                .enumerate()
-                .map(|(x, y)| (y.to_owned(), TyIdx::from(x))),
-        );
+        let mut tys = IndexVec::new();
+        let mut ty_map = HashMap::new();
+        let tyidx_void = tys.push(Ty::Void);
+        ty_map.insert(Ty::Void, tyidx_void);
+        let tyidx_ptr0 = tys.push(Ty::Ptr(0));
+        ty_map.insert(Ty::Ptr(0), tyidx_ptr0);
+        let tyidx_int1 = tys.push(Ty::Int(1));
+        ty_map.insert(Ty::Int(1), tyidx_int1);
         Self {
             passes: [
                 Box::new(KnownBits::new()),
@@ -186,6 +170,39 @@ impl FullOpt {
                 consts_map: HashMap::new(),
                 guard_extras: IndexVec::new(),
                 tys,
+                tyidx_int1,
+                tyidx_ptr0,
+                tyidx_void,
+                ty_map,
+            },
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::compile::j2) fn new_testing(tys: IndexVec<TyIdx, Ty>) -> Self {
+        let ty_map = HashMap::from_iter(
+            tys.iter()
+                .enumerate()
+                .map(|(x, y)| (y.to_owned(), TyIdx::from(x))),
+        );
+        let tyidx_ptr0 = *ty_map.get(&Ty::Ptr(0)).unwrap_or_else(|| panic!());
+        let tyidx_void = *ty_map.get(&Ty::Void).unwrap_or_else(|| panic!());
+        let tyidx_int1 = *ty_map.get(&Ty::Int(1)).unwrap_or_else(|| panic!());
+        Self {
+            passes: [
+                Box::new(KnownBits::new()),
+                Box::new(StrengthFold::new()),
+                Box::new(LoadStore::new()),
+                Box::new(CSE::new()),
+            ],
+            inner: OptInternal {
+                insts: IndexVec::new(),
+                consts_map: HashMap::new(),
+                guard_extras: IndexVec::new(),
+                tys,
+                tyidx_int1,
+                tyidx_ptr0,
+                tyidx_void,
                 ty_map,
             },
         }
@@ -287,6 +304,18 @@ impl ModLikeT for FullOpt {
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         self.inner.ty(tyidx)
     }
+
+    fn tyidx_int1(&self) -> TyIdx {
+        self.inner.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.inner.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.inner.tyidx_void
+    }
 }
 
 impl BlockLikeT for FullOpt {
@@ -322,7 +351,7 @@ impl OptT for FullOpt {
                     Inst::Term(_) => panic!(),
                     x => {
                         ginsts.push(Inst::Arg(Arg {
-                            tyidx: *self.inner.ty_map.get(x.ty(&*self)).unwrap(),
+                            tyidx: x.tyidx(&*self),
                         }));
                     }
                 }
@@ -354,13 +383,13 @@ impl OptT for FullOpt {
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
-        assert_ne!(*inst.ty(self), Ty::Void);
+        assert_ne!(inst.tyidx(self), self.tyidx_void());
         self.feed_internal(PassOptInner::new(), inst)
             .map(|x| x.unwrap())
     }
 
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
-        assert_eq!(*inst.ty(self), Ty::Void);
+        assert_eq!(inst.tyidx(self), self.tyidx_void());
         assert!(!matches!(inst, Inst::Guard(_)));
         self.feed_internal(PassOptInner::new(), inst)
     }
@@ -401,6 +430,12 @@ struct OptInternal {
     consts_map: HashMap<HashableConst, InstIdx>,
     guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     tys: IndexVec<TyIdx, Ty>,
+    /// The [TyIdx] for [Ty::Int(1)].
+    tyidx_int1: TyIdx,
+    /// The [TyIdx] for [Ty::Ptr(0)].
+    tyidx_ptr0: TyIdx,
+    /// The [TyIdx] for [Ty::Void].
+    tyidx_void: TyIdx,
     /// A map allowing us to deduplicate types. This guarantees that a given [Ty] appears exactly
     /// once in a module.
     ty_map: HashMap<Ty, TyIdx>,
@@ -569,6 +604,18 @@ impl ModLikeT for PassOpt<'_> {
         self.optinternal.ty(tyidx)
     }
 
+    fn tyidx_int1(&self) -> TyIdx {
+        self.optinternal.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.optinternal.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.optinternal.tyidx_void
+    }
+
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
         if geidx == GuardExtraIdx::MAX {
             self.inner.gextra.as_ref().unwrap()
@@ -634,6 +681,18 @@ impl BlockLikeT for CommitInstOpt<'_> {
 impl ModLikeT for CommitInstOpt<'_> {
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         self.inner.ty(tyidx)
+    }
+
+    fn tyidx_int1(&self) -> TyIdx {
+        self.inner.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.inner.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.inner.tyidx_void
     }
 
     fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
@@ -766,12 +825,18 @@ pub(in crate::compile::j2::opt) mod test {
                 equiv: InstIdx::MAX,
             });
         }
+        let tyidx_int1 = fopt.inner.tyidx_int1;
+        let tyidx_ptr0 = fopt.inner.tyidx_ptr0;
+        let tyidx_void = fopt.inner.tyidx_void;
         let (block, guard_extras, gblocks, tys) = fopt.build().unwrap();
         let m = Mod {
             trid: m.trid,
             trace_start: TraceStart::Test,
             trace_end: TraceEnd::Test { entry_vlocs, block },
             tys,
+            tyidx_int1,
+            tyidx_ptr0,
+            tyidx_void,
             guard_extras,
             gblocks,
             addr_name_map: None,
