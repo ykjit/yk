@@ -395,6 +395,26 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         Ok(())
     }
 
+    /// Log information about the instruction `iidx`. `extra` is an additional string to add to the
+    /// log after the "normal" instruction output has been logged.
+    ///
+    /// Note: it is the caller's duty to check that logging is enabled before calling this
+    /// function.
+    fn log_inst(&mut self, b: &Block, iidx: InstIdx, extra: &str) {
+        let inst = b.inst(iidx);
+        let ty = self.m.ty(inst.tyidx(self.m));
+        if ty == &Ty::Void {
+            self.be.log(inst.to_string(self.m, b));
+        } else {
+            self.be.log(format!(
+                "%{}: {} = {}{extra}",
+                usize::from(iidx),
+                ty.to_string(self.m),
+                inst.to_string(self.m, b)
+            ));
+        }
+    }
+
     /// Returns the stack offset.
     fn p_block(
         &mut self,
@@ -660,17 +680,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
             if logging {
-                let ty = self.m.ty(hinst.tyidx(self.m));
-                if ty == &Ty::Void {
-                    self.be.log(hinst.to_string(self.m, b));
-                } else {
-                    self.be.log(format!(
-                        "%{}: {} = {}",
-                        usize::from(iidx),
-                        ty.to_string(self.m),
-                        hinst.to_string(self.m, b)
-                    ));
-                }
+                self.log_inst(b, iidx, "");
             }
         }
 
@@ -679,24 +689,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // generate code themselves.
         ra.set_entry_vlocs_at_start(&mut self.be, entry_vlocs);
         if logging {
-            for (iidx, hinst) in insts_iter {
-                let ty = self.m.ty(hinst.tyidx(self.m));
+            for (iidx, _inst) in insts_iter {
                 let pp_vlocs = entry_vlocs[usize::from(iidx)]
                     .iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                if ty == &Ty::Void {
-                    todo!();
-                    // self.be.log(hinst.to_string(self.m, b));
-                } else {
-                    self.be.log(format!(
-                        "%{}: {} = {} [{pp_vlocs}]",
-                        usize::from(iidx),
-                        ty.to_string(self.m),
-                        hinst.to_string(self.m, b),
-                    ));
-                }
+                self.log_inst(b, iidx, &format!(" [{pp_vlocs}]"));
             }
         }
 
