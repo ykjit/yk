@@ -54,6 +54,8 @@ impl PassT for StrengthFold {
     }
 
     fn inst_committed(&mut self, _opt: &CommitInstOpt, _iidx: InstIdx, _inst: &Inst) {}
+
+    fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
 }
 
 fn opt_abs(opt: &mut PassOpt, mut inst: Abs) -> OptOutcome {
@@ -925,6 +927,7 @@ mod test {
                 StrengthFold::new().feed(opt, inst)
             },
             |_, _, _| (),
+            |_, _| (),
             ptn,
         );
     }
