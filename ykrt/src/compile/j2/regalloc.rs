@@ -219,13 +219,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     pub(super) fn set_term_vlocs(
         &mut self,
         be: &mut AB,
+        b: &Block,
         is_loop: bool,
         all_entry_vlocs: &[VarLocs<AB::Reg>],
-        exit_iidx: InstIdx,
-        all_term_vars: &[InstIdx],
         all_term_vlocs: &[VarLocs<AB::Reg>],
     ) -> Result<(), CompilationError> {
-        assert_eq!(all_term_vars.len(), all_term_vlocs.len());
+        assert_eq!(b.term_vars().len(), all_term_vlocs.len());
 
         // At a block's terminator, we potentially have to shuffle the stack around. In most cases
         // we have to "move" a value to/from the same stack location, but not always. Consider a
@@ -264,7 +263,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         // Push constants into registers as the very last thing (these registers are excellent
         // "temporary" candidates, so do them last).
-        for (iidx, term_vlocs) in all_term_vars.iter().zip(all_term_vlocs.iter()) {
+        for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()) {
             if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
                 for vloc in term_vlocs.iter() {
                     let bitw = self.b.inst_bitw(self.m, *iidx);
@@ -282,7 +281,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         // Push constants into the stack as the penultimate thing (these may require up to two
         // temporary registers).
-        for (iidx, term_vlocs) in all_term_vars.iter().zip(all_term_vlocs.iter()) {
+        for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()) {
             if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
                 for vloc in term_vlocs.iter() {
                     let bitw = self.b.inst_bitw(self.m, *iidx);
@@ -305,12 +304,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         let mut moves = Vec::new();
-        for (iidx, term_vlocs) in all_term_vars.iter().zip(all_term_vlocs.iter()) {
+        for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()) {
             if let Inst::Const(_) = self.b.inst(*iidx) {
                 // We handled these above.
                 continue;
             }
-            self.is_used[*iidx] = exit_iidx;
+            assert!(!b.insts.is_empty());
+            self.is_used[*iidx] = b.insts.len_idx() - 1;
             let bitw = self.b.inst_bitw(self.m, *iidx);
             for vloc in term_vlocs.iter() {
                 if term_vlocs

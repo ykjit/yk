@@ -167,10 +167,17 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
                 let (post_stack_label, entry_stack_off) = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
-                        let exit_vlocs = tgt_ctr.entry_vlocs();
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
+                        ra.set_entry_stacks_at_end(&entry_vlocs);
                         self.be.star_coupler_end(tgt_ctr)?;
-                        let entry_stack_off =
-                            self.p_block(entry, base_stack_off, &entry_vlocs, exit_vlocs, logging)?;
+                        ra.set_term_vlocs(
+                            &mut self.be,
+                            entry,
+                            false,
+                            &entry_vlocs,
+                            tgt_ctr.entry_vlocs(),
+                        )?;
+                        let entry_stack_off = self.p_block(entry, ra, &entry_vlocs, logging)?;
                         let post_stack_label = self.be.controlpoint_coupler_or_return_start(
                             entry_stack_off - base_stack_off,
                         )?;
@@ -178,14 +185,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                     TraceEnd::Loop { entry, peel } => {
                         assert!(peel.is_none());
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
+                        ra.set_entry_stacks_at_end(&entry_vlocs);
                         let iter0_label = self.be.controlpoint_loop_end()?;
-                        let entry_stack_off = self.p_block(
-                            entry,
-                            base_stack_off,
-                            &entry_vlocs,
-                            &entry_vlocs,
-                            logging,
-                        )?;
+                        ra.set_term_vlocs(&mut self.be, entry, true, &entry_vlocs, &entry_vlocs)?;
+                        let entry_stack_off = self.p_block(entry, ra, &entry_vlocs, logging)?;
                         self.be.controlpoint_loop_start(
                             iter0_label.clone(),
                             entry_stack_off - base_stack_off,
@@ -196,9 +200,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         entry,
                         exit_safepoint,
                     } => {
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
+                        ra.set_entry_stacks_at_end(&entry_vlocs);
+                        assert!(entry.term_vars().is_empty());
                         self.be.star_return_end(exit_safepoint)?;
-                        let entry_stack_off =
-                            self.p_block(entry, base_stack_off, &entry_vlocs, &[], logging)?;
+                        ra.set_term_vlocs(&mut self.be, entry, false, &entry_vlocs, &[])?;
+                        let entry_stack_off = self.p_block(entry, ra, &entry_vlocs, logging)?;
                         let post_stack_label = self.be.controlpoint_coupler_or_return_start(
                             entry_stack_off - base_stack_off,
                         )?;
@@ -230,17 +237,28 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
                 let entry_stack_off = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, src_stack_off);
+                        ra.set_entry_stacks_at_end(entry_vlocs);
                         self.be.star_coupler_end(tgt_ctr)?;
-                        let exit_vlocs = tgt_ctr.entry_vlocs();
-                        self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?
+                        ra.set_term_vlocs(
+                            &mut self.be,
+                            entry,
+                            false,
+                            entry_vlocs,
+                            tgt_ctr.entry_vlocs(),
+                        )?;
+                        self.p_block(entry, ra, entry_vlocs, logging)?
                     }
                     TraceEnd::Loop { .. } => unreachable!(),
                     TraceEnd::Return {
                         entry,
                         exit_safepoint,
                     } => {
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, src_stack_off);
+                        ra.set_entry_stacks_at_end(entry_vlocs);
                         self.be.star_return_end(exit_safepoint)?;
-                        self.p_block(entry, src_stack_off, entry_vlocs, &[], logging)?
+                        ra.set_term_vlocs(&mut self.be, entry, false, entry_vlocs, &[])?;
+                        self.p_block(entry, ra, entry_vlocs, logging)?
                     }
                     #[cfg(test)]
                     TraceEnd::Test { .. } => todo!(),
@@ -286,7 +304,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             panic!()
         };
         // Assemble the body
-        let stack_off = self.p_block(block, 0, entry_vlocs, entry_vlocs, true)?;
+        let mut ra = RegAlloc::<AB>::new(self.m, block, 0);
+        ra.set_entry_stacks_at_end(entry_vlocs);
+        // Currently we don't force tests to end with [Term] instructions.
+        if let Inst::Term(_) = block.insts.last().unwrap() {
+            ra.set_term_vlocs(&mut self.be, block, true, entry_vlocs, entry_vlocs)?;
+        }
+        let stack_off = self.p_block(block, ra, entry_vlocs, true)?;
         self.be.guard_coupler_start(stack_off);
 
         // Guards
@@ -415,20 +439,21 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         }
     }
 
-    /// Returns the stack offset.
+    /// Generate a code for a [Block] with the exception of its [Term] instruction which _must_
+    /// have been handled prior to calling this function. Returns the offset of the stack after
+    /// code generation for this block has occurred.
     fn p_block(
         &mut self,
         b: &'a Block,
-        stack_off: u32,
+        mut ra: RegAlloc<AB>,
         entry_vlocs: &[VarLocs<AB::Reg>],
-        exit_vlocs: &[VarLocs<AB::Reg>],
         logging: bool,
     ) -> Result<u32, CompilationError> {
-        let mut ra = RegAlloc::<AB>::new(self.m, b, stack_off);
-        ra.set_entry_stacks_at_end(entry_vlocs);
-
         let mut insts_iter = b.insts_iter(..).rev().peekable();
-        for _ in entry_vlocs.len()..b.insts_len() {
+        loop {
+            if let Some((_iidx, Inst::Arg(_))) = insts_iter.peek() {
+                break;
+            }
             let Some((iidx, hinst)) = insts_iter.next() else {
                 // By definition there must be no `Arg` instructions in this trace, which is only
                 // plausible in testing mode.
@@ -437,7 +462,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 #[cfg(test)]
                 break;
             };
-
             match hinst {
                 Inst::Abs(x) => {
                     if ra.is_used(iidx) {
@@ -632,21 +656,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_sub(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::Term(Term(term_vars)) => match self.m.trace_end {
-                    TraceEnd::Return { .. } => {
-                        assert_eq!(term_vars.len(), 0);
-                    }
-                    _ => {
-                        ra.set_term_vlocs(
-                            &mut self.be,
-                            matches!(self.m.trace_end, TraceEnd::Loop { .. }),
-                            entry_vlocs,
-                            iidx,
-                            term_vars,
-                            exit_vlocs,
-                        )?;
-                    }
-                },
+                Inst::Term(Term(_)) => (),
                 Inst::ThreadLocal(ThreadLocal(addr)) => {
                     if ra.is_used(iidx) {
                         let tloff = AB::thread_local_off(*addr);
