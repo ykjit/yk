@@ -33,6 +33,7 @@ impl PassT for KnownBits {
             Inst::AShr(x) => self.opt_ashr(opt, x),
             Inst::And(x) => self.opt_and(opt, x),
             Inst::Const(x) => self.opt_const(x),
+            Inst::Guard(x) => self.opt_guard(opt, x),
             Inst::ICmp(x) => self.opt_icmp(opt, x),
             Inst::LShr(x) => self.opt_lshr(opt, x),
             Inst::Or(x) => self.opt_or(opt, x),
@@ -48,7 +49,9 @@ impl PassT for KnownBits {
         self.known_bits.push(self.pending_commit.clone());
     }
 
-    fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
+    fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
+        self.known_bits[equiv1] = self.known_bits[equiv2].clone();
+    }
 }
 
 impl KnownBits {
@@ -71,6 +74,11 @@ impl KnownBits {
                     .unwrap_or_else(|| KnownBitValue::unknown(ty.bitw())),
             ),
         }
+    }
+
+    /// Updates the known bits value at `iidx` with `other`.
+    fn knownbits_set(&mut self, iidx: InstIdx, other: KnownBitValue) {
+        self.known_bits[iidx] = Some(other);
     }
 
     fn set_pending(&mut self, bits: KnownBitValue) {
@@ -132,6 +140,63 @@ impl KnownBits {
         if let ConstKind::Int(kind) = kind {
             self.set_pending(KnownBitValue::from_const(kind.clone()))
         }
+        OptOutcome::Rewritten(inst.into())
+    }
+
+    fn opt_guard(
+        &mut self,
+        opt: &mut PassOpt,
+        inst @ Guard { expect, cond, .. }: Guard,
+    ) -> OptOutcome {
+        if let Some(cond_b) = self.as_knownbits(opt, cond)
+            && cond_b.all_known()
+        {
+            return OptOutcome::NotNeeded;
+        }
+        if expect
+            && let cond_inst @ Inst::ICmp(ICmp {
+                pred: IPred::Eq, ..
+            }) = opt.inst(cond)
+        {
+            let mut cond_inst = cond_inst.to_owned();
+            cond_inst.canonicalise(opt);
+            let Inst::ICmp(ICmp {
+                pred: IPred::Eq,
+                lhs,
+                rhs,
+                samesign,
+            }) = cond_inst
+            else {
+                panic!()
+            };
+            assert!(!samesign);
+            if rhs == lhs {
+                return OptOutcome::NotNeeded;
+            }
+            if let Some(lhs_b) = self.as_knownbits(opt, lhs)
+                && let Some(rhs_b) = self.as_knownbits(opt, rhs)
+            {
+                let union = lhs_b.union(&rhs_b);
+                // We deduced a constant. Set future values to point to it.
+                if union.all_known() {
+                    let tyidx = opt.push_ty(Ty::Int(union.bitw())).unwrap();
+                    let idx = opt.push_pre_inst(Inst::Const(Const {
+                        tyidx,
+                        kind: ConstKind::Int(union.as_arbbitint()),
+                    }));
+                    opt.push_equiv(lhs, idx);
+                    opt.push_equiv(rhs, idx);
+                }
+                self.knownbits_set(lhs, union.clone());
+                self.knownbits_set(rhs, union);
+            }
+        }
+
+        self.knownbits_set(
+            cond,
+            KnownBitValue::from_const(ArbBitInt::from_u64(1, u64::from(expect))),
+        );
+
         OptOutcome::Rewritten(inst.into())
     }
 
@@ -290,6 +355,13 @@ impl KnownBitValue {
         }
     }
 
+    /// Union all the known ones in `self` with the known ones in `other`.
+    fn union(&self, other: &KnownBitValue) -> KnownBitValue {
+        let ones = self.ones.bitor(&other.ones);
+        let unknowns = self.unknowns.bitand(&other.unknowns);
+        KnownBitValue { ones, unknowns }
+    }
+
     /// Constructs an unknown KnownBitValue.
     pub fn unknown(bitw: u32) -> Self {
         KnownBitValue {
@@ -426,7 +498,9 @@ impl KnownBitValue {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::opt::{fullopt::test::opt_and_test, strength_fold::StrengthFold};
+    use crate::compile::j2::opt::{
+        cse::CSE, fullopt::test::opt_and_test, strength_fold::StrengthFold,
+    };
     use std::{cell::RefCell, rc::Rc};
 
     fn test_known_bits(mod_s: &str, ptn: &str) {
@@ -434,17 +508,43 @@ mod test {
         let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
         opt_and_test(
             mod_s,
-            |opt, mut inst| {
-                inst.canonicalise(opt);
-                match known_bits.borrow_mut().feed(opt, inst) {
-                    OptOutcome::Rewritten(new_inst) => {
-                        strength_fold.borrow_mut().feed(opt, new_inst)
-                    }
-                    x => x,
-                }
+            |opt, inst| match strength_fold.borrow_mut().feed(opt, inst.clone()) {
+                OptOutcome::Rewritten(new_inst) => known_bits.borrow_mut().feed(opt, new_inst),
+                x => x,
             },
             |opt, iidx, inst| known_bits.borrow_mut().inst_committed(opt, iidx, inst),
             |equiv1, equiv2| known_bits.borrow_mut().equiv_committed(equiv1, equiv2),
+            ptn,
+        );
+    }
+
+    fn test_known_bits_with_cse(mod_s: &str, ptn: &str) {
+        let known_bits = Rc::new(RefCell::new(KnownBits::new()));
+        let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
+        let cse = Rc::new(RefCell::new(CSE::new()));
+        opt_and_test(
+            mod_s,
+            |opt, mut inst| {
+                if let Inst::Guard(_) = inst {
+                    strength_fold.borrow_mut().feed(opt, inst)
+                } else {
+                    inst.canonicalise(opt);
+                    match cse.borrow_mut().feed(opt, inst) {
+                        OptOutcome::Rewritten(new_inst) => {
+                            known_bits.borrow_mut().feed(opt, new_inst)
+                        }
+                        x => x,
+                    }
+                }
+            },
+            |opt, iidx, inst| {
+                cse.borrow_mut().inst_committed(opt, iidx, inst);
+                known_bits.borrow_mut().inst_committed(opt, iidx, inst);
+            },
+            |equiv1, equiv2| {
+                cse.borrow_mut().equiv_committed(equiv1, equiv2);
+                known_bits.borrow_mut().equiv_committed(equiv1, equiv2);
+            },
             ptn,
         );
     }
@@ -620,6 +720,106 @@ mod test {
           %3: i8 = 3
           %4: i8 = 3
           blackbox %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_guard() {
+        // Known bits that passed through guard is correct for `or`.
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 1
+          %3: i8 = or %1, %2
+          %4: i1 = icmp eq %3, %0
+          guard true, %4, []
+          %6: i8 = or %0, %2
+          blackbox %6
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = 1
+          %3: i8 = or %1, %2
+          %4: i1 = icmp eq %3, %0
+          guard true, %4, []
+          blackbox %3
+          ...
+        ",
+        );
+
+        // Known bits guard sets `icmp`'s result.
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          guard false, %2, []
+          guard false, %2, []
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          guard false, %2, []
+          ...
+        ",
+        );
+
+        // Known bits canonicalises `icmp`.
+        test_known_bits_with_cse(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          %4: i8 = 1
+          %5: i8 = or %0, %4
+          %6: i8 = or %1, %4
+          %7: i1 = icmp eq %5, %6
+          guard true, %7, []
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          %4: i8 = 1
+          %5: i8 = or %0, %4
+          %6: i1 = icmp eq %5, %5
+          ...
+        ",
+        );
+
+        // Guard deduced constant in instruction stream
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 15
+          %3: i8 = 240
+          %4: i8 = or %0, %2
+          %5: i8 = or %1, %3
+          %6: i1 = icmp eq %4, %5
+          guard true, %6, []
+          %8: i32 = sext %4
+          blackbox %8
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = 15
+          %3: i8 = 240
+          %4: i8 = or %0, %2
+          %5: i8 = or %1, %3
+          %6: i1 = icmp eq %4, %5
+          %7: i8 = 255
+          guard true, %6, []
+          %9: i32 = 4294967295
+          blackbox %9
+          ...
         ",
         );
     }

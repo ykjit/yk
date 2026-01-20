@@ -226,24 +226,25 @@ impl FullOpt {
                 self.commit_inst_dedup_opt(inst);
             }
 
-            for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
-                assert_eq!(equiv1, self.equiv_iidx(equiv1));
-                assert_eq!(equiv2, self.equiv_iidx(equiv2));
-                let (equiv1, equiv2) = match (self.inst(equiv1), self.inst(equiv2)) {
-                    (Inst::Const(_), Inst::Const(_)) => panic!(),
-                    (_, Inst::Const(_)) => (equiv1, equiv2),
-                    (_, _) => (equiv2, equiv1),
-                };
-                self.inner.insts.get_mut(equiv1).unwrap().equiv = equiv2;
-                for pass in &mut self.passes {
-                    pass.equiv_committed(equiv1, equiv2);
-                }
-            }
-
             match fed {
                 OptOutcome::NotNeeded => return Ok(None),
                 OptOutcome::Rewritten(new_inst) => inst = new_inst,
                 OptOutcome::Equiv(iidx) => return Ok(Some(iidx)),
+            }
+        }
+
+        for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
+            let (equiv1, equiv2) = match (self.inst(equiv1), self.inst(equiv2)) {
+                (Inst::Const(_), Inst::Const(_)) => {
+                    assert_eq!(equiv1, equiv2);
+                    continue;
+                }
+                (_, Inst::Const(_)) => (equiv1, equiv2),
+                (_, _) => (equiv2, equiv1),
+            };
+            self.inner.insts.get_mut(equiv1).unwrap().equiv = equiv2;
+            for pass in &mut self.passes {
+                pass.equiv_committed(equiv1, equiv2);
             }
         }
 
@@ -574,6 +575,14 @@ impl PassOpt<'_> {
     /// the current pass, [InstIdx] is invalid, and attempting any operations with it will lead to
     /// undefined behaviour.
     pub(super) fn push_pre_inst(&mut self, preinst: Inst) -> InstIdx {
+        if let Inst::Const(c) = &preinst
+            && let Some(x) = self
+                .optinternal
+                .consts_map
+                .get(&HashableConst(c.to_owned()))
+        {
+            return *x;
+        }
         let iidx = InstIdx::from_usize(self.optinternal.insts.len() + self.inner.pre_insts.len());
         self.inner.pre_insts.push(preinst);
         iidx
@@ -792,8 +801,6 @@ pub(in crate::compile::j2::opt) mod test {
             }
 
             for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
-                assert_eq!(equiv1, fopt.equiv_iidx(equiv1));
-                assert_eq!(equiv2, fopt.equiv_iidx(equiv2));
                 let (equiv1, equiv2) = match (fopt.inst(equiv1), fopt.inst(equiv2)) {
                     (_, Inst::Const(_)) => (equiv1, equiv2),
                     (_, _) => (equiv2, equiv1),
