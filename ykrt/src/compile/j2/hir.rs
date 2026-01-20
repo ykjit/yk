@@ -188,6 +188,27 @@ use strum::{EnumCount, EnumDiscriminants};
 pub(super) trait ModLikeT {
     fn ty(&self, tyidx: TyIdx) -> &Ty;
 
+    /// Return the [TyIdx] for [Ty::Int(1)].
+    ///
+    /// # Panics
+    ///
+    /// If there is no matching [TyIdx].
+    fn tyidx_int1(&self) -> TyIdx;
+
+    /// Return the [TyIdx] for [Ty::Ptr(0)].
+    ///
+    /// # Panics
+    ///
+    /// If there is no matching [TyIdx].
+    fn tyidx_ptr0(&self) -> TyIdx;
+
+    /// Return the [TyIdx] for [Ty::Void].
+    ///
+    /// # Panics
+    ///
+    /// If there is no matching [TyIdx].
+    fn tyidx_void(&self) -> TyIdx;
+
     /// Returns the [FuncTy] at `tyidx`. This is a convenience function over [Self::ty].
     ///
     /// # Panics
@@ -230,7 +251,7 @@ pub(super) trait BlockLikeT {
     ///
     /// If `iidx` is out of bounds.
     fn inst_bitw(&self, m: &dyn ModLikeT, iidx: InstIdx) -> u32 {
-        self.inst(iidx).ty(m).bitw()
+        m.ty(self.inst(iidx).tyidx(m)).bitw()
     }
 }
 
@@ -243,8 +264,15 @@ pub(super) struct Mod<Reg: RegT> {
     pub trace_start: TraceStart<Reg>,
     pub trace_end: TraceEnd<Reg>,
     pub tys: IndexVec<TyIdx, Ty>,
+    /// The [TyIdx] for [Ty::Int(1)].
+    pub tyidx_int1: TyIdx,
+    /// The [TyIdx] for [Ty::Ptr(0)].
+    pub tyidx_ptr0: TyIdx,
+    /// The [TyIdx] for [Ty::Void].
+    pub tyidx_void: TyIdx,
     /// Extra information that is too big to fit in a [Guard] instruction.
     pub guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
+    pub gblocks: IndexVec<GuardBlockIdx, Block>,
     /// A map of names to pointers. Will be `None` if logging was disabled.
     pub addr_name_map: Option<HashMap<usize, Option<String>>>,
 }
@@ -272,20 +300,29 @@ impl<Reg: RegT> Mod<Reg> {
     pub(super) fn guard_extra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
         &self.guard_extras[geidx]
     }
-
-    pub(super) fn guard_extras(&self) -> &[GuardExtra] {
-        self.guard_extras.as_raw_slice()
-    }
 }
 
 impl<Reg: RegT> Display for Mod<Reg> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let gblocks = self
+            .gblocks
+            .iter_enumerated()
+            .map(|(x, y)| format!("; guard {}\n{}", usize::from(x), y.to_string(self)))
+            .collect::<Vec<_>>();
+        let gblocks = if !gblocks.is_empty() {
+            format!("\n{}", gblocks.join("\n"))
+        } else {
+            "".to_owned()
+        };
         match &self.trace_end {
-            TraceEnd::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            TraceEnd::Loop { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            TraceEnd::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
+            TraceEnd::Coupler { entry, .. } => write!(f, "{}{gblocks}", entry.to_string(self)),
+            TraceEnd::Loop { entry, peel, .. } => {
+                assert!(peel.is_none());
+                write!(f, "{}{gblocks}", entry.to_string(self))
+            }
+            TraceEnd::Return { entry, .. } => write!(f, "{}{gblocks}", entry.to_string(self)),
             #[cfg(test)]
-            TraceEnd::Test { block, .. } => write!(f, "{}", block.to_string(self)),
+            TraceEnd::Test { block, .. } => write!(f, "{}{gblocks}", block.to_string(self)),
         }
     }
 }
@@ -308,6 +345,18 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
 
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         &self.tys[tyidx]
+    }
+
+    fn tyidx_int1(&self) -> TyIdx {
+        self.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.tyidx_void
     }
 }
 
@@ -387,9 +436,9 @@ impl Block {
                 );
 
                 for (i, (x, y)) in entry_vlocs.iter().zip(exit_vlocs.iter()).enumerate() {
-                    let entry_ty = self.insts[InstIdx::from(i)].ty(m);
-                    let exit_ty = self.insts[term_vars[i]].ty(m);
-                    if entry_ty != exit_ty {
+                    let entry_tyidx = self.insts[InstIdx::from(i)].tyidx(m);
+                    let exit_tyidx = self.insts[term_vars[i]].tyidx(m);
+                    if entry_tyidx != exit_tyidx {
                         panic!(
                             "%{iidx:?}: term var '%{:?}' at position '{i}' does match type of %{i}",
                             term_vars[i]
@@ -449,6 +498,15 @@ impl Block {
         self.insts.len()
     }
 
+    /// Return a slice of the variables referenced in this block's [Term] instruction (which, by
+    /// definition, must be the last instruction in the [Block]).
+    pub(super) fn term_vars(&self) -> &[InstIdx] {
+        let Inst::Term(Term(x)) = self.insts.last().as_ref().unwrap() else {
+            panic!()
+        };
+        x
+    }
+
     /// Return true if there are heap effects in `range` that interfere with the instruction at
     /// `on`.
     pub(super) fn heap_effects_on<T: RangeBounds<InstIdx>>(&self, _on: InstIdx, range: T) -> bool {
@@ -478,13 +536,13 @@ impl Block {
     /// Return the bit width of the instruction `iidx`. This is a convenience function over other
     /// public functions.
     pub(super) fn inst_ty<'a, Reg: RegT>(&'a self, m: &'a Mod<Reg>, iidx: InstIdx) -> &'a Ty {
-        self.inst(iidx).ty(m)
+        m.ty(self.inst(iidx).tyidx(m))
     }
 
     pub(super) fn to_string<Reg: RegT>(&self, m: &Mod<Reg>) -> String {
         let mut out = Vec::with_capacity(self.insts.len());
         for (iidx, inst) in self.insts.iter_enumerated() {
-            let ty = inst.ty(m);
+            let ty = m.ty(inst.tyidx(m));
             if ty == &Ty::Void {
                 out.push(inst.to_string(m, self));
             } else {
@@ -572,7 +630,8 @@ pub(super) struct FuncTy {
 }
 
 index_vec::define_index_type! {
-    pub(super) struct BlockIdx = u16;
+    /// The index type for guard blocks.
+    pub(super) struct GuardBlockIdx = u16;
 }
 
 index_vec::define_index_type! {
@@ -635,8 +694,8 @@ pub(super) trait InstT: std::fmt::Debug {
     /// Return a pretty printed version of `self`.
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, m: &M, b: &B) -> String;
 
-    /// Return the [Ty] of `self`.
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty;
+    /// Return the [TyIdx] of `self`.
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx;
 }
 
 #[enum_dispatch(InstT)]
@@ -755,8 +814,8 @@ impl InstT for Abs {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -775,8 +834,8 @@ pub(super) struct Add {
 impl InstT for Add {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -829,8 +888,8 @@ impl InstT for Add {
         format!("add %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -847,8 +906,8 @@ pub(super) struct And {
 impl InstT for And {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -893,8 +952,8 @@ impl InstT for And {
         format!("and %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -928,8 +987,8 @@ impl InstT for Arg {
         "arg".to_string()
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -947,8 +1006,8 @@ pub(super) struct AShr {
 impl InstT for AShr {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -997,8 +1056,8 @@ impl InstT for AShr {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1036,8 +1095,8 @@ impl InstT for BlackBox {
         format!("blackbox %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Void
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_void()
     }
 }
 
@@ -1060,7 +1119,7 @@ pub(super) struct Call {
 impl InstT for Call {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.tgt).ty(m) == &Ty::Ptr(0),
+            b.inst(self.tgt).tyidx(m) == m.tyidx_ptr0(),
             "%{iidx:?}: call target is not a pointer"
         );
 
@@ -1075,8 +1134,8 @@ impl InstT for Call {
 
         for (i, iidx) in self.args.iter().enumerate().take(fty.args_tyidxs.len()) {
             assert_eq!(
-                b.inst(*iidx).ty(m),
-                m.ty(fty.args_tyidxs[i]),
+                b.inst(*iidx).tyidx(m),
+                fty.args_tyidxs[i],
                 "%{iidx:?}: argument {i} has wrong type"
             )
         }
@@ -1130,8 +1189,8 @@ impl InstT for Call {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(m.func_ty(self.func_tyidx).rtn_tyidx)
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.func_ty(self.func_tyidx).rtn_tyidx
     }
 }
 
@@ -1217,8 +1276,8 @@ impl InstT for Const {
         }
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1277,8 +1336,8 @@ impl InstT for CtPop {
         format!("ctpop %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1310,8 +1369,8 @@ impl InstT for DebugStr {
         format!("; {}", self.0)
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Void
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_void()
     }
 }
 
@@ -1325,12 +1384,12 @@ pub(super) struct DynPtrAdd {
 impl InstT for DynPtrAdd {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.ptr).ty(m) == &Ty::Ptr(0),
+            b.inst(self.ptr).tyidx(m) == m.tyidx_ptr0(),
             "%{iidx:?}: pointer is not a ptr type"
         );
 
         assert_matches!(
-            b.inst(self.num_elems).ty(m),
+            m.ty(b.inst(self.num_elems).tyidx(m)),
             Ty::Int(_bitw),
             "%{iidx:?}: num_elems is not an integer type"
         );
@@ -1379,8 +1438,8 @@ impl InstT for DynPtrAdd {
         )
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Ptr(0)
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_ptr0()
     }
 }
 
@@ -1397,8 +1456,8 @@ pub(super) struct FAdd {
 impl InstT for FAdd {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -1441,8 +1500,8 @@ impl InstT for FAdd {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1460,8 +1519,8 @@ pub(super) struct FCmp {
 impl InstT for FCmp {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_eq!(
-            b.inst(self.lhs).ty(m),
-            b.inst(self.rhs).ty(m),
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
             "%{iidx:?}: inconsistent lhs / rhs types"
         );
     }
@@ -1505,8 +1564,8 @@ impl InstT for FCmp {
         )
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Int(1)
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
     }
 }
 
@@ -1567,8 +1626,8 @@ pub(super) struct FDiv {
 impl InstT for FDiv {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -1611,8 +1670,8 @@ impl InstT for FDiv {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1626,8 +1685,8 @@ pub(super) struct Floor {
 impl InstT for Floor {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_eq!(
-            m.ty(self.tyidx),
-            b.inst(self.val).ty(m),
+            self.tyidx,
+            b.inst(self.val).tyidx(m),
             "%{iidx:?}: inconsistent types for return type and val"
         );
 
@@ -1669,8 +1728,8 @@ impl InstT for Floor {
         format!("floor %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1687,8 +1746,8 @@ pub(super) struct FMul {
 impl InstT for FMul {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -1731,8 +1790,8 @@ impl InstT for FMul {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1747,8 +1806,8 @@ pub(super) struct FNeg {
 impl InstT for FNeg {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_eq!(
-            *m.ty(self.tyidx),
-            *b.inst(self.val).ty(m),
+            self.tyidx,
+            b.inst(self.val).tyidx(m),
             "%{iidx:?}: inconsistent return / val types"
         );
     }
@@ -1784,8 +1843,8 @@ impl InstT for FNeg {
         format!("fneg %{}", usize::from(self.val),)
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1802,8 +1861,8 @@ pub(super) struct FSub {
 impl InstT for FSub {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -1846,8 +1905,8 @@ impl InstT for FSub {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1869,7 +1928,7 @@ impl InstT for FPExt {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Float,
             "%{iidx:?}: val is not an integer"
         );
@@ -1906,8 +1965,8 @@ impl InstT for FPExt {
         format!("fpext %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1927,7 +1986,7 @@ impl InstT for FPToSI {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Double | Ty::Float,
             "%{iidx:?}: return type is not a floating point type"
         );
@@ -1964,8 +2023,8 @@ impl InstT for FPToSI {
         format!("fptosi %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1983,8 +2042,8 @@ pub(super) struct Guard {
 impl InstT for Guard {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_eq!(
-            b.inst(self.cond).ty(m),
-            &Ty::Int(1),
+            b.inst(self.cond).tyidx(m),
+            m.tyidx_int1(),
             "%{iidx:?}: guard references a non-i1 for its condition"
         );
     }
@@ -2033,8 +2092,8 @@ impl InstT for Guard {
         )
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Void
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_void()
     }
 }
 
@@ -2070,6 +2129,9 @@ pub(super) struct GuardExtra {
     ///  exit_frames[0] variables
     /// ```
     pub exit_vars: Vec<InstIdx>,
+    /// What guard [Block] does this [Guard] / [GuardExtra] map to? This will initially be set to
+    /// `None`; hir_to_asm will set it to [Some] when the corresponding guard [Block] is created.
+    pub gbidx: Option<GuardBlockIdx>,
 }
 
 /// If a guard relates to an AOT `switch`, this struct records the extra information we need to
@@ -2098,8 +2160,8 @@ pub(super) struct ICmp {
 impl InstT for ICmp {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_eq!(
-            b.inst(self.lhs).ty(m),
-            b.inst(self.rhs).ty(m),
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
             "%{iidx:?}: inconsistent lhs / rhs types"
         );
     }
@@ -2157,8 +2219,8 @@ impl InstT for ICmp {
         )
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Int(1)
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
     }
 }
 
@@ -2218,7 +2280,7 @@ impl InstT for IntToPtr {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Int(_),
             "%{iidx:?}: val is not an integer type"
         );
@@ -2255,8 +2317,8 @@ impl InstT for IntToPtr {
         format!("inttoptr %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2270,7 +2332,7 @@ pub(super) struct Load {
 impl InstT for Load {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_matches!(
-            b.inst(self.ptr).ty(m),
+            m.ty(b.inst(self.ptr).tyidx(m)),
             &Ty::Ptr(_),
             "%{iidx:?}: ptr is not a pointer"
         );
@@ -2300,8 +2362,8 @@ impl InstT for Load {
         format!("load %{}", usize::from(self.ptr))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2319,8 +2381,8 @@ pub(super) struct LShr {
 impl InstT for LShr {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -2369,8 +2431,8 @@ impl InstT for LShr {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2386,11 +2448,11 @@ pub(super) struct MemCpy {
 impl InstT for MemCpy {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.dst).ty(m) == b.inst(self.src).ty(m),
+            b.inst(self.dst).tyidx(m) == b.inst(self.src).tyidx(m),
             "%{iidx:?}: inconsistent dst / src types"
         );
         assert_matches!(
-            b.inst(self.len).ty(m),
+            m.ty(b.inst(self.len).tyidx(m)),
             &Ty::Int(32 | 64),
             "%{iidx:?}: len has wrong type"
         );
@@ -2430,8 +2492,8 @@ impl InstT for MemCpy {
         )
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Void
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_void()
     }
 }
 
@@ -2447,17 +2509,17 @@ pub(super) struct MemSet {
 impl InstT for MemSet {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_matches!(
-            b.inst(self.dst).ty(m),
+            m.ty(b.inst(self.dst).tyidx(m)),
             &Ty::Ptr(_),
             "%{iidx:?}: dst has wrong type"
         );
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             &Ty::Int(8),
             "%{iidx:?}: val has wrong type"
         );
         assert_matches!(
-            b.inst(self.len).ty(m),
+            m.ty(b.inst(self.len).tyidx(m)),
             &Ty::Int(32 | 64),
             "%{iidx:?}: len has wrong type"
         );
@@ -2497,8 +2559,8 @@ impl InstT for MemSet {
         )
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Void
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_void()
     }
 }
 
@@ -2517,8 +2579,8 @@ pub(super) struct Mul {
 impl InstT for Mul {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -2571,8 +2633,8 @@ impl InstT for Mul {
         format!("mul %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2590,8 +2652,8 @@ pub(super) struct Or {
 impl InstT for Or {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -2642,8 +2704,8 @@ impl InstT for Or {
         format!("or %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2659,7 +2721,7 @@ pub(super) struct PtrAdd {
 impl InstT for PtrAdd {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.ptr).ty(m) == &Ty::Ptr(0),
+            b.inst(self.ptr).tyidx(m) == m.tyidx_ptr0(),
             "%{iidx:?}: pointer is not a ptr type"
         );
     }
@@ -2704,8 +2766,8 @@ impl InstT for PtrAdd {
         format!("ptradd %{}, {}", usize::from(self.ptr), self.off)
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Ptr(0)
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_ptr0()
     }
 }
 
@@ -2725,7 +2787,7 @@ impl InstT for PtrToInt {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Ptr(_),
             "%{iidx:?}: val is not a pointer"
         );
@@ -2762,8 +2824,8 @@ impl InstT for PtrToInt {
         format!("ptrtoint %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2781,8 +2843,8 @@ pub(super) struct SDiv {
 impl InstT for SDiv {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -2831,8 +2893,8 @@ impl InstT for SDiv {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2847,14 +2909,14 @@ pub(super) struct Select {
 impl InstT for Select {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_eq!(
-            b.inst(self.cond).ty(m),
-            &Ty::Int(1),
+            b.inst(self.cond).tyidx(m),
+            m.tyidx_int1(),
             "%{iidx:?}: select references a non-i1 for its condition"
         );
 
         assert!(
-            b.inst(self.truev).ty(m) == b.inst(self.falsev).ty(m)
-                && b.inst(self.falsev).ty(m) == m.ty(self.tyidx),
+            b.inst(self.truev).tyidx(m) == b.inst(self.falsev).tyidx(m)
+                && b.inst(self.falsev).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / truev / falsev types"
         );
     }
@@ -2906,8 +2968,8 @@ impl InstT for Select {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2927,7 +2989,7 @@ impl InstT for SExt {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Int(_),
             "%{iidx:?}: val is not an integer type"
         );
@@ -2969,8 +3031,8 @@ impl InstT for SExt {
         format!("sext %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -2989,8 +3051,8 @@ pub(super) struct Shl {
 impl InstT for Shl {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -3037,8 +3099,8 @@ impl InstT for Shl {
         format!("shl %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3058,7 +3120,7 @@ impl InstT for SIToFP {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Int(_),
             "%{iidx:?}: val is not an integer"
         );
@@ -3095,8 +3157,8 @@ impl InstT for SIToFP {
         format!("sitofp %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3113,8 +3175,8 @@ pub(super) struct SMax {
 impl InstT for SMax {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -3163,8 +3225,8 @@ impl InstT for SMax {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3181,8 +3243,8 @@ pub(super) struct SMin {
 impl InstT for SMin {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -3231,8 +3293,8 @@ impl InstT for SMin {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3249,8 +3311,8 @@ pub(super) struct SRem {
 impl InstT for SRem {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -3293,8 +3355,8 @@ impl InstT for SRem {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3310,7 +3372,7 @@ pub(super) struct Store {
 impl InstT for Store {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_matches!(
-            b.inst(self.ptr).ty(m),
+            m.ty(b.inst(self.ptr).tyidx(m)),
             &Ty::Ptr(_),
             "%{iidx:?}: ptr is not a pointer"
         );
@@ -3346,8 +3408,8 @@ impl InstT for Store {
         )
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Void
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_void()
     }
 }
 
@@ -3366,8 +3428,8 @@ pub(super) struct Sub {
 impl InstT for Sub {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -3414,8 +3476,8 @@ impl InstT for Sub {
         format!("sub %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3459,10 +3521,10 @@ impl InstT for Term {
         }
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
         // `Term` is a pseudo-instruction, but it makes various things simpler if we pretend it has
         // a type.
-        &Ty::Void
+        m.tyidx_void()
     }
 }
 
@@ -3502,8 +3564,8 @@ impl InstT for ThreadLocal {
         )
     }
 
-    fn ty<'a>(&'a self, _m: &'a dyn ModLikeT) -> &'a Ty {
-        &Ty::Ptr(0)
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_ptr0()
     }
 }
 
@@ -3525,7 +3587,7 @@ impl InstT for Trunc {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Int(_),
             "%{iidx:?}: val is not an integer type"
         );
@@ -3574,8 +3636,8 @@ impl InstT for Trunc {
         format!("trunc %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3593,8 +3655,8 @@ pub(super) struct UDiv {
 impl InstT for UDiv {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -3643,8 +3705,8 @@ impl InstT for UDiv {
         )
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3665,7 +3727,7 @@ impl InstT for UIToFP {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Int(_),
             "%{iidx:?}: val is not an integer"
         );
@@ -3703,8 +3765,8 @@ impl InstT for UIToFP {
         format!("uitofp %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3721,8 +3783,8 @@ pub(super) struct Xor {
 impl InstT for Xor {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert!(
-            b.inst(self.lhs).ty(m) == b.inst(self.rhs).ty(m)
-                && b.inst(self.rhs).ty(m) == m.ty(self.tyidx),
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
             "%{iidx:?}: inconsistent return / lhs / rhs types"
         );
     }
@@ -3767,8 +3829,8 @@ impl InstT for Xor {
         format!("xor %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3788,7 +3850,7 @@ impl InstT for ZExt {
         );
 
         assert_matches!(
-            b.inst(self.val).ty(m),
+            m.ty(b.inst(self.val).tyidx(m)),
             Ty::Int(_),
             "%{iidx:?}: val is not an integer type"
         );
@@ -3830,8 +3892,8 @@ impl InstT for ZExt {
         format!("zext %{}", usize::from(self.val))
     }
 
-    fn ty<'a>(&'a self, m: &'a dyn ModLikeT) -> &'a Ty {
-        m.ty(self.tyidx)
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -3927,6 +3989,7 @@ impl<'a> Iterator for IterIidxsIterator<'a> {
                         switch: _,
                         exit_vars,
                         exit_frames: _,
+                        gbidx: _,
                     } = self.m.gextra(*geidx);
                     if self.i - 1 <= exit_vars.len() {
                         return Some(exit_vars[self.i - 2]);

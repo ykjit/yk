@@ -185,6 +185,7 @@ mod test {
           %5: i8 = add %1, %1
           blackbox %4
           blackbox %5
+          term [%0, %1]
         ",
             "
           %0: i8 = arg
@@ -194,6 +195,8 @@ mod test {
           %4: i8 = add %0, %0
           blackbox %4
           blackbox %4
+          term [%0, %0]
+          ...
         ",
         );
 
@@ -207,6 +210,7 @@ mod test {
           %5: i8 = add %1, %1
           blackbox %2
           blackbox %5
+          term [%0, %1]
         ",
             "
           %0: i8 = arg
@@ -216,6 +220,8 @@ mod test {
           guard true, %3, []
           blackbox %2
           blackbox %2
+          term [%0, %0]
+          ...
         ",
         );
     }
@@ -277,11 +283,14 @@ mod test {
           %0: i1 = arg [reg]
           guard true, %0, []
           guard true, %0, []
+          term [%0]
         ",
             "
           %0: i1 = arg
           guard true, %0, []
           guard true, %0, []
+          term [%0]
+          ...
         ",
         );
 

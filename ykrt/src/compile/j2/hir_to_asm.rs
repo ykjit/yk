@@ -115,11 +115,26 @@ pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
     m: &'a Mod<AB::Reg>,
     hl: Arc<Mutex<HotLocation>>,
     be: AB,
+    /// The intermediate [AsmGuard] for each [Guard] block in a trace's "main" (i.e. non-[Guard])
+    /// blocks. These use [GuardBlockIdx] to emphasise that there is a 1:1 mapping between
+    /// [GuardExtra::gbidx] and this [IndexVec].
+    /// These will initially be set to `None`; as the main blocks are processed, they will
+    /// set the corresponding
+    ///
+    /// As the non-[Guard] blocks are as
+    asmguards: IndexVec<GuardBlockIdx, Option<AsmGuard<AB>>>,
 }
 
 impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     pub(super) fn new(m: &'a Mod<AB::Reg>, hl: Arc<Mutex<HotLocation>>, be: AB) -> Self {
-        Self { m, hl, be }
+        Self {
+            m,
+            hl,
+            be,
+            asmguards: (0..m.gblocks.len())
+                .map(|_| None)
+                .collect::<IndexVec<_, _>>(),
+        }
     }
 
     pub(super) fn build(mut self, mt: Arc<MT>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
@@ -144,58 +159,78 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 .unwrap();
 
                 let (rec, _) = aot_smaps.get(usize::try_from(entry_safepoint.id).unwrap());
-                let entry_vlocs = rec
+                let mut entry_vlocs = rec
                     .live_vals
                     .iter()
                     .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
 
+                for vlocs in entry_vlocs.iter_mut() {
+                    vlocs.retain(|x| {
+                        if let VarLoc::Reg(reg, _fill) = x
+                            && reg.is_caller_saved()
+                        {
+                            // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
+                            // for details), caller saved registers are potentially corrupted at the very start
+                            // of ControlPoint traces
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                }
+
                 let (post_stack_label, entry_stack_off) = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
-                        let exit_vlocs = tgt_ctr.entry_vlocs();
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
+                        ra.set_entry_stacks_at_end(&entry_vlocs);
                         self.be.star_coupler_end(tgt_ctr)?;
-                        let (guards, entry_stack_off) =
-                            self.p_block(entry, base_stack_off, &entry_vlocs, exit_vlocs, logging)?;
+                        ra.set_term_vlocs(
+                            &mut self.be,
+                            entry,
+                            false,
+                            &entry_vlocs,
+                            tgt_ctr.entry_vlocs(),
+                        )?;
+                        let entry_stack_off = self.p_block(entry, ra, &entry_vlocs, logging)?;
                         let post_stack_label = self.be.controlpoint_coupler_or_return_start(
                             entry_stack_off - base_stack_off,
                         )?;
-                        self.asm_guards(entry, guards)?;
                         (post_stack_label, entry_stack_off)
                     }
                     TraceEnd::Loop { entry, peel } => {
                         assert!(peel.is_none());
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
+                        ra.set_entry_stacks_at_end(&entry_vlocs);
                         let iter0_label = self.be.controlpoint_loop_end()?;
-                        let (guards, entry_stack_off) = self.p_block(
-                            entry,
-                            base_stack_off,
-                            &entry_vlocs,
-                            &entry_vlocs,
-                            logging,
-                        )?;
+                        ra.set_term_vlocs(&mut self.be, entry, true, &entry_vlocs, &entry_vlocs)?;
+                        let entry_stack_off = self.p_block(entry, ra, &entry_vlocs, logging)?;
                         self.be.controlpoint_loop_start(
                             iter0_label.clone(),
                             entry_stack_off - base_stack_off,
                         );
-                        self.asm_guards(entry, guards)?;
                         (iter0_label, entry_stack_off)
                     }
                     TraceEnd::Return {
                         entry,
                         exit_safepoint,
                     } => {
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
+                        ra.set_entry_stacks_at_end(&entry_vlocs);
+                        assert!(entry.term_vars().is_empty());
                         self.be.star_return_end(exit_safepoint)?;
-                        let (guards, entry_stack_off) =
-                            self.p_block(entry, base_stack_off, &entry_vlocs, &[], logging)?;
+                        ra.set_term_vlocs(&mut self.be, entry, false, &entry_vlocs, &[])?;
+                        let entry_stack_off = self.p_block(entry, ra, &entry_vlocs, logging)?;
                         let post_stack_label = self.be.controlpoint_coupler_or_return_start(
                             entry_stack_off - base_stack_off,
                         )?;
-                        self.asm_guards(entry, guards)?;
                         (post_stack_label, entry_stack_off)
                     }
                     #[cfg(test)]
                     TraceEnd::Test { .. } => todo!(),
                 };
 
+                self.asm_guards()?;
                 let (buf, guards, log, label_offs) =
                     self.be.build_exe(logging, &[post_stack_label])?;
                 let [sidetrace_off] = &*label_offs else {
@@ -215,29 +250,36 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 entry_vlocs,
             } => {
                 let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
-                let (entry, guards, entry_stack_off) = match &self.m.trace_end {
+                let entry_stack_off = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, src_stack_off);
+                        ra.set_entry_stacks_at_end(entry_vlocs);
                         self.be.star_coupler_end(tgt_ctr)?;
-                        let exit_vlocs = tgt_ctr.entry_vlocs();
-                        let (guards, entry_stack_off) =
-                            self.p_block(entry, src_stack_off, entry_vlocs, exit_vlocs, logging)?;
-                        (entry, guards, entry_stack_off)
+                        ra.set_term_vlocs(
+                            &mut self.be,
+                            entry,
+                            false,
+                            entry_vlocs,
+                            tgt_ctr.entry_vlocs(),
+                        )?;
+                        self.p_block(entry, ra, entry_vlocs, logging)?
                     }
                     TraceEnd::Loop { .. } => unreachable!(),
                     TraceEnd::Return {
                         entry,
                         exit_safepoint,
                     } => {
+                        let mut ra = RegAlloc::<AB>::new(self.m, entry, src_stack_off);
+                        ra.set_entry_stacks_at_end(entry_vlocs);
                         self.be.star_return_end(exit_safepoint)?;
-                        let (guards, entry_stack_off) =
-                            self.p_block(entry, src_stack_off, entry_vlocs, &[], logging)?;
-                        (entry, guards, entry_stack_off)
+                        ra.set_term_vlocs(&mut self.be, entry, false, entry_vlocs, &[])?;
+                        self.p_block(entry, ra, entry_vlocs, logging)?
                     }
                     #[cfg(test)]
                     TraceEnd::Test { .. } => todo!(),
                 };
                 self.be.guard_coupler_start(entry_stack_off - src_stack_off);
-                self.asm_guards(entry, guards)?;
+                self.asm_guards()?;
                 let modkind = J2TraceStart::Guard {
                     stack_off: entry_stack_off,
                 };
@@ -277,17 +319,28 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             panic!()
         };
         // Assemble the body
-        let (guards, stack_off) = self.p_block(block, 0, entry_vlocs, entry_vlocs, true)?;
+        let mut ra = RegAlloc::<AB>::new(self.m, block, 0);
+        ra.set_entry_stacks_at_end(entry_vlocs);
+        // Currently we don't force tests to end with [Term] instructions.
+        if let Inst::Term(_) = block.insts.last().unwrap() {
+            ra.set_term_vlocs(&mut self.be, block, true, entry_vlocs, entry_vlocs)?;
+        }
+        let stack_off = self.p_block(block, ra, entry_vlocs, true)?;
         self.be.guard_coupler_start(stack_off);
 
         // Guards
-        for (i, guard) in guards.into_iter().enumerate() {
+
+        for (gbidx, aguard) in self
+            .asmguards
+            .iter_enumerated()
+            .map(|(x, y)| (x, y.as_ref().unwrap()))
+        {
             let patch_label = self
                 .be
-                .guard_end(TraceId::testing(), AsmGuardIdx::from(i))?;
-            let gextra = self.m.guard_extra(guard.geidx);
+                .guard_end(self.m.trid, AsmGuardIdx::from(usize::from(gbidx)))?;
+            let gextra = self.m.guard_extra(aguard.geidx);
             self.be.guard_completed(
-                guard.label,
+                aguard.label.clone(),
                 patch_label,
                 0,
                 gextra.bid,
@@ -301,20 +354,24 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     }
 
     /// Assemble guards.
-    fn asm_guards(
-        &mut self,
-        entry: &Block,
-        guards: Vec<AsmGuard<AB>>,
-    ) -> Result<(), CompilationError> {
-        assert_eq!(guards.len(), self.m.guard_extras().len());
+    fn asm_guards(&mut self) -> Result<(), CompilationError> {
+        assert!(self.asmguards.iter().all(|x| x.is_some()));
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-        for (i, mut guard) in guards.into_iter().enumerate() {
-            let patch_label = self.be.guard_end(self.m.trid, AsmGuardIdx::from(i))?;
-            let gextra = self.m.guard_extra(guard.geidx);
+        for (gbidx, aguard) in self
+            .asmguards
+            .iter_enumerated()
+            .map(|(x, y)| (x, y.as_ref().unwrap()))
+        {
+            let gblock = &self.m.gblocks[gbidx];
+            let patch_label = self
+                .be
+                .guard_end(self.m.trid, AsmGuardIdx::from(usize::from(gbidx)))?;
+            let gextra = self.m.guard_extra(aguard.geidx);
 
-            let mut stack_off = guard.stack_off;
-            assert_eq!(gextra.exit_vars.len(), guard.exit_vlocs.len());
-            for (iidx, vlocs) in gextra.exit_vars.iter().zip(guard.exit_vlocs.iter_mut()) {
+            let mut stack_off = aguard.stack_off;
+            assert_eq!(gblock.term_vars().len(), aguard.exit_vlocs.len());
+            let mut exit_vlocs = aguard.exit_vlocs.clone();
+            for (iidx, vlocs) in gblock.term_vars().iter().zip(exit_vlocs.iter_mut()) {
                 // If a value only exists in a register(s), we need to pick one of those registers,
                 // and ensure it's spilt.
                 if vlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
@@ -325,7 +382,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     else {
                         panic!("{vlocs:?}")
                     };
-                    let bitw = entry.inst_bitw(self.m, *iidx);
+                    let bitw = gblock.inst_bitw(self.m, *iidx);
                     stack_off = self.be.align_spill(stack_off, bitw);
                     vlocs.push(VarLoc::Stack(stack_off));
                     self.be.spill(reg, fill, stack_off, bitw)?;
@@ -334,22 +391,18 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
             let mut deopt_frames = SmallVec::with_capacity(gextra.exit_frames.len());
             let mut deopt_vars = Vec::with_capacity(gextra.exit_vars.len());
-            let mut entry_var_off = 0;
+            let mut x = gblock.term_vars().iter().zip(exit_vlocs.into_iter());
             for Frame { pc, pc_safepoint } in gextra.exit_frames.iter() {
                 let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
-                for (iidx, (_aot_op, smap_loc)) in gextra.exit_vars
-                    [entry_var_off..entry_var_off + pc_safepoint.lives.len()]
-                    .iter()
-                    .zip(pc_safepoint.lives.iter().zip(smap.live_vals.iter()))
-                {
-                    let fromvlocs = guard.exit_vlocs
-                        [gextra.exit_vars.iter().position(|x| x == iidx).unwrap()]
-                    .iter()
-                    // FIXME (optimisation): We don't need to spill everything
-                    // before deopt / side-traces.
-                    .filter(|x| !matches!(x, VarLoc::Reg(_, _)))
-                    .cloned()
-                    .collect::<VarLocs<_>>();
+                for smap_loc in smap.live_vals.iter() {
+                    let (iidx, fromvlocs) = x.next().unwrap();
+                    let fromvlocs = fromvlocs
+                        .iter()
+                        // FIXME (optimisation): We don't need to spill everything
+                        // before deopt / side-traces.
+                        .filter(|x| !matches!(x, VarLoc::Reg(_, _)))
+                        .cloned()
+                        .collect::<VarLocs<_>>();
                     let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
                     if fromvlocs == tovlocs {
                         // Optimise away situations where we would just move a
@@ -357,50 +410,65 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         tovlocs = VarLocs::new();
                     }
                     deopt_vars.push(DeoptVar {
-                        bitw: entry.inst_bitw(self.m, *iidx),
+                        bitw: gblock.inst_bitw(self.m, *iidx),
                         fromvlocs,
                         tovlocs,
                     });
                 }
-                entry_var_off += pc_safepoint.lives.len();
                 deopt_frames.push(DeoptFrame {
                     pc: pc.clone(),
                     pc_safepoint,
                 });
             }
+            assert!(x.next().is_none());
             self.be.guard_completed(
-                guard.label,
+                aguard.label.clone(),
                 patch_label,
-                stack_off - guard.stack_off,
+                stack_off - aguard.stack_off,
                 gextra.bid,
                 deopt_frames,
                 deopt_vars,
                 gextra.switch.clone(),
             );
         }
-
         Ok(())
     }
 
-    /// Returns the guards (in reverse order) and the stack offset.
+    /// Log information about the instruction `iidx`. `extra` is an additional string to add to the
+    /// log after the "normal" instruction output has been logged.
+    ///
+    /// Note: it is the caller's duty to check that logging is enabled before calling this
+    /// function.
+    fn log_inst(&mut self, b: &Block, iidx: InstIdx, extra: &str) {
+        let inst = b.inst(iidx);
+        let ty = self.m.ty(inst.tyidx(self.m));
+        if ty == &Ty::Void {
+            self.be.log(inst.to_string(self.m, b));
+        } else {
+            self.be.log(format!(
+                "%{}: {} = {}{extra}",
+                usize::from(iidx),
+                ty.to_string(self.m),
+                inst.to_string(self.m, b)
+            ));
+        }
+    }
+
+    /// Generate a code for a [Block] with the exception of its [Term] instruction which _must_
+    /// have been handled prior to calling this function. Returns the offset of the stack after
+    /// code generation for this block has occurred.
     fn p_block(
         &mut self,
         b: &'a Block,
-        stack_off: u32,
+        mut ra: RegAlloc<AB>,
         entry_vlocs: &[VarLocs<AB::Reg>],
-        exit_vlocs: &[VarLocs<AB::Reg>],
         logging: bool,
-    ) -> Result<(Vec<AsmGuard<AB>>, u32), CompilationError> {
-        let mut ra = RegAlloc::<AB>::new(self.m, b, stack_off);
-        ra.set_entry_stacks_at_end(entry_vlocs);
-
-        // As we process the trace, we push [AsmGuardRestore]s in here with a 1:1 mapping to
-        // [self.m.guard_restores]. However, because we're iterating backwards over the trace,
-        // that means that the indexes will be backwards too! This causes us to do some indexing
-        // acrobatics in the treatment of [Guard]s below.
-        let mut guards = Vec::new();
+    ) -> Result<u32, CompilationError> {
         let mut insts_iter = b.insts_iter(..).rev().peekable();
-        for _ in entry_vlocs.len()..b.insts_len() {
+        loop {
+            if let Some((_iidx, Inst::Arg(_))) = insts_iter.peek() {
+                break;
+            }
             let Some((iidx, hinst)) = insts_iter.next() else {
                 // By definition there must be no `Arg` instructions in this trace, which is only
                 // plausible in testing mode.
@@ -409,7 +477,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 #[cfg(test)]
                 break;
             };
-
             match hinst {
                 Inst::Abs(x) => {
                     if ra.is_used(iidx) {
@@ -503,7 +570,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     let label = self.be.i_guard(&mut ra, b, iidx, x)?;
                     let gextra = self.m.gextra(*geidx);
                     let exit_vlocs = ra.vlocs_from_iidxs(&gextra.exit_vars);
-                    guards.push(AsmGuard {
+                    let gbidx = gextra.gbidx.unwrap();
+                    assert!(self.asmguards[gbidx].is_none());
+                    self.asmguards[gbidx] = Some(AsmGuard {
                         geidx: *geidx,
                         label,
                         exit_vlocs,
@@ -602,21 +671,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_sub(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::Term(Term(term_vars)) => match self.m.trace_end {
-                    TraceEnd::Return { .. } => {
-                        assert_eq!(term_vars.len(), 0);
-                    }
-                    _ => {
-                        ra.set_term_vlocs(
-                            &mut self.be,
-                            matches!(self.m.trace_end, TraceEnd::Loop { .. }),
-                            entry_vlocs,
-                            iidx,
-                            term_vars,
-                            exit_vlocs,
-                        )?;
-                    }
-                },
+                Inst::Term(Term(_)) => (),
                 Inst::ThreadLocal(ThreadLocal(addr)) => {
                     if ra.is_used(iidx) {
                         let tloff = AB::thread_local_off(*addr);
@@ -650,17 +705,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
             if logging {
-                let ty = hinst.ty(self.m);
-                if ty == &Ty::Void {
-                    self.be.log(hinst.to_string(self.m, b));
-                } else {
-                    self.be.log(format!(
-                        "%{}: {} = {}",
-                        usize::from(iidx),
-                        ty.to_string(self.m),
-                        hinst.to_string(self.m, b)
-                    ));
-                }
+                self.log_inst(b, iidx, "");
             }
         }
 
@@ -669,28 +714,17 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // generate code themselves.
         ra.set_entry_vlocs_at_start(&mut self.be, entry_vlocs);
         if logging {
-            for (iidx, hinst) in insts_iter {
-                let ty = hinst.ty(self.m);
+            for (iidx, _inst) in insts_iter {
                 let pp_vlocs = entry_vlocs[usize::from(iidx)]
                     .iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                if ty == &Ty::Void {
-                    todo!();
-                    // self.be.log(hinst.to_string(self.m, b));
-                } else {
-                    self.be.log(format!(
-                        "%{}: {} = {} [{pp_vlocs}]",
-                        usize::from(iidx),
-                        ty.to_string(self.m),
-                        hinst.to_string(self.m, b),
-                    ));
-                }
+                self.log_inst(b, iidx, &format!(" [{pp_vlocs}]"));
             }
         }
 
-        Ok((guards, ra.stack_off()))
+        Ok(ra.stack_off())
     }
 }
 

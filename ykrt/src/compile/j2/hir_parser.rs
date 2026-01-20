@@ -40,6 +40,12 @@ struct HirParser<'lexer, 'input: 'lexer, Reg: RegT> {
     externs: HashMap<&'input str, TyIdx>,
     insts: IndexVec<InstIdx, Inst>,
     tys: IndexVec<TyIdx, Ty>,
+    /// The [TyIdx] for [Ty::Int(1)].
+    tyidx_int1: TyIdx,
+    /// The [TyIdx] for [Ty::Ptr(0)].
+    tyidx_ptr0: TyIdx,
+    /// The [TyIdx] for [Ty::Void].
+    tyidx_void: TyIdx,
     /// ty_map is used to ensure that only distinct [Ty]s lead to new [TyIdx]s.
     ty_map: HashMap<Ty, TyIdx>,
     phantom: PhantomData<Reg>,
@@ -82,6 +88,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
 
         let mut entry_vlocs = Vec::new();
         let mut guards = IndexVec::new();
+        let mut gblocks = IndexVec::new();
         let mut testregiter = Reg::iter_test_regs();
         let mut autoregused = false;
         let mut manualregused = false;
@@ -467,12 +474,32 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into_iter()
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
+                    let mut ginsts = IndexVec::with_capacity(exit_vars.len());
+                    for iidx in &exit_vars {
+                        match &self.insts[*iidx] {
+                            Inst::Const(x) => {
+                                ginsts.push(x.clone().into());
+                            }
+                            Inst::Guard(_) => panic!(),
+                            Inst::Term(_) => panic!(),
+                            x => {
+                                ginsts.push(Inst::Arg(Arg {
+                                    tyidx: x.tyidx(&self),
+                                }));
+                            }
+                        }
+                    }
+                    ginsts.push(Inst::Term(Term(
+                        (0..exit_vars.len()).map(InstIdx::from).collect::<Vec<_>>(),
+                    )));
+                    let gbidx = Some(gblocks.push(Block { insts: ginsts }));
                     let bid = BBlockId::new(FuncIdx::from(0), BBlockIdx::from(0));
                     let geidx = guards.push(GuardExtra {
                         bid,
                         switch: None,
                         exit_vars,
                         exit_frames: SmallVec::new(),
+                        gbidx,
                     });
                     self.insts.push(Inst::Guard(Guard {
                         geidx,
@@ -873,7 +900,11 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             trace_start: TraceStart::Test,
             trace_end: TraceEnd::Test { entry_vlocs, block },
             tys: self.tys,
+            tyidx_int1: self.tyidx_int1,
+            tyidx_ptr0: self.tyidx_ptr0,
+            tyidx_void: self.tyidx_void,
             guard_extras: guards,
+            gblocks,
             addr_name_map: None,
         };
         m.assert_well_formed();
@@ -950,6 +981,36 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
     }
 }
 
+impl<'lexer, 'input: 'lexer, Reg: RegT> ModLikeT for HirParser<'lexer, 'input, Reg> {
+    fn ty(&self, tyidx: TyIdx) -> &Ty {
+        &self.tys[tyidx]
+    }
+
+    fn tyidx_int1(&self) -> TyIdx {
+        self.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.tyidx_void
+    }
+
+    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
+        todo!()
+    }
+
+    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
+        todo!()
+    }
+
+    fn addr_to_name(&self, _addr: usize) -> Option<&str> {
+        todo!()
+    }
+}
+
 /// Parse the string `s` into a [Mod].
 ///
 /// # Panics
@@ -970,12 +1031,24 @@ pub(super) fn str_to_mod<Reg: RegT>(s: &str) -> Mod<Reg> {
         panic!("No AST produced")
     };
 
+    let mut tys = IndexVec::new();
+    let mut ty_map = HashMap::new();
+    let tyidx_void = tys.push(Ty::Void);
+    ty_map.insert(Ty::Void, tyidx_void);
+    let tyidx_ptr0 = tys.push(Ty::Ptr(0));
+    ty_map.insert(Ty::Ptr(0), tyidx_ptr0);
+    let tyidx_int1 = tys.push(Ty::Int(1));
+    ty_map.insert(Ty::Int(1), tyidx_int1);
+
     let hp = HirParser {
         lexer: &lexer,
         externs: HashMap::new(),
         insts: IndexVec::new(),
-        tys: IndexVec::new(),
-        ty_map: HashMap::new(),
+        tys,
+        tyidx_int1,
+        tyidx_ptr0,
+        tyidx_void,
+        ty_map,
         phantom: PhantomData,
     };
     hp.build(externs, insts)

@@ -22,11 +22,15 @@ pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
     /// types (suitable for putting in a [Mod]).
     fn build(
         self: Box<Self>,
-    ) -> (
-        Block,
-        IndexVec<GuardExtraIdx, GuardExtra>,
-        IndexVec<TyIdx, Ty>,
-    );
+    ) -> Result<
+        (
+            Block,
+            IndexVec<GuardExtraIdx, GuardExtra>,
+            IndexVec<GuardBlockIdx, Block>,
+            IndexVec<TyIdx, Ty>,
+        ),
+        CompilationError,
+    >;
 
     #[allow(dead_code)]
     fn peel(self) -> (Block, Block);

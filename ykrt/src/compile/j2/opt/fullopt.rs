@@ -150,30 +150,14 @@ pub(in crate::compile::j2) struct FullOpt {
 
 impl FullOpt {
     pub(in crate::compile::j2) fn new() -> Self {
-        Self {
-            passes: [
-                Box::new(KnownBits::new()),
-                Box::new(StrengthFold::new()),
-                Box::new(LoadStore::new()),
-                Box::new(CSE::new()),
-            ],
-            inner: OptInternal {
-                insts: IndexVec::new(),
-                consts_map: HashMap::new(),
-                guard_extras: IndexVec::new(),
-                tys: IndexVec::new(),
-                ty_map: HashMap::new(),
-            },
-        }
-    }
-
-    #[cfg(test)]
-    pub(in crate::compile::j2) fn new_testing(tys: IndexVec<TyIdx, Ty>) -> Self {
-        let ty_map = HashMap::from_iter(
-            tys.iter()
-                .enumerate()
-                .map(|(x, y)| (y.to_owned(), TyIdx::from(x))),
-        );
+        let mut tys = IndexVec::new();
+        let mut ty_map = HashMap::new();
+        let tyidx_void = tys.push(Ty::Void);
+        ty_map.insert(Ty::Void, tyidx_void);
+        let tyidx_ptr0 = tys.push(Ty::Ptr(0));
+        ty_map.insert(Ty::Ptr(0), tyidx_ptr0);
+        let tyidx_int1 = tys.push(Ty::Int(1));
+        ty_map.insert(Ty::Int(1), tyidx_int1);
         Self {
             passes: [
                 Box::new(KnownBits::new()),
@@ -186,6 +170,39 @@ impl FullOpt {
                 consts_map: HashMap::new(),
                 guard_extras: IndexVec::new(),
                 tys,
+                tyidx_int1,
+                tyidx_ptr0,
+                tyidx_void,
+                ty_map,
+            },
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::compile::j2) fn new_testing(tys: IndexVec<TyIdx, Ty>) -> Self {
+        let ty_map = HashMap::from_iter(
+            tys.iter()
+                .enumerate()
+                .map(|(x, y)| (y.to_owned(), TyIdx::from(x))),
+        );
+        let tyidx_ptr0 = *ty_map.get(&Ty::Ptr(0)).unwrap_or_else(|| panic!());
+        let tyidx_void = *ty_map.get(&Ty::Void).unwrap_or_else(|| panic!());
+        let tyidx_int1 = *ty_map.get(&Ty::Int(1)).unwrap_or_else(|| panic!());
+        Self {
+            passes: [
+                Box::new(KnownBits::new()),
+                Box::new(StrengthFold::new()),
+                Box::new(LoadStore::new()),
+                Box::new(CSE::new()),
+            ],
+            inner: OptInternal {
+                insts: IndexVec::new(),
+                consts_map: HashMap::new(),
+                guard_extras: IndexVec::new(),
+                tys,
+                tyidx_int1,
+                tyidx_ptr0,
+                tyidx_void,
                 ty_map,
             },
         }
@@ -287,6 +304,18 @@ impl ModLikeT for FullOpt {
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         self.inner.ty(tyidx)
     }
+
+    fn tyidx_int1(&self) -> TyIdx {
+        self.inner.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.inner.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.inner.tyidx_void
+    }
 }
 
 impl BlockLikeT for FullOpt {
@@ -297,13 +326,44 @@ impl BlockLikeT for FullOpt {
 
 impl OptT for FullOpt {
     fn build(
-        self: Box<Self>,
-    ) -> (
-        Block,
-        IndexVec<GuardExtraIdx, GuardExtra>,
-        IndexVec<TyIdx, Ty>,
-    ) {
+        mut self: Box<Self>,
+    ) -> Result<
         (
+            Block,
+            IndexVec<GuardExtraIdx, GuardExtra>,
+            IndexVec<GuardBlockIdx, Block>,
+            IndexVec<TyIdx, Ty>,
+        ),
+        CompilationError,
+    > {
+        let mut gblocks = IndexVec::with_capacity(self.inner.guard_extras.len());
+        // Because we update the `GuardExtra` at the end of each iteration, the borrow checker
+        // won't let us iterate over the `guard_extras` directly _and_ call `self.inst`, so we have
+        // to iterate over the indices.
+        for i in 0..self.inner.guard_extras.len() {
+            let mut ginsts = IndexVec::with_capacity(self.inner.guard_extras[i].exit_vars.len());
+            for iidx in &self.inner.guard_extras[i].exit_vars {
+                match self.inst(*iidx) {
+                    Inst::Const(x) => {
+                        ginsts.push(x.clone().into());
+                    }
+                    Inst::Guard(_) => panic!(),
+                    Inst::Term(_) => panic!(),
+                    x => {
+                        ginsts.push(Inst::Arg(Arg {
+                            tyidx: x.tyidx(&*self),
+                        }));
+                    }
+                }
+            }
+            ginsts.push(Inst::Term(Term(
+                (0..self.inner.guard_extras[i].exit_vars.len())
+                    .map(InstIdx::from)
+                    .collect::<Vec<_>>(),
+            )));
+            self.inner.guard_extras[i].gbidx = Some(gblocks.push(Block { insts: ginsts }));
+        }
+        Ok((
             Block {
                 insts: self
                     .inner
@@ -313,8 +373,9 @@ impl OptT for FullOpt {
                     .collect::<IndexVec<_, _>>(),
             },
             self.inner.guard_extras,
+            gblocks,
             self.inner.tys,
-        )
+        ))
     }
 
     fn peel(self) -> (Block, Block) {
@@ -322,13 +383,13 @@ impl OptT for FullOpt {
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
-        assert_ne!(*inst.ty(self), Ty::Void);
+        assert_ne!(inst.tyidx(self), self.tyidx_void());
         self.feed_internal(PassOptInner::new(), inst)
             .map(|x| x.unwrap())
     }
 
     fn feed_void(&mut self, inst: Inst) -> Result<Option<InstIdx>, CompilationError> {
-        assert_eq!(*inst.ty(self), Ty::Void);
+        assert_eq!(inst.tyidx(self), self.tyidx_void());
         assert!(!matches!(inst, Inst::Guard(_)));
         self.feed_internal(PassOptInner::new(), inst)
     }
@@ -369,6 +430,12 @@ struct OptInternal {
     consts_map: HashMap<HashableConst, InstIdx>,
     guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
     tys: IndexVec<TyIdx, Ty>,
+    /// The [TyIdx] for [Ty::Int(1)].
+    tyidx_int1: TyIdx,
+    /// The [TyIdx] for [Ty::Ptr(0)].
+    tyidx_ptr0: TyIdx,
+    /// The [TyIdx] for [Ty::Void].
+    tyidx_void: TyIdx,
     /// A map allowing us to deduplicate types. This guarantees that a given [Ty] appears exactly
     /// once in a module.
     ty_map: HashMap<Ty, TyIdx>,
@@ -537,6 +604,18 @@ impl ModLikeT for PassOpt<'_> {
         self.optinternal.ty(tyidx)
     }
 
+    fn tyidx_int1(&self) -> TyIdx {
+        self.optinternal.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.optinternal.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.optinternal.tyidx_void
+    }
+
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
         if geidx == GuardExtraIdx::MAX {
             self.inner.gextra.as_ref().unwrap()
@@ -604,6 +683,18 @@ impl ModLikeT for CommitInstOpt<'_> {
         self.inner.ty(tyidx)
     }
 
+    fn tyidx_int1(&self) -> TyIdx {
+        self.inner.tyidx_int1
+    }
+
+    fn tyidx_ptr0(&self) -> TyIdx {
+        self.inner.tyidx_ptr0
+    }
+
+    fn tyidx_void(&self) -> TyIdx {
+        self.inner.tyidx_void
+    }
+
     fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
         todo!();
     }
@@ -638,6 +729,9 @@ pub(in crate::compile::j2::opt) mod test {
         static ref TEXT_RE: Regex = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
     }
 
+    /// Take an input module string `mod_s` and run it through user-defined passes in the function
+    /// `feed_f`. After each call of `feed_f`, `inst_committed` and/or `equiv_committed` will be
+    /// called as appropriate.
     pub(in crate::compile::j2::opt) fn opt_and_test<F, G, H>(
         mod_s: &str,
         feed_f: F,
@@ -653,6 +747,9 @@ pub(in crate::compile::j2::opt) mod test {
         let mut fopt = Box::new(FullOpt::new());
         fopt.inner.guard_extras = m.guard_extras;
         fopt.inner.tys = m.tys;
+        for (tyidx, ty) in fopt.inner.tys.iter_enumerated() {
+            fopt.inner.ty_map.insert(ty.clone(), tyidx);
+        }
         let TraceEnd::Test {
             entry_vlocs,
             block: Block { insts },
@@ -728,13 +825,20 @@ pub(in crate::compile::j2::opt) mod test {
                 equiv: InstIdx::MAX,
             });
         }
-        let (block, guard_extras, tys) = fopt.build();
+        let tyidx_int1 = fopt.inner.tyidx_int1;
+        let tyidx_ptr0 = fopt.inner.tyidx_ptr0;
+        let tyidx_void = fopt.inner.tyidx_void;
+        let (block, guard_extras, gblocks, tys) = fopt.build().unwrap();
         let m = Mod {
             trid: m.trid,
             trace_start: TraceStart::Test,
             trace_end: TraceEnd::Test { entry_vlocs, block },
             tys,
+            tyidx_int1,
+            tyidx_ptr0,
+            tyidx_void,
             guard_extras,
+            gblocks,
             addr_name_map: None,
         };
         let s = m.to_string();
@@ -796,6 +900,7 @@ pub(in crate::compile::j2::opt) mod test {
           blackbox %4
           blackbox %4
           term [%4]
+          ...
         ",
         );
 
@@ -825,6 +930,46 @@ pub(in crate::compile::j2::opt) mod test {
           blackbox %3
           blackbox %3
           term [%3, %3]
+          ...
+        ",
+        );
+    }
+
+    #[test]
+    fn guard_blocks() {
+        fn test_canon(mod_s: &str, ptn: &str) {
+            opt_and_test(
+                mod_s,
+                |opt, mut inst| {
+                    inst.canonicalise(opt);
+                    OptOutcome::Rewritten(inst)
+                },
+                |_, _, _| (),
+                |_, _| (),
+                ptn,
+            );
+        }
+
+        test_canon(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          %3: i1 = 0
+          guard true, %3, [%0, %3]
+          term [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          %3: i1 = 0
+          guard true, %3, [%0, %3]
+          term [%0, %1]
+          ; guard 0
+          %0: i8 = arg
+          %1: i1 = 0
+          term [%0, %1]
         ",
         );
     }

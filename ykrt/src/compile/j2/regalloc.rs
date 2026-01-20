@@ -57,7 +57,7 @@ use crate::compile::j2::hir::Ty;
 use crate::compile::{
     CompilationError,
     j2::{
-        hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod, TraceStart},
+        hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod},
         hir_to_asm::HirToAsmBackend,
     },
 };
@@ -165,17 +165,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         {
             for vloc in vlocs.iter() {
                 if let VarLoc::Reg(reg, fill) = vloc {
-                    if let TraceStart::ControlPoint { .. } = self.m.trace_start {
-                        // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
-                        // for details), caller saved registers are potentially corrupted at the very start
-                        // of ControlPoint traces
-                        //
-                        // FIXME: This is a horrible hack and assumes that all [Block]s in a loop
-                        // trace are subject to the same restriction.
-                        if reg.is_caller_saved() {
-                            continue;
-                        }
-                    }
                     if !in_rstate.iidxs(*reg).is_empty() {
                         let bitw = self.b.inst_bitw(self.m, iidx);
                         if bitw > iidxs_maxbitw(self.m, self.b, in_rstate.iidxs(*reg)) {
@@ -219,13 +208,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     pub(super) fn set_term_vlocs(
         &mut self,
         be: &mut AB,
+        b: &Block,
         is_loop: bool,
         all_entry_vlocs: &[VarLocs<AB::Reg>],
-        exit_iidx: InstIdx,
-        all_term_vars: &[InstIdx],
         all_term_vlocs: &[VarLocs<AB::Reg>],
     ) -> Result<(), CompilationError> {
-        assert_eq!(all_term_vars.len(), all_term_vlocs.len());
+        assert_eq!(b.term_vars().len(), all_term_vlocs.len());
 
         // At a block's terminator, we potentially have to shuffle the stack around. In most cases
         // we have to "move" a value to/from the same stack location, but not always. Consider a
@@ -264,7 +252,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         // Push constants into registers as the very last thing (these registers are excellent
         // "temporary" candidates, so do them last).
-        for (iidx, term_vlocs) in all_term_vars.iter().zip(all_term_vlocs.iter()) {
+        for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()) {
             if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
                 for vloc in term_vlocs.iter() {
                     let bitw = self.b.inst_bitw(self.m, *iidx);
@@ -282,7 +270,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         // Push constants into the stack as the penultimate thing (these may require up to two
         // temporary registers).
-        for (iidx, term_vlocs) in all_term_vars.iter().zip(all_term_vlocs.iter()) {
+        for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()) {
             if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
                 for vloc in term_vlocs.iter() {
                     let bitw = self.b.inst_bitw(self.m, *iidx);
@@ -305,12 +293,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         let mut moves = Vec::new();
-        for (iidx, term_vlocs) in all_term_vars.iter().zip(all_term_vlocs.iter()) {
+        for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()) {
             if let Inst::Const(_) = self.b.inst(*iidx) {
                 // We handled these above.
                 continue;
             }
-            self.is_used[*iidx] = exit_iidx;
+            assert!(!b.insts.is_empty());
+            self.is_used[*iidx] = b.insts.len_idx() - 1;
             let bitw = self.b.inst_bitw(self.m, *iidx);
             for vloc in term_vlocs.iter() {
                 if term_vlocs
@@ -1451,6 +1440,15 @@ impl<Reg: RegT> VarLocs<Reg> {
 
     pub(super) fn push(&mut self, vloc: VarLoc<Reg>) {
         self.raw.push(vloc);
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all elements e for which `f(&e)` returns false. This method operates
+    /// in place, visiting each element exactly once in the original order, and preserves the order
+    /// of the retained elements.
+    pub fn retain<F: FnMut(&mut VarLoc<Reg>) -> bool>(&mut self, f: F) {
+        self.raw.retain(f);
     }
 }
 
