@@ -57,7 +57,7 @@ use crate::compile::j2::hir::Ty;
 use crate::compile::{
     CompilationError,
     j2::{
-        hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod, TraceStart},
+        hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod},
         hir_to_asm::HirToAsmBackend,
     },
 };
@@ -165,17 +165,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         {
             for vloc in vlocs.iter() {
                 if let VarLoc::Reg(reg, fill) = vloc {
-                    if let TraceStart::ControlPoint { .. } = self.m.trace_start {
-                        // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
-                        // for details), caller saved registers are potentially corrupted at the very start
-                        // of ControlPoint traces
-                        //
-                        // FIXME: This is a horrible hack and assumes that all [Block]s in a loop
-                        // trace are subject to the same restriction.
-                        if reg.is_caller_saved() {
-                            continue;
-                        }
-                    }
                     if !in_rstate.iidxs(*reg).is_empty() {
                         let bitw = self.b.inst_bitw(self.m, iidx);
                         if bitw > iidxs_maxbitw(self.m, self.b, in_rstate.iidxs(*reg)) {
@@ -1451,6 +1440,15 @@ impl<Reg: RegT> VarLocs<Reg> {
 
     pub(super) fn push(&mut self, vloc: VarLoc<Reg>) {
         self.raw.push(vloc);
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all elements e for which `f(&e)` returns false. This method operates
+    /// in place, visiting each element exactly once in the original order, and preserves the order
+    /// of the retained elements.
+    pub fn retain<F: FnMut(&mut VarLoc<Reg>) -> bool>(&mut self, f: F) {
+        self.raw.retain(f);
     }
 }
 

@@ -159,11 +159,26 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 .unwrap();
 
                 let (rec, _) = aot_smaps.get(usize::try_from(entry_safepoint.id).unwrap());
-                let entry_vlocs = rec
+                let mut entry_vlocs = rec
                     .live_vals
                     .iter()
                     .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
+
+                for vlocs in entry_vlocs.iter_mut() {
+                    vlocs.retain(|x| {
+                        if let VarLoc::Reg(reg, _fill) = x
+                            && reg.is_caller_saved()
+                        {
+                            // Because of the way we call traces (see bc59d8bff411931440459fa3377a137e8537a32f
+                            // for details), caller saved registers are potentially corrupted at the very start
+                            // of ControlPoint traces
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                }
 
                 let (post_stack_label, entry_stack_off) = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
