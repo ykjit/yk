@@ -84,6 +84,11 @@ thread_local! {
 #[thread_local]
 static __yk_thread_tracing_state: AtomicU8 = const { AtomicU8::new(IsTracing::None.as_u8()) };
 
+/// Global counter of threads currently tracing. This is NOT TLS - it's a simple atomic counter.
+/// When this is 0, no thread is tracing, and TLS lookups can be skipped entirely.
+/// This optimisation avoids `__tls_get_addr` overhead when not tracing.
+static TRACING_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
+
 /// A meta-tracer. This is always passed around stored in an [Arc].
 ///
 /// When you are finished with this meta-tracer, it is best to explicitly call [MT::shutdown] to
@@ -1300,7 +1305,17 @@ impl MTThread {
     }
 
     /// Is this thread currently tracing something?
+    ///
+    /// This function is optimised for the common case (not tracing): it first checks a global
+    /// atomic counter to see if ANY thread is tracing. Only if that check passes does it
+    /// perform the more expensive TLS lookup for this specific thread.
+    #[inline(always)]
     pub(crate) fn is_tracing() -> bool {
+        // Fast path: if no thread is tracing globally, this thread definitely isn't
+        if TRACING_THREAD_COUNT.load(Ordering::Relaxed) == 0 {
+            return false;
+        }
+        // Slow path: check this thread's TLS state
         IsTracing::from(__yk_thread_tracing_state.load(Ordering::Relaxed)) != IsTracing::None
     }
 
@@ -1310,8 +1325,19 @@ impl MTThread {
     }
 
     /// Set this thread's tracing state.
+    ///
+    /// This also updates the global `TRACING_THREAD_COUNT` to enable fast-path optimisation
+    /// in promotion functions.
     fn set_tracing(kind: IsTracing) {
-        __yk_thread_tracing_state.swap(kind.as_u8(), Ordering::Relaxed);
+        let old = IsTracing::from(__yk_thread_tracing_state.swap(kind.as_u8(), Ordering::Relaxed));
+        let was_tracing = old != IsTracing::None;
+        let now_tracing = kind != IsTracing::None;
+        // Update the global counter only when transitioning to/from tracing
+        if !was_tracing && now_tracing {
+            TRACING_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
+        } else if was_tracing && !now_tracing {
+            TRACING_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 
     /// Call `f` with a `&` reference to this thread's [MTThread] instance.
@@ -2173,5 +2199,27 @@ mod tests {
             mt.transition_control_point(&loc1, ptr::null_mut()),
             TransitionControlPoint::Execute(_)
         );
+    }
+
+    #[test]
+    fn tracing_thread_count_tracks_tracing_threads() {
+        // Note: We can only assert `> 0` while tracing, not exact values, because other tests
+        // may run in parallel. The only invariant a thread can know is: "if I'm tracing, the
+        // count must be > 0". When not tracing, we cannot make any claims about the count.
+
+        // Start tracing on this thread
+        MTThread::set_tracing(IsTracing::Loop);
+        assert!(TRACING_THREAD_COUNT.load(Ordering::Relaxed) > 0);
+        assert!(MTThread::is_tracing());
+
+        // Transition from Loop to Guard (still tracing, count must still be > 0)
+        MTThread::set_tracing(IsTracing::Guard);
+        assert!(TRACING_THREAD_COUNT.load(Ordering::Relaxed) > 0);
+        assert!(MTThread::is_tracing());
+
+        // Stop tracing
+        MTThread::set_tracing(IsTracing::None);
+        assert!(!MTThread::is_tracing());
+        // Cannot assert anything about TRACING_THREAD_COUNT here - other threads may be tracing.
     }
 }
