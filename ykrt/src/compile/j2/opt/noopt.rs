@@ -101,8 +101,8 @@ impl OptT for NoOpt {
         // won't let us iterate over the `guard_extras` directly _and_ call `self.inst`, so we have
         // to iterate over the indices.
         for i in 0..self.guard_extras.len() {
-            let mut ginsts = IndexVec::with_capacity(self.guard_extras[i].exit_vars.len());
-            for iidx in &self.guard_extras[i].exit_vars {
+            let mut ginsts = IndexVec::with_capacity(self.guard_extras[i].guard_exit_vars.len());
+            for iidx in &self.guard_extras[i].guard_exit_vars {
                 match self.inst(*iidx) {
                     Inst::Const(x) => {
                         ginsts.push(x.clone().into());
@@ -116,11 +116,9 @@ impl OptT for NoOpt {
                     }
                 }
             }
-            ginsts.push(Inst::Term(Term(
-                (0..self.guard_extras[i].exit_vars.len())
-                    .map(InstIdx::from)
-                    .collect::<Vec<_>>(),
-            )));
+            ginsts.push(Inst::Term(Term(std::mem::take(
+                &mut self.guard_extras[i].deopt_vars,
+            ))));
             self.guard_extras[i].gbidx = Some(guards.push(Block { insts: ginsts }));
         }
         Ok((

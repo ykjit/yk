@@ -342,8 +342,9 @@ impl OptT for FullOpt {
         // won't let us iterate over the `guard_extras` directly _and_ call `self.inst`, so we have
         // to iterate over the indices.
         for i in 0..self.inner.guard_extras.len() {
-            let mut ginsts = IndexVec::with_capacity(self.inner.guard_extras[i].exit_vars.len());
-            for iidx in &self.inner.guard_extras[i].exit_vars {
+            let mut ginsts =
+                IndexVec::with_capacity(self.inner.guard_extras[i].guard_exit_vars.len());
+            for iidx in &self.inner.guard_extras[i].guard_exit_vars {
                 match self.inst(*iidx) {
                     Inst::Const(x) => {
                         ginsts.push(x.clone().into());
@@ -357,11 +358,9 @@ impl OptT for FullOpt {
                     }
                 }
             }
-            ginsts.push(Inst::Term(Term(
-                (0..self.inner.guard_extras[i].exit_vars.len())
-                    .map(InstIdx::from)
-                    .collect::<Vec<_>>(),
-            )));
+            ginsts.push(Inst::Term(Term(std::mem::take(
+                &mut self.inner.guard_extras[i].deopt_vars,
+            ))));
             self.inner.guard_extras[i].gbidx = Some(gblocks.push(Block { insts: ginsts }));
         }
         Ok((
@@ -957,6 +956,7 @@ pub(in crate::compile::j2::opt) mod test {
             );
         }
 
+        // Basic guard blocks
         test_canon(
             "
           %0: i8 = arg [reg]
@@ -977,6 +977,30 @@ pub(in crate::compile::j2::opt) mod test {
           %0: i8 = arg
           %1: i1 = 0
           term [%0, %1]
+        ",
+        );
+
+        // Repeated instruction indexes in guard exit_vars only lead to one `arg` in the guard
+        // block.
+        test_canon(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp eq %0, %1
+          %3: i1 = 0
+          guard true, %3, [%0, %0]
+          term [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp eq %0, %1
+          %3: i1 = 0
+          guard true, %3, [%0]
+          term [%0, %1]
+          ; guard 0
+          %0: i8 = arg
+          term [%0, %0]
         ",
         );
     }

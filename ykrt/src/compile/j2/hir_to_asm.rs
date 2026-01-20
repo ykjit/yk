@@ -369,40 +369,31 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             let gextra = self.m.guard_extra(aguard.geidx);
 
             let mut stack_off = aguard.stack_off;
-            assert_eq!(gblock.term_vars().len(), aguard.exit_vlocs.len());
-            let mut exit_vlocs = aguard.exit_vlocs.clone();
-            for (iidx, vlocs) in gblock.term_vars().iter().zip(exit_vlocs.iter_mut()) {
-                // If a value only exists in a register(s), we need to pick one of those registers,
-                // and ensure it's spilt.
-                if vlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
-                    let Some(VarLoc::Reg(reg, fill)) = vlocs
-                        .iter()
-                        .find(|x| matches!(x, VarLoc::Reg(_, _)))
-                        .cloned()
-                    else {
-                        panic!("{vlocs:?}")
-                    };
-                    let bitw = gblock.inst_bitw(self.m, *iidx);
-                    stack_off = self.be.align_spill(stack_off, bitw);
-                    vlocs.push(VarLoc::Stack(stack_off));
-                    self.be.spill(reg, fill, stack_off, bitw)?;
-                }
-            }
-
+            assert_eq!(gextra.guard_exit_vars.len(), aguard.guard_exit_vlocs.len());
             let mut deopt_frames = SmallVec::with_capacity(gextra.deopt_frames.len());
-            let mut deopt_vars = Vec::with_capacity(gextra.exit_vars.len());
-            let mut x = gblock.term_vars().iter().zip(exit_vlocs.into_iter());
+            let mut deopt_vars = Vec::with_capacity(gblock.term_vars().len());
+            let mut term_vars_iter = gblock.term_vars().iter();
             for Frame { pc, pc_safepoint } in gextra.deopt_frames.iter() {
                 let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
                 for smap_loc in smap.live_vals.iter() {
-                    let (iidx, fromvlocs) = x.next().unwrap();
-                    let fromvlocs = fromvlocs
-                        .iter()
-                        // FIXME (optimisation): We don't need to spill everything
-                        // before deopt / side-traces.
-                        .filter(|x| !matches!(x, VarLoc::Reg(_, _)))
-                        .cloned()
-                        .collect::<VarLocs<_>>();
+                    let iidx = term_vars_iter.next().unwrap();
+                    let mut fromvlocs = aguard.guard_exit_vlocs[usize::from(*iidx)].clone();
+                    if fromvlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
+                        let Some(VarLoc::Reg(reg, fill)) = fromvlocs
+                            .iter()
+                            .find(|x| matches!(x, VarLoc::Reg(_, _)))
+                            .cloned()
+                        else {
+                            panic!()
+                        };
+                        let bitw = gblock.inst_bitw(self.m, *iidx);
+                        stack_off = self.be.align_spill(stack_off, bitw);
+                        fromvlocs.push(VarLoc::Stack(stack_off));
+                        self.be.spill(reg, fill, stack_off, bitw)?;
+                    }
+                    // FIXME (optimisation): We don't need to spill everything before deopt /
+                    // side-traces.
+                    fromvlocs.retain(|x| !matches!(x, VarLoc::Reg(_, _)));
                     let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
                     if fromvlocs == tovlocs {
                         // Optimise away situations where we would just move a
@@ -420,7 +411,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     pc_safepoint,
                 });
             }
-            assert!(x.next().is_none());
+            assert!(term_vars_iter.next().is_none());
             self.be.guard_completed(
                 aguard.label.clone(),
                 patch_label,
@@ -569,13 +560,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 Inst::Guard(x @ Guard { geidx, .. }) => {
                     let label = self.be.i_guard(&mut ra, b, iidx, x)?;
                     let gextra = self.m.gextra(*geidx);
-                    let exit_vlocs = ra.vlocs_from_iidxs(&gextra.exit_vars);
+                    let exit_vlocs = ra.vlocs_from_iidxs(&gextra.guard_exit_vars);
                     let gbidx = gextra.gbidx.unwrap();
                     assert!(self.asmguards[gbidx].is_none());
                     self.asmguards[gbidx] = Some(AsmGuard {
                         geidx: *geidx,
                         label,
-                        exit_vlocs,
+                        guard_exit_vlocs: exit_vlocs,
                         stack_off: ra.stack_off(),
                     });
                 }
@@ -1286,7 +1277,7 @@ struct AsmGuard<AB: HirToAsmBackend + ?Sized> {
     geidx: GuardExtraIdx,
     label: AB::Label,
     /// Will be the same length as the matching [GuardExtra::exit_vars].
-    exit_vlocs: Vec<VarLocs<AB::Reg>>,
+    guard_exit_vlocs: Vec<VarLocs<AB::Reg>>,
     /// The stack offset of the register allocator at the entry point of the guard.
     stack_off: u32,
 }
