@@ -360,7 +360,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         switch: Option<hir::Switch>,
     ) -> Result<(), CompilationError> {
         self.frames.last_mut().unwrap().pc_safepoint = Some(guard_safepoint);
-        let mut exit_frames = SmallVec::with_capacity(self.frames.len());
+        let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
         // The list of variables tends to be long enough that we'll get more than one resizing, so
         // the precalculation is worth it.
         let mut exit_vars = Vec::with_capacity(
@@ -388,7 +388,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     .iter()
                     .map(|x| frame.get_local(&*self.opt, &x.to_inst_id())),
             );
-            exit_frames.push(hir::Frame { pc, pc_safepoint });
+            deopt_frames.push(hir::Frame { pc, pc_safepoint });
         }
 
         // In many cases, the last variable in a guards' list of variables is the condition
@@ -414,7 +414,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             bid,
             switch,
             exit_vars,
-            exit_frames,
+            deopt_frames,
             gbidx: None,
         };
 

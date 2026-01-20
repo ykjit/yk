@@ -389,10 +389,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let mut deopt_frames = SmallVec::with_capacity(gextra.exit_frames.len());
+            let mut deopt_frames = SmallVec::with_capacity(gextra.deopt_frames.len());
             let mut deopt_vars = Vec::with_capacity(gextra.exit_vars.len());
             let mut x = gblock.term_vars().iter().zip(exit_vlocs.into_iter());
-            for Frame { pc, pc_safepoint } in gextra.exit_frames.iter() {
+            for Frame { pc, pc_safepoint } in gextra.deopt_frames.iter() {
                 let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
                 for smap_loc in smap.live_vals.iter() {
                     let (iidx, fromvlocs) = x.next().unwrap();

@@ -2109,13 +2109,6 @@ pub(super) struct GuardExtra {
     /// then this records the information necessary for subsequent sidetraces to deal with the
     /// switch properly.
     pub switch: Option<Switch>,
-    /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
-    /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
-    /// *except* that the most recent call frame is replaced with the deopt information for the
-    /// branch (etc) that failed. Brief experiments suggest that, depending on the benchmark and
-    /// interpreter, the depth of frames decreases exponentially: in ~50-90% (and 90% is more
-    /// common than 50%) of cases there is 1 frame, about 10x fewer have 2 frames, and so on.
-    pub exit_frames: SmallVec<[Frame; 2]>,
     /// The variables used if the guard fails and exits to a side-trcae. These are stored as an
     /// ordered, flat, sequence, corresponding to the sequence of `exit_frames`. For example, if
     /// `exit_frames` has 2 frames, the first of which needs 3 variables and the second 1 variable
@@ -2124,11 +2117,18 @@ pub(super) struct GuardExtra {
     /// [a, b, c, d]
     ///  ^^^^^^^
     ///     |     ^
-    ///     |   exit_frames[1] variable
+    ///     |   deopt_frames[1] variable
     ///     |
-    ///  exit_frames[0] variables
+    ///  deopt_frames[0] variables
     /// ```
     pub exit_vars: Vec<InstIdx>,
+    /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
+    /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
+    /// *except* that the most recent call frame is replaced with the deopt information for the
+    /// branch (etc) that failed. Brief experiments suggest that, depending on the benchmark and
+    /// interpreter, the depth of frames decreases exponentially: in ~50-90% (and 90% is more
+    /// common than 50%) of cases there is 1 frame, about 10x fewer have 2 frames, and so on.
+    pub deopt_frames: SmallVec<[Frame; 2]>,
     /// What guard [Block] does this [Guard] / [GuardExtra] map to? This will initially be set to
     /// `None`; hir_to_asm will set it to [Some] when the corresponding guard [Block] is created.
     pub gbidx: Option<GuardBlockIdx>,
@@ -3988,7 +3988,7 @@ impl<'a> Iterator for IterIidxsIterator<'a> {
                         bid: _,
                         switch: _,
                         exit_vars,
-                        exit_frames: _,
+                        deopt_frames: _,
                         gbidx: _,
                     } = self.m.gextra(*geidx);
                     if self.i - 1 <= exit_vars.len() {

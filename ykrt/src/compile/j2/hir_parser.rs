@@ -498,7 +498,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         bid,
                         switch: None,
                         exit_vars,
-                        exit_frames: SmallVec::new(),
+                        deopt_frames: SmallVec::new(),
                         gbidx,
                     });
                     self.insts.push(Inst::Guard(Guard {
