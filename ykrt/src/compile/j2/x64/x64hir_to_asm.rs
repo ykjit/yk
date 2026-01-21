@@ -277,7 +277,10 @@ impl<'a> X64HirToAsm<'a> {
         else {
             panic!()
         };
-        let GuardExtra { exit_vars, .. } = self.m.gextra(*geidx);
+        let GuardExtra {
+            guard_exit_vars: exit_vars,
+            ..
+        } = self.m.gextra(*geidx);
 
         let bitw = b.inst_bitw(self.m, *lhs);
         let (imm, mut in_fill) = if pred.is_signed() {
@@ -2544,7 +2547,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             return self.i_icmp_guard(ra, b, iidx, ginst);
         }
 
-        let GuardExtra { exit_vars, .. } = self.m.gextra(*geidx);
+        let GuardExtra {
+            guard_exit_vars: exit_vars,
+            ..
+        } = self.m.gextra(*geidx);
         let [cndr, _] = ra.alloc(
             self,
             iidx,

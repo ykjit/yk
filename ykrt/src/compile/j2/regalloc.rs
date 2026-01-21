@@ -2384,7 +2384,7 @@ pub(crate) mod test {
             }: &Guard,
         ) -> Result<Self::Label, CompilationError> {
             let GuardExtra {
-                exit_vars: entry_vars,
+                guard_exit_vars: exit_vars,
                 ..
             } = self.m.gextra(*geidx);
             let [cndr, _] = ra.alloc(
@@ -2397,7 +2397,7 @@ pub(crate) mod test {
                         regs: &GP_REGS,
                         clobber: false,
                     },
-                    RegCnstr::KeepAlive { iidxs: entry_vars },
+                    RegCnstr::KeepAlive { iidxs: exit_vars },
                 ],
             )?;
 

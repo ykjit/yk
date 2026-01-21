@@ -360,15 +360,48 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         switch: Option<hir::Switch>,
     ) -> Result<(), CompilationError> {
         self.frames.last_mut().unwrap().pc_safepoint = Some(guard_safepoint);
-        let mut exit_frames = SmallVec::with_capacity(self.frames.len());
+
+        // If the condition variable is referenced in the guard's exit vars, we'll change it to
+        // reference a const -- but we construct this as-needed.
+        let mut cond_inverse_iidx = None;
+
         // The list of variables tends to be long enough that we'll get more than one resizing, so
         // the precalculation is worth it.
-        let mut exit_vars = Vec::with_capacity(
-            self.frames
-                .iter()
-                .map(|x| x.pc_safepoint.unwrap().lives.len())
-                .sum(),
-        );
+        let deopt_vars_len = self
+            .frames
+            .iter()
+            .map(|x| x.pc_safepoint.unwrap().lives.len())
+            .sum();
+
+        let mut guard_exit_vars = Vec::with_capacity(deopt_vars_len);
+        for i in 0..self.frames.len() {
+            let pc_safepoint = self.frames[i].pc_safepoint.unwrap();
+            for j in 0..pc_safepoint.lives.len() {
+                let mut iidx =
+                    self.frames[i].get_local(&*self.opt, &pc_safepoint.lives[j].to_inst_id());
+                if iidx == cond_iidx {
+                    if cond_inverse_iidx.is_none() {
+                        let tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
+                        cond_inverse_iidx = Some(self.const_to_iidx(
+                            tyidx,
+                            hir::ConstKind::Int(ArbBitInt::from_u64(
+                                1,
+                                !u64::from(expect_true) & 0b1,
+                            )),
+                        )?);
+                    }
+                    iidx = cond_inverse_iidx.unwrap();
+                }
+                guard_exit_vars.push(iidx);
+            }
+        }
+        // The good news is that `guard_exit_vars` will tend to be mostly sorted, so this rarely
+        // has to do much work.
+        guard_exit_vars.sort();
+        guard_exit_vars.dedup();
+
+        let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
+        let mut deopt_vars = Vec::with_capacity(deopt_vars_len);
         for (
             i,
             frame @ Frame {
@@ -382,27 +415,18 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             } else {
                 iid.clone()
             };
-            exit_vars.extend(
-                pc_safepoint
-                    .lives
-                    .iter()
-                    .map(|x| frame.get_local(&*self.opt, &x.to_inst_id())),
-            );
-            exit_frames.push(hir::Frame { pc, pc_safepoint });
-        }
-
-        // In many cases, the last variable in a guards' list of variables is the condition
-        // variable: by definition, we know that if the guard is taken the value will be
-        // `!expect_true`. We could leave this for the optimiser, but it's cheaper to do it here.
-        if let Operand::Local(last_iid) = guard_safepoint.lives.last().unwrap()
-            && cond_iidx == self.frames.last().unwrap().get_local(&*self.opt, last_iid)
-        {
-            let tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
-            let ciidx = self.const_to_iidx(
-                tyidx,
-                hir::ConstKind::Int(ArbBitInt::from_u64(1, !u64::from(expect_true) & 0b1)),
-            )?;
-            *exit_vars.last_mut().unwrap() = ciidx;
+            for mut iidx in pc_safepoint
+                .lives
+                .iter()
+                .map(|x| frame.get_local(&*self.opt, &x.to_inst_id()))
+            {
+                if iidx == cond_iidx {
+                    iidx = cond_inverse_iidx.unwrap();
+                }
+                let i = guard_exit_vars.binary_search(&iidx).unwrap();
+                deopt_vars.push(hir::InstIdx::from(i));
+            }
+            deopt_frames.push(hir::Frame { pc, pc_safepoint });
         }
 
         let hinst = hir::Guard {
@@ -413,8 +437,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let gextra = hir::GuardExtra {
             bid,
             switch,
-            exit_vars,
-            exit_frames,
+            guard_exit_vars,
+            deopt_vars,
+            deopt_frames,
             gbidx: None,
         };
 

@@ -2052,11 +2052,11 @@ impl InstT for Guard {
         self.cond = opt.equiv_iidx(self.cond);
         // To avoid allocating, we swap in an empty vec, mutate what we've taken out, and put it
         // back in just below.
-        let mut exit_vars = std::mem::take(&mut opt.gextra_mut(self.geidx).exit_vars);
-        for x in exit_vars.iter_mut() {
+        let mut guard_exit_vars = std::mem::take(&mut opt.gextra_mut(self.geidx).guard_exit_vars);
+        for x in guard_exit_vars.iter_mut() {
             *x = opt.equiv_iidx(*x);
         }
-        opt.gextra_mut(self.geidx).exit_vars = exit_vars;
+        opt.gextra_mut(self.geidx).guard_exit_vars = guard_exit_vars;
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
@@ -2073,7 +2073,7 @@ impl InstT for Guard {
         F: FnMut(InstIdx) -> InstIdx,
     {
         self.cond = iidx_map(self.cond);
-        for x in m.gextra_mut(self.geidx).exit_vars.iter_mut() {
+        for x in m.gextra_mut(self.geidx).guard_exit_vars.iter_mut() {
             *x = iidx_map(*x);
         }
     }
@@ -2084,7 +2084,7 @@ impl InstT for Guard {
             if self.expect { "true" } else { "false" },
             usize::from(self.cond),
             m.gextra(self.geidx)
-                .exit_vars
+                .guard_exit_vars
                 .iter()
                 .map(|iidx| format!("%{}", usize::from(*iidx)))
                 .collect::<Vec<_>>()
@@ -2109,26 +2109,29 @@ pub(super) struct GuardExtra {
     /// then this records the information necessary for subsequent sidetraces to deal with the
     /// switch properly.
     pub switch: Option<Switch>,
+    /// The variables that will be passed from the main trace [Block] to a guard [Block]. These
+    /// are unordered, but must not contain duplicates.
+    pub guard_exit_vars: Vec<InstIdx>,
+    /// The variables used for deopt and side-tracing. These are stored as an ordered, flat,
+    /// sequence, corresponding to the sequence of `deopt_frames`. For example, if `deopt_frames`
+    /// has 2 frames, the first of which needs 3 variables and the second 1 variable `deopt_vars`
+    /// would look as follows:
+    /// ```text
+    /// [a, b, c, d]
+    ///  ^^^^^^^
+    ///     |     ^
+    ///     |   deopt_frames[1] variable
+    ///     |
+    ///  deopt_frames[0] variables
+    /// ```
+    pub deopt_vars: Vec<InstIdx>,
     /// The frames needed for deopt and side-tracing with the most recent frame at the tail-end of
     /// this list. This is a 1:1 mapping with the call frames at the point of the respective guard
     /// *except* that the most recent call frame is replaced with the deopt information for the
     /// branch (etc) that failed. Brief experiments suggest that, depending on the benchmark and
     /// interpreter, the depth of frames decreases exponentially: in ~50-90% (and 90% is more
     /// common than 50%) of cases there is 1 frame, about 10x fewer have 2 frames, and so on.
-    pub exit_frames: SmallVec<[Frame; 2]>,
-    /// The variables used if the guard fails and exits to a side-trcae. These are stored as an
-    /// ordered, flat, sequence, corresponding to the sequence of `exit_frames`. For example, if
-    /// `exit_frames` has 2 frames, the first of which needs 3 variables and the second 1 variable
-    /// `exit_vars` would look as follows:
-    /// ```text
-    /// [a, b, c, d]
-    ///  ^^^^^^^
-    ///     |     ^
-    ///     |   exit_frames[1] variable
-    ///     |
-    ///  exit_frames[0] variables
-    /// ```
-    pub exit_vars: Vec<InstIdx>,
+    pub deopt_frames: SmallVec<[Frame; 2]>,
     /// What guard [Block] does this [Guard] / [GuardExtra] map to? This will initially be set to
     /// `None`; hir_to_asm will set it to [Some] when the corresponding guard [Block] is created.
     pub gbidx: Option<GuardBlockIdx>,
@@ -3987,12 +3990,13 @@ impl<'a> Iterator for IterIidxsIterator<'a> {
                     let GuardExtra {
                         bid: _,
                         switch: _,
-                        exit_vars,
-                        exit_frames: _,
+                        guard_exit_vars,
+                        deopt_vars: _,
+                        deopt_frames: _,
                         gbidx: _,
                     } = self.m.gextra(*geidx);
-                    if self.i - 1 <= exit_vars.len() {
-                        return Some(exit_vars[self.i - 2]);
+                    if self.i - 1 <= guard_exit_vars.len() {
+                        return Some(guard_exit_vars[self.i - 2]);
                     }
                 }
             }

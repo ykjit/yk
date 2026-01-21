@@ -11,6 +11,8 @@
 //! 3. Integers are either (possibly negative) decimal numbers or (always positive) hex numbers.
 //!    i.e. `-15` is allowed, but `-0xF` is not. Where sign extension is relevant, use decimal
 //!    numbers if you want sign extension, and hex numbers if you do not want sign extension.
+//! 4. Guard exit vars are considered as _both_ [GuardExtra::guard_exit_vars] and
+//!    [GuardExtra::deopt_vars]. The former are reordered and deduplicated as appropriate.
 
 use crate::{
     compile::{
@@ -475,18 +477,26 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
                     let mut ginsts = IndexVec::with_capacity(exit_vars.len());
+                    let mut guard_exit_vars = Vec::new();
+                    let mut deopt_vars = Vec::new();
                     for iidx in &exit_vars {
-                        match &self.insts[*iidx] {
-                            Inst::Const(x) => {
-                                ginsts.push(x.clone().into());
+                        if let Err(x) = guard_exit_vars.binary_search(iidx) {
+                            match &self.insts[*iidx] {
+                                Inst::Const(x) => {
+                                    ginsts.push(x.clone().into());
+                                }
+                                Inst::Guard(_) => panic!(),
+                                Inst::Term(_) => panic!(),
+                                x => {
+                                    ginsts.push(Inst::Arg(Arg {
+                                        tyidx: x.tyidx(&self),
+                                    }));
+                                }
                             }
-                            Inst::Guard(_) => panic!(),
-                            Inst::Term(_) => panic!(),
-                            x => {
-                                ginsts.push(Inst::Arg(Arg {
-                                    tyidx: x.tyidx(&self),
-                                }));
-                            }
+                            deopt_vars.push(InstIdx::from(guard_exit_vars.len()));
+                            guard_exit_vars.insert(x, *iidx);
+                        } else {
+                            deopt_vars.push(InstIdx::from(guard_exit_vars.len() - 1));
                         }
                     }
                     ginsts.push(Inst::Term(Term(
@@ -497,8 +507,9 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let geidx = guards.push(GuardExtra {
                         bid,
                         switch: None,
-                        exit_vars,
-                        exit_frames: SmallVec::new(),
+                        guard_exit_vars,
+                        deopt_vars,
+                        deopt_frames: SmallVec::new(),
                         gbidx,
                     });
                     self.insts.push(Inst::Guard(Guard {
