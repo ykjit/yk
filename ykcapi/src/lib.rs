@@ -71,6 +71,14 @@ pub extern "C" fn __ykrt_control_point(
     // FIXME: We could get rid of this entire function if we pass the frame's base pointer into the
     // control point from the interpreter.
     std::arch::naked_asm!(
+        // Fast-path check: Is location null?
+        "mov rax, [rsi]", // location is passed in rsi
+        "test rax, rax",  // Check if null
+        "jnz .slow_path", // If NOT null, jump to slow path
+        // Fast-path return (null location)
+        "ret",
+        // Slow path: proceed with full control point logic
+        ".slow_path:",
         "sub rsp, 8", // Alignment
         // Push the callee-save registers to the stack. This is required so that traces can read
         // live variables from them.
