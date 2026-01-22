@@ -174,6 +174,10 @@ pub fn mk_compiler(
         "-Wall",
         // Some tests are multi-threaded via the pthread API.
         "-pthread",
+        // Avoid PLT indirection for external calls, reducing call overhead.
+        // This is safe with --wrap (used for pthread_create/pthread_exit) because
+        // --wrap is a link-time symbol renaming, not a runtime interception.
+        "-fno-plt",
         // Some tests need the maths library.
         "-lm",
         // The input and output files.
