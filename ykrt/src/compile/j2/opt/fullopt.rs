@@ -160,10 +160,10 @@ impl FullOpt {
         ty_map.insert(Ty::Int(1), tyidx_int1);
         Self {
             passes: [
-                Box::new(KnownBits::new()),
                 Box::new(StrengthFold::new()),
                 Box::new(LoadStore::new()),
                 Box::new(CSE::new()),
+                Box::new(KnownBits::new()),
             ],
             inner: OptInternal {
                 insts: IndexVec::new(),
