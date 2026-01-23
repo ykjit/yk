@@ -64,7 +64,7 @@ use crate::compile::{
 use index_vec::{Idx, IndexVec, index_vec};
 use smallvec::{SmallVec, smallvec};
 use std::{
-    assert_matches::assert_matches,
+    assert_matches,
     fmt::{Debug, Display, Formatter},
 };
 use vob::Vob;

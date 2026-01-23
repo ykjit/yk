@@ -10,7 +10,7 @@ use crate::compile::{
     },
 };
 use index_vec::*;
-use std::{assert_matches::assert_matches, collections::HashMap};
+use std::{assert_matches, collections::HashMap};
 
 pub(in crate::compile::j2) struct NoOpt {
     insts: IndexVec<InstIdx, Inst>,

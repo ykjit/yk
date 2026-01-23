@@ -58,12 +58,7 @@ use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
 use index_vec::IndexVec;
 use smallvec::SmallVec;
-use std::{
-    assert_matches::{assert_matches, debug_assert_matches},
-    collections::HashMap,
-    ffi::c_void,
-    sync::Arc,
-};
+use std::{assert_matches, collections::HashMap, debug_assert_matches, ffi::c_void, sync::Arc};
 
 #[derive(Debug)]
 pub(in crate::compile::j2) struct X64HirToAsm<'a> {

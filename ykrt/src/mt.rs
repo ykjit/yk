@@ -1,10 +1,9 @@
 //! The main end-user interface to the meta-tracing system.
 
 use std::{
-    assert_matches::debug_assert_matches,
     cell::RefCell,
     collections::{HashMap, HashSet},
-    env,
+    debug_assert_matches, env,
     error::Error,
     ffi::c_void,
     marker::PhantomData,
@@ -1611,7 +1610,7 @@ mod tests {
         compile::{CompiledTraceTestingBasicTransitions, CompiledTraceTestingMinimal},
         trace::TraceRecorderError,
     };
-    use std::{assert_matches::assert_matches, hint::black_box, ptr, thread};
+    use std::{assert_matches, hint::black_box, ptr, thread};
     use test::bench::Bencher;
 
     // We only implement enough of the equality function for the tests we have.

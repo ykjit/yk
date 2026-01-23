@@ -41,7 +41,7 @@ use dynasmrt::{
         Assembler, {Rq, Rx},
     },
 };
-use std::{assert_matches::assert_matches, cmp::Ordering, marker::PhantomData, mem};
+use std::{assert_matches, cmp::Ordering, marker::PhantomData, mem};
 
 /// The complete set of general purpose x64 registers, in the order that dynasmrt defines them.
 /// Note that large portions of the code rely on these registers mapping to the integers 0..15

@@ -15,7 +15,7 @@ use super::{
     },
 };
 use crate::compile::CompilationError;
-use std::assert_matches::debug_assert_matches;
+use std::debug_assert_matches;
 
 mod analyse;
 mod heapvalues;
