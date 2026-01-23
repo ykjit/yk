@@ -45,8 +45,8 @@ use page_size;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::{
-    assert_matches::debug_assert_matches,
     cell::Cell,
+    debug_assert_matches,
     error::Error,
     slice,
     sync::{Arc, Weak, atomic::fence},

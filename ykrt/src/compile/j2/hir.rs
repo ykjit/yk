@@ -171,7 +171,7 @@ use enum_dispatch::enum_dispatch;
 use index_vec::IndexVec;
 use smallvec::SmallVec;
 use std::{
-    assert_matches::assert_matches,
+    assert_matches,
     cmp::min,
     collections::HashMap,
     ffi::c_void,

@@ -134,7 +134,7 @@ use crate::compile::{
 use index_vec::*;
 use smallvec::SmallVec;
 use std::{
-    assert_matches::assert_matches,
+    assert_matches,
     collections::HashMap,
     hash::{Hash, Hasher},
 };

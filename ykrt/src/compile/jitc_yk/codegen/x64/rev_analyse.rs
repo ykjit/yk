@@ -23,7 +23,7 @@ use crate::compile::jitc_yk::{
     },
 };
 use dynasmrt::x64::Rq;
-use std::{assert_matches::assert_matches, sync::Arc};
+use std::{assert_matches, sync::Arc};
 use vob::Vob;
 
 pub(crate) struct RevAnalyse<'a> {
@@ -654,7 +654,7 @@ impl<'a> RevAnalyse<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
     use vob::vob;
 
     fn rev_analyse_header(m: &Module) -> RevAnalyse<'_> {

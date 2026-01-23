@@ -35,10 +35,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
-use std::{
-    assert_matches::assert_matches, collections::HashMap, iter::Peekable, marker::PhantomData,
-    sync::Arc,
-};
+use std::{assert_matches, collections::HashMap, iter::Peekable, marker::PhantomData, sync::Arc};
 
 /// The symbol name of the global variable pointers array.
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
