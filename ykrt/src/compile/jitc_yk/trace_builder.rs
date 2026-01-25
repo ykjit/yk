@@ -818,9 +818,9 @@ impl TraceBuilder {
         cond: &aot_ir::Operand,
         true_bb: &aot_ir::BBlockIdx,
     ) -> Result<(), CompilationError> {
-        // Check if this is a tracing count check pattern (from ConditionalPromoteCalls pass).
+        // Check if this is a tracing state check pattern (from ConditionalPromoteCalls pass).
         // If so, skip the guard - we don't want to deoptimise when not tracing.
-        if self.is_tracing_count_check(cond) {
+        if self.is_tracing_state_check(cond) {
             return Ok(());
         }
 
@@ -839,7 +839,7 @@ impl TraceBuilder {
     /// - Otherwise: state == 0, we take the "skip_promote" path
     ///
     /// By skipping the guard, the trace will execute normally without checking the tracing state.
-    fn is_tracing_count_check(&self, cond: &aot_ir::Operand) -> bool {
+    fn is_tracing_state_check(&self, cond: &aot_ir::Operand) -> bool {
         // Pattern: icmp eq (load @__yk_thread_tracing_state), 0
         let aot_ir::Operand::Local(_) = cond else {
             return false;
