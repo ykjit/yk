@@ -95,7 +95,8 @@ use crate::{
         j2::{
             codebuf::ExeCodeBuf,
             compiled_trace::{
-                DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace, J2TraceStart,
+                CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace,
+                J2TraceStart,
             },
             hir::*,
             regalloc::{RegAlloc, RegFill, RegT, VarLoc, VarLocs},
@@ -337,7 +338,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         {
             let patch_label = self
                 .be
-                .guard_end(self.m.trid, AsmGuardIdx::from(usize::from(gbidx)))?;
+                .guard_end(self.m.trid, CompiledGuardIdx::from(usize::from(gbidx)))?;
             let gextra = self.m.guard_extra(aguard.geidx);
             self.be.guard_completed(
                 aguard.label.clone(),
@@ -365,7 +366,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             let gblock = &self.m.gblocks[gbidx];
             let patch_label = self
                 .be
-                .guard_end(self.m.trid, AsmGuardIdx::from(usize::from(gbidx)))?;
+                .guard_end(self.m.trid, CompiledGuardIdx::from(usize::from(gbidx)))?;
             let gextra = self.m.guard_extra(aguard.geidx);
 
             let mut stack_off = aguard.stack_off;
@@ -762,7 +763,7 @@ pub(super) trait HirToAsmBackend {
     ) -> Result<
         (
             ExeCodeBuf,
-            IndexVec<AsmGuardIdx, J2CompiledGuard<Self::Reg>>,
+            IndexVec<CompiledGuardIdx, J2CompiledGuard<Self::Reg>>,
             Option<String>,
             Vec<usize>,
         ),
@@ -894,7 +895,7 @@ pub(super) trait HirToAsmBackend {
     fn guard_end(
         &mut self,
         trid: TraceId,
-        gidx: AsmGuardIdx,
+        gidx: CompiledGuardIdx,
     ) -> Result<Self::Label, CompilationError>;
 
     /// The current guard has been completed:
@@ -1266,10 +1267,6 @@ pub(super) trait HirToAsmBackend {
 
 index_vec::define_index_type! {
     pub(super) struct FrameIdx = u16;
-}
-
-index_vec::define_index_type! {
-    pub(super) struct AsmGuardIdx = u16;
 }
 
 #[derive(Debug)]

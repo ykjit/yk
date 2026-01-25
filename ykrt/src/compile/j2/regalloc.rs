@@ -1787,7 +1787,7 @@ pub(crate) mod test {
             DeoptSafepoint,
             j2::{
                 codebuf::ExeCodeBuf,
-                compiled_trace::{DeoptFrame, DeoptVar, J2CompiledTrace},
+                compiled_trace::{CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace},
                 hir::Mod,
                 hir::*,
                 hir_parser::str_to_mod,
@@ -1998,7 +1998,7 @@ pub(crate) mod test {
             (
                 ExeCodeBuf,
                 IndexVec<
-                    AsmGuardIdx,
+                    CompiledGuardIdx,
                     crate::compile::j2::compiled_trace::J2CompiledGuard<Self::Reg>,
                 >,
                 Option<String>,
@@ -2152,7 +2152,7 @@ pub(crate) mod test {
         fn guard_end(
             &mut self,
             _trid: crate::mt::TraceId,
-            _gridx: AsmGuardIdx,
+            _gridx: CompiledGuardIdx,
         ) -> Result<Self::Label, CompilationError> {
             Ok(TestLabelIdx::new(0))
         }

@@ -155,8 +155,7 @@
 use crate::{
     compile::{
         j2::{
-            compiled_trace::J2CompiledTrace,
-            hir_to_asm::AsmGuardIdx,
+            compiled_trace::{CompiledGuardIdx, J2CompiledTrace},
             opt::EquivIIdxT,
             regalloc::{RegT, VarLocs},
         },
@@ -370,7 +369,7 @@ pub(super) enum TraceStart<Reg: RegT> {
     /// This trace started from a guard failing.
     Guard {
         src_ctr: Arc<J2CompiledTrace<Reg>>,
-        src_gidx: AsmGuardIdx,
+        src_gidx: CompiledGuardIdx,
         entry_vlocs: Vec<VarLocs<Reg>>,
     },
     /// This is a trace intended for unit testing.
