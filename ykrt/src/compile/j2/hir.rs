@@ -271,7 +271,6 @@ pub(super) struct Mod<Reg: RegT> {
     pub tyidx_void: TyIdx,
     /// Extra information that is too big to fit in a [Guard] instruction.
     pub guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
-    pub gblocks: IndexVec<GuardBlockIdx, Block>,
     /// A map of names to pointers. Will be `None` if logging was disabled.
     pub addr_name_map: Option<HashMap<usize, Option<String>>>,
 }
@@ -303,25 +302,15 @@ impl<Reg: RegT> Mod<Reg> {
 
 impl<Reg: RegT> Display for Mod<Reg> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        let gblocks = self
-            .gblocks
-            .iter_enumerated()
-            .map(|(x, y)| format!("; guard {}\n{}", usize::from(x), y.to_string(self)))
-            .collect::<Vec<_>>();
-        let gblocks = if !gblocks.is_empty() {
-            format!("\n{}", gblocks.join("\n"))
-        } else {
-            "".to_owned()
-        };
         match &self.trace_end {
-            TraceEnd::Coupler { entry, .. } => write!(f, "{}{gblocks}", entry.to_string(self)),
+            TraceEnd::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
             TraceEnd::Loop { entry, peel, .. } => {
                 assert!(peel.is_none());
-                write!(f, "{}{gblocks}", entry.to_string(self))
+                write!(f, "{}", entry.to_string(self))
             }
-            TraceEnd::Return { entry, .. } => write!(f, "{}{gblocks}", entry.to_string(self)),
+            TraceEnd::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
             #[cfg(test)]
-            TraceEnd::Test { block, .. } => write!(f, "{}{gblocks}", block.to_string(self)),
+            TraceEnd::Test { block, .. } => write!(f, "{}", block.to_string(self)),
         }
     }
 }
@@ -2033,7 +2022,7 @@ impl InstT for FPToSI {
 pub(super) struct Guard {
     pub expect: bool,
     pub cond: InstIdx,
-    /// The [Guardextra] that this guard maps to. Before optimisation, this will be set to
+    /// The [GuardExtra] that this guard maps to. Before optimisation, this will be set to
     /// [GuardExtra::MAX].
     pub geidx: GuardExtraIdx,
 }
@@ -2131,9 +2120,6 @@ pub(super) struct GuardExtra {
     /// interpreter, the depth of frames decreases exponentially: in ~50-90% (and 90% is more
     /// common than 50%) of cases there is 1 frame, about 10x fewer have 2 frames, and so on.
     pub deopt_frames: SmallVec<[Frame; 2]>,
-    /// What guard [Block] does this [Guard] / [GuardExtra] map to? This will initially be set to
-    /// `None`; hir_to_asm will set it to [Some] when the corresponding guard [Block] is created.
-    pub gbidx: Option<GuardBlockIdx>,
 }
 
 /// If a guard relates to an AOT `switch`, this struct records the extra information we need to
@@ -3992,7 +3978,6 @@ impl<'a> Iterator for IterIidxsIterator<'a> {
                         guard_exit_vars,
                         deopt_vars: _,
                         deopt_frames: _,
-                        gbidx: _,
                     } = self.m.gextra(*geidx);
                     if self.i - 1 <= guard_exit_vars.len() {
                         return Some(guard_exit_vars[self.i - 2]);

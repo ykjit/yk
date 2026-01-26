@@ -245,7 +245,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let tyidx_ptr0 = self.opt.tyidx_ptr0();
         let tyidx_void = self.opt.tyidx_void();
 
-        let (entry, guard_extras, gblocks, tys) = self.opt.build()?;
+        let (entry, guard_extras, tys) = self.opt.build()?;
         let (trace_start, trace_end) = match bmk {
             BuildModKind::Coupler {
                 entry_safepoint,
@@ -306,7 +306,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             tyidx_void,
             addr_name_map: self.addr_name_map,
             guard_extras,
-            gblocks,
         };
 
         let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -438,7 +437,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             guard_exit_vars,
             deopt_vars,
             deopt_frames,
-            gbidx: None,
         };
 
         self.opt.feed_guard(hinst, gextra)?;

@@ -26,7 +26,6 @@ pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
         (
             Block,
             IndexVec<GuardExtraIdx, GuardExtra>,
-            IndexVec<GuardBlockIdx, Block>,
             IndexVec<TyIdx, Ty>,
         ),
         CompilationError,

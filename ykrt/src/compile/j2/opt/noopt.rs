@@ -86,47 +86,16 @@ impl BlockLikeT for NoOpt {
 
 impl OptT for NoOpt {
     fn build(
-        mut self: Box<Self>,
+        self: Box<Self>,
     ) -> Result<
         (
             Block,
             IndexVec<GuardExtraIdx, GuardExtra>,
-            IndexVec<GuardBlockIdx, Block>,
             IndexVec<TyIdx, Ty>,
         ),
         CompilationError,
     > {
-        let mut guards = IndexVec::with_capacity(self.guard_extras.len());
-        // Because we update the `GuardExtra` at the end of each iteration, the borrow checker
-        // won't let us iterate over the `guard_extras` directly _and_ call `self.inst`, so we have
-        // to iterate over the indices.
-        for i in 0..self.guard_extras.len() {
-            let mut ginsts = IndexVec::with_capacity(self.guard_extras[i].guard_exit_vars.len());
-            for iidx in &self.guard_extras[i].guard_exit_vars {
-                match self.inst(*iidx) {
-                    Inst::Const(x) => {
-                        ginsts.push(x.clone().into());
-                    }
-                    Inst::Guard(_) => panic!(),
-                    Inst::Term(_) => panic!(),
-                    x => {
-                        ginsts.push(Inst::Arg(Arg {
-                            tyidx: x.tyidx(&*self),
-                        }));
-                    }
-                }
-            }
-            ginsts.push(Inst::Term(Term(std::mem::take(
-                &mut self.guard_extras[i].deopt_vars,
-            ))));
-            self.guard_extras[i].gbidx = Some(guards.push(Block { insts: ginsts }));
-        }
-        Ok((
-            Block { insts: self.insts },
-            self.guard_extras,
-            guards,
-            self.tys,
-        ))
+        Ok((Block { insts: self.insts }, self.guard_extras, self.tys))
     }
 
     fn peel(self) -> (Block, Block) {

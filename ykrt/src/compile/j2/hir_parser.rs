@@ -90,7 +90,6 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
 
         let mut entry_vlocs = Vec::new();
         let mut guards = IndexVec::new();
-        let mut gblocks = IndexVec::new();
         let mut testregiter = Reg::iter_test_regs();
         let mut autoregused = false;
         let mut manualregused = false;
@@ -475,45 +474,20 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     exit_vars,
                 } => {
                     let cond = self.p_local(cond);
-                    let exit_vars = exit_vars
+                    let bid = BBlockId::new(FuncIdx::from(0), BBlockIdx::from(0));
+                    let deopt_vars = exit_vars
                         .into_iter()
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
-                    let mut ginsts = IndexVec::with_capacity(exit_vars.len());
-                    let mut guard_exit_vars = Vec::new();
-                    let mut deopt_vars = Vec::new();
-                    for iidx in &exit_vars {
-                        if let Err(x) = guard_exit_vars.binary_search(iidx) {
-                            match &self.insts[*iidx] {
-                                Inst::Const(x) => {
-                                    ginsts.push(x.clone().into());
-                                }
-                                Inst::Guard(_) => panic!(),
-                                Inst::Term(_) => panic!(),
-                                x => {
-                                    ginsts.push(Inst::Arg(Arg {
-                                        tyidx: x.tyidx(&self),
-                                    }));
-                                }
-                            }
-                            deopt_vars.push(InstIdx::from(guard_exit_vars.len()));
-                            guard_exit_vars.insert(x, *iidx);
-                        } else {
-                            deopt_vars.push(InstIdx::from(guard_exit_vars.len() - 1));
-                        }
-                    }
-                    ginsts.push(Inst::Term(Term(
-                        (0..exit_vars.len()).map(InstIdx::from).collect::<Vec<_>>(),
-                    )));
-                    let gbidx = Some(gblocks.push(Block { insts: ginsts }));
-                    let bid = BBlockId::new(FuncIdx::from(0), BBlockIdx::from(0));
+                    let mut guard_exit_vars = deopt_vars.clone();
+                    guard_exit_vars.sort();
+                    guard_exit_vars.dedup();
                     let geidx = guards.push(GuardExtra {
                         bid,
                         switch: None,
                         guard_exit_vars,
                         deopt_vars,
                         deopt_frames: SmallVec::new(),
-                        gbidx,
                     });
                     self.insts.push(Inst::Guard(Guard {
                         geidx,
@@ -921,7 +895,6 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             tyidx_ptr0: self.tyidx_ptr0,
             tyidx_void: self.tyidx_void,
             guard_extras: guards,
-            gblocks,
             addr_name_map: None,
         };
         m.assert_well_formed();
