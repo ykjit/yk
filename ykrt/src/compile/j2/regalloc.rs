@@ -76,10 +76,8 @@ pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
     istates: IndexVec<InstIdx, IState>,
     /// The state of each register.
     rstates: RStates<AB::Reg>,
-    /// For each instruction, where is its last use? A value of 0 means, by definition, "not yet
-    /// used" because both (a) an instruction cannot use itself (b) value 0 is the last possible
-    /// value.
-    is_used: IndexVec<InstIdx, InstIdx>,
+    /// For each instruction, has it yet been used?
+    is_used: Vob,
     /// The offset of the current stack: this must be exactly equal to the end of the last byte
     /// used in the stack.
     stack_off: u32,
@@ -92,7 +90,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             b,
             istates: index_vec![IState::None; b.insts_len()],
             rstates: RStates::new(),
-            is_used: index_vec![InstIdx::from_usize(0); b.insts_len()],
+            is_used: Vob::from_elem(false, b.insts_len()),
             stack_off,
         }
     }
@@ -299,7 +297,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 continue;
             }
             assert!(!b.insts.is_empty());
-            self.is_used[*iidx] = b.insts.len_idx() - 1;
+            self.is_used.set(usize::from(*iidx), true);
             let bitw = self.b.inst_bitw(self.m, *iidx);
             for vloc in term_vlocs.iter() {
                 if term_vlocs
@@ -574,13 +572,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     ///
     /// Note: being used in a guard's entry_vars counts as "being used".
     pub(super) fn is_used(&self, iidx: InstIdx) -> bool {
-        usize::from(*self.is_used.get(usize::from(iidx)).unwrap()) > 0
+        self.is_used[usize::from(iidx)]
     }
 
     /// Force the value `iidx` to be marked as used at `cur_iidx`. Must only be used for testing purposes.
     #[cfg(test)]
-    pub(super) fn blackbox(&mut self, cur_iidx: InstIdx, iidx: InstIdx) {
-        self.is_used[iidx] = cur_iidx;
+    pub(super) fn blackbox(&mut self, _cur_iidx: InstIdx, iidx: InstIdx) {
+        self.is_used.set(usize::from(iidx), true);
     }
 
     /// Return an iterator which will produce all the registers in which `iidx` is contained.
@@ -819,7 +817,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     in_fill: _,
                     ..
                 } => {
-                    self.is_used[*in_iidx] = iidx;
+                    self.is_used.set(usize::from(*in_iidx), true);
                 }
                 RegCnstr::InputOutput {
                     in_iidx, out_fill, ..
@@ -836,7 +834,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             out_bitw,
                         )?;
                     }
-                    self.is_used[*in_iidx] = iidx;
+                    self.is_used.set(usize::from(*in_iidx), true);
                 }
                 RegCnstr::Output {
                     out_fill,
@@ -944,7 +942,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             self.istates[*ka_iidx] = IState::Stack(self.stack_off);
                         }
                     }
-                    self.is_used[*ka_iidx] = iidx;
+                    self.is_used.set(usize::from(*ka_iidx), true);
                 }
             }
         }
@@ -1110,7 +1108,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     continue;
                 }
                 if let RegCnstr::Input { regs, in_iidx, .. } = cnstr
-                    && self.is_used[*in_iidx] <= iidx
+                    && !self.is_used[usize::from(*in_iidx)]
                     && regs.contains(&output_reg)
                 {
                     allocs[i] = Some(output_reg);
@@ -1155,7 +1153,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             // their register.
             for (j, in_cnstr) in cnstrs.iter().enumerate() {
                 if let RegCnstr::Input { regs, in_iidx, .. } = in_cnstr
-                    && self.is_used[*in_iidx] <= iidx
+                    && !self.is_used[usize::from(*in_iidx)]
                     && regs.contains(&allocs[j].unwrap())
                 {
                     allocs[i] = allocs[j];
