@@ -121,7 +121,7 @@ pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
     /// [GuardExtra::gbidx] and this [IndexVec].
     /// These will initially be set to `None`; as the main blocks are processed, they will be set
     /// to `Some`. Note: `[Self::asm_guards]` will empty this [IndexVec] completely.
-    asmguards: IndexVec<CompiledGuardIdx, Option<AsmGuard<'a, AB>>>,
+    asmguards: IndexVec<CompiledGuardIdx, AsmGuard<'a, AB>>,
 }
 
 impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
@@ -130,9 +130,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             m,
             hl,
             be,
-            asmguards: (0..m.guard_extras.len())
-                .map(|_| None)
-                .collect::<IndexVec<_, _>>(),
+            asmguards: IndexVec::new(),
         }
     }
 
@@ -332,15 +330,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
         // Guards
 
-        for (gidx, aguard) in self
-            .asmguards
-            .iter_enumerated()
-            .map(|(x, y)| (x, y.as_ref().unwrap()))
-        {
+        for (gidx, aguard) in self.asmguards.iter_enumerated() {
             let patch_label = self
                 .be
                 .guard_end(self.m.trid, CompiledGuardIdx::from(usize::from(gidx)))?;
-            let gextra = self.m.guard_extra(aguard.geidx);
+            let gextra = block.gextra(aguard.geidx);
             self.be.guard_completed(
                 aguard.label.clone(),
                 patch_label,
@@ -358,15 +352,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     /// Assemble guards.
     fn asm_guards(&mut self) -> Result<(), CompilationError> {
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-        let aguards = std::mem::take(&mut self.asmguards)
-            .into_iter()
-            .map(|x| x.unwrap())
-            .collect::<IndexVec<CompiledGuardIdx, _>>();
+        let aguards = std::mem::take(&mut self.asmguards);
         for (gidx, aguard) in aguards.into_iter_enumerated() {
             let patch_label = self
                 .be
                 .guard_end(self.m.trid, CompiledGuardIdx::from(usize::from(gidx)))?;
-            let gextra = self.m.guard_extra(aguard.geidx);
+            let gextra = aguard.block.gextra(aguard.geidx);
 
             let mut stack_off = aguard.stack_off;
             let mut deopt_frames = SmallVec::with_capacity(gextra.deopt_frames.len());
@@ -564,12 +555,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                 }
                 Inst::Guard(x @ Guard { geidx, .. }) => {
-                    let gextra = self.m.gextra(*geidx);
+                    let gextra = b.gextra(*geidx);
                     let label = self.be.i_guard(&mut ra, b, iidx, x, &gextra.deopt_vars)?;
                     let deopt_vlocs = ra.vlocs_from_iidxs(&gextra.deopt_vars);
-                    let gidx = CompiledGuardIdx::from(usize::from(*geidx));
-                    assert!(self.asmguards[gidx].is_none());
-                    self.asmguards[gidx] = Some(AsmGuard {
+                    self.asmguards.push(AsmGuard {
                         geidx: *geidx,
                         block: b_self.unwrap(),
                         label,

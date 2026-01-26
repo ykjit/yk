@@ -881,7 +881,10 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             }
         }
 
-        let block = Block { insts: self.insts };
+        let block = Block {
+            insts: self.insts,
+            guard_extras: guards,
+        };
         let m = Mod {
             trid: TraceId::testing(),
             trace_start: TraceStart::Test,
@@ -890,7 +893,6 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             tyidx_int1: self.tyidx_int1,
             tyidx_ptr0: self.tyidx_ptr0,
             tyidx_void: self.tyidx_void,
-            guard_extras: guards,
             addr_name_map: None,
         };
         m.assert_well_formed();
@@ -982,14 +984,6 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> ModLikeT for HirParser<'lexer, 'input, R
 
     fn tyidx_void(&self) -> TyIdx {
         self.tyidx_void
-    }
-
-    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
-        todo!()
-    }
-
-    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
-        todo!()
     }
 
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {

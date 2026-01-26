@@ -53,14 +53,6 @@ impl ModLikeT for NoOpt {
         panic!("Not available in optimiser");
     }
 
-    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
-        todo!();
-    }
-
-    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
-        todo!();
-    }
-
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         &self.tys[tyidx]
     }
@@ -82,20 +74,25 @@ impl BlockLikeT for NoOpt {
     fn inst(&self, idx: InstIdx) -> &Inst {
         &self.insts[usize::from(idx)]
     }
+
+    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
+        todo!();
+    }
+
+    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
+        todo!();
+    }
 }
 
 impl OptT for NoOpt {
-    fn build(
-        self: Box<Self>,
-    ) -> Result<
-        (
-            Block,
-            IndexVec<GuardExtraIdx, GuardExtra>,
-            IndexVec<TyIdx, Ty>,
-        ),
-        CompilationError,
-    > {
-        Ok((Block { insts: self.insts }, self.guard_extras, self.tys))
+    fn build(self: Box<Self>) -> Result<(Block, IndexVec<TyIdx, Ty>), CompilationError> {
+        Ok((
+            Block {
+                insts: self.insts,
+                guard_extras: self.guard_extras,
+            },
+            self.tys,
+        ))
     }
 
     fn peel(self) -> (Block, Block) {

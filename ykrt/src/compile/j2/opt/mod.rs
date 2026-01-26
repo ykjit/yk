@@ -20,16 +20,7 @@ mod strength_fold;
 pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
     /// The block is now complete and the optimiser should turn it into a [Block] and a set of
     /// types (suitable for putting in a [Mod]).
-    fn build(
-        self: Box<Self>,
-    ) -> Result<
-        (
-            Block,
-            IndexVec<GuardExtraIdx, GuardExtra>,
-            IndexVec<TyIdx, Ty>,
-        ),
-        CompilationError,
-    >;
+    fn build(self: Box<Self>) -> Result<(Block, IndexVec<TyIdx, Ty>), CompilationError>;
 
     #[allow(dead_code)]
     fn peel(self) -> (Block, Block);
