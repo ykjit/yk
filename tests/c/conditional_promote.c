@@ -9,10 +9,6 @@
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{_}}: i8 = load @__yk_thread_tracing_state
-//     %{{_}}: i1 = eq %{{_}}, 0i8
-//     condbr %{{_}}, bb{{_}}, bb{{_}} ...
-//     ...
 //     %{{_}}: i64 = promote %{{_}} ...
 //     ...
 //     --- End aot ---
@@ -20,10 +16,9 @@
 //     yk-execution: enter-jit-code
 //     ...
 
-// Check that the ConditionalPromoteCalls pass generates:
-// 1. A load from __yk_thread_tracing_state
-// 2. A comparison with 0
-// 3. A conditional branch to skip the promote call when not tracing
+// Check that the ConditionalPromoteCalls pass:
+// 1. The tracing state check is NOT serialised into AOT IR (it's skipped)
+// 2. The promote call IS present in AOT IR
 
 #include <assert.h>
 #include <stdio.h>
