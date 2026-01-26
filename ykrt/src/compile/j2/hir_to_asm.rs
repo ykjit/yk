@@ -119,8 +119,8 @@ pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
     /// The intermediate [AsmGuard] for each [Guard] block in a trace's "main" (i.e. non-[Guard])
     /// blocks. These use [GuardBlockIdx] to emphasise that there is a 1:1 mapping between
     /// [GuardExtra::gbidx] and this [IndexVec].
-    /// These will initially be set to `None`; as the main blocks are processed, they will
-    /// set the corresponding
+    /// These will initially be set to `None`; as the main blocks are processed, they will be set
+    /// to `Some`. Note: `[Self::asm_guards]` will empty this [IndexVec] completely.
     asmguards: IndexVec<CompiledGuardIdx, Option<AsmGuard<'a, AB>>>,
 }
 
@@ -358,27 +358,25 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     /// Assemble guards.
     fn asm_guards(&mut self) -> Result<(), CompilationError> {
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-        for (gidx, aguard) in self
-            .asmguards
-            .iter_enumerated()
-            .map(|(x, y)| (x, y.as_ref().unwrap()))
-        {
+        let aguards = std::mem::take(&mut self.asmguards)
+            .into_iter()
+            .map(|x| x.unwrap())
+            .collect::<IndexVec<CompiledGuardIdx, _>>();
+        for (gidx, aguard) in aguards.into_iter_enumerated() {
             let patch_label = self
                 .be
                 .guard_end(self.m.trid, CompiledGuardIdx::from(usize::from(gidx)))?;
             let gextra = self.m.guard_extra(aguard.geidx);
 
             let mut stack_off = aguard.stack_off;
-            assert_eq!(gextra.guard_exit_vars.len(), aguard.guard_exit_vlocs.len());
             let mut deopt_frames = SmallVec::with_capacity(gextra.deopt_frames.len());
-            let mut deopt_vars = Vec::with_capacity(gextra.guard_exit_vars.len());
-            let mut term_vars_iter = gextra.deopt_vars.iter();
+            let mut deopt_vars = Vec::with_capacity(gextra.deopt_vars.len());
+            assert_eq!(gextra.deopt_vars.len(), aguard.deopt_vlocs.len());
+            let mut term_vars_iter = gextra.deopt_vars.iter().zip(aguard.deopt_vlocs.into_iter());
             for Frame { pc, pc_safepoint } in gextra.deopt_frames.iter() {
                 let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
                 for smap_loc in smap.live_vals.iter() {
-                    let gblock_iidx = term_vars_iter.next().unwrap();
-                    let block_iidx = gextra.guard_exit_vars[usize::from(*gblock_iidx)];
-                    let mut fromvlocs = aguard.guard_exit_vlocs[usize::from(*gblock_iidx)].clone();
+                    let (iidx, mut fromvlocs) = term_vars_iter.next().unwrap();
                     if fromvlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
                         let Some(VarLoc::Reg(reg, fill)) = fromvlocs
                             .iter()
@@ -387,7 +385,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         else {
                             panic!()
                         };
-                        let bitw = aguard.block.inst_bitw(self.m, block_iidx);
+                        let bitw = aguard.block.inst_bitw(self.m, *iidx);
                         stack_off = self.be.align_spill(stack_off, bitw);
                         fromvlocs.push(VarLoc::Stack(stack_off));
                         self.be.spill(reg, fill, stack_off, bitw)?;
@@ -402,7 +400,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         tovlocs = VarLocs::new();
                     }
                     deopt_vars.push(DeoptVar {
-                        bitw: aguard.block.inst_bitw(self.m, block_iidx),
+                        bitw: aguard.block.inst_bitw(self.m, *iidx),
                         fromvlocs,
                         tovlocs,
                     });
@@ -566,16 +564,16 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                 }
                 Inst::Guard(x @ Guard { geidx, .. }) => {
-                    let label = self.be.i_guard(&mut ra, b, iidx, x)?;
                     let gextra = self.m.gextra(*geidx);
-                    let guard_exit_vlocs = ra.vlocs_from_iidxs(&gextra.guard_exit_vars);
+                    let label = self.be.i_guard(&mut ra, b, iidx, x, &gextra.deopt_vars)?;
+                    let deopt_vlocs = ra.vlocs_from_iidxs(&gextra.deopt_vars);
                     let gidx = CompiledGuardIdx::from(usize::from(*geidx));
                     assert!(self.asmguards[gidx].is_none());
                     self.asmguards[gidx] = Some(AsmGuard {
                         geidx: *geidx,
                         block: b_self.unwrap(),
                         label,
-                        guard_exit_vlocs,
+                        deopt_vlocs,
                         stack_off: ra.stack_off(),
                     });
                 }
@@ -1053,7 +1051,7 @@ pub(super) trait HirToAsmBackend {
     ) -> Result<(), CompilationError>;
 
     /// The instruction should use [super::regalloc::RegCnstr::KeepAlive] for the values in
-    /// [GuardExtra::exit_vars].
+    /// `exit_vars`.
     ///
     /// The label returned should be the jump instruction to the guard body.
     fn i_guard(
@@ -1062,6 +1060,7 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &Guard,
+        exit_vars: &[InstIdx],
     ) -> Result<Self::Label, CompilationError>;
 
     fn i_icmp(
@@ -1283,7 +1282,7 @@ struct AsmGuard<'a, AB: HirToAsmBackend + ?Sized> {
     block: &'a Block,
     label: AB::Label,
     /// Will be the same length as the matching [GuardExtra::exit_vars].
-    guard_exit_vlocs: Vec<VarLocs<AB::Reg>>,
+    deopt_vlocs: Vec<VarLocs<AB::Reg>>,
     /// The stack offset of the register allocator at the entry point of the guard.
     stack_off: u32,
 }

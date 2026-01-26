@@ -479,13 +479,9 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into_iter()
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
-                    let mut guard_exit_vars = deopt_vars.clone();
-                    guard_exit_vars.sort();
-                    guard_exit_vars.dedup();
                     let geidx = guards.push(GuardExtra {
                         bid,
                         switch: None,
-                        guard_exit_vars,
                         deopt_vars,
                         deopt_frames: SmallVec::new(),
                     });

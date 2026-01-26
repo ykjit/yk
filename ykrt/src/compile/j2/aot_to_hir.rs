@@ -362,20 +362,25 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         // reference a const -- but we construct this as-needed.
         let mut cond_inverse_iidx = None;
 
-        // The list of variables tends to be long enough that we'll get more than one resizing, so
-        // the precalculation is worth it.
-        let deopt_vars_len = self
-            .frames
-            .iter()
-            .map(|x| x.pc_safepoint.unwrap().lives.len())
-            .sum();
-
-        let mut guard_exit_vars = Vec::with_capacity(deopt_vars_len);
+        let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
+        let mut deopt_vars = Vec::with_capacity(
+            self.frames
+                .iter()
+                .map(|x| x.pc_safepoint.unwrap().lives.len())
+                .sum(),
+        );
         for i in 0..self.frames.len() {
-            let pc_safepoint = self.frames[i].pc_safepoint.unwrap();
-            for j in 0..pc_safepoint.lives.len() {
-                let mut iidx =
-                    self.frames[i].get_local(&*self.opt, &pc_safepoint.lives[j].to_inst_id());
+            let Frame {
+                pc, pc_safepoint, ..
+            } = &self.frames[i];
+            let pc_safepoint = pc_safepoint.unwrap();
+            let pc = if i + 1 < self.frames.len() {
+                pc.clone().unwrap()
+            } else {
+                iid.clone()
+            };
+            for op in pc_safepoint.lives.iter() {
+                let mut iidx = self.frames[i].get_local(&*self.opt, &op.to_inst_id());
                 if iidx == cond_iidx {
                     if cond_inverse_iidx.is_none() {
                         let tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
@@ -389,39 +394,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     }
                     iidx = cond_inverse_iidx.unwrap();
                 }
-                guard_exit_vars.push(iidx);
-            }
-        }
-        // The good news is that `guard_exit_vars` will tend to be mostly sorted, so this rarely
-        // has to do much work.
-        guard_exit_vars.sort();
-        guard_exit_vars.dedup();
-
-        let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
-        let mut deopt_vars = Vec::with_capacity(deopt_vars_len);
-        for (
-            i,
-            frame @ Frame {
-                pc, pc_safepoint, ..
-            },
-        ) in self.frames.iter().enumerate()
-        {
-            let pc_safepoint = pc_safepoint.unwrap();
-            let pc = if i + 1 < self.frames.len() {
-                pc.clone().unwrap()
-            } else {
-                iid.clone()
-            };
-            for mut iidx in pc_safepoint
-                .lives
-                .iter()
-                .map(|x| frame.get_local(&*self.opt, &x.to_inst_id()))
-            {
-                if iidx == cond_iidx {
-                    iidx = cond_inverse_iidx.unwrap();
-                }
-                let i = guard_exit_vars.binary_search(&iidx).unwrap();
-                deopt_vars.push(hir::InstIdx::from(i));
+                deopt_vars.push(iidx);
             }
             deopt_frames.push(hir::Frame { pc, pc_safepoint });
         }
@@ -434,7 +407,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let gextra = hir::GuardExtra {
             bid,
             switch,
-            guard_exit_vars,
             deopt_vars,
             deopt_frames,
         };

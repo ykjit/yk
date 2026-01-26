@@ -257,12 +257,8 @@ impl<'a> X64HirToAsm<'a> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        Guard {
-            geidx,
-            expect,
-            cond,
-            ..
-        }: &Guard,
+        Guard { expect, cond, .. }: &Guard,
+        exit_vars: &[InstIdx],
     ) -> Result<LabelIdx, CompilationError> {
         let Inst::ICmp(ICmp {
             pred,
@@ -273,10 +269,6 @@ impl<'a> X64HirToAsm<'a> {
         else {
             panic!()
         };
-        let GuardExtra {
-            guard_exit_vars: exit_vars,
-            ..
-        } = self.m.gextra(*geidx);
 
         let bitw = b.inst_bitw(self.m, *lhs);
         let (imm, mut in_fill) = if pred.is_signed() {
@@ -2532,21 +2524,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        ginst @ Guard {
-            geidx,
-            expect,
-            cond,
-            ..
-        }: &Guard,
+        ginst @ Guard { expect, cond, .. }: &Guard,
+        exit_vars: &[InstIdx],
     ) -> Result<Self::Label, CompilationError> {
         if let Inst::ICmp(ICmp { .. }) = b.inst(*cond) {
-            return self.i_icmp_guard(ra, b, iidx, ginst);
+            return self.i_icmp_guard(ra, b, iidx, ginst, exit_vars);
         }
 
-        let GuardExtra {
-            guard_exit_vars: exit_vars,
-            ..
-        } = self.m.gextra(*geidx);
         let [cndr, _] = ra.alloc(
             self,
             iidx,
