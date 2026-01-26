@@ -10,6 +10,7 @@ use crate::compile::{
     },
     jitc_yk::arbbitint::ArbBitInt,
 };
+use num_traits::FromPrimitive;
 
 pub(super) struct StrengthFold;
 
@@ -44,6 +45,7 @@ impl PassT for StrengthFold {
             Inst::Select(x) => opt_select(opt, x),
             Inst::SExt(x) => opt_sext(opt, x),
             Inst::Shl(x) => opt_shl(opt, x),
+            Inst::SIToFP(x) => opt_sitofp(opt, x),
             Inst::Sub(x) => opt_sub(opt, x),
             Inst::Trunc(x) => opt_trunc(opt, x),
             Inst::UDiv(x) => opt_udiv(opt, x),
@@ -758,6 +760,26 @@ fn opt_shl(opt: &mut PassOpt, mut inst: Shl) -> OptOutcome {
     }
 
     OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_sitofp(opt: &mut PassOpt, mut inst: SIToFP) -> OptOutcome {
+    inst.canonicalise(opt);
+    let SIToFP { tyidx, val } = inst;
+    match opt.as_constkind(val) {
+        Some(ConstKind::Int(src_val)) => match opt.ty(tyidx) {
+            Ty::Double => OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Double(f64::from_i64(src_val.to_sign_ext_i64().unwrap()).unwrap()),
+            })),
+            Ty::Float => OptOutcome::Rewritten(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Float(f32::from_i32(src_val.to_sign_ext_i32().unwrap()).unwrap()),
+            })),
+            _ => unreachable!(),
+        },
+        Some(_) => unreachable!(),
+        None => OptOutcome::Rewritten(inst.into()),
+    }
 }
 
 fn opt_sub(opt: &mut PassOpt, mut inst: Sub) -> OptOutcome {
@@ -2778,6 +2800,81 @@ mod test {
             "
           %0: i8 = arg
           %1: i8 = 0
+          blackbox %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_sitofp() {
+        // double
+
+        // Precisely representable
+        test_sf(
+            "
+          %0: i8 = 3
+          %1: double = sitofp %0
+          blackbox %1
+          %3: i8 = 255
+          %4: double = sitofp %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = 3
+          %1: double = 3
+          blackbox %1
+          %3: i8 = 255
+          %4: double = -1
+          blackbox %4
+        ",
+        );
+
+        // Rounded
+        test_sf(
+            "
+          %0: i64 = 9007199254740993
+          %1: double = sitofp %0
+          blackbox %1
+        ",
+            "
+          %0: i64 = 9007199254740993
+          %1: double = 9007199254740992
+          blackbox %1
+        ",
+        );
+
+        // float
+
+        // Precisely representable
+        test_sf(
+            "
+          %0: i8 = 3
+          %1: float = sitofp %0
+          blackbox %1
+          %3: i8 = 255
+          %4: float = sitofp %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = 3
+          %1: float = 3
+          blackbox %1
+          %3: i8 = 255
+          %4: float = -1
+          blackbox %4
+        ",
+        );
+
+        // Rounded
+        test_sf(
+            "
+          %0: i64 = 16777217
+          %1: float = sitofp %0
+          blackbox %1
+        ",
+            "
+          %0: i64 = 16777217
+          %1: float = 16777216
           blackbox %1
         ",
         );
