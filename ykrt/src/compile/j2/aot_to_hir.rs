@@ -20,9 +20,10 @@ use crate::{
         CompilationError, CompiledTrace, GuardId,
         j2::{
             J2,
-            compiled_trace::{DeoptFrame, DeoptVar, J2CompiledTrace, J2TraceStart},
+            compiled_trace::{
+                CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace, J2TraceStart,
+            },
             hir,
-            hir_to_asm::AsmGuardIdx,
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
         },
@@ -179,7 +180,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     .as_any()
                     .downcast::<J2CompiledTrace<Reg>>()
                     .unwrap();
-                let src_gidx = AsmGuardIdx::from(usize::from(*src_gid));
+                let src_gidx = CompiledGuardIdx::from(usize::from(*src_gid));
                 let prev_bid = src_ctr.bid(src_gidx);
                 self.prev_bid = Some(prev_bid);
                 let tgt_ctr = Arc::clone(tgt_ctr)
@@ -648,7 +649,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     fn p_start_side(
         &mut self,
         src_ctr: &Arc<J2CompiledTrace<Reg>>,
-        src_gidx: AsmGuardIdx,
+        src_gidx: CompiledGuardIdx,
         _tgt_ctr: &Arc<J2CompiledTrace<Reg>>,
     ) -> Result<Vec<VarLocs<Reg>>, CompilationError> {
         assert!(self.frames.is_empty());
@@ -1945,7 +1946,7 @@ enum BuildModKind<Reg: RegT> {
         prev_bid: BBlockId,
         entry_vlocs: Vec<VarLocs<Reg>>,
         src_ctr: Arc<J2CompiledTrace<Reg>>,
-        src_gidx: AsmGuardIdx,
+        src_gidx: CompiledGuardIdx,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,
     },
 }

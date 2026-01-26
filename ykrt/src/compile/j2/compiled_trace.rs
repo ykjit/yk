@@ -5,7 +5,6 @@ use crate::{
         j2::{
             codebuf::ExeCodeBuf,
             hir::Switch,
-            hir_to_asm::AsmGuardIdx,
             regalloc::{RegT, VarLocs},
         },
         jitc_yk::aot_ir::{self, DeoptSafepoint, InstId},
@@ -29,7 +28,7 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     pub trid: TraceId,
     pub hl: Weak<Mutex<HotLocation>>,
     codebuf: ExeCodeBuf,
-    pub guards: IndexVec<AsmGuardIdx, J2CompiledGuard<Reg>>,
+    pub guards: IndexVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
     pub trace_start: J2TraceStart<Reg>,
 }
 
@@ -39,7 +38,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         trid: TraceId,
         hl: Weak<Mutex<HotLocation>>,
         codebuf: ExeCodeBuf,
-        guards: IndexVec<AsmGuardIdx, J2CompiledGuard<Reg>>,
+        guards: IndexVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
         trace_start: J2TraceStart<Reg>,
     ) -> Self {
         Self {
@@ -52,15 +51,15 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         }
     }
 
-    pub(super) fn bid(&self, gidx: AsmGuardIdx) -> aot_ir::BBlockId {
+    pub(super) fn bid(&self, gidx: CompiledGuardIdx) -> aot_ir::BBlockId {
         self.guards[gidx].bid()
     }
 
-    pub(super) fn switch(&self, gidx: AsmGuardIdx) -> Option<&Switch> {
+    pub(super) fn switch(&self, gidx: CompiledGuardIdx) -> Option<&Switch> {
         self.guards[gidx].switch.as_ref()
     }
 
-    pub(super) fn guard(&self, gidx: AsmGuardIdx) -> &J2CompiledGuard<Reg> {
+    pub(super) fn guard(&self, gidx: CompiledGuardIdx) -> &J2CompiledGuard<Reg> {
         &self.guards[gidx]
     }
 
@@ -75,7 +74,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         self.codebuf.as_ptr() as *mut c_void
     }
 
-    pub(super) fn guard_stack_off(&self, gidx: AsmGuardIdx) -> u32 {
+    pub(super) fn guard_stack_off(&self, gidx: CompiledGuardIdx) -> u32 {
         match self.trace_start {
             J2TraceStart::ControlPoint { stack_off, .. }
             | J2TraceStart::Guard { stack_off, .. } => {
@@ -108,7 +107,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     }
 
     fn guard(&self, gid: GuardId) -> &Guard {
-        let gidx = AsmGuardIdx::from(usize::from(gid));
+        let gidx = CompiledGuardIdx::from(usize::from(gid));
         self.guards[gidx].guard()
     }
 
@@ -116,7 +115,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     // / J2CompiledTrace makes this awkward.
     #[cfg(target_arch = "x86_64")]
     fn patch_guard(&self, gid: GuardId, tgt: *const std::ffi::c_void) {
-        let gidx = AsmGuardIdx::from(usize::from(gid));
+        let gidx = CompiledGuardIdx::from(usize::from(gid));
         let patch_off = usize::try_from(self.guards[gidx].patch_off()).unwrap();
         self.codebuf.patch(patch_off, 5, |patch_addr| {
             assert_eq!(unsafe { patch_addr.read() }, 0xE9);
@@ -184,7 +183,7 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     // Generic yk stuff that probably should be stored in a struct at the `compile/mod.rs` level.
     guard: Guard,
 
-    // X64 / j2 specific stuff.
+    // j2 specific stuff.
     /// The block ID of the guard, needed for `prev_bid` in `aot_to_hir`.
     bid: aot_ir::BBlockId,
     /// The [DeoptFrame]s necessary to reconstruct the stackframes for this guard. See also
@@ -262,4 +261,8 @@ pub(super) struct DeoptVar<Reg: RegT> {
     pub bitw: u32,
     pub fromvlocs: VarLocs<Reg>,
     pub tovlocs: VarLocs<Reg>,
+}
+
+index_vec::define_index_type! {
+    pub(super) struct CompiledGuardIdx = u16;
 }

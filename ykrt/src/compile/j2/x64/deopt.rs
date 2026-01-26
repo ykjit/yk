@@ -5,9 +5,8 @@ use crate::{
     compile::{
         CompiledTrace, GuardId,
         j2::{
-            compiled_trace::{DeoptVar, J2CompiledTrace},
+            compiled_trace::{CompiledGuardIdx, DeoptVar, J2CompiledTrace},
             hir::ConstKind,
-            hir_to_asm::AsmGuardIdx,
             regalloc::{RegFill, VarLoc},
             x64::x64regalloc::Reg,
         },
@@ -141,7 +140,7 @@ thread_local! {
 #[unsafe(no_mangle)]
 pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> ! {
     let gid = GuardId::from(usize::try_from(gid).unwrap());
-    let gidx = AsmGuardIdx::from(usize::from(gid));
+    let gidx = CompiledGuardIdx::from(usize::from(gid));
     let ctr = MTThread::with_borrow(|mtt| mtt.compiled_trace(TraceId::from_u64(trid)))
         .as_any()
         .downcast::<J2CompiledTrace<Reg>>()

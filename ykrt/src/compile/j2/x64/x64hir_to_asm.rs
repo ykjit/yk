@@ -39,10 +39,11 @@ use crate::{
         j2::{
             codebuf::{CodeBufInProgress, ExeCodeBuf},
             compiled_trace::{
-                DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace, J2TraceStart,
+                CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace,
+                J2TraceStart,
             },
             hir::*,
-            hir_to_asm::{AsmGuardIdx, HirToAsmBackend},
+            hir_to_asm::HirToAsmBackend,
             regalloc::{AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
             x64::{
                 asm::{Asm, BLOCK_ALIGNMENT, LabelIdx, RelocKind},
@@ -67,7 +68,7 @@ pub(in crate::compile::j2) struct X64HirToAsm<'a> {
     /// The data section: we map any given (align, byte sequence) pair to [LabelIdx]s, which will
     /// eventually be output as their own pseudo-block.
     data_sec: HashMap<Vec<u8>, (u32, LabelIdx)>,
-    guards: IndexVec<AsmGuardIdx, IntermediateGuard>,
+    guards: IndexVec<CompiledGuardIdx, IntermediateGuard>,
 }
 
 impl<'a> X64HirToAsm<'a> {
@@ -855,7 +856,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     ) -> Result<
         (
             ExeCodeBuf,
-            IndexVec<AsmGuardIdx, J2CompiledGuard<Reg>>,
+            IndexVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
             Option<String>,
             Vec<usize>,
         ),
@@ -1385,7 +1386,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn guard_end(
         &mut self,
         trid: TraceId,
-        gidx: AsmGuardIdx,
+        gidx: CompiledGuardIdx,
     ) -> Result<LabelIdx, CompilationError> {
         self.asm
             .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
