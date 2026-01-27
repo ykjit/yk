@@ -24,7 +24,8 @@ Output from `YKD_LOG_STATS` looks as follows:
     "duration_deopting": 2.2638,
     "duration_jit_executing": 0.2,
     "duration_outside_yk": 0.142,
-    "duration_trace_mapping": 3.3797,                                           
+    "duration_trace_mapping": 3.3797,
+    "duration_tracing": 1.2345,
     "traces_collected_err": 0,                                                  
     "traces_collected_ok": 11,                                                  
     "traces_compiled_err": 1,
@@ -47,6 +48,7 @@ Fields and their meaning are as follows:
    "outside yk".
  * `duration_trace_mapping`. Float, seconds. How long was spent mapping a "raw"
    trace to compiler-ready IR?
+ * `duration_tracing`. Float, seconds. How long was spent tracing?
  * `trace_executions`. Unsigned integer. How many times have traces been
    executed? Note that the same trace can count arbitrarily many times to this.
  * `traces_collected_err`. Unsigned integer. How many traces were collected
@@ -71,7 +73,7 @@ was generated.
 To record a profile we first recommend compiling yk with debugging info
 embedded. cargo's `debug` profile does this automatically, but because no code
 optimisation is performed, the profiles are unrepresentative. We recommend
-using yk's provided `profile-with-debug` profile, which turns on
+using yk's provided `release-with-debug` profile, which turns on
 `--release`-style code optimisation *and* embeds debugging information:
 
 ```
