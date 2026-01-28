@@ -25,6 +25,11 @@ then you can use `bin/rr_c_test` or `bin/gdb_c_test`.
 
 Run these tools with no arguments for help on how to use them.
 
+Note that because these tools don't run tests under `lang_tester`, environment
+variables usually set by `env-var` in the test file will not be applied. If
+need be, you can set them manually, e.g. `YKD_SERAIALISE_COMPILATION=1
+./bin/rr_c_test ...`.
+
 ### GDB plugin
 
 Yk comes with a GDB plugin that allows the debugger to show higher-level
