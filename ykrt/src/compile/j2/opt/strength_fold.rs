@@ -1182,7 +1182,7 @@ mod test {
             "
           %0: ptr = 0x1234
           %1: i32 = 10
-          %2: i8 = dynptradd %0, %1, 4
+          %2: ptr = dynptradd %0, %1, 4
           blackbox %2
         ",
             "
@@ -1199,7 +1199,7 @@ mod test {
           %0: ptr = arg [reg]
           %1: ptr = ptradd %0, 4
           %2: i32 = 10
-          %3: i8 = dynptradd %1, %2, 4
+          %3: ptr = dynptradd %1, %2, 4
           blackbox %3
         ",
             "
@@ -2607,7 +2607,7 @@ mod test {
         test_sf(
             "
           %0: ptr = 0x1234
-          %1: i8 = ptradd %0, 4
+          %1: ptr = ptradd %0, 4
           blackbox %1
         ",
             "
@@ -2621,7 +2621,7 @@ mod test {
         test_sf(
             "
           %0: ptr = arg [reg]
-          %1: i8 = ptradd %0, 0
+          %1: ptr = ptradd %0, 0
           blackbox %1
         ",
             "
@@ -2635,8 +2635,8 @@ mod test {
         test_sf(
             "
           %0: ptr = arg [reg]
-          %1: i8 = ptradd %0, 4
-          %2: i8 = ptradd %1, 4
+          %1: ptr = ptradd %0, 4
+          %2: ptr = ptradd %1, 4
           blackbox %2
         ",
             "
@@ -2651,7 +2651,7 @@ mod test {
         test_sf(
             "
           %0: ptr = arg [reg]
-          %1: i8 = ptradd %0, 4
+          %1: ptr = ptradd %0, 4
           blackbox %0
         ",
             "

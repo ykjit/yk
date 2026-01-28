@@ -264,8 +264,8 @@ VLoc -> Result<AstVLoc, Box<dyn Error>>:
     "REG" { Ok(AstVLoc::AutoReg) }
   | "REG" "(" "STRING" "," RegFill ")" { Ok(AstVLoc::Reg($3?.span(), $5?)) }
   | "STACK" { Ok(AstVLoc::AutoStack) }
-  | "STACK" "INT" { Ok(AstVLoc::Stack($2?.span())) }
-  | "STACKOFF" "INT" { Ok(AstVLoc::StackOff($2?.span())) }
+  | "STACK" "(" "INT" ")" { Ok(AstVLoc::Stack($3?.span())) }
+  | "STACKOFF" "(" "INT" ")" { Ok(AstVLoc::StackOff($3?.span())) }
   ;
 
 RegFill -> Result<RegFill, Box<dyn Error>>:

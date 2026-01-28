@@ -4240,7 +4240,7 @@ mod test {
     fn stackoff() {
         codegen_and_test(
             "
-              %0: ptr = arg [stackoff 32]
+              %0: ptr = arg [stackoff(32)]
               %1: i8 = load %0
               blackbox %1
               term [%0]

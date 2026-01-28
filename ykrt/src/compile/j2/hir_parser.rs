@@ -349,7 +349,10 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     elem_size,
                 } => {
                     self.p_def_local(local);
-                    let _tyidx = self.p_ty(ty);
+                    let tyidx = self.p_ty(ty);
+                    if tyidx != self.ty_map[&Ty::Ptr(0)] {
+                        self.err_span(local, "Return type is not a pointer");
+                    }
                     let ptr = self.p_local(ptr);
                     let num_elems = self.p_local(num_elems);
                     let elem_size = self.p_bitw(elem_size);
@@ -665,7 +668,10 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     off,
                 } => {
                     self.p_def_local(local);
-                    let _tyidx = self.p_ty(ty);
+                    let tyidx = self.p_ty(ty);
+                    if tyidx != self.ty_map[&Ty::Ptr(0)] {
+                        self.err_span(local, "Return type is not a pointer");
+                    }
                     let ptr = self.p_local(ptr);
                     let off = self
                         .lexer
