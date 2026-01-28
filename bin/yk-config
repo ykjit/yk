@@ -108,6 +108,8 @@ handle_arg() {
             else
                 # SWT-specific flags.
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
+                # Wrap promote calls with TLS check to skip when not tracing.
+                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-conditional-promote-calls"
                 # Make optimised clones of functions.
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"
             fi
