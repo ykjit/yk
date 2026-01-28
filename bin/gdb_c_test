@@ -2,5 +2,21 @@
 #
 # Wrapper around the `gdb_c_test` binary to make it easier to use.
 
-set -e
-cargo run --bin gdb_c_test -- $@
+set -eu
+
+if [ $# -lt 2 ]; then
+    printf "usage: "
+    printf "gdb_c_test <rust-profile> <test_file> [-- <extra-gdb-args> ...]\n"
+    printf "\nexample: gdb_c_test release simple.c\n"
+    exit 1
+fi
+
+profile=$1;
+shift
+
+# We know what you meant, so just do that.
+if [ "$profile" = "debug" ]; then
+    profile=dev
+fi
+
+cargo run --profile "$profile" --bin gdb_c_test -- "$@"
