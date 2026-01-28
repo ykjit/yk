@@ -34,6 +34,8 @@ use crate::{
     mt::{MT, TraceId},
     trace::TraceAction,
 };
+#[cfg(test)]
+use index_vec::IndexVec;
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
 use std::{assert_matches, collections::HashMap, iter::Peekable, marker::PhantomData, sync::Arc};
@@ -245,7 +247,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let tyidx_ptr0 = self.opt.tyidx_ptr0();
         let tyidx_void = self.opt.tyidx_void();
 
-        let (entry, guard_extras, gblocks, tys) = self.opt.build()?;
+        let (entry, tys) = self.opt.build()?;
         let (trace_start, trace_end) = match bmk {
             BuildModKind::Coupler {
                 entry_safepoint,
@@ -305,8 +307,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             tyidx_ptr0,
             tyidx_void,
             addr_name_map: self.addr_name_map,
-            guard_extras,
-            gblocks,
+            #[cfg(test)]
+            smaps: IndexVec::new(),
         };
 
         let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -363,20 +365,25 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         // reference a const -- but we construct this as-needed.
         let mut cond_inverse_iidx = None;
 
-        // The list of variables tends to be long enough that we'll get more than one resizing, so
-        // the precalculation is worth it.
-        let deopt_vars_len = self
-            .frames
-            .iter()
-            .map(|x| x.pc_safepoint.unwrap().lives.len())
-            .sum();
-
-        let mut guard_exit_vars = Vec::with_capacity(deopt_vars_len);
+        let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
+        let mut deopt_vars = Vec::with_capacity(
+            self.frames
+                .iter()
+                .map(|x| x.pc_safepoint.unwrap().lives.len())
+                .sum(),
+        );
         for i in 0..self.frames.len() {
-            let pc_safepoint = self.frames[i].pc_safepoint.unwrap();
-            for j in 0..pc_safepoint.lives.len() {
-                let mut iidx =
-                    self.frames[i].get_local(&*self.opt, &pc_safepoint.lives[j].to_inst_id());
+            let Frame {
+                pc, pc_safepoint, ..
+            } = &self.frames[i];
+            let pc_safepoint = pc_safepoint.unwrap();
+            let pc = if i + 1 < self.frames.len() {
+                pc.clone().unwrap()
+            } else {
+                iid.clone()
+            };
+            for op in pc_safepoint.lives.iter() {
+                let mut iidx = self.frames[i].get_local(&*self.opt, &op.to_inst_id());
                 if iidx == cond_iidx {
                     if cond_inverse_iidx.is_none() {
                         let tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
@@ -390,41 +397,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     }
                     iidx = cond_inverse_iidx.unwrap();
                 }
-                guard_exit_vars.push(iidx);
+                deopt_vars.push(iidx);
             }
-        }
-        // The good news is that `guard_exit_vars` will tend to be mostly sorted, so this rarely
-        // has to do much work.
-        guard_exit_vars.sort();
-        guard_exit_vars.dedup();
-
-        let mut deopt_frames = SmallVec::with_capacity(self.frames.len());
-        let mut deopt_vars = Vec::with_capacity(deopt_vars_len);
-        for (
-            i,
-            frame @ Frame {
-                pc, pc_safepoint, ..
-            },
-        ) in self.frames.iter().enumerate()
-        {
-            let pc_safepoint = pc_safepoint.unwrap();
-            let pc = if i + 1 < self.frames.len() {
-                pc.clone().unwrap()
-            } else {
-                iid.clone()
-            };
-            for mut iidx in pc_safepoint
-                .lives
-                .iter()
-                .map(|x| frame.get_local(&*self.opt, &x.to_inst_id()))
-            {
-                if iidx == cond_iidx {
-                    iidx = cond_inverse_iidx.unwrap();
-                }
-                let i = guard_exit_vars.binary_search(&iidx).unwrap();
-                deopt_vars.push(hir::InstIdx::from(i));
-            }
-            deopt_frames.push(hir::Frame { pc, pc_safepoint });
+            deopt_frames.push(hir::Frame {
+                pc,
+                pc_safepoint,
+                #[cfg(test)]
+                smapidx: hir::StackMapIdx::new(0),
+            });
         }
 
         let hinst = hir::Guard {
@@ -435,10 +415,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let gextra = hir::GuardExtra {
             bid,
             switch,
-            guard_exit_vars,
             deopt_vars,
             deopt_frames,
-            gbidx: None,
         };
 
         self.opt.feed_guard(hinst, gextra)?;

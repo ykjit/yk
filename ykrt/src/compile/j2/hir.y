@@ -50,8 +50,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "CALL" "ID" "LOCAL" "(" Locals ")" {
       Ok(AstInst::Call { local: None, ty: None, extern_: $2?.span(), tgt: $3?.span(), args: $5? })
     }
-  | "GUARD" Bool "," "LOCAL" "," "[" Locals "]" {
-       Ok(AstInst::Guard { expect: $2?, cond: $4?.span(), exit_vars: $7? })
+  | "GUARD" Bool "," "LOCAL" "," "[" Locals "]" GuardStackMaps {
+       Ok(AstInst::Guard { expect: $2?, cond: $4?.span(), exit_vars: $7?, smaps: $9? })
     }
   | "LOCAL" ":" Ty "=" "CALL" "ID" "LOCAL" "(" Locals ")" {
       Ok(AstInst::Call { local: Some($1?.span()), ty: Some($3?), extern_: $6?.span(), tgt: $7?.span(), args: $9? })
@@ -68,7 +68,7 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ASHR" "LOCAL" "," "LOCAL" {
       Ok(AstInst::AShr { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
-  | "LOCAL" ":" Ty "=" "ARG" "[" ArgList "]" {
+  | "LOCAL" ":" Ty "=" "ARG" "[" VLocList "]" {
       Ok(AstInst::Arg { local: $1?.span(), ty: $3?, vlocs: $7? })
     }
   | "LOCAL" ":" Ty "=" Const {
@@ -190,8 +190,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
     }
   ;
 
-ArgList -> Result<Vec<AstVLoc>, Box<dyn Error>>:
-    ArgList "," VLoc { flattenr($1, $3) }
+VLocList -> Result<Vec<AstVLoc>, Box<dyn Error>>:
+    VLocList "," VLoc { flattenr($1, $3) }
   | VLoc { Ok(vec![$1?]) }
   ;
 
@@ -223,6 +223,22 @@ FPred -> Result<FPred, Box<dyn Error>>:
   | "UNE" { Ok(FPred::Une) }
   | "UNO" { Ok(FPred::Uno) }
   | "TRUE" { Ok(FPred::True) }
+  ;
+
+GuardStackMaps -> Result<Vec<Vec<Vec<AstVLoc>>>, Box<dyn Error>>:
+    "," "[" GuardStackMapLives "]" { $3 }
+  | "," "[" "]" { Ok(Vec::new()) }
+  | { Ok(Vec::new()) }
+  ;
+
+GuardStackMapLives -> Result<Vec<Vec<Vec<AstVLoc>>>, Box<dyn Error>>:
+    GuardStackMapLives "," "[" GuardStackMapVLocs "]" { flattenr($1, $4) }
+  | "[" GuardStackMapVLocs "]" { Ok(vec![$2?]) }
+  ;
+
+GuardStackMapVLocs -> Result<Vec<Vec<AstVLoc>>, Box<dyn Error>>:
+    GuardStackMapVLocs "," "[" VLocList "]" { flattenr($1, $4) }
+  | "[" VLocList "]" { Ok(vec![$2?]) }
   ;
 
 IntMinPoison -> Result<bool, Box<dyn Error>>:
