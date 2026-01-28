@@ -21,30 +21,14 @@ variable, which takes the following values:
 
 Often you will find the need to inspect JITted code with a debugger. If the
 problem trace comes from a C test (i.e. one of the test cases under `tests/c`),
-then you can use the `gdb_c_test` tool.
+then you can use `bin/rr_c_test` or `bin/gdb_c_test`.
 
-The tool automates the compilation and invocation of the resulting binary
-under GDB.
+Run these tools with no arguments for help on how to use them.
 
-The simplest invocation of `gdb_c_test` (from the top-level of the `yk` repo)
-would look like:
-
-```
-bin/gdb_c_test simple.c
-```
-
-This will automatically compile and run the `tests/c/simple.c` test under GDB.
-This would be ideal if you have a crashing trace, as it will dump you into a
-GDB shell at the time of the crash.
-
-To see what else you can do with `gdb_c_test`, run:
-
-```
-bin/gdb_c_test --help
-```
-
-For help on using GDB, see the [GDB
-documentation](https://sourceware.org/gdb/documentation/).
+Note that because these tools don't run tests under `lang_tester`, environment
+variables usually set by `env-var` in the test file will not be applied. If
+need be, you can set them manually, e.g. `YKD_SERAIALISE_COMPILATION=1
+./bin/rr_c_test ...`.
 
 ### GDB plugin
 
