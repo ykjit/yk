@@ -34,6 +34,8 @@ use crate::{
     mt::{MT, TraceId},
     trace::TraceAction,
 };
+#[cfg(test)]
+use index_vec::IndexVec;
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
 use std::{assert_matches, collections::HashMap, iter::Peekable, marker::PhantomData, sync::Arc};
@@ -305,6 +307,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             tyidx_ptr0,
             tyidx_void,
             addr_name_map: self.addr_name_map,
+            #[cfg(test)]
+            smaps: IndexVec::new(),
         };
 
         let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -395,7 +399,12 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
                 deopt_vars.push(iidx);
             }
-            deopt_frames.push(hir::Frame { pc, pc_safepoint });
+            deopt_frames.push(hir::Frame {
+                pc,
+                pc_safepoint,
+                #[cfg(test)]
+                smapidx: hir::StackMapIdx::new(0),
+            });
         }
 
         let hinst = hir::Guard {

@@ -94,7 +94,7 @@ impl<'a> X64HirToAsm<'a> {
             #[cfg(test)]
             TraceEnd::Test { block, .. } => block.insts_len(),
         };
-        num_hir_insts * 16
+        num_hir_insts * 25
     }
 
     pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>, buf: CodeBufInProgress) -> Self {
@@ -5555,6 +5555,7 @@ mod test {
               ; term [%0]
               ; l0
               sub rsp, 0
+              ; term []
               ; l1
               jmp l2
               ; l2
@@ -5580,6 +5581,7 @@ mod test {
               ; term [%0]
               ; l0
               sub rsp, 0
+              ; term []
               ; l1
               jmp l2
               ; l2

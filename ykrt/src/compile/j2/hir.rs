@@ -271,6 +271,8 @@ pub(super) struct Mod<Reg: RegT> {
     pub tyidx_void: TyIdx,
     /// A map of names to pointers. Will be `None` if logging was disabled.
     pub addr_name_map: Option<HashMap<usize, Option<String>>>,
+    #[cfg(test)]
+    pub smaps: IndexVec<StackMapIdx, Vec<VarLocs<Reg>>>,
 }
 
 impl<Reg: RegT> Mod<Reg> {
@@ -489,7 +491,12 @@ impl Block {
         // Heap effects aren't currently implemented, so we do the ultra-conservative thing: if
         // anything in `range` has a possible heap effect, we return `true`.
         for (_, inst) in self.insts_iter(range) {
-            if let Inst::Call(_) | Inst::Load(_) | Inst::Store(_) = inst {
+            if let Inst::Call(_)
+            | Inst::Load(_)
+            | Inst::MemCpy(_)
+            | Inst::MemSet(_)
+            | Inst::Store(_) = inst
+            {
                 return true;
             }
         }
@@ -670,7 +677,6 @@ pub(super) trait InstT: std::fmt::Debug {
 
     /// Apply the function `iidx_map` to each of this instruction's operands, mutating `self` with
     /// the result.
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, b: &mut dyn BlockLikeT, iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx;
@@ -778,7 +784,6 @@ impl InstT for Abs {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -859,7 +864,6 @@ impl InstT for Add {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -923,7 +927,6 @@ impl InstT for And {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -960,7 +963,6 @@ impl InstT for Arg {
         panic!();
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1023,7 +1025,6 @@ impl InstT for AShr {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1067,7 +1068,6 @@ impl InstT for BlackBox {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1140,7 +1140,6 @@ impl InstT for Call {
         IterIidxsIterator::with_kind(b, IterIidxsIteratorKind::Call(self))
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1238,7 +1237,6 @@ impl InstT for Const {
         IterIidxsIterator::none(b)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1308,7 +1306,6 @@ impl InstT for CtPop {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1342,7 +1339,6 @@ impl InstT for DebugStr {
         IterIidxsIterator::none(b)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1404,7 +1400,6 @@ impl InstT for DynPtrAdd {
         IterIidxsIterator::two(b, self.ptr, self.num_elems)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1467,7 +1462,6 @@ impl InstT for FAdd {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1530,7 +1524,6 @@ impl InstT for FCmp {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1637,7 +1630,6 @@ impl InstT for FDiv {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1700,7 +1692,6 @@ impl InstT for Floor {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1757,7 +1748,6 @@ impl InstT for FMul {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1815,7 +1805,6 @@ impl InstT for FNeg {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1872,7 +1861,6 @@ impl InstT for FSub {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1937,7 +1925,6 @@ impl InstT for FPExt {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -1995,7 +1982,6 @@ impl InstT for FPToSI {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2051,7 +2037,6 @@ impl InstT for Guard {
         IterIidxsIterator::with_kind(b, IterIidxsIteratorKind::Guard(self))
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2182,7 +2167,6 @@ impl InstT for ICmp {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2286,7 +2270,6 @@ impl InstT for IntToPtr {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2331,7 +2314,6 @@ impl InstT for Load {
         IterIidxsIterator::one(b, self.ptr)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2395,7 +2377,6 @@ impl InstT for LShr {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2453,7 +2434,6 @@ impl InstT for MemCpy {
         IterIidxsIterator::three(b, self.dst, self.src, self.len)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2520,7 +2500,6 @@ impl InstT for MemSet {
         IterIidxsIterator::three(b, self.dst, self.val, self.len)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2601,7 +2580,6 @@ impl InstT for Mul {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2672,7 +2650,6 @@ impl InstT for Or {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2735,7 +2712,6 @@ impl InstT for PtrAdd {
         IterIidxsIterator::one(b, self.ptr)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2793,7 +2769,6 @@ impl InstT for PtrToInt {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2857,7 +2832,6 @@ impl InstT for SDiv {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -2930,7 +2904,6 @@ impl InstT for Select {
         IterIidxsIterator::three(b, self.cond, self.truev, self.falsev)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3000,7 +2973,6 @@ impl InstT for SExt {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3067,7 +3039,6 @@ impl InstT for Shl {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3126,7 +3097,6 @@ impl InstT for SIToFP {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3189,7 +3159,6 @@ impl InstT for SMax {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3257,7 +3226,6 @@ impl InstT for SMin {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3319,7 +3287,6 @@ impl InstT for SRem {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3372,7 +3339,6 @@ impl InstT for Store {
         IterIidxsIterator::two(b, self.val, self.ptr)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3444,7 +3410,6 @@ impl InstT for Sub {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3492,7 +3457,6 @@ impl InstT for Term {
         )
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3531,7 +3495,6 @@ impl InstT for ThreadLocal {
         IterIidxsIterator::none(b)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut _iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3605,7 +3568,6 @@ impl InstT for Trunc {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3669,7 +3631,6 @@ impl InstT for UDiv {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3734,7 +3695,6 @@ impl InstT for UIToFP {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3797,7 +3757,6 @@ impl InstT for Xor {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -3861,7 +3820,6 @@ impl InstT for ZExt {
         IterIidxsIterator::one(b, self.val)
     }
 
-    #[cfg(test)]
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
     where
         F: FnMut(InstIdx) -> InstIdx,
@@ -4009,6 +3967,13 @@ enum IterIidxsIteratorKind<'a> {
 pub(super) struct Frame {
     pub pc: aot_ir::InstId,
     pub pc_safepoint: &'static DeoptSafepoint,
+    #[cfg(test)]
+    pub smapidx: StackMapIdx,
+}
+
+#[cfg(test)]
+index_vec::define_index_type! {
+    pub(crate) struct StackMapIdx = usize;
 }
 
 #[cfg(test)]

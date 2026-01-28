@@ -352,6 +352,30 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         Ok(())
     }
 
+    /// For guard bodies, return the stack offset, if there is one, for `iidx`.
+    pub(super) fn get_stack_off(&self, iidx: InstIdx) -> Option<u32> {
+        match self.istates[iidx] {
+            IState::Stack(x) => Some(x),
+            _ => None,
+        }
+    }
+
+    /// For guard bodies, set the stack offset for `iidx` to `stack_off`: this also updates the
+    /// allocator's stack offset to `stack_off`.
+    pub(super) fn set_stack_off(&mut self, iidx: InstIdx, stack_off: u32) {
+        assert!(stack_off > self.stack_off);
+        assert_eq!(self.istates[iidx], IState::None);
+        self.istates[iidx] = IState::Stack(stack_off);
+        self.stack_off = stack_off;
+    }
+
+    /// For guard bodies, ensure that the instructions `iidxs` are marked as used at `term_iidx`.
+    pub(super) fn keep_alive_at_term(&mut self, _term_iidx: InstIdx, iidxs: &[InstIdx]) {
+        for iidx in iidxs {
+            self.is_used.set(usize::from(*iidx), true);
+        }
+    }
+
     /// Topologically sort `ractions.distinct_copies`, breaking cycles as necessary, such that no
     /// [RegAction::Copy] can overwrite a value needed by a later [RegAction::Copy]. This will
     /// update the `ractions.spills` and `raction.unspills` as necessary. Note:
@@ -1177,7 +1201,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// the current [self.rstates] to the new `src_rstates` (bearing in mind "src" and "dst" are
     /// relative to reverse code generation).
     fn rstate_diff_to_action(
-        &mut self,
+        &self,
         src_rstates: &RStates<AB::Reg>,
         ractions: &mut RegActions<AB::Reg>,
     ) {

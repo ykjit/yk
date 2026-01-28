@@ -810,6 +810,7 @@ pub(in crate::compile::j2::opt) mod test {
             tyidx_ptr0,
             tyidx_void,
             addr_name_map: None,
+            smaps: m.smaps,
         };
         let s = m.to_string();
 

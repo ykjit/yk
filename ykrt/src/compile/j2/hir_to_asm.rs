@@ -106,11 +106,13 @@ use crate::{
     location::HotLocation,
     log::{IRPhase, log_ir, should_log_ir},
     mt::{MT, TraceId},
+    varlocs,
 };
 use index_vec::IndexVec;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::{ffi::c_void, sync::Arc};
+use vob::Vob;
 
 pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
     m: &'a Mod<AB::Reg>,
@@ -120,7 +122,7 @@ pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
     /// blocks. These use [GuardBlockIdx] to emphasise that there is a 1:1 mapping between
     /// [GuardExtra::gbidx] and this [IndexVec].
     /// These will initially be set to `None`; as the main blocks are processed, they will be set
-    /// to `Some`. Note: `[Self::asm_guards]` will empty this [IndexVec] completely.
+    /// to `Some`. Note: [Self::asm_guards] will empty this [IndexVec] completely.
     asmguards: IndexVec<CompiledGuardIdx, AsmGuard<'a, AB>>,
 }
 
@@ -230,7 +232,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     TraceEnd::Test { .. } => todo!(),
                 };
 
-                self.asm_guards()?;
+                self.asm_guards(logging)?;
                 let (buf, guards, log, label_offs) =
                     self.be.build_exe(logging, &[post_stack_label])?;
                 let [sidetrace_off] = &*label_offs else {
@@ -279,7 +281,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     TraceEnd::Test { .. } => todo!(),
                 };
                 self.be.guard_coupler_start(entry_stack_off - src_stack_off);
-                self.asm_guards()?;
+                self.asm_guards(logging)?;
                 let modkind = J2TraceStart::Guard {
                     stack_off: entry_stack_off,
                 };
@@ -330,28 +332,29 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
         // Guards
 
-        for (gidx, aguard) in self.asmguards.iter_enumerated() {
-            let patch_label = self
-                .be
-                .guard_end(self.m.trid, CompiledGuardIdx::from(usize::from(gidx)))?;
-            let gextra = block.gextra(aguard.geidx);
-            self.be.guard_completed(
-                aguard.label.clone(),
-                patch_label,
-                0,
-                gextra.bid,
-                SmallVec::new(),
-                Vec::new(),
-                None,
-            );
-        }
+        self.asm_guards(true)?;
 
         Ok(self.be.build_test(&[]))
     }
 
     /// Assemble guards.
-    fn asm_guards(&mut self) -> Result<(), CompilationError> {
+    fn asm_guards(&mut self, logging: bool) -> Result<(), CompilationError> {
+        // For each guard we've encountered while assembling the main [Block]s, we now get the
+        // backend to produce code for the associated guard body. We've already identified which
+        // instructions should end up in the guard body, so this isn't too difficult: we create a
+        // temporary [Block] with the appropriate instructions, work out the [VarLoc]s, and call
+        // [Self::p_block].
+
+        // Since we're creating temporary [Block]s, we can reuse the allocation for its
+        // instructions and term_vars, so we hoist these out of the loop.
+        let mut ginsts: IndexVec<InstIdx, Inst> = IndexVec::new();
+        let mut gterms: Vec<InstIdx> = Vec::new();
+
+        // There is a little bit of awkwardness in testing mode, where there are no stackmaps:
+        // instead [Mod::smaps] contains stackmaps specified by the test author.
+        #[cfg(not(test))]
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+
         let aguards = std::mem::take(&mut self.asmguards);
         for (gidx, aguard) in aguards.into_iter_enumerated() {
             let patch_label = self
@@ -359,49 +362,133 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 .guard_end(self.m.trid, CompiledGuardIdx::from(usize::from(gidx)))?;
             let gextra = aguard.block.gextra(aguard.geidx);
 
+            // The temporary `Block` that is the guard body. This will end up as:
+            //
+            // ```
+            // %0: arg
+            // ...
+            // %n: arg ; where `n` == aguard.exit_vars.len()
+            // %n + 1: <copy_in[0]>
+            // ...
+            // %n + m: <copy_in[m]> ; where m == aguard.copy_in.len()
+            // ```
+            ginsts.clear();
+            let mut gblock = Block {
+                insts: std::mem::take(&mut ginsts),
+                guard_extras: IndexVec::new(),
+            };
+
+            // Given an [InstIdx] `x` from the main `Block`, return its position in the guard's
+            // `Block`. Because we now from above how many `arg`s and `copy_in` instructions there
+            // are, this mapping is simple and because `exit_vars` and `copy_in` are ordered, can
+            // be done with a binary search.
+            let map = |x: InstIdx| {
+                if let Ok(i) = aguard.exit_vars.binary_search(&x) {
+                    InstIdx::from(i)
+                } else if let Ok(i) = aguard.copy_in.binary_search(&x) {
+                    InstIdx::from(aguard.exit_vars.len() + i)
+                } else {
+                    panic!()
+                }
+            };
+
+            // Push the `arg` instructions.
+            for iidx in aguard.exit_vars.iter() {
+                let tyidx = aguard.block.inst(*iidx).tyidx(self.m);
+                gblock.insts.push(Arg { tyidx }.into());
+            }
+            // Push the `copy_in` instructions, rewriting their operands as we go.
+            for iidx in aguard.copy_in.iter() {
+                let mut inst = aguard.block.inst(*iidx).clone();
+                inst.rewrite_iidxs(&mut gblock, map);
+                gblock.insts.push(inst);
+            }
+
+            // Finally, push the `term` instruction.
+            gterms.clear();
+            gterms.extend(gextra.deopt_vars.iter().map(|x| map(*x)));
+            gblock.insts.push(Inst::Term(Term(gterms)));
+
+            // At this point we have a complete, correct, `Block` representing the guard body. Now
+            // we have to set this up in a way that both side-tracing and deopt are happy with.
+
             let mut stack_off = aguard.stack_off;
+            let mut ra = RegAlloc::<AB>::new(self.m, &gblock, stack_off);
+            ra.set_entry_stacks_at_end(&aguard.exit_vlocs);
             let mut deopt_frames = SmallVec::with_capacity(gextra.deopt_frames.len());
             let mut deopt_vars = Vec::with_capacity(gextra.deopt_vars.len());
-            assert_eq!(gextra.deopt_vars.len(), aguard.deopt_vlocs.len());
-            let mut term_vars_iter = gextra.deopt_vars.iter().zip(aguard.deopt_vlocs.into_iter());
-            for Frame { pc, pc_safepoint } in gextra.deopt_frames.iter() {
-                let smap = aot_smaps.get(usize::try_from(pc_safepoint.id).unwrap()).0;
-                for smap_loc in smap.live_vals.iter() {
-                    let (iidx, mut fromvlocs) = term_vars_iter.next().unwrap();
-                    if fromvlocs.iter().all(|x| matches!(x, VarLoc::Reg(_, _))) {
-                        let Some(VarLoc::Reg(reg, fill)) = fromvlocs
-                            .iter()
-                            .find(|x| matches!(x, VarLoc::Reg(_, _)))
-                            .cloned()
-                        else {
-                            panic!()
-                        };
-                        let bitw = aguard.block.inst_bitw(self.m, *iidx);
-                        stack_off = self.be.align_spill(stack_off, bitw);
-                        fromvlocs.push(VarLoc::Stack(stack_off));
-                        self.be.spill(reg, fill, stack_off, bitw)?;
-                    }
-                    // FIXME (optimisation): We don't need to spill everything before deopt /
-                    // side-traces.
-                    fromvlocs.retain(|x| !matches!(x, VarLoc::Reg(_, _)));
+            assert_eq!(gextra.deopt_vars.len(), gblock.term_vars().len());
+            let mut deopt_term_iter = gextra.deopt_vars.iter().zip(gblock.term_vars().iter());
+            for frame in gextra.deopt_frames.iter() {
+                #[cfg(not(test))]
+                let smap_lives_iter = aot_smaps
+                    .get(usize::try_from(frame.pc_safepoint.id).unwrap())
+                    .0
+                    .live_vals
+                    .iter();
+                #[cfg(test)]
+                let smap_lives_iter = self.m.smaps[usize::from(frame.smapidx)].iter();
+
+                for smap_loc in smap_lives_iter {
+                    let (deopt_iidx, term_iidx) = deopt_term_iter.next().unwrap();
+                    // FIXME: This forces every variable represented in `gblock.term_vars` to be
+                    // spilt before the end. This makes deopt simple, but is unnecessary for
+                    // side-traces, where we could just pass things straight through in a register.
+                    let fromvlocs = if let Inst::Const(Const { kind, .. }) = gblock.inst(*term_iidx)
+                    {
+                        varlocs![VarLoc::Const(kind.clone())]
+                    } else {
+                        let fromvlocs = aguard
+                            .exit_vars
+                            .binary_search(deopt_iidx)
+                            .map(|x| &aguard.exit_vlocs[x])
+                            .ok();
+                        if let Some(fromvlocs) = fromvlocs
+                            && let Some(VarLoc::Stack(x)) =
+                                fromvlocs.iter().find(|x| matches!(x, VarLoc::Stack(_)))
+                        {
+                            varlocs![VarLoc::Stack(*x)]
+                        } else if let Some(fromvlocs) = fromvlocs
+                            && let Some(VarLoc::StackOff(x)) =
+                                fromvlocs.iter().find(|x| matches!(x, VarLoc::StackOff(_)))
+                        {
+                            varlocs![VarLoc::StackOff(*x)]
+                        } else {
+                            match ra.get_stack_off(*term_iidx) {
+                                Some(x) => varlocs![VarLoc::Stack(x)],
+                                None => {
+                                    let bitw = gblock.inst_bitw(self.m, *term_iidx);
+                                    stack_off = self.be.align_spill(stack_off, bitw);
+                                    ra.set_stack_off(*term_iidx, stack_off);
+                                    varlocs![VarLoc::Stack(stack_off)]
+                                }
+                            }
+                        }
+                    };
+                    #[cfg(not(test))]
                     let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
+                    #[cfg(test)]
+                    let mut tovlocs = smap_loc.clone();
                     if fromvlocs == tovlocs {
                         // Optimise away situations where we would just move a
                         // value from VLoc X to VLoc X.
                         tovlocs = VarLocs::new();
                     }
                     deopt_vars.push(DeoptVar {
-                        bitw: aguard.block.inst_bitw(self.m, *iidx),
+                        bitw: gblock.inst_bitw(self.m, *term_iidx),
                         fromvlocs,
                         tovlocs,
                     });
                 }
                 deopt_frames.push(DeoptFrame {
-                    pc: pc.clone(),
-                    pc_safepoint,
+                    pc: frame.pc.clone(),
+                    pc_safepoint: frame.pc_safepoint,
                 });
             }
-            assert!(term_vars_iter.next().is_none());
+            assert!(deopt_term_iter.next().is_none());
+            assert!(!gblock.insts.is_empty());
+            ra.keep_alive_at_term(InstIdx::from(gblock.insts.len() - 1), gblock.term_vars());
+            stack_off = self.p_block(&gblock, None, ra, &aguard.exit_vlocs, logging)?;
             self.be.guard_completed(
                 aguard.label.clone(),
                 patch_label,
@@ -411,6 +498,15 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 deopt_vars,
                 gextra.switch.clone(),
             );
+
+            // Make sure we reuse the `ginsts` and `gterms` allocations.
+            ginsts = std::mem::take(&mut gblock.insts);
+            {
+                let Inst::Term(Term(mut x)) = ginsts.pop().unwrap() else {
+                    panic!()
+                };
+                gterms = std::mem::take(&mut x);
+            }
         }
 
         Ok(())
@@ -452,6 +548,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         entry_vlocs: &[VarLocs<AB::Reg>],
         logging: bool,
     ) -> Result<u32, CompilationError> {
+        // These three variables are used to construct guard bodies: they're pulled out here
+        // so that we only need to perform a single allocation per entry [Block]. See `Inst::Guard`
+        // below to see how these are used.
+        let mut gexit_vars = Vob::from_elem(false, b.insts_len());
+        let mut gcopy = Vob::from_elem(false, b.insts_len());
+        let mut gqueue = Vec::new();
+
         let mut insts_iter = b.insts_iter(..).rev().peekable();
         loop {
             if let Some((_iidx, Inst::Arg(_))) = insts_iter.peek() {
@@ -556,13 +659,85 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
                 Inst::Guard(x @ Guard { geidx, .. }) => {
                     let gextra = b.gextra(*geidx);
-                    let label = self.be.i_guard(&mut ra, b, iidx, x, &gextra.deopt_vars)?;
-                    let deopt_vlocs = ra.vlocs_from_iidxs(&gextra.deopt_vars);
+
+                    // We now have to work out what will end up in the guard body. We have a simple
+                    // fixed-point algorithm which examines instructions referenced in a guard's
+                    // exit variables to see if they can be copied into the guard's body. This is
+                    // done recursively until we hit instructions which can't (i.e. side effects)
+                    // or shouldn't (e.g. in a register anyway) be copied.
+                    //
+                    // We make use of three variables (hoiked out of the loop for performance
+                    // reasons) that we will use / calculate below:
+                    // * `gexit_vars`: The new ordered, deduplicated, sequence of exit variables we
+                    //   will associate the guard with.
+                    // * `gcopy`: The ordered, deduplicated, sequence of instructions we've
+                    //   determined should be copied into the guard body.
+                    // * `gqueue`: The unordered queue of instructions we want to examine to see
+                    //   how they affect the guard and guard body. Note: this may contain
+                    //   duplicates and/or elements that have been processed before.
+                    // The first two of these are `Vob`s, because they are naturally ordered and
+                    // allow us to deduplicate for free.
+                    gexit_vars.set_all(false);
+                    gcopy.set_all(false);
+                    assert!(gqueue.is_empty());
+                    gqueue.extend(&gextra.deopt_vars);
+
+                    while let Some(giidx) = gqueue.pop() {
+                        let inst = b.inst(giidx);
+                        // We don't copy instructions that are used by non-guard instructions
+                        // unless: they're a `Const`; aren't in a register; don't have
+                        // side-effects.
+                        if (ra.is_used(giidx)
+                            && !matches!(inst, Inst::Const(_))
+                            && ra.iter_reg_for(giidx).nth(0).is_some())
+                            || matches!(
+                                inst,
+                                Inst::Arg(_)
+                                    | Inst::Call(_)
+                                    | Inst::MemCpy(_)
+                                    | Inst::MemSet(_)
+                                    | Inst::Store(_)
+                            )
+                        {
+                            gexit_vars.set(usize::from(giidx), true);
+                            continue;
+                        }
+
+                        // We can copy `Load`s in if there are no side effects between the `Load`
+                        // and the current guard.
+                        if let Inst::Load(Load { ptr, .. }) = inst
+                            && (ra.is_used(giidx) || b.heap_effects_on(*ptr, giidx + 1..iidx))
+                        {
+                            gexit_vars.set(usize::from(giidx), true);
+                            continue;
+                        }
+
+                        // We can copy this instruction!
+                        gcopy.set(usize::from(giidx), true);
+                        // Add all this instruction's operand references to the queue.
+                        for op_iidx in inst.iter_iidxs(b) {
+                            gqueue.push(op_iidx);
+                        }
+                    }
+
+                    // At this point, `gexit_vars` is a new sequence of exit variables for this
+                    // guard.
+                    let exit_vars = gexit_vars
+                        .iter_set_bits(..)
+                        .map(InstIdx::from)
+                        .collect::<Vec<_>>();
+                    let label = self.be.i_guard(&mut ra, b, iidx, x, &exit_vars)?;
+                    let exit_vlocs = ra.vlocs_from_iidxs(&exit_vars);
                     self.asmguards.push(AsmGuard {
                         geidx: *geidx,
                         block: b_self.unwrap(),
                         label,
-                        deopt_vlocs,
+                        exit_vars,
+                        exit_vlocs,
+                        copy_in: gcopy
+                            .iter_set_bits(..)
+                            .map(InstIdx::from)
+                            .collect::<Vec<_>>(),
                         stack_off: ra.stack_off(),
                     });
                 }
@@ -1268,10 +1443,1178 @@ index_vec::define_index_type! {
 #[derive(Debug)]
 struct AsmGuard<'a, AB: HirToAsmBackend + ?Sized> {
     geidx: GuardExtraIdx,
-    block: &'a Block,
     label: AB::Label,
-    /// Will be the same length as the matching [GuardExtra::exit_vars].
-    deopt_vlocs: Vec<VarLocs<AB::Reg>>,
+    /// The block that contained the associated guard.
+    block: &'a Block,
+    /// The post-guard-body list of variables live at the point of the guard's exit. Must be sorted
+    /// and not contain duplicates.
+    exit_vars: Vec<InstIdx>,
+    /// For each variable in [Self::exit_Vars], its corresponding [VarLocs].
+    exit_vlocs: Vec<VarLocs<AB::Reg>>,
+    /// The instructions that should be copied into the guard body when it is created. Must be
+    /// sorted, not contain duplicates, and have an empty intersection with [Self::exit_vars].
+    copy_in: Vec<InstIdx>,
     /// The stack offset of the register allocator at the entry point of the guard.
     stack_off: u32,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        compile::{
+            DeoptSafepoint,
+            j2::{
+                codebuf::ExeCodeBuf,
+                compiled_trace::{CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace},
+                hir::Mod,
+                hir_parser::str_to_mod,
+                regalloc::{RegCnstr, RegCnstrFill, TestRegIter},
+            },
+            jitc_yk::aot_ir,
+        },
+        location::{HotLocation, HotLocationKind},
+        mt::TraceId,
+    };
+    use fm::{FMBuilder, FMatcher};
+
+    use lazy_static::lazy_static;
+    use parking_lot::Mutex;
+    use regex::Regex;
+    use std::sync::Arc;
+    use strum::{Display, EnumCount, FromRepr};
+
+    #[derive(Copy, Clone, Debug, Display, EnumCount, FromRepr, PartialEq)]
+    #[repr(u8)]
+    enum TestReg {
+        R0,
+        R1,
+        R2,
+        R3,
+        Undefined,
+    }
+
+    const GP_REGS: [TestReg; 4] = [TestReg::R0, TestReg::R1, TestReg::R2, TestReg::R3];
+
+    impl RegT for TestReg {
+        type RegIdx = TestRegIdx;
+        const MAX_REGIDX: TestRegIdx = TestRegIdx::from_usize_unchecked(TestReg::COUNT);
+
+        fn undefined() -> Self {
+            TestReg::Undefined
+        }
+
+        fn from_regidx(idx: Self::RegIdx) -> Self {
+            TestReg::from_repr(idx.raw()).unwrap()
+        }
+
+        fn regidx(&self) -> Self::RegIdx {
+            TestRegIdx::from(*self as usize)
+        }
+
+        fn is_caller_saved(&self) -> bool {
+            todo!()
+        }
+
+        fn iter_test_regs() -> impl TestRegIter<Self> {
+            TestRegTestIter::new()
+        }
+
+        fn from_str(s: &str) -> Option<Self> {
+            match s {
+                "R0" => Some(Self::R0),
+                "R1" => Some(Self::R1),
+                "R2" => Some(Self::R2),
+                "R3" => Some(Self::R3),
+                _ => None,
+            }
+        }
+    }
+
+    index_vec::define_index_type! {
+        pub(crate) struct TestRegIdx = u8;
+    }
+
+    struct TestRegTestIter<Reg> {
+        gp_regs: Box<dyn Iterator<Item = Reg>>,
+    }
+
+    impl TestRegTestIter<TestReg> {
+        fn new() -> Self {
+            Self {
+                gp_regs: Box::new(
+                    [TestReg::R0, TestReg::R1, TestReg::R2, TestReg::R3]
+                        .iter()
+                        .cloned(),
+                ),
+            }
+        }
+    }
+
+    impl TestRegIter<TestReg> for TestRegTestIter<TestReg> {
+        fn next_reg(&mut self, ty: &Ty) -> Option<TestReg> {
+            match ty {
+                Ty::Double | Ty::Float => todo!(),
+                Ty::Func(_func_ty) => todo!(),
+                Ty::Int(bitw) => {
+                    if *bitw <= 64 {
+                        self.gp_regs.next()
+                    } else {
+                        todo!()
+                    }
+                }
+                Ty::Ptr(addrspace) => {
+                    assert_eq!(*addrspace, 0);
+                    self.gp_regs.next()
+                }
+                Ty::Void => todo!(),
+            }
+        }
+    }
+
+    index_vec::define_index_type! {
+        struct TestLabelIdx = u32;
+        IMPL_RAW_CONVERSIONS = true;
+    }
+
+    struct TestHirToAsm<'a> {
+        m: &'a Mod<TestReg>,
+        log: Vec<String>,
+    }
+
+    impl<'a> TestHirToAsm<'a> {
+        fn new(m: &'a Mod<TestReg>) -> Self {
+            Self { m, log: Vec::new() }
+        }
+    }
+
+    impl<'a> HirToAsmBackend for TestHirToAsm<'a> {
+        type Label = TestLabelIdx;
+        type Reg = TestReg;
+        type BuildTest = String;
+
+        fn smp_to_vloc(
+            _smp_locs: &SmallVec<[yksmp::Location; 1]>,
+            _reg_fill: RegFill,
+        ) -> VarLocs<Self::Reg> {
+            todo!()
+        }
+
+        fn thread_local_off(_addr: *const c_void) -> u32 {
+            todo!()
+        }
+
+        fn build_exe(
+            self,
+            _log: bool,
+            _labels: &[Self::Label],
+        ) -> Result<
+            (
+                ExeCodeBuf,
+                IndexVec<CompiledGuardIdx, J2CompiledGuard<Self::Reg>>,
+                Option<String>,
+                Vec<usize>,
+            ),
+            CompilationError,
+        > {
+            todo!()
+        }
+
+        fn build_test(self, _labels: &[Self::Label]) -> Self::BuildTest {
+            self.log.join("\n")
+        }
+
+        fn iter_possible_regs(&self, b: &Block, iidx: InstIdx) -> impl Iterator<Item = Self::Reg> {
+            match b.inst_ty(self.m, iidx) {
+                Ty::Double | Ty::Float => todo!(),
+                Ty::Func(_func_ty) => todo!(),
+                Ty::Int(_) | Ty::Ptr(_) => GP_REGS.iter().cloned(),
+                Ty::Void => todo!(),
+            }
+        }
+
+        fn log(&mut self, s: String) {
+            self.log.push(format!("; {s}"));
+        }
+
+        fn const_needs_tmp_reg(
+            &self,
+            _reg: Self::Reg,
+            _c: &ConstKind,
+        ) -> Option<impl Iterator<Item = Self::Reg>> {
+            None::<std::iter::Empty<Self::Reg>>
+        }
+
+        fn move_const(
+            &mut self,
+            _reg: Self::Reg,
+            _tmp_reg: Option<Self::Reg>,
+            _tgt_bitw: u32,
+            _tgt_fill: RegFill,
+            _c: &ConstKind,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn move_stackoff(
+            &mut self,
+            _reg: Self::Reg,
+            _stack_off: u32,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn arrange_fill(
+            &mut self,
+            reg: Self::Reg,
+            src_fill: RegFill,
+            dst_bitw: u32,
+            dst_fill: RegFill,
+        ) {
+            self.log.push(format!(
+                "arrange_fill: reg={reg:?}, from={src_fill:?}, dst_bitw={dst_bitw}, to={dst_fill:?}"
+            ));
+        }
+
+        fn copy_reg(
+            &mut self,
+            from_reg: Self::Reg,
+            to_reg: Self::Reg,
+        ) -> Result<(), CompilationError> {
+            self.log.push(format!("copy_reg: {to_reg:?}={from_reg:?}"));
+            Ok(())
+        }
+
+        fn align_spill(&self, stack_off: u32, bitw: u32) -> u32 {
+            stack_off + (bitw / 8).next_multiple_of(8)
+        }
+
+        fn spill(
+            &mut self,
+            reg: Self::Reg,
+            in_fill: RegFill,
+            stack_off: u32,
+            bitw: u32,
+        ) -> Result<(), CompilationError> {
+            self.log.push(format!(
+                "spill: reg={reg:?}, in_fill={in_fill:?}, stack_off={stack_off}, bitw={bitw}"
+            ));
+            Ok(())
+        }
+
+        fn unspill(
+            &mut self,
+            _stack_off: u32,
+            _reg: Self::Reg,
+            _out_fill: RegFill,
+            _bitw: u32,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn move_stack_val(
+            &mut self,
+            _bitw: u32,
+            _src_stack_off: u32,
+            _dst_stack_off: u32,
+            _tmp_reg: Self::Reg,
+        ) {
+            todo!()
+        }
+
+        fn controlpoint_coupler_or_return_start(
+            &mut self,
+            _stack_off: u32,
+        ) -> Result<Self::Label, CompilationError> {
+            todo!()
+        }
+
+        fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
+            todo!()
+        }
+
+        fn controlpoint_loop_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {
+            todo!()
+        }
+
+        fn star_coupler_end(
+            &mut self,
+            _tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn guard_coupler_start(&mut self, stack_off: u32) {
+            self.log
+                .push(format!("guard_coupler_start: stack_off={stack_off}"));
+        }
+
+        fn star_return_end(
+            &mut self,
+            _exit_safepoint: &'static DeoptSafepoint,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn guard_end(
+            &mut self,
+            _trid: TraceId,
+            _gidx: CompiledGuardIdx,
+        ) -> Result<Self::Label, CompilationError> {
+            Ok(TestLabelIdx::new(0))
+        }
+
+        fn guard_completed(
+            &mut self,
+            _start_label: Self::Label,
+            _patch_label: Self::Label,
+            _stack_off: u32,
+            _bid: aot_ir::BBlockId,
+            _deopt_frames: SmallVec<[DeoptFrame; 2]>,
+            deopt_vars: Vec<DeoptVar<Self::Reg>>,
+            _switch: Option<Switch>,
+        ) {
+            self.log.push(format!(
+                "guard_completed:\n{}",
+                deopt_vars
+                    .iter()
+                    .map(|x| format!(
+                        "  fromvlocs=[{}]\n  tovlocs=[{}]",
+                        x.fromvlocs
+                            .iter()
+                            .map(|x| format!("{x:?}"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        x.tovlocs
+                            .iter()
+                            .map(|x| format!("{x:?}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ));
+        }
+
+        fn i_abs(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Abs,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_add(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Add,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_and(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &And,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_ashr(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &AShr,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_call(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Call,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_ctpop(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &CtPop,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_dynptradd(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            DynPtrAdd {
+                ptr,
+                num_elems,
+                elem_size,
+            }: &DynPtrAdd,
+        ) -> Result<(), CompilationError> {
+            let [ptrr, nelemsr, outr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *ptr,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *num_elems,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
+            )?;
+            self.log.push(format!(
+                "dynptradd: {outr:?}={ptrr:?} + ({nelemsr:?}*{elem_size})"
+            ));
+            Ok(())
+        }
+
+        fn i_fadd(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FAdd,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fcmp(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FCmp,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fdiv(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FDiv,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_floor(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Floor,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fmul(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FMul,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fneg(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FNeg,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fsub(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FSub,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fpext(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FPExt,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_fptosi(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &FPToSI,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_guard(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            Guard { cond, .. }: &Guard,
+            exit_vars: &[InstIdx],
+        ) -> Result<Self::Label, CompilationError> {
+            let [_condr, _] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *cond,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::KeepAlive { iidxs: exit_vars },
+                ],
+            )?;
+            self.log.push(format!(
+                "i_guard: [{}]",
+                exit_vars
+                    .iter()
+                    .map(|x| format!("%{x:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+            Ok(TestLabelIdx::new(0))
+        }
+
+        fn i_icmp(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &ICmp,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_inttoptr(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &IntToPtr,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_load(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            Load { ptr, .. }: &Load,
+        ) -> Result<(), CompilationError> {
+            let [ptrr, outr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *ptr,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
+            )?;
+            self.log.push(format!("load: {outr:?}=*{ptrr:?}"));
+            Ok(())
+        }
+
+        fn i_lshr(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &LShr,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_memcpy(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &MemCpy,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_memset(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &MemSet,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_mul(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Mul,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_or(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Or,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_ptradd(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            PtrAdd { ptr, off, .. }: &PtrAdd,
+        ) -> Result<(), CompilationError> {
+            let [inr, outr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *ptr,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
+            )?;
+            self.log.push(format!("ptradd: {outr:?}={inr:?} + {off}"));
+            Ok(())
+        }
+
+        fn i_ptrtoint(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &PtrToInt,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_sdiv(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SDiv,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_select(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Select,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_sext(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SExt,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_shl(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Shl,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_sitofp(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SIToFP,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_smax(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SMax,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_smin(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SMin,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_srem(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &SRem,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_store(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            Store { ptr, val, .. }: &Store,
+        ) -> Result<(), CompilationError> {
+            let [ptrr, valr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *ptr,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *val,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.log.push(format!("store: *{ptrr:?}={valr:?}"));
+            Ok(())
+        }
+
+        fn i_sub(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Sub,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_threadlocal(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _tl_off: u32,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_trunc(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Trunc,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_udiv(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &UDiv,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_uitofp(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &UIToFP,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_xor(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &Xor,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+
+        fn i_zext(
+            &mut self,
+            _ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            _iidx: InstIdx,
+            _inst: &ZExt,
+        ) -> Result<(), CompilationError> {
+            todo!()
+        }
+    }
+
+    lazy_static! {
+        /// Use `{{name}}` to match non-literal strings in tests.
+        static ref PTN_RE: Regex = {
+            Regex::new(r"\{\{.+?\}\}").unwrap()
+        };
+
+        static ref PTN_RE_IGNORE: Regex = {
+            Regex::new(r"\{\{_}\}").unwrap()
+        };
+
+        static ref TEXT_RE: Regex = {
+            Regex::new(r"[a-zA-Z0-9\._]+").unwrap()
+        };
+    }
+
+    fn fmatcher(ptn: &str) -> FMatcher<'_> {
+        FMBuilder::new(ptn)
+            .unwrap()
+            .name_matcher(PTN_RE.clone(), TEXT_RE.clone())
+            .name_matcher_ignore(PTN_RE_IGNORE.clone(), TEXT_RE.clone())
+            .build()
+            .unwrap()
+    }
+
+    /// Enable simple tests of hir_to_asm.
+    ///
+    /// This function takes a module `s` in and runs [HirToAsm] it with our "test" backend above.
+    /// It then runs each line of the log through `log_filter`, only keeping lines where
+    /// `log_filter` returns `true`. It recombines the log and then matches it against the [fm]
+    /// pattern `ptn`.
+    fn build_and_test<F>(s: &str, log_filter: F, ptns: &[&str])
+    where
+        F: Fn(&str) -> bool,
+    {
+        let m = str_to_mod::<TestReg>(s);
+
+        let hl = Arc::new(Mutex::new(HotLocation {
+            kind: HotLocationKind::Tracing(TraceId::testing()),
+            tracecompilation_errors: 0,
+            #[cfg(feature = "ykd")]
+            debug_str: None,
+        }));
+
+        let be = TestHirToAsm::new(&m);
+        let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
+        let log = log
+            .lines()
+            .filter(|s| log_filter(s))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut failures = Vec::with_capacity(ptns.len());
+        for ptn in ptns {
+            match fmatcher(ptn).matches(&log) {
+                Ok(_) => return,
+                Err(e) => failures.push(format!("{e}")),
+            }
+        }
+
+        panic!("{}", failures.join("\n\n"));
+    }
+
+    #[test]
+    fn gbody_moves() {
+        // Nothing can be moved into the guard body.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [reg]
+          guard true, %0, [%1], [[[reg("R0", undefined)]]]
+          term [%0, %1]
+        "#,
+            |_| true,
+            &[r#"
+          ...
+          i_guard: [%1]
+          ...
+        "#],
+        );
+
+        // Move one instruction into the guard body.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [reg]
+          %2: ptr = ptradd %1, 8
+          guard true, %0, [%2], [[[reg("R0", undefined)]]]
+          term [%0, %1]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0, %1]
+          i_guard: [%1]
+          ...
+          ; %0: i1 = arg [Reg("R0", Undefined)]
+          guard_coupler_start: stack_off=0
+          ; term [%1]
+          spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
+          ptradd: R0=R0 + 8
+          ; %1: ptr = ptradd %0, 8
+          arrange_fill: reg=R0, from=Undefined, dst_bitw=64, to=Undefined
+          copy_reg: R0=R1
+          ; %0: ptr = arg [Reg("R1", Undefined)]
+          guard_completed:
+            fromvlocs=[Stack(8)]
+            tovlocs=[Reg(R0, Undefined)]
+        "#],
+        );
+
+        // Move two unrelated instructions into the guard body.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [reg]
+          %2: ptr = ptradd %1, 8
+          %3: ptr = ptradd %1, 16
+          guard true, %0, [%2, %3], [[[reg("R0", undefined)]], [[reg("R1", undefined)]]]
+          term [%0, %1]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0, %1]
+          i_guard: [%1]
+          ...
+          ; term [%1, %2]
+          spill: reg=R0, in_fill=Undefined, stack_off=16, bitw=64
+          ptradd: R0=R0 + 16
+          ; %2: ptr = ptradd %0, 16
+          spill: reg=R1, in_fill=Undefined, stack_off=8, bitw=64
+          ptradd: R1=R0 + 8
+          ; %1: ptr = ptradd %0, 8
+          arrange_fill: reg=R0, from=Undefined, dst_bitw=64, to=Undefined
+          copy_reg: R0=R1
+          ; %0: ptr = arg [Reg("R1", Undefined)]
+          guard_completed:
+            fromvlocs=[Stack(8)]
+            tovlocs=[Reg(R0, Undefined)]
+            fromvlocs=[Stack(16)]
+            tovlocs=[Reg(R1, Undefined)]
+        "#],
+        );
+
+        // Move two recursively-related instructions into the guard body.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [reg]
+          %2: i64 = arg [reg]
+          %3: ptr = ptradd %1, 8
+          %4: ptr = dynptradd %3, %2, 8
+          guard true, %0, [%4], [[[reg("R0", undefined)]]]
+          term [%0, %1, %2]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0, %1, %2]
+          i_guard: [%1, %2]
+          ...
+          ; term [%3]
+          spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
+          dynptradd: R0=R0 + (R1*8)
+          ; %3: ptr = dynptradd %2, %1, 8
+          ptradd: R0=R0 + 8
+          ; %2: ptr = ptradd %0, 8
+          arrange_fill: reg=R1, from=Undefined, dst_bitw=64, to=Zeroed
+          copy_reg: R1=R2
+          arrange_fill: reg=R0, from=Undefined, dst_bitw=64, to=Undefined
+          copy_reg: R0=R1
+          ; %1: i64 = arg [Reg("R2", Undefined)]
+          ; %0: ptr = arg [Reg("R1", Undefined)]
+          guard_completed:
+            fromvlocs=[Stack(8)]
+            tovlocs=[Reg(R0, Undefined)]
+        "#],
+        );
+
+        // Move something that we don't use at the point of the guard but then use later. This
+        // doesn't hurt, but does mean we compute things twice.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [reg]
+          %2: ptr = ptradd %1, 8
+          blackbox %2
+          guard true, %0, [%2], [[[reg("R0", undefined)]]]
+          term [%0, %1]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0, %1]
+          i_guard: [%1]
+          ; guard true, %0, [%2]
+          ; blackbox %2
+          ptradd: R2=R1 + 8
+          ; %2: ptr = ptradd %1, 8
+          ...
+          ; term [%1]
+          ...
+          ptradd: R0=R0 + 8
+          ; %1: ptr = ptradd %0, 8
+          ...
+        "#],
+        );
+
+        // Move a (safe to move!) `load` into a guard body.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [reg]
+          %2: i8 = load %1
+          guard true, %0, [%2], [[[reg("R0", undefined)]]]
+          term [%0, %1]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0, %1]
+          i_guard: [%1]
+          ; guard true, %0, [%2]
+          ; %2: i8 = load %1
+          ...
+          ; term [%1]
+          ...
+          load: R0=*R0
+          ; %1: i8 = load %0
+          ...
+        "#],
+        );
+
+        // Don't move a (not safe to move!) `load` into a guard body.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [reg]
+          %2: i8 = arg [reg]
+          %3: i8 = load %1
+          store %2, %1
+          guard true, %0, [%3], [[[reg("R0", undefined)]]]
+          term [%0, %1, %2]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0, %1, %2]
+          i_guard: [%3]
+          ; guard true, %0, [%3]
+          store: *R1=R2
+          ; store %2, %1
+          load: R3=*R1
+          ; %3: i8 = load %1
+          ...
+        "#],
+        );
+    }
+
+    #[test]
+    fn gbody_deopt_vars() {
+        // Test `VarLoc::Stack`.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [reg]
+          %2: ptr = ptradd %1, 8
+          guard true, %0, [%2], [[[stack(24)]]]
+          term [%0, %1]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0, %1]
+          i_guard: [%1]
+          ...
+          ; %0: i1 = arg [Reg("R0", Undefined)]
+          guard_coupler_start: stack_off=0
+          ; term [%1]
+          spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
+          ptradd: R0=R0 + 8
+          ; %1: ptr = ptradd %0, 8
+          arrange_fill: reg=R0, from=Undefined, dst_bitw=64, to=Undefined
+          copy_reg: R0=R1
+          ; %0: ptr = arg [Reg("R1", Undefined)]
+          guard_completed:
+            fromvlocs=[Stack(8)]
+            tovlocs=[Stack(24)]
+        "#],
+        );
+    }
 }
