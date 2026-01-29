@@ -13,7 +13,11 @@
 //!    numbers if you want sign extension, and hex numbers if you do not want sign extension.
 //! 4. Guard exit vars are considered as _both_ [GuardExtra::guard_exit_vars] and
 //!    [GuardExtra::deopt_vars]. The former are reordered and deduplicated as appropriate.
+//! 5. Guards can optionally specify an additional list which is the stack of frames, and the
+//!    [VarLocs] for their corresponding [GuardExtra::deopt_vars].
 
+#[cfg(test)]
+use crate::compile::jitc_yk::aot_ir::{BBlockInstIdx, InstId};
 use crate::{
     compile::{
         j2::{
@@ -21,7 +25,7 @@ use crate::{
             regalloc::{RegFill, RegT, TestRegIter, VarLoc, VarLocs},
         },
         jitc_yk::{
-            aot_ir::{BBlockId, BBlockIdx, FuncIdx},
+            aot_ir::{BBlockId, BBlockIdx, DeoptSafepoint, FuncIdx},
             arbbitint::ArbBitInt,
         },
     },
@@ -36,6 +40,14 @@ use std::{collections::HashMap, ffi::CString, marker::PhantomData};
 lrlex_mod!("compile/j2/hir.l");
 lrpar_mod!("compile/j2/hir.y");
 type StorageT = u16;
+
+/// In unit test mode, there are are no [DeoptSafepoint]s, since we're running as a normal Rust
+/// binary, not a ykllvm compiled C program. If we want to use a [DeoptSafepoint] in tests, we have
+/// to create a dummy.
+static TEST_DEOPT_SAFEPOINT: DeoptSafepoint = DeoptSafepoint {
+    id: 0,
+    lives: Vec::new(),
+};
 
 struct HirParser<'lexer, 'input: 'lexer, Reg: RegT> {
     lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
@@ -90,10 +102,10 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
 
         let mut entry_vlocs = Vec::new();
         let mut guards = IndexVec::new();
-        let mut gblocks = IndexVec::new();
         let mut testregiter = Reg::iter_test_regs();
         let mut autoregused = false;
         let mut manualregused = false;
+        let mut smaps = IndexVec::new();
         for inst in astinsts {
             match inst {
                 AstInst::Blackbox(span) => {
@@ -171,58 +183,17 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
-                AstInst::Arg {
-                    local,
-                    ty,
-                    vlocs: ast_vlocs,
-                } => {
+                AstInst::Arg { local, ty, vlocs } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
-                    let mut vlocs = VarLocs::with_capacity(ast_vlocs.len());
-                    for ast_vloc in ast_vlocs {
-                        let vloc = match ast_vloc {
-                            AstVLoc::AutoReg => {
-                                if manualregused {
-                                    self.err_span(
-                                        local,
-                                        "Can't mix `auto` and manually assigned registers",
-                                    );
-                                }
-                                autoregused = true;
-                                VarLoc::Reg(
-                                    testregiter.next_reg(&self.tys[tyidx]).unwrap_or_else(|| {
-                                        self.err_span(local, "Exhausted automatic test registers")
-                                    }),
-                                    RegFill::Undefined,
-                                )
-                            }
-                            AstVLoc::Reg(span, fill) => {
-                                if autoregused {
-                                    self.err_span(
-                                        local,
-                                        "Can't mix `auto` and manually assigned registers",
-                                    );
-                                }
-                                manualregused = true;
-                                let s = self.lexer.span_str(span).trim_prefix('"').trim_suffix('"');
-                                match Reg::from_str(s) {
-                                    Some(reg) => VarLoc::Reg(reg, fill),
-                                    None => self.err_span(span, &format!("No such register {s}")),
-                                }
-                            }
-                            AstVLoc::AutoStack => todo!(),
-                            AstVLoc::Stack(_span) => todo!(),
-                            AstVLoc::StackOff(span) => {
-                                let s = self.lexer.span_str(span);
-                                let stack_off = s.parse::<u32>().unwrap_or_else(|e| {
-                                    self.err_span(span, &format!("Invalid StackOff: {e}"))
-                                });
-                                VarLoc::StackOff(stack_off)
-                            }
-                        };
-                        vlocs.push(vloc);
-                    }
-                    entry_vlocs.push(vlocs);
+                    entry_vlocs.push(self.p_vlocs_with_auto(
+                        &mut autoregused,
+                        &mut manualregused,
+                        &mut testregiter,
+                        local,
+                        tyidx,
+                        vlocs,
+                    ));
                     self.insts.push(Arg { tyidx }.into());
                 }
                 AstInst::Call {
@@ -473,47 +444,43 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     expect,
                     cond,
                     exit_vars,
+                    smaps: gsmaps,
                 } => {
-                    let cond = self.p_local(cond);
-                    let exit_vars = exit_vars
+                    let bid = BBlockId::new(FuncIdx::from(0), BBlockIdx::from(0));
+                    let deopt_vars = exit_vars
                         .into_iter()
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
-                    let mut ginsts = IndexVec::with_capacity(exit_vars.len());
-                    let mut guard_exit_vars = Vec::new();
-                    let mut deopt_vars = Vec::new();
-                    for iidx in &exit_vars {
-                        if let Err(x) = guard_exit_vars.binary_search(iidx) {
-                            match &self.insts[*iidx] {
-                                Inst::Const(x) => {
-                                    ginsts.push(x.clone().into());
-                                }
-                                Inst::Guard(_) => panic!(),
-                                Inst::Term(_) => panic!(),
-                                x => {
-                                    ginsts.push(Inst::Arg(Arg {
-                                        tyidx: x.tyidx(&self),
-                                    }));
-                                }
-                            }
-                            deopt_vars.push(InstIdx::from(guard_exit_vars.len()));
-                            guard_exit_vars.insert(x, *iidx);
-                        } else {
-                            deopt_vars.push(InstIdx::from(guard_exit_vars.len() - 1));
-                        }
+                    let mut deopt_frames = SmallVec::with_capacity(smaps.len());
+                    for x in gsmaps {
+                        let lives = x
+                            .into_iter()
+                            .map(|x| self.p_vlocs(cond, x))
+                            .collect::<Vec<_>>();
+                        deopt_frames.push(Frame {
+                            pc: InstId::new(
+                                FuncIdx::new(0),
+                                BBlockIdx::new(0),
+                                BBlockInstIdx::new(0),
+                            ),
+                            pc_safepoint: &TEST_DEOPT_SAFEPOINT,
+                            smapidx: smaps.len_idx(),
+                        });
+                        smaps.push(lives);
                     }
-                    ginsts.push(Inst::Term(Term(
-                        (0..exit_vars.len()).map(InstIdx::from).collect::<Vec<_>>(),
-                    )));
-                    let gbidx = Some(gblocks.push(Block { insts: ginsts }));
-                    let bid = BBlockId::new(FuncIdx::from(0), BBlockIdx::from(0));
+                    let smaps_len = smaps.iter().map(|x| x.len()).sum::<usize>();
+                    if smaps_len != 0 && deopt_vars.len() != smaps_len {
+                        self.err_span(
+                            cond,
+                            "Number of stackmap variables does not match number of deopt variables",
+                        );
+                    }
+                    let cond = self.p_local(cond);
                     let geidx = guards.push(GuardExtra {
                         bid,
                         switch: None,
-                        guard_exit_vars,
                         deopt_vars,
-                        deopt_frames: SmallVec::new(),
-                        gbidx,
+                        deopt_frames,
                     });
                     self.insts.push(Inst::Guard(Guard {
                         geidx,
@@ -911,7 +878,10 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             }
         }
 
-        let block = Block { insts: self.insts };
+        let block = Block {
+            insts: self.insts,
+            guard_extras: guards,
+        };
         let m = Mod {
             trid: TraceId::testing(),
             trace_start: TraceStart::Test,
@@ -920,9 +890,8 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             tyidx_int1: self.tyidx_int1,
             tyidx_ptr0: self.tyidx_ptr0,
             tyidx_void: self.tyidx_void,
-            guard_extras: guards,
-            gblocks,
             addr_name_map: None,
+            smaps,
         };
         m.assert_well_formed();
         m
@@ -996,6 +965,88 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             AstTy::Void => self.push_ty(Ty::Void),
         }
     }
+
+    fn p_vlocs(&mut self, sp: Span, ast_vlocs: Vec<AstVLoc>) -> VarLocs<Reg> {
+        let mut vlocs = VarLocs::with_capacity(ast_vlocs.len());
+        for ast_vloc in ast_vlocs {
+            let vloc = match ast_vloc {
+                AstVLoc::AutoReg => self.err_span(sp, "Can't use auto registers here"),
+                AstVLoc::Reg(span, fill) => {
+                    let s = self.lexer.span_str(span).trim_prefix('"').trim_suffix('"');
+                    match Reg::from_str(s) {
+                        Some(reg) => VarLoc::Reg(reg, fill),
+                        None => self.err_span(span, &format!("No such register {s}")),
+                    }
+                }
+                AstVLoc::AutoStack => todo!(),
+                AstVLoc::Stack(span) => VarLoc::Stack(
+                    self.lexer
+                        .span_str(span)
+                        .parse::<u32>()
+                        .unwrap_or_else(|e| self.err_span(span, &e.to_string())),
+                ),
+                AstVLoc::StackOff(span) => {
+                    let s = self.lexer.span_str(span);
+                    let stack_off = s
+                        .parse::<u32>()
+                        .unwrap_or_else(|e| self.err_span(span, &format!("Invalid StackOff: {e}")));
+                    VarLoc::StackOff(stack_off)
+                }
+            };
+            vlocs.push(vloc);
+        }
+        vlocs
+    }
+
+    fn p_vlocs_with_auto(
+        &mut self,
+        autoregused: &mut bool,
+        manualregused: &mut bool,
+        testregiter: &mut impl TestRegIter<Reg>,
+        local: Span,
+        tyidx: TyIdx,
+        ast_vlocs: Vec<AstVLoc>,
+    ) -> VarLocs<Reg> {
+        let mut vlocs = VarLocs::with_capacity(ast_vlocs.len());
+        for ast_vloc in ast_vlocs {
+            let vloc = match ast_vloc {
+                AstVLoc::AutoReg => {
+                    if *manualregused {
+                        self.err_span(local, "Can't mix `auto` and manually assigned registers");
+                    }
+                    *autoregused = true;
+                    VarLoc::Reg(
+                        testregiter.next_reg(&self.tys[tyidx]).unwrap_or_else(|| {
+                            self.err_span(local, "Exhausted automatic test registers")
+                        }),
+                        RegFill::Undefined,
+                    )
+                }
+                AstVLoc::Reg(span, fill) => {
+                    if *autoregused {
+                        self.err_span(local, "Can't mix `auto` and manually assigned registers");
+                    }
+                    *manualregused = true;
+                    let s = self.lexer.span_str(span).trim_prefix('"').trim_suffix('"');
+                    match Reg::from_str(s) {
+                        Some(reg) => VarLoc::Reg(reg, fill),
+                        None => self.err_span(span, &format!("No such register {s}")),
+                    }
+                }
+                AstVLoc::AutoStack => todo!(),
+                AstVLoc::Stack(_span) => todo!(),
+                AstVLoc::StackOff(span) => {
+                    let s = self.lexer.span_str(span);
+                    let stack_off = s
+                        .parse::<u32>()
+                        .unwrap_or_else(|e| self.err_span(span, &format!("Invalid StackOff: {e}")));
+                    VarLoc::StackOff(stack_off)
+                }
+            };
+            vlocs.push(vloc);
+        }
+        vlocs
+    }
 }
 
 impl<'lexer, 'input: 'lexer, Reg: RegT> ModLikeT for HirParser<'lexer, 'input, Reg> {
@@ -1013,14 +1064,6 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> ModLikeT for HirParser<'lexer, 'input, R
 
     fn tyidx_void(&self) -> TyIdx {
         self.tyidx_void
-    }
-
-    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
-        todo!()
-    }
-
-    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
-        todo!()
     }
 
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
@@ -1203,6 +1246,7 @@ enum AstInst {
         expect: bool,
         cond: Span,
         exit_vars: Vec<Span>,
+        smaps: Vec<Vec<Vec<AstVLoc>>>,
     },
     ICmp {
         local: Span,

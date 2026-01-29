@@ -294,14 +294,6 @@ impl ModLikeT for FullOpt {
         panic!("Not available in optimiser");
     }
 
-    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
-        &self.inner.guard_extras[geidx]
-    }
-
-    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra {
-        &mut self.inner.guard_extras[geidx]
-    }
-
     fn ty(&self, tyidx: TyIdx) -> &Ty {
         self.inner.ty(tyidx)
     }
@@ -323,46 +315,18 @@ impl BlockLikeT for FullOpt {
     fn inst(&self, idx: InstIdx) -> &Inst {
         &self.inner.insts[usize::from(idx)].inst
     }
+
+    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
+        &self.inner.guard_extras[geidx]
+    }
+
+    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra {
+        &mut self.inner.guard_extras[geidx]
+    }
 }
 
 impl OptT for FullOpt {
-    fn build(
-        mut self: Box<Self>,
-    ) -> Result<
-        (
-            Block,
-            IndexVec<GuardExtraIdx, GuardExtra>,
-            IndexVec<GuardBlockIdx, Block>,
-            IndexVec<TyIdx, Ty>,
-        ),
-        CompilationError,
-    > {
-        let mut gblocks = IndexVec::with_capacity(self.inner.guard_extras.len());
-        // Because we update the `GuardExtra` at the end of each iteration, the borrow checker
-        // won't let us iterate over the `guard_extras` directly _and_ call `self.inst`, so we have
-        // to iterate over the indices.
-        for i in 0..self.inner.guard_extras.len() {
-            let mut ginsts =
-                IndexVec::with_capacity(self.inner.guard_extras[i].guard_exit_vars.len());
-            for iidx in &self.inner.guard_extras[i].guard_exit_vars {
-                match self.inst(*iidx) {
-                    Inst::Const(x) => {
-                        ginsts.push(x.clone().into());
-                    }
-                    Inst::Guard(_) => panic!(),
-                    Inst::Term(_) => panic!(),
-                    x => {
-                        ginsts.push(Inst::Arg(Arg {
-                            tyidx: x.tyidx(&*self),
-                        }));
-                    }
-                }
-            }
-            ginsts.push(Inst::Term(Term(std::mem::take(
-                &mut self.inner.guard_extras[i].deopt_vars,
-            ))));
-            self.inner.guard_extras[i].gbidx = Some(gblocks.push(Block { insts: ginsts }));
-        }
+    fn build(self: Box<Self>) -> Result<(Block, IndexVec<TyIdx, Ty>), CompilationError> {
         Ok((
             Block {
                 insts: self
@@ -371,9 +335,8 @@ impl OptT for FullOpt {
                     .into_iter()
                     .map(|x| x.inst)
                     .collect::<IndexVec<_, _>>(),
+                guard_extras: self.inner.guard_extras,
             },
-            self.inner.guard_extras,
-            gblocks,
             self.inner.tys,
         ))
     }
@@ -605,6 +568,22 @@ impl BlockLikeT for PassOpt<'_> {
     fn inst(&self, iidx: InstIdx) -> &Inst {
         self.optinternal.inst(iidx)
     }
+
+    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
+        if geidx == GuardExtraIdx::MAX {
+            self.inner.gextra.as_ref().unwrap()
+        } else {
+            &self.optinternal.guard_extras[geidx]
+        }
+    }
+
+    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra {
+        if geidx == GuardExtraIdx::MAX {
+            self.inner.gextra.as_mut().unwrap()
+        } else {
+            &mut self.optinternal.guard_extras[geidx]
+        }
+    }
 }
 
 impl ModLikeT for PassOpt<'_> {
@@ -622,22 +601,6 @@ impl ModLikeT for PassOpt<'_> {
 
     fn tyidx_void(&self) -> TyIdx {
         self.optinternal.tyidx_void
-    }
-
-    fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
-        if geidx == GuardExtraIdx::MAX {
-            self.inner.gextra.as_ref().unwrap()
-        } else {
-            &self.optinternal.guard_extras[geidx]
-        }
-    }
-
-    fn gextra_mut(&mut self, geidx: GuardExtraIdx) -> &mut GuardExtra {
-        if geidx == GuardExtraIdx::MAX {
-            self.inner.gextra.as_mut().unwrap()
-        } else {
-            &mut self.optinternal.guard_extras[geidx]
-        }
     }
 
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
@@ -684,6 +647,14 @@ impl BlockLikeT for CommitInstOpt<'_> {
     fn inst(&self, iidx: InstIdx) -> &Inst {
         self.inner.inst(iidx)
     }
+
+    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
+        todo!();
+    }
+
+    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
+        todo!();
+    }
 }
 
 impl ModLikeT for CommitInstOpt<'_> {
@@ -701,14 +672,6 @@ impl ModLikeT for CommitInstOpt<'_> {
 
     fn tyidx_void(&self) -> TyIdx {
         self.inner.tyidx_void
-    }
-
-    fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
-        todo!();
-    }
-
-    fn gextra_mut(&mut self, _geidx: GuardExtraIdx) -> &mut GuardExtra {
-        todo!();
     }
 
     fn addr_to_name(&self, _addr: usize) -> Option<&str> {
@@ -753,18 +716,21 @@ pub(in crate::compile::j2::opt) mod test {
     {
         let m = str_to_mod::<TestReg>(mod_s);
         let mut fopt = Box::new(FullOpt::new());
-        fopt.inner.guard_extras = m.guard_extras;
-        fopt.inner.tys = m.tys;
-        for (tyidx, ty) in fopt.inner.tys.iter_enumerated() {
-            fopt.inner.ty_map.insert(ty.clone(), tyidx);
-        }
         let TraceEnd::Test {
             entry_vlocs,
-            block: Block { insts },
+            block: Block {
+                insts,
+                guard_extras,
+            },
         } = m.trace_end
         else {
             panic!()
         };
+        fopt.inner.guard_extras = guard_extras;
+        fopt.inner.tys = m.tys;
+        for (tyidx, ty) in fopt.inner.tys.iter_enumerated() {
+            fopt.inner.ty_map.insert(ty.clone(), tyidx);
+        }
         // We need to maintain a manual map of iidxs the user has written in their test to the
         // current state of the actual optimiser. Consider:
         //
@@ -834,7 +800,7 @@ pub(in crate::compile::j2::opt) mod test {
         let tyidx_int1 = fopt.inner.tyidx_int1;
         let tyidx_ptr0 = fopt.inner.tyidx_ptr0;
         let tyidx_void = fopt.inner.tyidx_void;
-        let (block, guard_extras, gblocks, tys) = fopt.build().unwrap();
+        let (block, tys) = fopt.build().unwrap();
         let m = Mod {
             trid: m.trid,
             trace_start: TraceStart::Test,
@@ -843,9 +809,8 @@ pub(in crate::compile::j2::opt) mod test {
             tyidx_int1,
             tyidx_ptr0,
             tyidx_void,
-            guard_extras,
-            gblocks,
             addr_name_map: None,
+            smaps: m.smaps,
         };
         let s = m.to_string();
 
@@ -937,70 +902,6 @@ pub(in crate::compile::j2::opt) mod test {
           blackbox %3
           term [%3, %3]
           ...
-        ",
-        );
-    }
-
-    #[test]
-    fn guard_blocks() {
-        fn test_canon(mod_s: &str, ptn: &str) {
-            opt_and_test(
-                mod_s,
-                |opt, mut inst| {
-                    inst.canonicalise(opt);
-                    OptOutcome::Rewritten(inst)
-                },
-                |_, _, _| (),
-                |_, _| (),
-                ptn,
-            );
-        }
-
-        // Basic guard blocks
-        test_canon(
-            "
-          %0: i8 = arg [reg]
-          %1: i8 = arg [reg]
-          %2: i1 = icmp eq %0, %1
-          %3: i1 = 0
-          guard true, %3, [%0, %3]
-          term [%0, %1]
-        ",
-            "
-          %0: i8 = arg
-          %1: i8 = arg
-          %2: i1 = icmp eq %0, %1
-          %3: i1 = 0
-          guard true, %3, [%0, %3]
-          term [%0, %1]
-          ; guard 0
-          %0: i8 = arg
-          %1: i1 = 0
-          term [%0, %1]
-        ",
-        );
-
-        // Repeated instruction indexes in guard exit_vars only lead to one `arg` in the guard
-        // block.
-        test_canon(
-            "
-          %0: i8 = arg [reg]
-          %1: i8 = arg [reg]
-          %2: i1 = icmp eq %0, %1
-          %3: i1 = 0
-          guard true, %3, [%0, %0]
-          term [%0, %1]
-        ",
-            "
-          %0: i8 = arg
-          %1: i8 = arg
-          %2: i1 = icmp eq %0, %1
-          %3: i1 = 0
-          guard true, %3, [%0]
-          term [%0, %1]
-          ; guard 0
-          %0: i8 = arg
-          term [%0, %0]
         ",
         );
     }

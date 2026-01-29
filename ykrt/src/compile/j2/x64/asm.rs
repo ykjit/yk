@@ -65,6 +65,7 @@ impl Asm {
 
     pub(super) fn block_completed(&mut self) {
         self.blocks.push(replace(&mut self.insts, index_vec![]));
+        self.log.push(Vec::new());
     }
 
     pub(super) fn log(&mut self, s: String) {
