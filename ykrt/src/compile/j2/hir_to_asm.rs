@@ -112,6 +112,7 @@ use index_vec::IndexVec;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::{ffi::c_void, sync::Arc};
+use test_stubs::test_stubs;
 use vob::Vob;
 
 pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
@@ -902,6 +903,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 ///      guard bodies. Each block is assembled in reverse order.
 ///   3. After each block has been fully processed, [HirToAsmBackend::block_completed] will be
 ///      called.
+#[test_stubs]
 pub(super) trait HirToAsmBackend {
     type Reg: RegT + 'static;
 
@@ -1463,10 +1465,8 @@ mod test {
     use super::*;
     use crate::{
         compile::{
-            DeoptSafepoint,
             j2::{
-                codebuf::ExeCodeBuf,
-                compiled_trace::{CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace},
+                compiled_trace::{CompiledGuardIdx, DeoptFrame, DeoptVar},
                 hir::Mod,
                 hir_parser::str_to_mod,
                 regalloc::{RegCnstr, RegCnstrFill, TestRegIter},
@@ -1593,33 +1593,6 @@ mod test {
         type Reg = TestReg;
         type BuildTest = String;
 
-        fn smp_to_vloc(
-            _smp_locs: &SmallVec<[yksmp::Location; 1]>,
-            _reg_fill: RegFill,
-        ) -> VarLocs<Self::Reg> {
-            todo!()
-        }
-
-        fn thread_local_off(_addr: *const c_void) -> u32 {
-            todo!()
-        }
-
-        fn build_exe(
-            self,
-            _log: bool,
-            _labels: &[Self::Label],
-        ) -> Result<
-            (
-                ExeCodeBuf,
-                IndexVec<CompiledGuardIdx, J2CompiledGuard<Self::Reg>>,
-                Option<String>,
-                Vec<usize>,
-            ),
-            CompilationError,
-        > {
-            todo!()
-        }
-
         fn build_test(self, _labels: &[Self::Label]) -> Self::BuildTest {
             self.log.join("\n")
         }
@@ -1643,25 +1616,6 @@ mod test {
             _c: &ConstKind,
         ) -> Option<impl Iterator<Item = Self::Reg>> {
             None::<std::iter::Empty<Self::Reg>>
-        }
-
-        fn move_const(
-            &mut self,
-            _reg: Self::Reg,
-            _tmp_reg: Option<Self::Reg>,
-            _tgt_bitw: u32,
-            _tgt_fill: RegFill,
-            _c: &ConstKind,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn move_stackoff(
-            &mut self,
-            _reg: Self::Reg,
-            _stack_off: u32,
-        ) -> Result<(), CompilationError> {
-            todo!()
         }
 
         fn arrange_fill(
@@ -1702,58 +1656,9 @@ mod test {
             Ok(())
         }
 
-        fn unspill(
-            &mut self,
-            _stack_off: u32,
-            _reg: Self::Reg,
-            _out_fill: RegFill,
-            _bitw: u32,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn move_stack_val(
-            &mut self,
-            _bitw: u32,
-            _src_stack_off: u32,
-            _dst_stack_off: u32,
-            _tmp_reg: Self::Reg,
-        ) {
-            todo!()
-        }
-
-        fn controlpoint_coupler_or_return_start(
-            &mut self,
-            _stack_off: u32,
-        ) -> Result<Self::Label, CompilationError> {
-            todo!()
-        }
-
-        fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
-            todo!()
-        }
-
-        fn controlpoint_loop_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {
-            todo!()
-        }
-
-        fn star_coupler_end(
-            &mut self,
-            _tgt_ctr: &Arc<J2CompiledTrace<Self::Reg>>,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
         fn guard_coupler_start(&mut self, stack_off: u32) {
             self.log
                 .push(format!("guard_coupler_start: stack_off={stack_off}"));
-        }
-
-        fn star_return_end(
-            &mut self,
-            _exit_safepoint: &'static DeoptSafepoint,
-        ) -> Result<(), CompilationError> {
-            todo!()
         }
 
         fn guard_end(
@@ -1796,66 +1701,6 @@ mod test {
             ));
         }
 
-        fn i_abs(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Abs,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_add(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Add,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_and(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &And,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_ashr(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &AShr,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_call(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Call,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_ctpop(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &CtPop,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
         fn i_dynptradd(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -1896,96 +1741,6 @@ mod test {
             Ok(())
         }
 
-        fn i_fadd(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FAdd,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fcmp(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FCmp,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fdiv(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FDiv,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_floor(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Floor,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fmul(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FMul,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fneg(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FNeg,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fsub(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FSub,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fpext(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FPExt,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fptosi(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FPToSI,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
         fn i_guard(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -2018,26 +1773,6 @@ mod test {
             Ok(TestLabelIdx::new(0))
         }
 
-        fn i_icmp(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &ICmp,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_inttoptr(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &IntToPtr,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
         fn i_load(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -2064,56 +1799,6 @@ mod test {
             )?;
             self.log.push(format!("load: {outr:?}=*{ptrr:?}"));
             Ok(())
-        }
-
-        fn i_lshr(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &LShr,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_memcpy(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &MemCpy,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_memset(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &MemSet,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_mul(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Mul,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_or(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Or,
-        ) -> Result<(), CompilationError> {
-            todo!()
         }
 
         fn i_ptradd(
@@ -2144,96 +1829,6 @@ mod test {
             Ok(())
         }
 
-        fn i_ptrtoint(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &PtrToInt,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_sdiv(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SDiv,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_select(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Select,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_sext(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SExt,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_shl(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Shl,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_sitofp(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SIToFP,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_smax(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SMax,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_smin(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SMin,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_srem(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SRem,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
         fn i_store(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -2261,76 +1856,6 @@ mod test {
             )?;
             self.log.push(format!("store: *{ptrr:?}={valr:?}"));
             Ok(())
-        }
-
-        fn i_sub(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Sub,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_threadlocal(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _tl_off: u32,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_trunc(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Trunc,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_udiv(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &UDiv,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_uitofp(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &UIToFP,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_xor(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Xor,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_zext(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &ZExt,
-        ) -> Result<(), CompilationError> {
-            todo!()
         }
     }
 

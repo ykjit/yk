@@ -1806,10 +1806,8 @@ pub(crate) mod test {
     use super::*;
     use crate::{
         compile::{
-            DeoptSafepoint,
             j2::{
-                codebuf::ExeCodeBuf,
-                compiled_trace::{CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace},
+                compiled_trace::{CompiledGuardIdx, DeoptFrame, DeoptVar},
                 hir::Mod,
                 hir::*,
                 hir_parser::str_to_mod,
@@ -2001,36 +1999,6 @@ pub(crate) mod test {
         type Reg = TestReg;
         type BuildTest = String;
 
-        fn smp_to_vloc(
-            _smp_locs: &SmallVec<[yksmp::Location; 1]>,
-            _reg_fill: RegFill,
-        ) -> VarLocs<Self::Reg> {
-            todo!()
-        }
-
-        fn thread_local_off(_addr: *const std::ffi::c_void) -> u32 {
-            todo!()
-        }
-
-        fn build_exe(
-            self,
-            _log: bool,
-            _labels: &[Self::Label],
-        ) -> Result<
-            (
-                ExeCodeBuf,
-                IndexVec<
-                    CompiledGuardIdx,
-                    crate::compile::j2::compiled_trace::J2CompiledGuard<Self::Reg>,
-                >,
-                Option<String>,
-                Vec<usize>,
-            ),
-            CompilationError,
-        > {
-            todo!()
-        }
-
         fn build_test(self, _labels: &[Self::Label]) -> Self::BuildTest {
             self.ra_log.join("\n")
         }
@@ -2070,14 +2038,6 @@ pub(crate) mod test {
                 "const {reg:?} tmp_reg={tmp_reg:?} tgt_bitw={tgt_bitw} fill={fill:?} {c:?}"
             ));
             Ok(())
-        }
-
-        fn move_stackoff(
-            &mut self,
-            _reg: Self::Reg,
-            _stack_off: u32,
-        ) -> Result<(), CompilationError> {
-            todo!();
         }
 
         fn arrange_fill(
@@ -2132,42 +2092,7 @@ pub(crate) mod test {
             Ok(())
         }
 
-        fn move_stack_val(
-            &mut self,
-            _bitw: u32,
-            _src_stack_off: u32,
-            _dst_stack_off: u32,
-            _reg: Self::Reg,
-        ) {
-            todo!()
-        }
-
-        fn controlpoint_coupler_or_return_start(
-            &mut self,
-            _stack_off: u32,
-        ) -> Result<Self::Label, CompilationError> {
-            todo!();
-        }
-
-        fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
-            todo!()
-        }
-
         fn controlpoint_loop_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {}
-
-        fn star_return_end(
-            &mut self,
-            _exit_safepoint: &'static DeoptSafepoint,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn star_coupler_end(
-            &mut self,
-            _ctr: &std::sync::Arc<J2CompiledTrace<Self::Reg>>,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
 
         fn guard_coupler_start(&mut self, _stack_off: u32) {}
 
@@ -2189,16 +2114,6 @@ pub(crate) mod test {
             _deopt_vars: Vec<DeoptVar<Self::Reg>>,
             _switch: Option<Switch>,
         ) {
-        }
-
-        fn i_abs(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Abs,
-        ) -> Result<(), CompilationError> {
-            todo!()
         }
 
         fn i_add(
@@ -2233,56 +2148,6 @@ pub(crate) mod test {
             Ok(())
         }
 
-        fn i_and(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::And,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_ashr(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::AShr,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_call(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Call,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_ctpop(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::CtPop,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_dynptradd(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::DynPtrAdd,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
         fn i_fadd(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -2311,86 +2176,6 @@ pub(crate) mod test {
             self.ra_log
                 .push(format!("alloc %{iidx:?} {lhsr:?} {rhsr:?}"));
             Ok(())
-        }
-
-        fn i_fcmp(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _fcmp: &FCmp,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fdiv(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _fadd: &FDiv,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_floor(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Floor,
-        ) -> Result<(), CompilationError> {
-            todo!();
-        }
-
-        fn i_fneg(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FNeg,
-        ) -> Result<(), CompilationError> {
-            todo!();
-        }
-
-        fn i_fmul(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _fmul: &FMul,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fsub(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _fadd: &FSub,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fpext(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FPExt,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_fptosi(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &FPToSI,
-        ) -> Result<(), CompilationError> {
-            todo!()
         }
 
         fn i_guard(
@@ -2461,206 +2246,6 @@ pub(crate) mod test {
             Ok(())
         }
 
-        fn i_inttoptr(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::IntToPtr,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_load(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Load,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_lshr(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::LShr,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_memcpy(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &MemCpy,
-        ) -> Result<(), CompilationError> {
-            todo!();
-        }
-
-        fn i_memset(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &MemSet,
-        ) -> Result<(), CompilationError> {
-            todo!();
-        }
-
-        fn i_mul(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Mul,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_or(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Or,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_ptradd(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::PtrAdd,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_ptrtoint(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::PtrToInt,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_sdiv(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SDiv,
-        ) -> Result<(), CompilationError> {
-            todo!();
-        }
-
-        fn i_select(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Select,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_sext(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::SExt,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_shl(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Shl,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_sitofp(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SIToFP,
-        ) -> Result<(), CompilationError> {
-            todo!();
-        }
-
-        fn i_smax(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SMax,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_smin(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SMin,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_srem(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &SRem,
-        ) -> Result<(), CompilationError> {
-            todo!();
-        }
-
-        fn i_store(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Store,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_sub(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::Sub,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_threadlocal(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _tl_off: u32,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
         fn i_trunc(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -2679,36 +2264,6 @@ pub(crate) mod test {
             )?;
             self.ra_log.push(format!("trunc %{iidx:?} {reg:?}"));
             Ok(())
-        }
-
-        fn i_udiv(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &crate::compile::j2::hir::UDiv,
-        ) -> Result<(), CompilationError> {
-            todo!()
-        }
-
-        fn i_uitofp(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &UIToFP,
-        ) -> Result<(), CompilationError> {
-            todo!();
-        }
-
-        fn i_xor(
-            &mut self,
-            _ra: &mut RegAlloc<Self>,
-            _b: &Block,
-            _iidx: InstIdx,
-            _inst: &Xor,
-        ) -> Result<(), CompilationError> {
-            todo!()
         }
 
         fn i_zext(
