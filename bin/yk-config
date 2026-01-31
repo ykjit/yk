@@ -111,7 +111,8 @@ handle_arg() {
                 # Make optimised clones of functions.
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"
             fi
-
+            # Use direct calls (bypassing PLT) for yk patchpoint functions.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-patchpoint-direct-functions-call"
             # Disable backend optimisations that Yk can't handle by adding the
             # `optnone` attribute onto every traceable function after
             # high-level IR optimisations have finished.
