@@ -49,6 +49,7 @@ fn main() {
                 "-Wl,-mllvm=--yk-embed-ir",
                 // The serialiser now assumes that we are doing software tracing.
                 "-Wl,--mllvm=--yk-basicblock-tracer",
+                "-Wl,--mllvm=--yk-conditional-promote-calls",
                 // Link libykcapi so that the tests inherit the necessary software tracing symbols.
                 &ykcapi_linkdir,
                 "-lykcapi",
