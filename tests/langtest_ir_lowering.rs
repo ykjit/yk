@@ -49,6 +49,8 @@ fn main() {
                 "-Wl,-mllvm=--yk-embed-ir",
                 // The serialiser now assumes that we are doing software tracing.
                 "-Wl,--mllvm=--yk-basicblock-tracer",
+                // Enable conditional promote calls.
+                "-Wl,--mllvm=--yk-conditional-promote-calls",
                 // Use direct calls (bypassing PLT) for yk patchpoint functions.
                 "-Wl,--mllvm=--yk-patchpoint-direct-functions-call",
                 // Link libykcapi so that the tests inherit the necessary software tracing symbols.
