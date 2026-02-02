@@ -98,6 +98,7 @@ use crate::{
                 CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace,
                 J2TraceStart,
             },
+            effects::Effects,
             hir::*,
             regalloc::{RegAlloc, RegFill, RegT, VarLoc, VarLocs},
         },
@@ -685,30 +686,27 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
                     while let Some(giidx) = gqueue.pop() {
                         let inst = b.inst(giidx);
-                        // We don't copy instructions that are used by non-guard instructions
-                        // unless: they're a `Const`; aren't in a register; don't have
-                        // side-effects.
-                        if (ra.is_used(giidx)
-                            && !matches!(inst, Inst::Const(_))
-                            && ra.iter_reg_for(giidx).nth(0).is_some())
-                            || matches!(
-                                inst,
-                                Inst::Arg(_)
-                                    | Inst::Call(_)
-                                    | Inst::MemCpy(_)
-                                    | Inst::MemSet(_)
-                                    | Inst::Store(_)
-                            )
-                        {
-                            gexit_vars.set(usize::from(giidx), true);
-                            continue;
-                        }
 
-                        // We can copy `Load`s in if there are no side effects between the `Load`
-                        // and the current guard.
-                        if let Inst::Load(Load { ptr, .. }) = inst
-                            && (ra.is_used(giidx) || b.heap_effects_on(*ptr, giidx + 1..iidx))
+                        if let Inst::Load(_) = inst {
+                            // We can copy `Load`s in if there are no write effects between the
+                            // `Load` and the current guard.
+                            if ra.is_used(giidx)
+                                || b.insts_iter(giidx + 1..iidx).any(|(_, inst)| {
+                                    inst.write_effects()
+                                        .interferes(Effects::all().minus_guard())
+                                })
+                            {
+                                gexit_vars.set(usize::from(giidx), true);
+                                continue;
+                            }
+                        } else if inst.read_write_effects().interferes(Effects::all())
+                            || (ra.is_used(giidx)
+                                && !matches!(inst, Inst::Const(_))
+                                && ra.iter_reg_for(giidx).nth(0).is_some())
                         {
+                            // We don't copy instructions that are used by non-guard instructions
+                            // unless: they're a `Const`; aren't in a register; don't have
+                            // side-effects.
                             gexit_vars.set(usize::from(giidx), true);
                             continue;
                         }

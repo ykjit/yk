@@ -13,6 +13,7 @@
 mod aot_to_hir;
 mod codebuf;
 mod compiled_trace;
+mod effects;
 mod hir;
 #[cfg(test)]
 mod hir_parser;

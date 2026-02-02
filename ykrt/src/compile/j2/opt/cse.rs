@@ -17,6 +17,7 @@
 //! no match.
 
 use crate::compile::j2::{
+    effects::Effects,
     hir::{Inst, InstDiscriminants, InstIdx, InstT},
     opt::{
         BlockLikeT, EquivIIdxT,
@@ -56,17 +57,7 @@ impl CSE {
 
 impl PassT for CSE {
     fn feed(&mut self, opt: &mut PassOpt, inst: Inst) -> OptOutcome {
-        // FIXME: This is a hack for "does this instruction have side effects".
-        if let Inst::Arg(_)
-        | Inst::Call(_)
-        | Inst::Const(_)
-        | Inst::Guard(_)
-        | Inst::Load(_)
-        | Inst::MemCpy(_)
-        | Inst::MemSet(_)
-        | Inst::Store(_)
-        | Inst::Term(_) = inst
-        {
+        if inst.read_write_effects().interferes(Effects::all()) || matches!(inst, Inst::Const(_)) {
             return OptOutcome::Rewritten(inst);
         }
 

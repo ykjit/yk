@@ -42,6 +42,7 @@ use crate::{
                 CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace,
                 J2TraceStart,
             },
+            effects::Effects,
             hir::*,
             hir_to_asm::HirToAsmBackend,
             regalloc::{AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
@@ -211,7 +212,11 @@ impl<'a> X64HirToAsm<'a> {
         }) = b.inst(op_iidx)
         {
             assert!(op_iidx < cur_iidx);
-            if !b.heap_effects_on(op_iidx, op_iidx + 1..cur_iidx) {
+            if b.insts_iter(op_iidx + 1..cur_iidx).all(|(_, inst)| {
+                !inst
+                    .write_effects()
+                    .interferes(Effects::all().minus_guard())
+            }) {
                 return self.flatten_ptradd_chain(b, *ptr);
             }
         }
@@ -685,7 +690,13 @@ impl<'a> X64HirToAsm<'a> {
             let (load_ptr, load_off) = self
                 .flatten_ptradd_chain(b, *load_ptr)
                 .unwrap_or((*load_ptr, 0));
-            if (ptr, off) == (load_ptr, load_off) && !b.heap_effects_on(*lhs, *lhs + 1..iidx) {
+            if (ptr, off) == (load_ptr, load_off)
+                && b.insts_iter(*lhs + 1..iidx).all(|(_, inst)| {
+                    !inst
+                        .write_effects()
+                        .interferes(Effects::all().minus_guard())
+                })
+            {
                 let [ptrr] = ra.alloc(
                     self,
                     iidx,
@@ -4192,7 +4203,7 @@ mod test {
         );
         assert_eq!(
             be.try_load_to_mem_op(b, InstIdx::from(5), InstIdx::from(1)),
-            None
+            Some((InstIdx::from(0), 0))
         );
         assert_eq!(
             be.try_load_to_mem_op(b, InstIdx::from(6), InstIdx::from(4)),
@@ -7258,8 +7269,67 @@ mod test {
               ...
             "],
         );
+    }
 
+    #[test]
+    fn cg_load_op_store() {
         // load-add-const-store optimisation
+
+        // negative case: load pointers must match or the optimisation doesn't kick in
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i8 = load %0
+              %3: i8 = 42
+              %4: i8 = add %2, %3
+              store %4, %1
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              sub rsp, 0
+              ; %0: ptr = arg ...
+              ; %1: ptr = arg ...
+              ; %2: i8 = load %0
+              movzx r.32.x, byte [r15]
+              ; %3: i8 = 42
+              ; %4: i8 = add %2, %3
+              add r.32.x, 0x2A
+              ; store %4, %1
+              mov [r.64._], r.8.x
+              ; term [%0, %1]
+            "#],
+        );
+
+        // negative case: write effect between loads
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i8 = load %0
+              %3: i8 = 42
+              store %3, %1
+              %5: i8 = add %2, %3
+              store %5, %0
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg ...
+              ; %1: ptr = arg ...
+              ; %2: i8 = load %0
+              movzx r.32.x, byte [r.64._]
+              ; %3: i8 = 42
+              ; store %3, %1
+              mov byte [r.64._], 0x2A
+              ; %5: i8 = add %2, %3
+              add r.32.x, 0x2A
+              ; store %5, %0
+              mov [r.64._], r.8._
+              ; term [%0, %1]
+            "#],
+        );
 
         // i8
         codegen_and_test(
