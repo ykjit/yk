@@ -156,6 +156,7 @@ use crate::{
     compile::{
         j2::{
             compiled_trace::{CompiledGuardIdx, J2CompiledTrace},
+            effects::Effects,
             opt::EquivIIdxT,
             regalloc::{RegT, VarLocs},
         },
@@ -485,24 +486,6 @@ impl Block {
         x
     }
 
-    /// Return true if there are heap effects in `range` that interfere with the instruction at
-    /// `on`.
-    pub(super) fn heap_effects_on<T: RangeBounds<InstIdx>>(&self, _on: InstIdx, range: T) -> bool {
-        // Heap effects aren't currently implemented, so we do the ultra-conservative thing: if
-        // anything in `range` has a possible heap effect, we return `true`.
-        for (_, inst) in self.insts_iter(range) {
-            if let Inst::Call(_)
-            | Inst::Load(_)
-            | Inst::MemCpy(_)
-            | Inst::MemSet(_)
-            | Inst::Store(_) = inst
-            {
-                return true;
-            }
-        }
-        false
-    }
-
     /// If `iidx` is a constant Pointer, return a reference to that pointer or `None` otherwise.
     pub(super) fn inst_ptr<Reg: RegT>(&self, _m: &Mod<Reg>, iidx: InstIdx) -> Option<usize> {
         if let Inst::Const(Const {
@@ -675,6 +658,18 @@ pub(super) trait InstT: std::fmt::Debug {
     /// Produce each of this instruction's operands: note no order is guaranteed.
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a>;
 
+    /// Returns this instruction's read [Effects].
+    fn read_effects(&self) -> Effects;
+
+    /// Returns this instruction's write [Effects].
+    fn write_effects(&self) -> Effects;
+
+    /// Return the union of this instruction's read and write effects. This is a convenience
+    /// method over [Self::read_effects] and [Self::write_effects].
+    fn read_write_effects(&self) -> Effects {
+        self.read_effects().union(self.write_effects())
+    }
+
     /// Apply the function `iidx_map` to each of this instruction's operands, mutating `self` with
     /// the result.
     fn rewrite_iidxs<F>(&mut self, b: &mut dyn BlockLikeT, iidx_map: F)
@@ -780,6 +775,14 @@ impl InstT for Abs {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -860,6 +863,14 @@ impl InstT for Add {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -923,6 +934,14 @@ impl InstT for And {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -961,6 +980,14 @@ impl InstT for Arg {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_internal()
     }
 
     fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut _iidx_map: F)
@@ -1021,6 +1048,14 @@ impl InstT for AShr {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -1062,6 +1097,14 @@ impl InstT for BlackBox {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_internal()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -1134,6 +1177,14 @@ impl InstT for Call {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_heap().add_volatile()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_heap().add_volatile()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -1233,6 +1284,14 @@ impl InstT for Const {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::none(b)
     }
@@ -1302,6 +1361,14 @@ impl InstT for CtPop {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -1333,6 +1400,14 @@ impl InstT for DebugStr {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         false
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_internal()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -1394,6 +1469,14 @@ impl InstT for DynPtrAdd {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -1458,6 +1541,14 @@ impl InstT for FAdd {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -1518,6 +1609,14 @@ impl InstT for FCmp {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -1626,6 +1725,14 @@ impl InstT for FDiv {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -1688,6 +1795,14 @@ impl InstT for Floor {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -1742,6 +1857,14 @@ impl InstT for FMul {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -1801,6 +1924,14 @@ impl InstT for FNeg {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -1855,6 +1986,14 @@ impl InstT for FSub {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -1921,6 +2060,14 @@ impl InstT for FPExt {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -1978,6 +2125,14 @@ impl InstT for FPToSI {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -2031,6 +2186,14 @@ impl InstT for Guard {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_guard()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_guard()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -2163,6 +2326,14 @@ impl InstT for ICmp {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -2266,6 +2437,14 @@ impl InstT for IntToPtr {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -2308,6 +2487,22 @@ impl InstT for Load {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        if self.is_volatile {
+            Effects::none().add_volatile()
+        } else {
+            Effects::none().add_heap()
+        }
+    }
+
+    fn write_effects(&self) -> Effects {
+        if self.is_volatile {
+            Effects::none().add_volatile()
+        } else {
+            Effects::none()
+        }
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -2373,6 +2568,14 @@ impl InstT for LShr {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -2428,6 +2631,22 @@ impl InstT for MemCpy {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        if self.volatile {
+            Effects::none().add_volatile()
+        } else {
+            Effects::none().add_heap()
+        }
+    }
+
+    fn write_effects(&self) -> Effects {
+        if self.volatile {
+            Effects::none().add_volatile()
+        } else {
+            Effects::none().add_heap()
+        }
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -2494,6 +2713,22 @@ impl InstT for MemSet {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        if self.volatile {
+            Effects::none().add_volatile()
+        } else {
+            Effects::none()
+        }
+    }
+
+    fn write_effects(&self) -> Effects {
+        if self.volatile {
+            Effects::none().add_volatile()
+        } else {
+            Effects::none().add_heap()
+        }
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -2576,6 +2811,14 @@ impl InstT for Mul {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -2646,6 +2889,14 @@ impl InstT for Or {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -2708,6 +2959,14 @@ impl InstT for PtrAdd {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.ptr)
     }
@@ -2763,6 +3022,14 @@ impl InstT for PtrToInt {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -2826,6 +3093,14 @@ impl InstT for SDiv {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -2900,6 +3175,14 @@ impl InstT for Select {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::three(b, self.cond, self.truev, self.falsev)
     }
@@ -2969,6 +3252,14 @@ impl InstT for SExt {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -3035,6 +3326,14 @@ impl InstT for Shl {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -3091,6 +3390,14 @@ impl InstT for SIToFP {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -3153,6 +3460,14 @@ impl InstT for SMax {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -3222,6 +3537,14 @@ impl InstT for SMin {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -3283,6 +3606,14 @@ impl InstT for SRem {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -3333,6 +3664,22 @@ impl InstT for Store {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        if self.is_volatile {
+            Effects::none().add_volatile()
+        } else {
+            Effects::none()
+        }
+    }
+
+    fn write_effects(&self) -> Effects {
+        if self.is_volatile {
+            Effects::none().add_volatile()
+        } else {
+            Effects::none().add_heap()
+        }
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -3406,6 +3753,14 @@ impl InstT for Sub {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::two(b, self.lhs, self.rhs)
     }
@@ -3440,6 +3795,14 @@ impl InstT for Term {
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
         panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_internal()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -3489,6 +3852,14 @@ impl InstT for ThreadLocal {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -3564,6 +3935,14 @@ impl InstT for Trunc {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -3625,6 +4004,14 @@ impl InstT for UDiv {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -3691,6 +4078,14 @@ impl InstT for UIToFP {
         }
     }
 
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
         IterIidxsIterator::one(b, self.val)
     }
@@ -3751,6 +4146,14 @@ impl InstT for Xor {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -3814,6 +4217,14 @@ impl InstT for ZExt {
         } else {
             false
         }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {

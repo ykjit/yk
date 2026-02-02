@@ -21,6 +21,7 @@
 //!     encounters a barrier, all of its knowledge of heap values is destroyed.
 
 use crate::compile::j2::{
+    effects::Effects,
     hir::*,
     opt::{
         BlockLikeT, EquivIIdxT, ModLikeT,
@@ -87,8 +88,6 @@ impl PassT for LoadStore {
 
     fn inst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx, inst: &Inst) {
         match inst {
-            // FIXME: This is a hack for "does this instruction have side effects".
-            Inst::Call(_) | Inst::MemCpy(_) | Inst::MemSet(_) => self.hv.clear(),
             Inst::Load(Load {
                 tyidx: _,
                 ptr,
@@ -138,7 +137,14 @@ impl PassT for LoadStore {
                 }
                 self.hv.insert(addr, val);
             }
-            _ => (),
+            _ => {
+                if inst
+                    .read_write_effects()
+                    .interferes(Effects::none().add_heap().add_volatile())
+                {
+                    self.hv.clear();
+                }
+            }
         }
     }
 
