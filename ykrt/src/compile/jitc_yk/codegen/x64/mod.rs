@@ -1631,7 +1631,7 @@ impl<'a> Assemble<'a> {
                     [
                         GPConstraint::Input {
                             op: inst.num_elems(self.m),
-                            in_ext: RegExtension::ZeroExtended,
+                            in_ext: RegExtension::SignExtended,
                             force_reg: None,
                             clobber_reg: false,
                         },
@@ -1672,7 +1672,7 @@ impl<'a> Assemble<'a> {
                     [
                         GPConstraint::InputOutput {
                             op: inst.num_elems(self.m),
-                            in_ext: RegExtension::ZeroExtended,
+                            in_ext: RegExtension::SignExtended,
                             out_ext: RegExtension::ZeroExtended,
                             force_reg: None,
                         },
@@ -4654,7 +4654,7 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 1
-                mov r.32.x, r.32.x
+                movsxd r.64.x, r.32.x
                 lea r.64._, [r.64._+r.64.x*1]
                 ",
             false,
@@ -4671,7 +4671,7 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 2
-                mov r.32.x, r.32.x
+                movsxd r.64.x, r.32.x
                 lea r.64._, [r.64._+r.64.x*2]
                 ",
             false,
@@ -4688,7 +4688,7 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 4
-                mov r.32.x, r.32.x
+                movsxd r.64.x, r.32.x
                 lea r.64._, [r.64._+r.64.x*4]
                 ...
                 ",
@@ -4706,7 +4706,7 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 5
-                mov r.32.x, r.32.x
+                movsxd r.64.x, r.32.x
                 imul r.64.x, r.64.x, 0x05
                 add r.64.x, r.64._
                 ",
@@ -4724,7 +4724,7 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 16
-                mov r.32.x, r.32.x
+                movsxd r.64.x, r.32.x
                 shl r.64.x, 0x04
                 add r.64.x, r.64._
                 ...
@@ -4743,7 +4743,7 @@ mod tests {
             "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 77
-                mov r.32.x, r.32.x
+                movsxd r.64.x, r.32.x
                 imul r.64.x, r.64.x, 0x4d
                 add r.64.x, r.64._
                 ",
