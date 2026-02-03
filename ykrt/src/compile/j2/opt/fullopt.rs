@@ -341,8 +341,10 @@ impl OptT for FullOpt {
         ))
     }
 
-    fn peel(self) -> (Block, Block) {
-        todo!()
+    fn build_with_peel(
+        self: Box<Self>,
+    ) -> Result<(Block, Option<Block>, IndexVec<TyIdx, Ty>), CompilationError> {
+        self.build().map(|(bk, tys)| (bk, None, tys))
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
