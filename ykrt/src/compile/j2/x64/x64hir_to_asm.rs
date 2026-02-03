@@ -2032,7 +2032,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     },
                     RegCnstr::Input {
                         in_iidx: *num_elems,
-                        in_fill: RegCnstrFill::Zeroed,
+                        in_fill: RegCnstrFill::Signed,
                         regs: &NORMAL_GP_REGS,
                         clobber: false,
                     },
@@ -2067,7 +2067,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     // that the value we overwrite.
                     RegCnstr::InputOutput {
                         in_iidx: *num_elems,
-                        in_fill: RegCnstrFill::Zeroed,
+                        in_fill: RegCnstrFill::Signed,
                         out_fill: RegCnstrFill::Zeroed,
                         regs: &NORMAL_GP_REGS,
                     },
@@ -5143,6 +5143,41 @@ mod test {
               ; %6: ptr = dynptradd %0, %1, 16
               shl r.64.y, 4
               add r.64.y, r.64.x
+              ...
+            "],
+        );
+
+        // check indices smaller than a pointer are sign-extended correctly.
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = arg [reg]
+              %2: ptr = dynptradd %0, %1, 1
+              %3: ptr = dynptradd %0, %1, 2
+              %4: ptr = dynptradd %0, %1, 4
+              %5: ptr = dynptradd %0, %1, 8
+              %6: ptr = dynptradd %0, %1, 16
+              blackbox %2
+              blackbox %3
+              blackbox %4
+              blackbox %5
+              blackbox %6
+              term [%0, %1]
+            ",
+            &["
+              ...
+              movsxd r.64.x, r.32.x
+              ; %2: ptr = dynptradd %0, %1, 1
+              lea r.64._, [r.64.y+r.64.x]
+              ; %3: ptr = dynptradd %0, %1, 2
+              lea r.64._, [r.64.y+r.64.x*2]
+              ; %4: ptr = dynptradd %0, %1, 4
+              lea r.64._, [r.64.y+r.64.x*4]
+              ; %5: ptr = dynptradd %0, %1, 8
+              lea r.64._, [r.64.y+r.64.x*8]
+              ; %6: ptr = dynptradd %0, %1, 16
+              shl r.64.x, 4
+              add r.64.x, r.64.y
               ...
             "],
         );
