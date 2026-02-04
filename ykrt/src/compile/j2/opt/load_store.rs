@@ -51,13 +51,20 @@ impl PassT for LoadStore {
                 is_volatile: false,
             }) => {
                 let addr = Address::from(opt, ptr);
-                if let Some(iidx) = self.hv.get(&addr) {
-                    let iidx = opt.equiv_iidx(*iidx);
+                if let Some(hv_iidx) = self.hv.get(&addr) {
+                    let inst_ty = opt.ty(tyidx);
+                    let hv_iidx = opt.equiv_iidx(*hv_iidx);
+                    let hv_tyidx = opt.inst(hv_iidx).tyidx(opt);
+                    let hv_ty = opt.ty(hv_tyidx);
                     // We currently only allow the same number of bytes to lead to load
-                    // elimination. We could relax this to allow <= the number of known bytes.
-                    let bytew = opt.ty(tyidx).bitw() * 8;
-                    if bytew == opt.inst_bitw(opt, iidx) * 8 {
-                        return OptOutcome::Equiv(iidx);
+                    // elimination. We could relax this to allow <= the number of known bits.
+                    if inst_ty.bitw() == hv_ty.bitw() {
+                        // If type punning has occurred, we can either do a type conversion
+                        // ourselves, or give up.
+                        if hv_ty == inst_ty {
+                            // No type punning has occurred: the easy case!
+                            return OptOutcome::Equiv(hv_iidx);
+                        }
                     }
                 }
                 OptOutcome::Rewritten(inst)
@@ -72,10 +79,9 @@ impl PassT for LoadStore {
                 if let Some(iidx) = self.hv.get(&addr) {
                     let iidx = opt.equiv_iidx(*iidx);
                     if val == iidx {
-                        let bytew = opt.inst_bitw(opt, val) * 8;
-                        // We currently only allow the same number of bytes to lead to load
-                        // elimination. We could relax this to allow <= the number of known bytes.
-                        if bytew == opt.inst_bitw(opt, iidx) * 8 {
+                        // We currently only allow the same number of bits to lead to load
+                        // elimination. We could relax this to allow <= the number of known bits.
+                        if opt.inst_bitw(opt, val) == opt.inst_bitw(opt, iidx) {
                             return OptOutcome::NotNeeded;
                         }
                     }
@@ -111,13 +117,15 @@ impl PassT for LoadStore {
                     Address::PtrOff(ptr, off) => {
                         let ptr = opt.equiv_iidx(ptr);
                         let off = isize::try_from(off).unwrap();
-                        let bytew = isize::try_from(opt.inst_bitw(opt, val) * 8).unwrap();
+                        let bytew = isize::try_from(opt.inst_bitw(opt, val).div_ceil(8)).unwrap();
                         self.hv.retain(|hv_addr, hv_val| match hv_addr {
                             Address::PtrOff(hv_ptr, hv_off) => {
                                 let hv_ptr = opt.equiv_iidx(*hv_ptr);
                                 let hv_off = isize::try_from(*hv_off).unwrap();
                                 let hv_val = opt.equiv_iidx(*hv_val);
-                                let hv_bytew = isize::try_from(opt.inst_bitw(opt, hv_val)).unwrap();
+                                let hv_bytew =
+                                    isize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
+                                        .unwrap();
                                 ptr == hv_ptr && (off + bytew <= hv_off || hv_off + hv_bytew <= off)
                             }
                             Address::Const(_) => false,
@@ -127,9 +135,12 @@ impl PassT for LoadStore {
                         self.hv.retain(|hv_addr, hv_val| match hv_addr {
                             Address::PtrOff(_, _) => false,
                             Address::Const(hv_addr) => {
-                                let bytew = usize::try_from(opt.inst_bitw(opt, val) * 8).unwrap();
+                                let bytew =
+                                    usize::try_from(opt.inst_bitw(opt, val).div_ceil(8)).unwrap();
                                 let hv_val = opt.equiv_iidx(*hv_val);
-                                let hv_bytew = usize::try_from(opt.inst_bitw(opt, hv_val)).unwrap();
+                                let hv_bytew =
+                                    usize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
+                                        .unwrap();
                                 addr + bytew <= *hv_addr || hv_addr + hv_bytew <= addr
                             }
                         });
@@ -394,6 +405,34 @@ mod test {
           store %0, %1
           %3: i16 = load %1
           blackbox %3
+        ",
+        );
+    }
+
+    #[test]
+    fn overlap_edges() {
+        // Test that non-overlapping stores don't invalidate previous loads.
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = load %0
+          %3: ptr = ptradd %0, -8
+          store %1, %3
+          %5: i8 = load %0
+          blackbox %2
+          blackbox %5
+          term [%0, %1]
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = arg
+          %2: i8 = load %0
+          %3: ptr = ptradd %0, -8
+          store %1, %3
+          blackbox %2
+          blackbox %2
+          term [%0, %1]
         ",
         );
     }
