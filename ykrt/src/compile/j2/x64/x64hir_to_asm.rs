@@ -1692,6 +1692,68 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_bitcast(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        BitCast { tyidx, val }: &BitCast,
+    ) -> Result<(), CompilationError> {
+        assert_eq!(b.inst_bitw(self.m, *val), self.m.ty(*tyidx).bitw());
+        match (b.inst_ty(self.m, *val), self.m.ty(*tyidx)) {
+            (Ty::Double, Ty::Int(64)) => {
+                let [srcr, dstr] = ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *val,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &ALL_XMM_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            can_be_same_as_input: false,
+                        },
+                    ],
+                )?;
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movq_rm64_xmm,
+                    dstr.to_reg64(),
+                    srcr.to_xmm(),
+                ));
+            }
+            (Ty::Int(64), Ty::Double) => {
+                let [srcr, dstr] = ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *val,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: &ALL_XMM_REGS,
+                            can_be_same_as_input: false,
+                        },
+                    ],
+                )?;
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movq_xmm_rm64,
+                    dstr.to_xmm(),
+                    srcr.to_reg64(),
+                ));
+            }
+            (x, y) => todo!("{x:?} {y:?}"),
+        }
+        Ok(())
+    }
+
     fn i_call(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -4576,6 +4638,43 @@ mod test {
               sar r.64.x, cl
               ...
             "],
+        );
+    }
+
+    #[test]
+    fn cg_bitcast() {
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: double = bitcast %0
+              blackbox %1
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i64 = arg [Reg("r.64.x", Undefined)]
+              ; %1: double = bitcast %0
+              movq fp.128.x, r.64.x
+              ; blackbox %1
+              ; term [%0]
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: i64 = bitcast %0
+              blackbox %1
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: double = arg [Reg("fp.128.x", Undefined)]
+              ; %1: i64 = bitcast %0
+              movq r.64.x, fp.128.x
+              ; blackbox %1
+              ; term [%0]
+            "#],
         );
     }
 

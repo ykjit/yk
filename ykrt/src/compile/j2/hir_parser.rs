@@ -196,6 +196,12 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     ));
                     self.insts.push(Arg { tyidx }.into());
                 }
+                AstInst::BitCast { local, ty, val } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let val = self.p_local(val);
+                    self.insts.push(BitCast { tyidx, val }.into());
+                }
                 AstInst::Call {
                     local,
                     ty,
@@ -1161,6 +1167,11 @@ enum AstInst {
         local: Span,
         ty: AstTy,
         vlocs: Vec<AstVLoc>,
+    },
+    BitCast {
+        local: Span,
+        ty: AstTy,
+        val: Span,
     },
     Call {
         local: Option<Span>,

@@ -691,6 +691,7 @@ pub(super) enum Inst {
     And,
     Arg,
     AShr,
+    BitCast,
     #[cfg(test)]
     BlackBox,
     Call,
@@ -1074,6 +1075,71 @@ impl InstT for AShr {
             usize::from(self.lhs),
             usize::from(self.rhs)
         )
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
+/// Bitcast the same semantics as LLVM's `bitcast`.
+#[derive(Clone, Debug)]
+pub(super) struct BitCast {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+}
+
+impl InstT for BitCast {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            m.ty(self.tyidx).bitw(),
+            b.inst_bitw(m, self.val),
+            "%{iidx:?}: bitcasting between different bitwidths"
+        );
+
+        assert!(
+            !matches!(m.ty(self.tyidx), Ty::Ptr(_))
+                && !matches!(m.ty(b.inst(self.val).tyidx(m)), Ty::Ptr(_)),
+            "%{iidx:?}: bitcasting between pointer(s)"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::BitCast(BitCast { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(b, self.val)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.val = iidx_map(self.val);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("bitcast %{}", usize::from(self.val))
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -4718,6 +4784,39 @@ mod test {
           %0: i8 = arg [reg]
           %1: i8 = arg [reg]
           %2: i16 = ashr %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: bitcasting between different bitwidths")]
+    fn bitcast_different_bitws() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          %1: float = bitcast %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: bitcasting between pointer(s)")]
+    fn bitcast_pointers1() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          %1: ptr = bitcast %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: bitcasting between pointer(s)")]
+    fn bitcast_pointers2() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: ptr = arg [reg]
+          %1: i64 = bitcast %0
         ",
         );
     }
