@@ -595,6 +595,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_ashr(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::BitCast(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_bitcast(&mut ra, b, iidx, x)?;
+                    }
+                }
                 #[cfg(test)]
                 Inst::BlackBox(BlackBox { val }) => {
                     ra.blackbox(iidx, *val);
@@ -1116,6 +1121,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &AShr,
+    ) -> Result<(), CompilationError>;
+
+    fn i_bitcast(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &BitCast,
     ) -> Result<(), CompilationError>;
 
     fn i_call(

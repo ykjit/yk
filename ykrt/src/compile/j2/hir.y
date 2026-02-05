@@ -71,6 +71,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ARG" "[" VLocList "]" {
       Ok(AstInst::Arg { local: $1?.span(), ty: $3?, vlocs: $7? })
     }
+  | "LOCAL" ":" Ty "=" "BITCAST" "LOCAL" {
+      Ok(AstInst::BitCast{ local: $1?.span(), ty: $3?, val: $6?.span() })
+    }
   | "LOCAL" ":" Ty "=" Const {
        Ok(AstInst::Const { local: $1?.span(), ty: $3?, kind: $5? })
     }

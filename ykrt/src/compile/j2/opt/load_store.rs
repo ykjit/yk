@@ -59,11 +59,41 @@ impl PassT for LoadStore {
                     // We currently only allow the same number of bytes to lead to load
                     // elimination. We could relax this to allow <= the number of known bits.
                     if inst_ty.bitw() == hv_ty.bitw() {
-                        // If type punning has occurred, we can either do a type conversion
-                        // ourselves, or give up.
-                        if hv_ty == inst_ty {
-                            // No type punning has occurred: the easy case!
-                            return OptOutcome::Equiv(hv_iidx);
+                        match (hv_ty, inst_ty) {
+                            (x, y) if x == y => {
+                                // No type punning has occurred: the easy case!
+                                return OptOutcome::Equiv(hv_iidx);
+                            }
+                            // The cases below are for type punning: we have to translate these
+                            // into the appropriate HIR instructions.
+                            (Ty::Int(64), Ty::Double) | (Ty::Double, Ty::Int(64)) => {
+                                return OptOutcome::Rewritten(
+                                    BitCast {
+                                        tyidx,
+                                        val: hv_iidx,
+                                    }
+                                    .into(),
+                                );
+                            }
+                            (Ty::Int(_), Ty::Ptr(0)) => {
+                                return OptOutcome::Rewritten(
+                                    IntToPtr {
+                                        tyidx,
+                                        val: hv_iidx,
+                                    }
+                                    .into(),
+                                );
+                            }
+                            (Ty::Ptr(0), Ty::Int(_)) => {
+                                return OptOutcome::Rewritten(
+                                    PtrToInt {
+                                        tyidx,
+                                        val: hv_iidx,
+                                    }
+                                    .into(),
+                                );
+                            }
+                            (x, y) => todo!("{x:?} {y:?}"),
                         }
                     }
                 }
@@ -458,6 +488,69 @@ mod test {
           blackbox %1
         ",
         );
+    }
+
+    #[test]
+    fn load_punning() {
+        // i64 -> double
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i64 = load %0
+          %2: double = load %0
+          blackbox %1
+          blackbox %2
+        ",
+            "
+          %0: ptr = arg
+          %1: i64 = load %0
+          %2: double = bitcast %1
+          blackbox %1
+          blackbox %2
+        ",
+        );
+
+        #[cfg(not(target_pointer_width = "64"))]
+        todo!();
+
+        #[cfg(target_pointer_width = "64")]
+        {
+            // i64 -> ptr
+            test_ls(
+                "
+          %0: ptr = arg [reg]
+          %1: i64 = load %0
+          %2: ptr = load %0
+          blackbox %1
+          blackbox %2
+        ",
+                "
+          %0: ptr = arg
+          %1: i64 = load %0
+          %2: ptr = inttoptr %1
+          blackbox %1
+          blackbox %2
+        ",
+            );
+
+            // ptr -> i64
+            test_ls(
+                "
+          %0: ptr = arg [reg]
+          %1: ptr = load %0
+          %2: i64 = load %0
+          blackbox %1
+          blackbox %2
+        ",
+                "
+          %0: ptr = arg
+          %1: ptr = load %0
+          %2: i64 = ptrtoint %1
+          blackbox %1
+          blackbox %2
+        ",
+            );
+        }
     }
 
     #[test]
