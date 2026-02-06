@@ -1,4 +1,6 @@
-//! Strength reduction and constant folding
+//! Strength reduction and constant folding.
+//!
+//! This pass guarantees to have canonicalised all instructions by its end.
 
 use crate::compile::{
     j2::{
@@ -21,7 +23,7 @@ impl StrengthFold {
 }
 
 impl PassT for StrengthFold {
-    fn feed(&mut self, opt: &mut PassOpt, inst: Inst) -> OptOutcome {
+    fn feed(&mut self, opt: &mut PassOpt, mut inst: Inst) -> OptOutcome {
         match inst {
             Inst::Abs(x) => opt_abs(opt, x),
             Inst::AShr(x) => opt_ashr(opt, x),
@@ -51,7 +53,10 @@ impl PassT for StrengthFold {
             Inst::UDiv(x) => opt_udiv(opt, x),
             Inst::Xor(x) => opt_xor(opt, x),
             Inst::ZExt(x) => opt_zext(opt, x),
-            _ => OptOutcome::Rewritten(inst),
+            _ => {
+                inst.canonicalise(opt);
+                OptOutcome::Rewritten(inst)
+            }
         }
     }
 
@@ -2925,6 +2930,27 @@ mod test {
           %0: i8 = arg
           %1: i8 = 0
           term [%0]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_term() {
+        // We don't optimise `term` but we do canonicalise it.
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 4
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          term [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 4
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          term [%1]
         ",
         );
     }
