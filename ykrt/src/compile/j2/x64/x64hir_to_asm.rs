@@ -2150,7 +2150,12 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     i32::try_from(elem_size.ilog2()).unwrap(),
                 ));
             } else {
-                todo!();
+                self.asm.push_inst(IcedInst::with3(
+                    Code::Imul_r64_rm64_imm32,
+                    nelemsr.to_reg64(),
+                    nelemsr.to_reg64(),
+                    i32::try_from(*elem_size).unwrap(),
+                ));
             }
         }
         Ok(())
@@ -5213,6 +5218,7 @@ mod test {
 
     #[test]
     fn cg_dynptradd() {
+        // power of 2
         codegen_and_test(
             "
               %0: ptr = arg [reg]
@@ -5242,6 +5248,32 @@ mod test {
               ; %6: ptr = dynptradd %0, %1, 16
               shl r.64.y, 4
               add r.64.y, r.64.x
+              ...
+            "],
+        );
+
+        // not a power of 2
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = dynptradd %0, %1, 3
+              %3: ptr = dynptradd %0, %1, 17
+              blackbox %2
+              blackbox %3
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; %2: ptr = dynptradd %0, %1, 3
+              imul r.64.x, 3
+              add r.64.x, r.64.y
+              mov r.64.x, ...
+              ; %3: ptr = dynptradd %0, %1, 17
+              imul r.64._, 0x11
+              add r.64._, r.64._
+              mov r.64._, ...
+              ; blackbox %2
               ...
             "],
         );
