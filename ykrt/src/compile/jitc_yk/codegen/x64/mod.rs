@@ -853,7 +853,9 @@ impl<'a> Assemble<'a> {
                 self.comment_inst(body_iidx, inst);
                 match inst {
                     Inst::BinOp(x) => self.cg_binop(body_iidx, &x),
+                    Inst::DynPtrAdd(x) => self.cg_dynptradd(body_iidx, &x),
                     Inst::ICmp(x) => self.cg_icmp(body_iidx, &x),
+                    Inst::IntToPtr(x) => self.cg_inttoptr(body_iidx, &x),
                     Inst::LookupGlobal(x) => self.cg_lookupglobal(body_iidx, &x),
                     Inst::PtrAdd(x) => self.cg_ptradd(body_iidx, &x),
                     Inst::PtrToInt(x) => self.cg_ptrtoint(body_iidx, &x),
