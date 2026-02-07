@@ -3181,7 +3181,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_select(
         &mut self,
         ra: &mut RegAlloc<Self>,
-        _b: &Block,
+        b: &Block,
         iidx: InstIdx,
         Select {
             tyidx,
@@ -3242,46 +3242,126 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             }
             Ty::Func(_) => todo!(),
             Ty::Int(bitw) => {
-                let out_fill = if let 32 | 64 = bitw {
-                    RegCnstrFill::Zeroed
+                if *bitw == 1
+                    && let Some(c) = self.zero_ext_op_for_imm8(b, *truev)
+                {
+                    let [condr, falser] = ra.alloc(
+                        self,
+                        iidx,
+                        [
+                            RegCnstr::InputOutput {
+                                in_iidx: *cond,
+                                in_fill: RegCnstrFill::Undefined,
+                                out_fill: RegCnstrFill::Undefined,
+                                regs: &NORMAL_GP_REGS,
+                            },
+                            RegCnstr::Input {
+                                in_iidx: *falsev,
+                                in_fill: RegCnstrFill::Undefined,
+                                regs: &NORMAL_GP_REGS,
+                                clobber: false,
+                            },
+                        ],
+                    )?;
+                    if c == 0 {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::And_rm32_r32,
+                            condr.to_reg32(),
+                            falser.to_reg32(),
+                        ));
+                        self.asm
+                            .push_inst(IcedInst::with1(Code::Not_rm32, condr.to_reg32()));
+                    } else {
+                        assert_eq!(c, 1);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Or_rm32_r32,
+                            condr.to_reg32(),
+                            falser.to_reg32(),
+                        ));
+                    }
+                } else if *bitw == 1
+                    && let Some(c) = self.zero_ext_op_for_imm8(b, *falsev)
+                {
+                    let [condr, falser] = ra.alloc(
+                        self,
+                        iidx,
+                        [
+                            RegCnstr::InputOutput {
+                                in_iidx: *cond,
+                                in_fill: RegCnstrFill::Undefined,
+                                out_fill: RegCnstrFill::Undefined,
+                                regs: &NORMAL_GP_REGS,
+                            },
+                            RegCnstr::Input {
+                                in_iidx: *truev,
+                                in_fill: RegCnstrFill::Undefined,
+                                regs: &NORMAL_GP_REGS,
+                                clobber: false,
+                            },
+                        ],
+                    )?;
+                    if c == 0 {
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::And_rm32_r32,
+                            condr.to_reg32(),
+                            falser.to_reg32(),
+                        ));
+                    } else {
+                        assert_eq!(c, 1);
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Or_rm32_r32,
+                            condr.to_reg32(),
+                            falser.to_reg32(),
+                        ));
+                        self.asm
+                            .push_inst(IcedInst::with1(Code::Not_rm32, condr.to_reg32()));
+                    }
                 } else {
-                    RegCnstrFill::Undefined
-                };
-                let [condr, truer, falser] = ra.alloc(
-                    self,
-                    iidx,
-                    [
-                        RegCnstr::Input {
-                            in_iidx: *cond,
-                            in_fill: RegCnstrFill::Undefined,
-                            regs: &NORMAL_GP_REGS,
-                            clobber: false,
-                        },
-                        RegCnstr::InputOutput {
-                            in_iidx: *truev,
-                            in_fill: RegCnstrFill::Undefined,
-                            out_fill,
-                            regs: &NORMAL_GP_REGS,
-                        },
-                        RegCnstr::Input {
-                            in_iidx: *falsev,
-                            in_fill: RegCnstrFill::Undefined,
-                            regs: &NORMAL_GP_REGS,
-                            clobber: false,
-                        },
-                    ],
-                )?;
-                self.asm.push_inst(match bitw {
-                    1..=32 => {
-                        IcedInst::with2(Code::Cmovae_r32_rm32, truer.to_reg32(), falser.to_reg32())
-                    }
-                    64 => {
-                        IcedInst::with2(Code::Cmovae_r64_rm64, truer.to_reg64(), falser.to_reg64())
-                    }
-                    x => todo!("{x}"),
-                });
-                self.asm
-                    .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, condr.to_reg32(), 0));
+                    let out_fill = if let 32 | 64 = bitw {
+                        RegCnstrFill::Zeroed
+                    } else {
+                        RegCnstrFill::Undefined
+                    };
+                    let [condr, truer, falser] = ra.alloc(
+                        self,
+                        iidx,
+                        [
+                            RegCnstr::Input {
+                                in_iidx: *cond,
+                                in_fill: RegCnstrFill::Undefined,
+                                regs: &NORMAL_GP_REGS,
+                                clobber: false,
+                            },
+                            RegCnstr::InputOutput {
+                                in_iidx: *truev,
+                                in_fill: RegCnstrFill::Undefined,
+                                out_fill,
+                                regs: &NORMAL_GP_REGS,
+                            },
+                            RegCnstr::Input {
+                                in_iidx: *falsev,
+                                in_fill: RegCnstrFill::Undefined,
+                                regs: &NORMAL_GP_REGS,
+                                clobber: false,
+                            },
+                        ],
+                    )?;
+                    self.asm.push_inst(match bitw {
+                        1..=32 => IcedInst::with2(
+                            Code::Cmovae_r32_rm32,
+                            truer.to_reg32(),
+                            falser.to_reg32(),
+                        ),
+                        64 => IcedInst::with2(
+                            Code::Cmovae_r64_rm64,
+                            truer.to_reg64(),
+                            falser.to_reg64(),
+                        ),
+                        x => todo!("{x}"),
+                    });
+                    self.asm
+                        .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, condr.to_reg32(), 0));
+                }
                 Ok(())
             }
             Ty::Ptr(addrspace) => {
@@ -6838,7 +6918,7 @@ mod test {
             "#],
         );
 
-        // i1
+        // i1: (var, var)
         codegen_and_test(
             "
               %0: i1 = arg [reg]
@@ -6852,6 +6932,74 @@ mod test {
               ; %3: i1 = select %0, %1, %2
               bt r.32.x, 0
               cmovae r.32.y, r.32.z
+              ...
+            "],
+        );
+
+        // i1: (var, const)
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i1 = arg [reg]
+              %2: i1 = 0
+              %3: i1 = select %0, %1, %2
+              term [%0, %3]
+            ",
+            &["
+              ...
+              ; %3: i1 = select %0, %1, %2
+              and r.32.x, r.32.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i1 = arg [reg]
+              %2: i1 = 1
+              %3: i1 = select %0, %1, %2
+              term [%0, %3]
+            ",
+            &["
+              ...
+              ; %3: i1 = select %0, %1, %2
+              not r.32.x
+              or r.32.x, r.32.y
+              ...
+            "],
+        );
+
+        // i1: (const, var)
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i1 = arg [reg]
+              %2: i1 = 0
+              %3: i1 = select %0, %2, %1
+              term [%0, %3]
+            ",
+            &["
+              ...
+              ; %3: i1 = select %0, %2, %1
+              not r.32.x
+              and r.32.x, r.32.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i1 = arg [reg]
+              %2: i1 = 1
+              %3: i1 = select %0, %2, %1
+              term [%0, %3]
+            ",
+            &["
+              ...
+              ; %3: i1 = select %0, %2, %1
+              or r.32.x, r.32.y
               ...
             "],
         );
