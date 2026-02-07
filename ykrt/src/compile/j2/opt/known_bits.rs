@@ -52,6 +52,24 @@ impl PassT for KnownBits {
     fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
         self.known_bits[equiv1] = self.known_bits[equiv2].clone();
     }
+
+    fn prepare_for_peel(
+        &mut self,
+        opt: &mut PassOpt,
+        _entry: &Block,
+        _map: &IndexVec<InstIdx, InstIdx>,
+    ) {
+        assert!(self.pending_commit.is_none());
+        self.known_bits.clear();
+        for iidx in (0..opt.insts_len()).map(InstIdx::from) {
+            if let Some(ConstKind::Int(x)) = opt.as_constkind(iidx) {
+                self.known_bits
+                    .push(Some(KnownBitValue::from_const(x.clone())));
+            } else {
+                self.known_bits.push(None);
+            }
+        }
+    }
 }
 
 impl KnownBits {
@@ -499,14 +517,14 @@ impl KnownBitValue {
 mod test {
     use super::*;
     use crate::compile::j2::opt::{
-        cse::CSE, fullopt::test::opt_and_test, strength_fold::StrengthFold,
+        cse::CSE, fullopt::test::user_defined_opt_test, strength_fold::StrengthFold,
     };
     use std::{cell::RefCell, rc::Rc};
 
     fn test_known_bits(mod_s: &str, ptn: &str) {
         let known_bits = Rc::new(RefCell::new(KnownBits::new()));
         let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
-        opt_and_test(
+        user_defined_opt_test(
             mod_s,
             |opt, inst| match strength_fold.borrow_mut().feed(opt, inst.clone()) {
                 OptOutcome::Rewritten(new_inst) => known_bits.borrow_mut().feed(opt, new_inst),
@@ -522,7 +540,7 @@ mod test {
         let known_bits = Rc::new(RefCell::new(KnownBits::new()));
         let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
         let cse = Rc::new(RefCell::new(CSE::new()));
-        opt_and_test(
+        user_defined_opt_test(
             mod_s,
             |opt, mut inst| {
                 if let Inst::Guard(_) = inst {

@@ -38,27 +38,22 @@ use crate::{
         CompilationError, DeoptSafepoint,
         j2::{
             codebuf::{CodeBufInProgress, ExeCodeBuf},
-            compiled_trace::{
-                CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace,
-                J2TraceStart,
-            },
+            compiled_trace::{CompiledGuardIdx, DeoptVar, J2CompiledTrace, J2TraceStart},
             effects::Effects,
             hir::*,
             hir_to_asm::HirToAsmBackend,
             regalloc::{AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
             x64::{
                 asm::{Asm, BLOCK_ALIGNMENT, LabelIdx, RelocKind},
-                x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, Reg},
+                x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
             },
         },
-        jitc_yk::aot_ir,
     },
     mt::TraceId,
     varlocs,
 };
 use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
-use index_vec::IndexVec;
 use smallvec::SmallVec;
 use std::{assert_matches, collections::HashMap, debug_assert_matches, ffi::c_void, sync::Arc};
 
@@ -69,7 +64,6 @@ pub(in crate::compile::j2) struct X64HirToAsm<'a> {
     /// The data section: we map any given (align, byte sequence) pair to [LabelIdx]s, which will
     /// eventually be output as their own pseudo-block.
     data_sec: HashMap<Vec<u8>, (u32, LabelIdx)>,
-    guards: IndexVec<CompiledGuardIdx, IntermediateGuard>,
 }
 
 impl<'a> X64HirToAsm<'a> {
@@ -88,12 +82,13 @@ impl<'a> X64HirToAsm<'a> {
         let num_hir_insts = match &m.trace_end {
             TraceEnd::Coupler { entry, .. } => entry.insts_len(),
             TraceEnd::Loop { entry, peel } => {
-                assert!(peel.is_none());
-                entry.insts_len()
+                entry.insts_len() + peel.as_ref().map(|x| x.insts_len()).unwrap_or(0)
             }
             TraceEnd::Return { entry, .. } => entry.insts_len(),
             #[cfg(test)]
             TraceEnd::Test { block, .. } => block.insts_len(),
+            #[cfg(test)]
+            TraceEnd::TestPeel { entry, peel, .. } => entry.insts_len() + peel.insts_len(),
         };
         num_hir_insts * 25
     }
@@ -103,7 +98,6 @@ impl<'a> X64HirToAsm<'a> {
             m,
             asm: Asm::new(buf),
             data_sec: HashMap::new(),
-            guards: IndexVec::new(),
         }
     }
 
@@ -790,6 +784,7 @@ impl<'a> X64HirToAsm<'a> {
 impl HirToAsmBackend for X64HirToAsm<'_> {
     type Label = LabelIdx;
     type Reg = Reg;
+    type PeelRegsBuilder = PeelRegsBuilder<Reg>;
 
     #[cfg(test)]
     type BuildTest = String;
@@ -843,6 +838,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         u32::try_from(off).unwrap()
     }
 
+    fn peel_regs_builder() -> PeelRegsBuilder<Reg> {
+        PeelRegsBuilder::new()
+    }
+
     fn iter_possible_regs(&self, b: &Block, iidx: InstIdx) -> impl Iterator<Item = Self::Reg> {
         match b.inst_ty(self.m, iidx) {
             Ty::Double | Ty::Float => ALL_XMM_REGS.iter().cloned(),
@@ -856,15 +855,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         mut self,
         log: bool,
         labels: &[Self::Label],
-    ) -> Result<
-        (
-            ExeCodeBuf,
-            IndexVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
-            Option<String>,
-            Vec<usize>,
-        ),
-        CompilationError,
-    > {
+    ) -> Result<(ExeCodeBuf, Option<String>, Vec<usize>), CompilationError> {
         // Push the data section as its own block. This rests on the assumption that the start of
         // each block is aligned.
         let mut data_off = BLOCK_ALIGNMENT;
@@ -880,60 +871,12 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             data_off += data.len();
         }
         self.asm.block_completed();
-
-        // Merge all labels into one vec as that's what `asm.into_exe` prefers.
-        let all_labels = labels
-            .iter()
-            .chain(
-                self.guards
-                    .iter()
-                    .map(|IntermediateGuard { patch_label, .. }| patch_label),
-            )
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let (buf, log, mut label_offs) = self.asm.into_exe(log, all_labels.as_slice())?;
-
-        // Demerge the label offsets.
-        let guard_labels = label_offs.split_off(labels.len());
-        assert_eq!(guard_labels.len(), self.guards.len());
-        assert_eq!(label_offs.len(), labels.len());
-
-        // Convert [IntermediateGuard]s into [J2CompiledGuard]s.
-        let guards = self
-            .guards
-            .into_iter()
-            .zip(guard_labels)
-            .map(
-                |(
-                    IntermediateGuard {
-                        bid,
-                        deopt_frames,
-                        deopt_vars,
-                        extra_stack_len,
-                        switch,
-                        ..
-                    },
-                    patch_off,
-                )| {
-                    J2CompiledGuard::new(
-                        bid,
-                        deopt_frames,
-                        deopt_vars,
-                        u32::try_from(patch_off).unwrap(),
-                        extra_stack_len,
-                        switch,
-                    )
-                },
-            )
-            .collect::<IndexVec<_, _>>();
-
-        Ok((buf, guards, log, label_offs))
+        self.asm.into_exe(log, labels)
     }
 
     #[cfg(test)]
     fn build_test(self, labels: &[Self::Label]) -> Self::BuildTest {
-        self.build_exe(true, labels).unwrap().2.unwrap()
+        self.build_exe(true, labels).unwrap().1.unwrap()
     }
 
     fn log(&mut self, s: String) {
@@ -1299,6 +1242,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm.block_completed();
     }
 
+    fn controlpoint_peel_start(&mut self, peel_label: Self::Label) -> Self::Label {
+        self.asm.attach_label(peel_label);
+        self.asm.mk_label()
+    }
+
     fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
         let label = self.asm.mk_label();
         self.asm.push_reloc(
@@ -1431,12 +1379,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn guard_completed(
         &mut self,
         start_label: Self::Label,
-        patch_label: Self::Label,
         extra_stack_len: u32,
-        bid: aot_ir::BBlockId,
-        deopt_frames: SmallVec<[DeoptFrame; 2]>,
-        deopt_vars: Vec<DeoptVar<Reg>>,
-        switch: Option<Switch>,
+        _deopt_vars: &[DeoptVar<Self::Reg>],
     ) {
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,
@@ -1446,15 +1390,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
         self.asm.attach_label(start_label);
         self.asm.block_completed();
-
-        self.guards.push(IntermediateGuard {
-            patch_label,
-            bid,
-            deopt_frames,
-            deopt_vars,
-            extra_stack_len,
-            switch,
-        });
     }
 
     fn i_abs(
@@ -3906,16 +3841,6 @@ enum RegOrMemOp {
     MemOp(Reg, i64),
 }
 
-#[derive(Debug)]
-struct IntermediateGuard {
-    patch_label: LabelIdx,
-    bid: aot_ir::BBlockId,
-    deopt_frames: SmallVec<[DeoptFrame; 2]>,
-    deopt_vars: Vec<DeoptVar<Reg>>,
-    extra_stack_len: u32,
-    switch: Option<Switch>,
-}
-
 /// x64 tests. These use an unusual form of pattern matching. Instead of using concrete register
 /// names, one can refer to a class of registers e.g. `r.8` is all 8-bit registers. To match a
 /// register name but ignore its value uses `r.8._`: to match a register name use `r.8.x`.
@@ -5699,7 +5624,7 @@ mod test {
               jae l0
               ; term [%0]
               ; l0
-              sub rsp, 0
+              sub rsp, 0x80
               ; term []
               ; l1
               jmp l2
@@ -5725,7 +5650,7 @@ mod test {
               jb l0
               ; term [%0]
               ; l0
-              sub rsp, 0
+              sub rsp, 0x80
               ; term []
               ; l1
               jmp l2

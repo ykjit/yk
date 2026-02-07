@@ -116,16 +116,18 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     #[cfg(target_arch = "x86_64")]
     fn patch_guard(&self, gid: GuardId, tgt: *const std::ffi::c_void) {
         let gidx = CompiledGuardIdx::from(usize::from(gid));
-        let patch_off = usize::try_from(self.guards[gidx].patch_off()).unwrap();
-        self.codebuf.patch(patch_off, 5, |patch_addr| {
-            assert_eq!(unsafe { patch_addr.read() }, 0xE9);
-            let patch_addr = unsafe { patch_addr.byte_add(1) };
-            let next_ip = patch_addr.addr() + 4;
-            let diff = i32::try_from(tgt.addr().checked_signed_diff(next_ip).unwrap()).unwrap();
-            unsafe {
-                (patch_addr as *mut u32).write(diff.cast_unsigned());
-            }
-        });
+        for patch_off in &self.guards[gidx].patch_offs {
+            let patch_off = usize::try_from(*patch_off).unwrap();
+            self.codebuf.patch(patch_off, 5, |patch_addr| {
+                assert_eq!(unsafe { patch_addr.read() }, 0xE9);
+                let patch_addr = unsafe { patch_addr.byte_add(1) };
+                let next_ip = patch_addr.addr() + 4;
+                let diff = i32::try_from(tgt.addr().checked_signed_diff(next_ip).unwrap()).unwrap();
+                unsafe {
+                    (patch_addr as *mut u32).write(diff.cast_unsigned());
+                }
+            });
+        }
     }
 
     fn entry(&self) -> *const c_void {
@@ -202,7 +204,9 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     ///  deopt_frames[0] variables
     /// ```
     pub deopt_vars: Vec<DeoptVar<Reg>>,
-    patch_off: u32,
+    /// All of the instruction offsets in the associated machine code which will need to be patched
+    /// when a sidetrace is compiled.
+    patch_offs: SmallVec<[u32; 2]>,
     /// How much additional space will this guard have consumed relative to the main part of the
     /// trace it was part of?
     pub extra_stack_len: u32,
@@ -221,7 +225,7 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
         bid: aot_ir::BBlockId,
         deopt_frames: SmallVec<[DeoptFrame; 2]>,
         deopt_vars: Vec<DeoptVar<Reg>>,
-        patch_off: u32,
+        patch_offs: SmallVec<[u32; 2]>,
         extra_stack_len: u32,
         switch: Option<Switch>,
     ) -> Self {
@@ -230,7 +234,7 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
             deopt_frames,
             deopt_vars,
             guard: Guard::new(),
-            patch_off,
+            patch_offs,
             extra_stack_len,
             switch,
         }
@@ -243,10 +247,6 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
     pub(super) fn guard(&self) -> &Guard {
         &self.guard
     }
-
-    pub(super) fn patch_off(&self) -> u32 {
-        self.patch_off
-    }
 }
 
 /// The information about a frame necessary for deopt and side-tracing.
@@ -256,7 +256,13 @@ pub(super) struct DeoptFrame {
     pub pc_safepoint: &'static DeoptSafepoint,
 }
 
-#[derive(Debug)]
+impl PartialEq for DeoptFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.pc == other.pc && std::ptr::eq(self.pc_safepoint, other.pc_safepoint)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct DeoptVar<Reg: RegT> {
     pub bitw: u32,
     pub fromvlocs: VarLocs<Reg>,

@@ -75,6 +75,10 @@ impl BlockLikeT for NoOpt {
         &self.insts[usize::from(idx)]
     }
 
+    fn insts_len(&self) -> usize {
+        self.insts.len()
+    }
+
     fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
         todo!();
     }
