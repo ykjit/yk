@@ -1594,6 +1594,28 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 64 => IcedInst::with2(Code::And_rm64_imm32, lhsr.to_reg64(), imm),
                 x => todo!("{x}"),
             });
+        } else if bitw == 64
+            && let Inst::Const(Const {
+                kind: ConstKind::Int(x),
+                ..
+            }) = b.inst(*rhs)
+            && let Some(c) = x.to_zero_ext_u32()
+        {
+            let [lhsr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                }],
+            )?;
+            self.asm.push_inst(IcedInst::with2(
+                Code::And_rm32_imm32,
+                lhsr.to_reg32(),
+                c.cast_signed(),
+            ));
         } else {
             let out_fill = if bitw == 32 || bitw == 64 {
                 RegCnstrFill::Zeroed
@@ -4542,6 +4564,22 @@ mod test {
               ...
               ; %2: i64 = and %0, %1
               and r.64._, 0xFFFFFFF
+              ...
+            "],
+        );
+
+        // i64, where the constant would sign-extend if assigned to a 64 bit register
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 0xFFFFFFFF
+              %2: i64 = and %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = and %0, %1
+              and r.32._, 0xFFFFFFFF
               ...
             "],
         );
