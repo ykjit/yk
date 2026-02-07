@@ -1,9 +1,13 @@
 //! The x64 specific parts of register allocation.
 
-use crate::compile::j2::regalloc::RegT;
 #[cfg(test)]
-use crate::compile::j2::{hir::Ty, regalloc::TestRegIter};
+use crate::compile::j2::regalloc::TestRegIter;
+use crate::compile::j2::{
+    hir::{Block, InstIdx, Mod, Ty},
+    regalloc::{PeelRegsBuilderT, RegT},
+};
 use iced_x86::Register;
+use std::marker::PhantomData;
 use strum::{EnumCount, FromRepr};
 
 #[derive(Clone, Copy, Debug, EnumCount, FromRepr, PartialEq)]
@@ -434,8 +438,9 @@ index_vec::define_index_type! {
     IMPL_RAW_CONVERSIONS = true;
 }
 
-// We prefer allocating registers such as R15, as they are not clobbered by CALLs / MULs (etc), and
-// are less likely to need to be copied around.
+// These are deliberately in reverse order: we prefer allocating registers such as R15, as they are
+// not clobbered by CALLs / MULs (etc), and are less likely to need to be copied around, so we put
+// those first.
 pub(super) const NORMAL_GP_REGS: [Reg; 14] = [
     Reg::R15,
     Reg::R14,
@@ -471,3 +476,78 @@ pub(super) const ALL_XMM_REGS: [Reg; 16] = [
     Reg::XMM14,
     Reg::XMM15,
 ];
+
+pub struct PeelRegsBuilder<Reg: RegT> {
+    /// A bit field with one bit set for each [NORMAL_GP_REGS] set.
+    used_gp: u16,
+    /// A bit field with one bit set for each [ALL_XMM_REGS] set.
+    used_xmm: u16,
+    phantom: PhantomData<Reg>,
+}
+
+impl PeelRegsBuilder<Reg> {
+    pub(super) fn new() -> Self {
+        // Assert that a `u16` is big enough for both sets of registers.
+        assert!(NORMAL_GP_REGS.len() <= 16);
+        assert!(ALL_XMM_REGS.len() <= 16);
+        Self {
+            used_gp: 0,
+            used_xmm: 0,
+            phantom: PhantomData,
+        }
+    }
+
+    fn is_gp_full(&self) -> bool {
+        // As a rough heuristic, leave 3 registers unallocated (for intermediate values) before
+        // declaring that we can't allocate any more.
+        self.used_gp.count_ones() > u32::try_from(NORMAL_GP_REGS.len() - 3).unwrap()
+    }
+
+    fn is_fp_full(&self) -> bool {
+        // As a rough heuristic, leave 3 registers unallocated (for intermediate values) before
+        // declaring that we can't allocate any more.
+        self.used_xmm.count_ones() > u32::try_from(ALL_XMM_REGS.len() - 3).unwrap()
+    }
+}
+
+impl PeelRegsBuilderT<Reg> for PeelRegsBuilder<Reg> {
+    fn force_set(&mut self, reg: Reg) {
+        if reg.is_gp() {
+            let i = NORMAL_GP_REGS.iter().position(|x| *x == reg).unwrap();
+            self.used_gp |= u16::try_from(1 << i).unwrap();
+        } else {
+            assert!(reg.is_fp());
+            let i = ALL_XMM_REGS.iter().position(|x| *x == reg).unwrap();
+            self.used_xmm |= u16::try_from(1 << i).unwrap();
+        }
+    }
+
+    fn is_full(&self) -> bool {
+        self.is_gp_full() && self.is_fp_full()
+    }
+
+    fn try_alloc_reg_for(&mut self, m: &Mod<Reg>, b: &Block, iidx: InstIdx) -> Option<Reg> {
+        match b.inst_ty(m, iidx) {
+            Ty::Double | Ty::Float => {
+                if !self.is_fp_full() {
+                    let i = self.used_xmm.trailing_ones();
+                    self.used_xmm |= 1 << i;
+                    Some(ALL_XMM_REGS[usize::try_from(i).unwrap()])
+                } else {
+                    None
+                }
+            }
+            Ty::Func(_) => todo!(),
+            Ty::Int(_) | Ty::Ptr(_) => {
+                if !self.is_gp_full() {
+                    let i = self.used_gp.trailing_ones();
+                    self.used_gp |= 1 << i;
+                    Some(NORMAL_GP_REGS[usize::try_from(i).unwrap()])
+                } else {
+                    None
+                }
+            }
+            Ty::Void => unreachable!(),
+        }
+    }
+}

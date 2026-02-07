@@ -12,6 +12,7 @@ use crate::compile::{
     },
     jitc_yk::arbbitint::ArbBitInt,
 };
+use index_vec::IndexVec;
 use num_traits::FromPrimitive;
 
 pub(super) struct StrengthFold;
@@ -63,6 +64,14 @@ impl PassT for StrengthFold {
     fn inst_committed(&mut self, _opt: &CommitInstOpt, _iidx: InstIdx, _inst: &Inst) {}
 
     fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
+
+    fn prepare_for_peel(
+        &mut self,
+        _opt: &mut PassOpt,
+        _entry: &Block,
+        _map: &IndexVec<InstIdx, InstIdx>,
+    ) {
+    }
 }
 
 fn opt_abs(opt: &mut PassOpt, mut inst: Abs) -> OptOutcome {
@@ -944,10 +953,10 @@ fn opt_zext(opt: &mut PassOpt, mut inst: ZExt) -> OptOutcome {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::opt::fullopt::test::opt_and_test;
+    use crate::compile::j2::opt::fullopt::test::user_defined_opt_test;
 
     fn test_sf(mod_s: &str, ptn: &str) {
-        opt_and_test(
+        user_defined_opt_test(
             mod_s,
             |opt, mut inst| {
                 inst.canonicalise(opt);

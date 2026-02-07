@@ -364,7 +364,7 @@ fn reconstruct(
                         VarLoc::Stack(off) => unsafe {
                             (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u64).write(v);
                         },
-                        VarLoc::StackOff(_) => todo!(),
+                        VarLoc::StackOff(_) => (),
                         VarLoc::Reg(reg, fill) => {
                             assert_eq!(*fill, RegFill::Zeroed);
                             if reg.is_gp() {

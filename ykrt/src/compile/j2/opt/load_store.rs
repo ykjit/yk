@@ -28,7 +28,8 @@ use crate::compile::j2::{
         fullopt::{CommitInstOpt, OptOutcome, PassOpt, PassT},
     },
 };
-use std::collections::HashMap;
+use index_vec::IndexVec;
+use std::{collections::HashMap, mem};
 
 /// Load/Store elimination
 pub(super) struct LoadStore {
@@ -189,7 +190,42 @@ impl PassT for LoadStore {
         }
     }
 
-    fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
+    fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
+        // FIXME: This is of a hack until `prepare_for_peel` can properly determine equivalences.
+        // At that point, there's no need for this method to do anything.
+        for (_hv_addr, hv_val) in self.hv.iter_mut() {
+            if *hv_val == equiv1 {
+                *hv_val = equiv2;
+            }
+        }
+    }
+
+    fn prepare_for_peel(
+        &mut self,
+        opt: &mut PassOpt,
+        entry: &Block,
+        map: &IndexVec<InstIdx, InstIdx>,
+    ) {
+        let mut new_hv = HashMap::new();
+
+        for (hv_addr, hv_val) in mem::take(&mut self.hv) {
+            let new_addr = match hv_addr {
+                Address::PtrOff(iidx, off) => {
+                    if map[iidx] == InstIdx::MAX {
+                        continue;
+                    }
+                    Address::PtrOff(map[iidx], off)
+                }
+                Address::Const(_) => hv_addr,
+            };
+            if map[hv_val] != InstIdx::MAX {
+                new_hv.insert(new_addr, opt.equiv_iidx(map[hv_val]));
+            } else if let Inst::Const(x) = entry.inst(hv_val) {
+                new_hv.insert(new_addr, opt.push_pre_inst(Inst::Const(x.to_owned())));
+            }
+        }
+        self.hv = new_hv;
+    }
 }
 
 /// An abstract "address" representing a location in RAM.
@@ -248,13 +284,16 @@ impl Address {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::opt::{fullopt::test::opt_and_test, strength_fold::StrengthFold};
+    use crate::compile::j2::opt::{
+        fullopt::test::{full_opt_test, user_defined_opt_test},
+        strength_fold::StrengthFold,
+    };
     use std::{cell::RefCell, rc::Rc};
 
     fn test_ls(mod_s: &str, ptn: &str) {
         let ls = Rc::new(RefCell::new(LoadStore::new()));
         let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
-        opt_and_test(
+        user_defined_opt_test(
             mod_s,
             |opt, mut inst| {
                 if let Inst::Guard(_) = inst {
@@ -614,6 +653,93 @@ mod test {
           %3: i8 = load %0
           memset %0, %1, %2, true
           %5: i8 = load %0
+        ",
+        );
+    }
+
+    #[test]
+    fn peeling() {
+        // Optimise away a load of a known constant across a peel.
+        full_opt_test(
+            r#"
+          %0: ptr = arg [reg("GPR0", undefined)]
+          %1: i8 = load %0
+          %2: i8 = 2
+          %3: i1 = icmp eq %1, %2
+          guard true, %3, []
+          blackbox %1
+          term [%0]
+        "#,
+            "
+          %0: ptr = arg
+          %1: i8 = load %0
+          %2: i8 = 2
+          %3: i1 = icmp eq %1, %2
+          %4: i8 = 2
+          guard true, %3, []
+          blackbox %2
+          term [%0]
+          ; peel
+          %0: ptr = arg
+          %1: i8 = 2
+          %2: i8 = 2
+          %3: i1 = 1
+          blackbox %2
+          term [%0]
+        ",
+        );
+
+        // Optimise away a store of a known constant across a peel.
+        full_opt_test(
+            r#"
+          %0: ptr = arg [reg("GPR0", undefined)]
+          %1: i8 = 2
+          store %1, %0
+          term [%0]
+        "#,
+            "
+          %0: ptr = arg
+          %1: i8 = 2
+          store %1, %0
+          term [%0]
+          ; peel
+          %0: ptr = arg
+          %1: i8 = 2
+          term [%0]
+        ",
+        );
+
+        // FIXME: This test shouldn't pass! We _should_ be capable of passing the equivalence of %2
+        // and %1 into the peel, but we need to extend the term_vars to do so.
+        full_opt_test(
+            r#"
+          %0: ptr = arg [reg("GPR0", undefined)]
+          %1: i8 = arg [reg("GPR1", undefined)]
+          %2: i8 = load %0
+          %3: i1 = icmp eq %2, %1
+          guard true, %3, []
+          blackbox %1
+          %6: i8 = 2
+          term [%0, %6]
+        "#,
+            "
+          %0: ptr = arg
+          %1: i8 = arg
+          %2: i8 = load %0
+          %3: i1 = icmp eq %2, %1
+          guard true, %3, []
+          blackbox %2
+          %6: i8 = 2
+          term [%0, %6]
+          ; peel
+          %0: ptr = arg
+          %1: i8 = 2
+          %2: i8 = load %0
+          %3: i1 = icmp eq %2, %1
+          %4: i8 = 2
+          guard true, %3, []
+          blackbox %1
+          term [%0, %1]
         ",
         );
     }
