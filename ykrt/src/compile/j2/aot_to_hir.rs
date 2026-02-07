@@ -247,27 +247,38 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let tyidx_ptr0 = self.opt.tyidx_ptr0();
         let tyidx_void = self.opt.tyidx_void();
 
-        let (entry, tys) = self.opt.build()?;
-        let (trace_start, trace_end) = match bmk {
+        let (trace_start, trace_end, tys) = match bmk {
             BuildModKind::Coupler {
                 entry_safepoint,
                 tgt_ctr,
-            } => (
-                hir::TraceStart::ControlPoint { entry_safepoint },
-                hir::TraceEnd::Coupler { entry, tgt_ctr },
-            ),
+            } => {
+                let (entry, tys) = self.opt.build()?;
+                (
+                    hir::TraceStart::ControlPoint { entry_safepoint },
+                    hir::TraceEnd::Coupler { entry, tgt_ctr },
+                    tys,
+                )
+            }
             BuildModKind::Loop { entry_safepoint } => match return_safepoint {
-                None => (
-                    hir::TraceStart::ControlPoint { entry_safepoint },
-                    hir::TraceEnd::Loop { entry, peel: None },
-                ),
-                Some(exit_safepoint) => (
-                    hir::TraceStart::ControlPoint { entry_safepoint },
-                    hir::TraceEnd::Return {
-                        entry,
-                        exit_safepoint,
-                    },
-                ),
+                None => {
+                    let (entry, peel, tys) = self.opt.build_with_peel()?;
+                    (
+                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceEnd::Loop { entry, peel },
+                        tys,
+                    )
+                }
+                Some(exit_safepoint) => {
+                    let (entry, tys) = self.opt.build()?;
+                    (
+                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceEnd::Return {
+                            entry,
+                            exit_safepoint,
+                        },
+                        tys,
+                    )
+                }
             },
             BuildModKind::Side {
                 entry_vlocs,
@@ -275,27 +286,32 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 src_gidx,
                 tgt_ctr,
                 ..
-            } => match return_safepoint {
-                None => (
-                    hir::TraceStart::Guard {
-                        entry_vlocs,
-                        src_ctr,
-                        src_gidx,
-                    },
-                    hir::TraceEnd::Coupler { entry, tgt_ctr },
-                ),
-                Some(exit_safepoint) => (
-                    hir::TraceStart::Guard {
-                        entry_vlocs,
-                        src_ctr,
-                        src_gidx,
-                    },
-                    hir::TraceEnd::Return {
-                        entry,
-                        exit_safepoint,
-                    },
-                ),
-            },
+            } => {
+                let (entry, tys) = self.opt.build()?;
+                match return_safepoint {
+                    None => (
+                        hir::TraceStart::Guard {
+                            entry_vlocs,
+                            src_ctr,
+                            src_gidx,
+                        },
+                        hir::TraceEnd::Coupler { entry, tgt_ctr },
+                        tys,
+                    ),
+                    Some(exit_safepoint) => (
+                        hir::TraceStart::Guard {
+                            entry_vlocs,
+                            src_ctr,
+                            src_gidx,
+                        },
+                        hir::TraceEnd::Return {
+                            entry,
+                            exit_safepoint,
+                        },
+                        tys,
+                    ),
+                }
+            }
         };
 
         let m = hir::Mod {

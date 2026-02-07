@@ -238,6 +238,9 @@ pub(super) trait BlockLikeT {
     /// If `iidx` is out of bounds.
     fn inst(&self, iidx: InstIdx) -> &Inst;
 
+    /// How many instructions does this block contain?
+    fn insts_len(&self) -> usize;
+
     /// Return the bit width of the instruction `iidx`. This is a convenience function over other
     /// public functions.
     ///
@@ -293,6 +296,15 @@ impl<Reg: RegT> Mod<Reg> {
             TraceEnd::Test { entry_vlocs, block } => {
                 block.assert_well_formed(self, entry_vlocs, entry_vlocs);
             }
+            #[cfg(test)]
+            TraceEnd::TestPeel {
+                entry_vlocs,
+                entry,
+                peel,
+            } => {
+                entry.assert_well_formed(self, entry_vlocs, entry_vlocs);
+                peel.assert_well_formed(self, entry_vlocs, entry_vlocs);
+            }
         }
     }
 }
@@ -301,13 +313,25 @@ impl<Reg: RegT> Display for Mod<Reg> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match &self.trace_end {
             TraceEnd::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
-            TraceEnd::Loop { entry, peel, .. } => {
-                assert!(peel.is_none());
-                write!(f, "{}", entry.to_string(self))
-            }
+            TraceEnd::Loop { entry, peel, .. } => match peel {
+                Some(x) => write!(
+                    f,
+                    "{}\n; peel\n{}",
+                    entry.to_string(self),
+                    x.to_string(self)
+                ),
+                None => write!(f, "{}", entry.to_string(self)),
+            },
             TraceEnd::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
             #[cfg(test)]
             TraceEnd::Test { block, .. } => write!(f, "{}", block.to_string(self)),
+            #[cfg(test)]
+            TraceEnd::TestPeel { entry, peel, .. } => write!(
+                f,
+                "{}\n; peel\n{}",
+                entry.to_string(self),
+                peel.to_string(self)
+            ),
         }
     }
 }
@@ -378,6 +402,13 @@ pub(super) enum TraceEnd<Reg: RegT> {
         entry_vlocs: Vec<VarLocs<Reg>>,
         block: Block,
     },
+    /// This is a trace intended for unit testing peeled loops.
+    #[cfg(test)]
+    TestPeel {
+        entry_vlocs: Vec<VarLocs<Reg>>,
+        entry: Block,
+        peel: Block,
+    },
 }
 
 /// An ordered sequence of instructions.
@@ -390,7 +421,7 @@ pub(super) struct Block {
 
 impl Block {
     #[allow(dead_code)]
-    fn assert_well_formed<Reg: RegT>(
+    pub(super) fn assert_well_formed<Reg: RegT>(
         &self,
         m: &dyn ModLikeT,
         entry_vlocs: &[VarLocs<Reg>],
@@ -473,10 +504,6 @@ impl Block {
         })
     }
 
-    pub(super) fn insts_len(&self) -> usize {
-        self.insts.len()
-    }
-
     /// Return a slice of the variables referenced in this block's [Term] instruction (which, by
     /// definition, must be the last instruction in the [Block]).
     pub(super) fn term_vars(&self) -> &[InstIdx] {
@@ -527,6 +554,10 @@ impl Block {
 impl BlockLikeT for Block {
     fn inst(&self, idx: InstIdx) -> &Inst {
         &self.insts[usize::from(idx)]
+    }
+
+    fn insts_len(&self) -> usize {
+        self.insts.len()
     }
 
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
@@ -2331,7 +2362,7 @@ pub(super) struct GuardExtra {
 
 /// If a guard relates to an AOT `switch`, this struct records the extra information we need to
 /// process it correctly.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Switch {
     /// The [InstId] of the AOT switch instruction.
     pub iid: aot_ir::InstId,
@@ -4446,6 +4477,20 @@ pub(super) struct Frame {
     pub pc_safepoint: &'static DeoptSafepoint,
     #[cfg(test)]
     pub smapidx: StackMapIdx,
+}
+
+impl PartialEq for Frame {
+    #[cfg(not(test))]
+    fn eq(&self, other: &Self) -> bool {
+        self.pc == other.pc && std::ptr::eq(self.pc_safepoint, other.pc_safepoint)
+    }
+
+    #[cfg(test)]
+    fn eq(&self, other: &Self) -> bool {
+        self.pc == other.pc
+            && std::ptr::eq(self.pc_safepoint, other.pc_safepoint)
+            && self.smapidx == other.smapidx
+    }
 }
 
 #[cfg(test)]

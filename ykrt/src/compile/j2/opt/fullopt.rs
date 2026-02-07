@@ -124,6 +124,7 @@
 use crate::compile::{
     CompilationError,
     j2::{
+        effects::Effects,
         hir::*,
         opt::{
             EquivIIdxT, OptT, cse::CSE, known_bits::KnownBits, load_store::LoadStore,
@@ -137,7 +138,9 @@ use std::{
     assert_matches,
     collections::HashMap,
     hash::{Hash, Hasher},
+    mem,
 };
+use vob::Vob;
 
 ////////////////////////////////////////////////////////////////////////////////
 // The external-facing part of the optimiser.
@@ -236,7 +239,6 @@ impl FullOpt {
         for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
             let (equiv1, equiv2) = match (self.inst(equiv1), self.inst(equiv2)) {
                 (Inst::Const(_), Inst::Const(_)) => {
-                    assert_eq!(equiv1, equiv2);
                     continue;
                 }
                 (_, Inst::Const(_)) => (equiv1, equiv2),
@@ -316,6 +318,10 @@ impl BlockLikeT for FullOpt {
         &self.inner.insts[usize::from(idx)].inst
     }
 
+    fn insts_len(&self) -> usize {
+        self.inner.insts.len()
+    }
+
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
         &self.inner.guard_extras[geidx]
     }
@@ -341,8 +347,118 @@ impl OptT for FullOpt {
         ))
     }
 
-    fn peel(self) -> (Block, Block) {
-        todo!()
+    fn build_with_peel(
+        mut self: Box<Self>,
+    ) -> Result<(Block, Option<Block>, IndexVec<TyIdx, Ty>), CompilationError> {
+        // First of all create the entry iteration `Block`. This is useful when we're creating the
+        // peel `Block` below.
+        let entry = Block {
+            insts: mem::take(&mut self.inner.insts)
+                .into_iter()
+                .map(|x| x.inst)
+                .collect::<IndexVec<_, _>>(),
+            guard_extras: mem::take(&mut self.inner.guard_extras),
+        };
+        self.inner.consts_map.clear();
+        assert!(self.inner.guard_extras.is_empty());
+
+        // Dead code analysis: we don't want to waste energy feeding things into the peel that
+        // can't possibly be used.
+        let mut is_used = Vob::from_elem(false, entry.insts.len());
+        for (iidx, inst) in entry.insts_iter(..).rev() {
+            if is_used[usize::from(iidx)] || inst.write_effects().interferes(Effects::all()) {
+                is_used.set(usize::from(iidx), true);
+                for op_iidx in inst.iter_iidxs(&entry) {
+                    is_used.set(usize::from(op_iidx), true);
+                }
+            }
+        }
+
+        // For each terminal exit variable in the entry block, create an arg/const in the peel
+        // block.
+        let mut map = index_vec![InstIdx::MAX; entry.insts.len()];
+        for entry_iidx in entry.term_vars() {
+            let peel_iidx = self.inner.insts.len_idx();
+            // FIXME: The next line won't work when we do loop-invariant code motion.
+            map[peel_iidx] = peel_iidx;
+            map[*entry_iidx] = peel_iidx;
+            match entry.inst(*entry_iidx) {
+                Inst::Const(x) => {
+                    self.inner.insts.push(InstEquiv {
+                        inst: x.clone().into(),
+                        equiv: InstIdx::MAX,
+                    });
+                    self.inner
+                        .consts_map
+                        .insert(HashableConst(x.to_owned()), peel_iidx);
+                }
+                _ => {
+                    let tyidx = entry.inst(*entry_iidx).tyidx(&*self);
+                    self.inner.insts.push(InstEquiv {
+                        inst: Arg { tyidx }.into(),
+                        equiv: InstIdx::MAX,
+                    });
+                }
+            }
+        }
+
+        // Set the optimisation passes up for peeling.
+        let mut popt_inner = PassOptInner::new();
+        let mut popt = PassOpt {
+            optinternal: &mut self.inner,
+            inner: &mut popt_inner,
+        };
+        for pass in &mut self.passes {
+            pass.prepare_for_peel(&mut popt, &entry, &map);
+        }
+        assert!(popt_inner.gextra.is_none());
+        assert!(popt_inner.new_equivs.is_empty());
+        for inst in popt_inner.pre_insts.drain(..) {
+            self.commit_inst(inst);
+        }
+
+        // Feed each instruction from `entry` (except the arguments!) into the peel.
+        for (iidx, inst) in entry
+            .insts_iter(..)
+            .skip(entry.term_vars().len()) // Skip `Arg` instructions
+            .filter(|(iidx, _)| is_used[usize::from(*iidx)])
+        {
+            let mut inst = inst.clone();
+            if let Inst::Guard(mut x) = inst {
+                let old_gextra = &entry.guard_extras[x.geidx];
+                let gextra = GuardExtra {
+                    bid: old_gextra.bid,
+                    switch: old_gextra.switch.clone(),
+                    deopt_vars: old_gextra
+                        .deopt_vars
+                        .iter()
+                        .map(|x| map[*x])
+                        .collect::<Vec<_>>(),
+                    deopt_frames: old_gextra.deopt_frames.clone(),
+                };
+                x.cond = map[x.cond];
+                x.geidx = GuardExtraIdx::MAX;
+                // FIXME: Peeled guards can find contradictions because not all loops are
+                // control-flow stable.
+                self.feed_guard(x, gextra)?;
+            } else if inst.tyidx(&*self) == self.inner.tyidx_void {
+                inst.rewrite_iidxs(&mut *self, |x| map[x]);
+                self.feed_void(inst)?;
+            } else {
+                inst.rewrite_iidxs(&mut *self, |x| map[x]);
+                map[iidx] = self.feed(inst)?;
+            }
+        }
+
+        let peel = Block {
+            insts: mem::take(&mut self.inner.insts)
+                .into_iter()
+                .map(|x| x.inst)
+                .collect::<IndexVec<_, _>>(),
+            guard_extras: mem::take(&mut self.inner.guard_extras),
+        };
+
+        Ok((entry, Some(peel), self.inner.tys))
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
@@ -483,6 +599,7 @@ pub(super) enum OptOutcome {
 
 /// A wrapper around an [Inst] and our current knowledge of another instruction it is equivalent
 /// to.
+#[derive(Debug)]
 struct InstEquiv {
     /// The [Inst] at a given [InstIdx].
     inst: Inst,
@@ -508,6 +625,16 @@ pub(super) trait PassT {
     /// `equiv1` and `equiv2` have been identified as equivalent and henceforth `equiv1` will be
     /// rewritten to `equiv2`.
     fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx);
+
+    /// Prepare for peeling on `entry`: the pass can copy information across from the first
+    /// iteration to the peel. `map` contains a map from instruction indices so far known in the
+    /// peel to the instruction index in the first iteration.
+    fn prepare_for_peel(
+        &mut self,
+        opt: &mut PassOpt,
+        entry: &Block,
+        map: &IndexVec<InstIdx, InstIdx>,
+    );
 }
 
 /// The object passed to [PassT::feed] so that they can interact with the optimiser.
@@ -567,6 +694,10 @@ impl PassOpt<'_> {
 impl BlockLikeT for PassOpt<'_> {
     fn inst(&self, iidx: InstIdx) -> &Inst {
         self.optinternal.inst(iidx)
+    }
+
+    fn insts_len(&self) -> usize {
+        self.optinternal.insts.len()
     }
 
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
@@ -648,6 +779,10 @@ impl BlockLikeT for CommitInstOpt<'_> {
         self.inner.inst(iidx)
     }
 
+    fn insts_len(&self) -> usize {
+        self.inner.insts.len()
+    }
+
     fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
         todo!();
     }
@@ -686,9 +821,9 @@ impl EquivIIdxT for CommitInstOpt<'_> {
 }
 
 #[cfg(test)]
-pub(in crate::compile::j2::opt) mod test {
+pub(in crate::compile::j2) mod test {
     use super::*;
-    use crate::compile::j2::{hir_parser::str_to_mod, regalloc::test::TestReg};
+    use crate::compile::j2::{hir_parser::str_to_mod, regalloc::RegT, regalloc::test::TestReg};
     use fm::FMBuilder;
     use index_vec::IndexVec;
     use lazy_static::lazy_static;
@@ -700,10 +835,102 @@ pub(in crate::compile::j2::opt) mod test {
         static ref TEXT_RE: Regex = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
     }
 
+    pub(in crate::compile::j2) fn str_to_peel_mod<Reg: RegT>(mod_s: &str) -> Mod<Reg> {
+        let m = str_to_mod::<Reg>(mod_s);
+        let TraceEnd::Test {
+            entry_vlocs,
+            block: Block {
+                insts,
+                guard_extras,
+            },
+        } = &m.trace_end
+        else {
+            panic!()
+        };
+        let mut fopt = Box::new(FullOpt::new());
+        fopt.inner.guard_extras = guard_extras.clone();
+        fopt.inner.tys = m.tys.clone();
+
+        // We need to maintain a manual map of iidxs the user has written in their test to the
+        // current state of the actual optimiser. Consider:
+        //
+        // ```
+        // %0: i8 = arg [reg]
+        // %1: i8 = 0
+        // %2: i8 = add %0, %1
+        // %3: blackbox %2
+        // ```
+        //
+        // The `add` is a no-op, and won't be inserted into the optimisation's ongoing module at
+        // all, so when we get to `blackbox %2` there is no `%2` to reference: we'd get an
+        // out-of-bounds error! We thus need to rewrite this to `blackbox %0` _before_ feeding the
+        // instruction to the optimiser.
+        let mut opt_map = IndexVec::with_capacity(insts.len());
+        let mut insts_iter = insts.into_iter();
+        for _ in 0..entry_vlocs.len() {
+            opt_map.push(opt_map.len_idx());
+            fopt.feed_arg(insts_iter.next().unwrap().clone()).unwrap();
+        }
+        for inst in insts_iter {
+            let mut inst = inst.clone();
+            inst.rewrite_iidxs(&mut *fopt, |x| opt_map[x]);
+            if let Inst::Guard(mut x @ Guard { geidx, .. }) = inst {
+                x.geidx = GuardExtraIdx::MAX;
+                fopt.feed_guard(x, fopt.inner.guard_extras[geidx].clone())
+                    .unwrap();
+                opt_map.push(opt_map.len_idx());
+            } else if let Inst::Arg(_) = inst {
+                unreachable!();
+            } else if *m.ty(inst.tyidx(&m)) == Ty::Void {
+                if let Some(x) = fopt.feed_void(inst).unwrap() {
+                    opt_map.push(x);
+                } else {
+                    opt_map.push(opt_map.len_idx());
+                }
+            } else {
+                opt_map.push(fopt.feed(inst).unwrap());
+            }
+        }
+        let tyidx_int1 = fopt.inner.tyidx_int1;
+        let tyidx_ptr0 = fopt.inner.tyidx_ptr0;
+        let tyidx_void = fopt.inner.tyidx_void;
+        let (entry, peel, tys) = fopt.build_with_peel().unwrap();
+        Mod {
+            trid: m.trid,
+            trace_start: TraceStart::Test,
+            trace_end: TraceEnd::TestPeel {
+                entry_vlocs: entry_vlocs.to_owned(),
+                entry,
+                peel: peel.unwrap(),
+            },
+            tys,
+            tyidx_int1,
+            tyidx_ptr0,
+            tyidx_void,
+            addr_name_map: None,
+            smaps: m.smaps,
+        }
+    }
+
+    pub(in crate::compile::j2::opt) fn full_opt_test(mod_s: &str, ptn: &str) {
+        let m = str_to_peel_mod::<TestReg>(mod_s);
+        let s = m.to_string();
+        let fmb = FMBuilder::new(ptn)
+            .unwrap()
+            .name_matcher_ignore(PTN_RE_IGNORE.clone(), TEXT_RE.clone())
+            .name_matcher(PTN_RE.clone(), TEXT_RE.clone())
+            .build()
+            .unwrap();
+        if let Err(e) = fmb.matches(&s) {
+            eprintln!("{e}");
+            panic!();
+        }
+    }
+
     /// Take an input module string `mod_s` and run it through user-defined passes in the function
     /// `feed_f`. After each call of `feed_f`, `inst_committed` and/or `equiv_committed` will be
     /// called as appropriate.
-    pub(in crate::compile::j2::opt) fn opt_and_test<F, G, H>(
+    pub(in crate::compile::j2::opt) fn user_defined_opt_test<F, G, H>(
         mod_s: &str,
         feed_f: F,
         inst_committed_f: G,
@@ -732,19 +959,7 @@ pub(in crate::compile::j2::opt) mod test {
             fopt.inner.ty_map.insert(ty.clone(), tyidx);
         }
         // We need to maintain a manual map of iidxs the user has written in their test to the
-        // current state of the actual optimiser. Consider:
-        //
-        // ```
-        // %0: i8 = arg [reg]
-        // %1: i8 = 0
-        // %2: i8 = add %0, %1
-        // %3: blackbox %2
-        // ```
-        //
-        // The `add` is a no-op, and won't be inserted into the optimisation's ongoing module at
-        // all, so when we get to `blackbox %2` there is no `%2` to reference: we'd get an
-        // out-of-bounds error! We thus need to rewrite this to `blackbox %0` _before_ feeding the
-        // instruction to the optimiser.
+        // current state of the actual optimiser. See the comment in [full_opt_test].
         let mut opt_map = IndexVec::with_capacity(insts.len());
         for mut inst in insts.into_iter() {
             inst.rewrite_iidxs(&mut *fopt, |x| opt_map[x]);
@@ -813,7 +1028,6 @@ pub(in crate::compile::j2::opt) mod test {
             smaps: m.smaps,
         };
         let s = m.to_string();
-
         let fmb = FMBuilder::new(ptn)
             .unwrap()
             .name_matcher_ignore(PTN_RE_IGNORE.clone(), TEXT_RE.clone())
@@ -833,7 +1047,7 @@ pub(in crate::compile::j2::opt) mod test {
         // but also relies on `strength_fold` doing the right thing.
 
         fn test_sf(mod_s: &str, ptn: &str) {
-            opt_and_test(
+            user_defined_opt_test(
                 mod_s,
                 |opt, mut inst| {
                     inst.canonicalise(opt);
@@ -902,6 +1116,61 @@ pub(in crate::compile::j2::opt) mod test {
           blackbox %3
           term [%3, %3]
           ...
+        ",
+        );
+    }
+
+    #[test]
+    fn peeling() {
+        // Simple constant propagation and strength/fold in the peel.
+        full_opt_test(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 4
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          term [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 4
+          %2: i1 = icmp eq %0, %1
+          %3: i8 = 4
+          guard true, %2, []
+          term [%1]
+          ; peel
+          %0: i8 = 4
+          %1: i1 = 1
+          term [%0]
+        ",
+        );
+
+        // Simple load/store optimisation across the peel.
+        full_opt_test(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = load %0
+          %3: i8 = 4
+          %4: i1 = icmp eq %2, %3
+          guard true, %4, []
+          term [%0, %2]
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = arg
+          %2: i8 = load %0
+          %3: i8 = 4
+          %4: i1 = icmp eq %2, %3
+          %5: i8 = 4
+          guard true, %4, []
+          term [%0, %3]
+          ; peel
+          %0: ptr = arg
+          %1: i8 = 4
+          %2: i8 = 4
+          %3: i1 = 1
+          term [%0, %1]
         ",
         );
     }

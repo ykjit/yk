@@ -75,6 +75,10 @@ impl BlockLikeT for NoOpt {
         &self.insts[usize::from(idx)]
     }
 
+    fn insts_len(&self) -> usize {
+        self.insts.len()
+    }
+
     fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
         todo!();
     }
@@ -95,8 +99,10 @@ impl OptT for NoOpt {
         ))
     }
 
-    fn peel(self) -> (Block, Block) {
-        todo!()
+    fn build_with_peel(
+        self: Box<Self>,
+    ) -> Result<(Block, Option<Block>, IndexVec<TyIdx, Ty>), CompilationError> {
+        self.build().map(|(bk, tys)| (bk, None, tys))
     }
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {

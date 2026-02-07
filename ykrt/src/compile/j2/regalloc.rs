@@ -67,6 +67,7 @@ use std::{
     assert_matches,
     fmt::{Debug, Display, Formatter},
 };
+use test_stubs::test_stubs;
 use vob::Vob;
 
 pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
@@ -1412,6 +1413,29 @@ pub(super) trait RegT: Clone + Copy + Debug + Display + PartialEq + Send + Sync 
     fn from_str(s: &str) -> Option<Self>;
 }
 
+/// A trait for building up a set [VarLocs] when for a peeled block. In essence, this should hand
+/// out _new_ registers for instructions if there is room to do so (i.e. two calls of
+/// [PeelRegsBuilderT::try_alloc_reg_for] should not return the same register). It is up to the
+/// implementation to decide when to stop handing out more registers: it's probably not a good idea
+/// to allocate _every_ register, because then there will be no scratch registers for intermediate
+/// values.
+///
+/// [super::hir_to_asm] will first of all call [PeelRegsBuilderT::force_set] as many times as
+/// needed to indicate registers that the peeled block is forced to make use of. It will then call
+/// [PeelRegsBuilderT::find_reg_for] for instructions repeatedly, giving up if
+/// [PeelRegsBuilderT::is_full] indicates that no more registers could be allocated.
+#[test_stubs]
+pub(super) trait PeelRegsBuilderT<Reg: RegT> {
+    /// The peeled block has `reg` pre-set.
+    fn force_set(&mut self, reg: Reg);
+    /// If `self` has no more registers to hand out, returns `true`, preventing [super::hir_to_asm]
+    /// from wasting time calling [PeelRegsBuilderT::find_reg_for] pointlessly.
+    fn is_full(&self) -> bool;
+    /// Try allocating a register or `iidx` in `b`. Returns `Some` if it succeeded in doing so:
+    /// that register must then not be handed out on future calls to this function.
+    fn try_alloc_reg_for(&mut self, m: &Mod<Reg>, b: &Block, iidx: InstIdx) -> Option<Reg>;
+}
+
 #[cfg(test)]
 pub(super) trait TestRegIter<Reg: RegT> {
     /// Return a register which is suitable to hold instances of `ty`. The backend has freedom
@@ -1805,15 +1829,12 @@ impl Iterator for MaxBitIter {
 pub(crate) mod test {
     use super::*;
     use crate::{
-        compile::{
-            j2::{
-                compiled_trace::{CompiledGuardIdx, DeoptFrame, DeoptVar},
-                hir::Mod,
-                hir::*,
-                hir_parser::str_to_mod,
-                hir_to_asm::*,
-            },
-            jitc_yk::aot_ir,
+        compile::j2::{
+            compiled_trace::{CompiledGuardIdx, DeoptVar},
+            hir::Mod,
+            hir::*,
+            hir_parser::str_to_mod,
+            hir_to_asm::*,
         },
         location::{HotLocation, HotLocationKind},
         mt::TraceId,
@@ -1980,6 +2001,10 @@ pub(crate) mod test {
         }
     }
 
+    struct TestPeelRegsBuilder;
+
+    impl PeelRegsBuilderT<TestReg> for TestPeelRegsBuilder {}
+
     struct TestHirToAsm<'a> {
         m: &'a Mod<TestReg>,
         ra_log: Vec<String>,
@@ -1997,6 +2022,7 @@ pub(crate) mod test {
     impl<'a> HirToAsmBackend for TestHirToAsm<'a> {
         type Label = TestLabelIdx;
         type Reg = TestReg;
+        type PeelRegsBuilder = TestPeelRegsBuilder;
         type BuildTest = String;
 
         fn build_test(self, _labels: &[Self::Label]) -> Self::BuildTest {
@@ -2107,12 +2133,8 @@ pub(crate) mod test {
         fn guard_completed(
             &mut self,
             _start_label: Self::Label,
-            _patch_label: Self::Label,
             _stack_off: u32,
-            _bid: aot_ir::BBlockId,
-            _deopt_frames: SmallVec<[DeoptFrame; 2]>,
-            _deopt_vars: Vec<DeoptVar<Self::Reg>>,
-            _switch: Option<Switch>,
+            _deopt_vars: &[DeoptVar<Self::Reg>],
         ) {
         }
 

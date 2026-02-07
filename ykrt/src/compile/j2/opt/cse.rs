@@ -18,12 +18,13 @@
 
 use crate::compile::j2::{
     effects::Effects,
-    hir::{Inst, InstDiscriminants, InstIdx, InstT},
+    hir::{Block, Inst, InstDiscriminants, InstIdx, InstT},
     opt::{
         BlockLikeT, EquivIIdxT,
         fullopt::{CommitInstOpt, OptOutcome, PassOpt, PassT},
     },
 };
+use index_vec::IndexVec;
 use strum::EnumCount;
 
 /// Common supexpression elimination.
@@ -90,18 +91,33 @@ impl PassT for CSE {
     }
 
     fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
+
+    fn prepare_for_peel(
+        &mut self,
+        opt: &mut PassOpt,
+        _entry: &Block,
+        _map: &IndexVec<InstIdx, InstIdx>,
+    ) {
+        self.heads = [InstIdx::from_usize(InstIdx::MAX_INDEX); Inst::COUNT];
+        self.predecessors.clear();
+        for _ in 0..opt.insts_len() {
+            self.predecessors.push(InstIdx::MAX);
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::opt::{fullopt::test::opt_and_test, strength_fold::StrengthFold};
+    use crate::compile::j2::opt::{
+        fullopt::test::user_defined_opt_test, strength_fold::StrengthFold,
+    };
     use std::{cell::RefCell, rc::Rc};
 
     fn test_cse(mod_s: &str, ptn: &str) {
         let cse = Rc::new(RefCell::new(CSE::new()));
         let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
-        opt_and_test(
+        user_defined_opt_test(
             mod_s,
             |opt, mut inst| {
                 if let Inst::Guard(_) = inst {
