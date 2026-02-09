@@ -176,6 +176,7 @@ use std::{
     collections::HashMap,
     ffi::c_void,
     fmt::{Display, Formatter},
+    mem,
     ops::{Bound, RangeBounds},
     sync::Arc,
 };
@@ -871,7 +872,7 @@ impl InstT for Add {
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            std::mem::swap(&mut self.lhs, &mut self.rhs);
+            mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -950,7 +951,7 @@ impl InstT for And {
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
-            std::mem::swap(&mut self.lhs, &mut self.rhs);
+            mem::swap(&mut self.lhs, &mut self.rhs);
         }
     }
 
@@ -2392,16 +2393,26 @@ impl InstT for ICmp {
         );
     }
 
-    /// For [IPred::Eq] and [IPred::Ne], canonicalise to favour references to constants on the RHS of
-    /// the addition.
+    /// Canonicalise to favour references to constants on the RHS of the comparison.
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
-        if (self.pred == IPred::Eq || self.pred == IPred::Ne)
-            && matches!(opt.inst(self.lhs), Inst::Const(_))
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
         {
             std::mem::swap(&mut self.lhs, &mut self.rhs);
+            self.pred = match self.pred {
+                IPred::Eq => IPred::Eq,
+                IPred::Ne => IPred::Ne,
+                IPred::Ugt => IPred::Ult,
+                IPred::Uge => IPred::Ule,
+                IPred::Ult => IPred::Ugt,
+                IPred::Ule => IPred::Uge,
+                IPred::Sgt => IPred::Slt,
+                IPred::Sge => IPred::Sle,
+                IPred::Slt => IPred::Sgt,
+                IPred::Sle => IPred::Sge,
+            };
         }
     }
 
@@ -4503,7 +4514,10 @@ mod test {
     use super::*;
     use crate::compile::j2::{
         hir_parser::str_to_mod,
-        opt::{OptT, fullopt::FullOpt},
+        opt::{
+            OptT,
+            fullopt::{FullOpt, OptOutcome, test::user_defined_opt_test},
+        },
         regalloc::{TestRegIter, test::TestReg},
     };
     use strum::{Display, EnumCount};
@@ -5706,6 +5720,66 @@ mod test {
           %0: i8 = arg [reg]
           %1: i8 = zext %0
         ",
+        );
+    }
+
+    #[test]
+    fn canonicalise() {
+        fn test_c(mod_s: &str, ptn: &str) {
+            user_defined_opt_test(
+                mod_s,
+                |opt, mut inst| {
+                    inst.canonicalise(&mut *opt);
+                    OptOutcome::Rewritten(inst)
+                },
+                |_, _, _| (),
+                |_, _| (),
+                ptn,
+            );
+        }
+
+        // icmp
+        test_c(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i1 = icmp eq %1, %0
+          %3: i1 = icmp ne %1, %0
+          %4: i1 = icmp ugt %1, %0
+          %5: i1 = icmp uge %1, %0
+          %6: i1 = icmp ult %1, %0
+          %7: i1 = icmp ule %1, %0
+          %8: i1 = icmp sgt %1, %0
+          %9: i1 = icmp sge %1, %0
+          %10: i1 = icmp slt %1, %0
+          %11: i1 = icmp sle %1, %0
+          blackbox %2
+          blackbox %3
+          blackbox %4
+          blackbox %5
+          blackbox %6
+          blackbox %7
+          blackbox %8
+          blackbox %9
+          blackbox %10
+          blackbox %11
+          term [%0]
+",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          %2: i1 = icmp eq %0, %1
+          %3: i1 = icmp ne %0, %1
+          %4: i1 = icmp ult %0, %1
+          %5: i1 = icmp ule %0, %1
+          %6: i1 = icmp ugt %0, %1
+          %7: i1 = icmp uge %0, %1
+          %8: i1 = icmp slt %0, %1
+          %9: i1 = icmp sle %0, %1
+          %10: i1 = icmp sgt %0, %1
+          %11: i1 = icmp sge %0, %1
+          ...
+",
         );
     }
 

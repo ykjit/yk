@@ -589,7 +589,7 @@ impl Eq for HashableConst {}
 
 /// What an optimisation has managed to make of a given input [Inst].
 #[derive(Debug)]
-pub(super) enum OptOutcome {
+pub enum OptOutcome {
     NotNeeded,
     /// The input [Inst] has been rewritten to a new [Inst].
     Rewritten(Inst),
@@ -638,7 +638,7 @@ pub(super) trait PassT {
 }
 
 /// The object passed to [PassT::feed] so that they can interact with the optimiser.
-pub(super) struct PassOpt<'a> {
+pub struct PassOpt<'a> {
     optinternal: &'a mut OptInternal,
     inner: &'a mut PassOptInner,
 }
@@ -770,7 +770,7 @@ impl PassOptInner {
 }
 
 /// The object passed to [PassT::inst_committed] so that they can interact with the optimiser.
-pub(super) struct CommitInstOpt<'a> {
+pub struct CommitInstOpt<'a> {
     inner: &'a OptInternal,
 }
 
@@ -930,7 +930,7 @@ pub(in crate::compile::j2) mod test {
     /// Take an input module string `mod_s` and run it through user-defined passes in the function
     /// `feed_f`. After each call of `feed_f`, `inst_committed` and/or `equiv_committed` will be
     /// called as appropriate.
-    pub(in crate::compile::j2::opt) fn user_defined_opt_test<F, G, H>(
+    pub(in crate::compile::j2) fn user_defined_opt_test<F, G, H>(
         mod_s: &str,
         feed_f: F,
         inst_committed_f: G,
