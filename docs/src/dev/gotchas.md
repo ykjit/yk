@@ -42,9 +42,6 @@ does its own symbol introspection, Yk may break it.
 
  - `.llvmbc`: LLVM bytecode for your interpreter. Used to construct traces.
    This is a standard LLVM section (but extended by Yk).
- - `.llvm_bb_addr_map`: The basic block address map. Used to map virtual
-   addresses back to LLVM IR blocks. This is a standard LLVM section (but
-   extended by Yk).
  - `.llvm_stackmaps`: Stackmap table. Used to identify the locations of live
    LLVM IR variables. This is a standard LLVM section (but extended by Yk).
 
