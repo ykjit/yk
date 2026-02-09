@@ -80,9 +80,6 @@ handle_arg() {
             # Split blocks after function calls.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-split-blocks-after-calls"
 
-            # Ensure we can unambiguously map back to LLVM IR blocks.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-block-disambiguate"
-
             # Ensure calls never appear in the entry block of a function.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-no-calls-in-entryblocks"
 
