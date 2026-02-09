@@ -18,12 +18,16 @@ mod strength_fold;
 /// An outward-facing optimiser, used by [super::aot_to_hir]. By definition this operates on one
 /// [Block] at a time, so it is both [ModLikeT] and [BlockLikeT].
 pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
-    /// The block is now complete and the optimiser should turn it into a [Block] and a set of
-    /// types (suitable for putting in a [Mod]).
+    /// The optimiser has now been fed the complete input and should turn it into: an entry
+    /// [Block]; and a set of types (suitable for putting in a [Mod]).
     fn build(self: Box<Self>) -> Result<(Block, IndexVec<TyIdx, Ty>), CompilationError>;
 
-    #[allow(dead_code)]
-    fn peel(self) -> (Block, Block);
+    /// The optimiser has now been fed the complete input and should turn it into: an entry
+    /// [Block]; (optionally) a peeled [Block]; and a set of types (suitable for putting in a
+    /// [Mod]).
+    fn build_with_peel(
+        self: Box<Self>,
+    ) -> Result<(Block, Option<Block>, IndexVec<TyIdx, Ty>), CompilationError>;
 
     /// Feed a non-[Ty::Void] instruction into the optimiser and return an [InstIdx]. The returned
     /// [InstIdx] may refer to a previously inserted instruction, as an optimiser might prove that
