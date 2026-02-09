@@ -99,10 +99,6 @@ handle_arg() {
             if [ "${YKB_TRACER}" = "hwt" ]; then
                 # HWT-specific flags.
                 #
-                # Emit a basicblock map section. Used by the HWT mapper.
-                OUTPUT="${OUTPUT} -Wl,--lto-basic-block-sections=labels"
-                # Use the yk extensions to the blockmap section.
-                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-extended-llvmbbaddrmap-section"
                 # Fallthrough optimisations distort block mapping.
                 OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-no-fallthrough"
             else
