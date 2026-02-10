@@ -800,6 +800,24 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         entry_vlocs: &[VarLocs<AB::Reg>],
         logging: bool,
     ) -> Result<u32, CompilationError> {
+        let logging_show = if logging {
+            let mut show = Vob::from_elem(false, b.insts_len());
+            // Always show all of the block's arguments.
+            for i in 0..entry_vlocs.len() {
+                show.set(i, true);
+            }
+            for (iidx, inst) in b.insts_iter(..).rev() {
+                if show[usize::from(iidx)] || inst.write_effects().interferes(Effects::all()) {
+                    show.set(usize::from(iidx), true);
+                    for op_iidx in inst.iter_iidxs(b) {
+                        show.set(usize::from(op_iidx), true);
+                    }
+                }
+            }
+            show
+        } else {
+            Vob::new()
+        };
         // These three variables are used to construct guard bodies: they're pulled out here
         // so that we only need to perform a single allocation per entry [Block]. See `Inst::Guard`
         // below to see how these are used.
@@ -1120,7 +1138,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                 }
             }
-            if logging {
+            if logging && logging_show[usize::from(iidx)] {
                 self.log_inst(b, iidx, "");
             }
         }
@@ -2525,16 +2543,12 @@ mod test {
             &[r#"
           controlpoint_loop_end
           ; term [%0]
-          ; %2: i1 = 0
-          ; %1: i8 = 4
           ; %0: i8 = 5
           controlpoint_peel_start 1
           ; term [%6]
           ; %6: i8 = 5
-          ; %5: i8 = 1
           i_guard: [%0]
           ; guard true, %2, [%0]
-          ; %3: i8 = 4
           ; %2: i1 = icmp eq %0, %1
           ; %1: i8 = 4
           arrange_fill: reg=R1, from=Undefined, dst_bitw=8, to=Undefined
