@@ -151,6 +151,35 @@
 //! A HIR module can be checked for well-formedness with [Mod::assert_well_formed]. Well-formedness
 //! is a lightweight check that HIR's basic rules have been adhered to: it does not guarantee that
 //! the trace is semantically well-formed.
+//!
+//!
+//! ## Pretty printing
+//!
+//! When a [Block] is pretty printed (with [Block::to_string]), it will elide instructions which
+//! can't possibly contribute to the output. [Note: in testing mode, it is (currently) possible for
+//! [Block]s not to end with a `Term` instruction. In that case, every instruction is printed,
+//! regardless.] For example this "input block":
+//!
+//! ```text
+//! %0: i8 = arg
+//! %1: i8 = 2
+//! %2: i8 = 2
+//! %3: add %0, %2
+//! term [%0, %3]
+//! ```
+//!
+//! will pretty print as;
+//!
+//! ```text
+//! %0: i8 = arg
+//! %2: i8 = 2
+//! %3: add %0, %2
+//! term [%0, %3]
+//! ```
+//!
+//! Note: just because an instruction is pretty-printed does not mean that a specific backend will
+//! generate code for that instruction! For example, [PtrAdd] instructions are often inlined into
+//! other instructions.
 
 use crate::{
     compile::{
@@ -181,6 +210,7 @@ use std::{
     sync::Arc,
 };
 use strum::{EnumCount, EnumDiscriminants};
+use vob::Vob;
 
 /// A representation of a "module like" object.
 ///
@@ -534,8 +564,39 @@ impl Block {
     }
 
     pub(super) fn to_string<Reg: RegT>(&self, m: &Mod<Reg>) -> String {
+        let show = if !matches!(self.insts.last().as_ref().unwrap(), Inst::Term(Term(_))) {
+            #[cfg(test)]
+            {
+                Vob::from_elem(true, self.insts_len())
+            }
+            #[cfg(not(test))]
+            {
+                panic!()
+            }
+        } else {
+            let mut show = Vob::from_elem(false, self.insts_len());
+            // Always show all of the block's arguments (some of which may be `Const`
+            // instructions!).
+            for i in 0..self.term_vars().len() {
+                show.set(i, true);
+            }
+            for (iidx, inst) in self.insts_iter(..).rev() {
+                if show[usize::from(iidx)] || inst.write_effects().interferes(Effects::all()) {
+                    show.set(usize::from(iidx), true);
+                    for op_iidx in inst.iter_iidxs(self) {
+                        show.set(usize::from(op_iidx), true);
+                    }
+                }
+            }
+            show
+        };
+
         let mut out = Vec::with_capacity(self.insts.len());
-        for (iidx, inst) in self.insts.iter_enumerated() {
+        for (iidx, inst) in self
+            .insts
+            .iter_enumerated()
+            .filter(|(iidx, _)| show[usize::from(*iidx)])
+        {
             let ty = m.ty(inst.tyidx(m));
             if ty == &Ty::Void {
                 out.push(inst.to_string(m, self));

@@ -1075,7 +1075,6 @@ pub(in crate::compile::j2) mod test {
         ",
             "
           %0: i8 = arg
-          %1: i8 = 1
           %2: i8 = 4
           %3: i1 = icmp eq %0, %2
           %4: i8 = 4
@@ -1085,7 +1084,6 @@ pub(in crate::compile::j2) mod test {
           blackbox %4
           blackbox %4
           term [%4]
-          ...
         ",
         );
 
@@ -1106,7 +1104,6 @@ pub(in crate::compile::j2) mod test {
             "
           %0: i8 = arg
           %1: i8 = arg
-          %2: i8 = 1
           %3: i8 = 4
           %4: i1 = icmp eq %0, %3
           %5: i1 = icmp eq %0, %1
@@ -1115,7 +1112,6 @@ pub(in crate::compile::j2) mod test {
           blackbox %3
           blackbox %3
           term [%3, %3]
-          ...
         ",
         );
     }
@@ -1135,12 +1131,10 @@ pub(in crate::compile::j2) mod test {
           %0: i8 = arg
           %1: i8 = 4
           %2: i1 = icmp eq %0, %1
-          %3: i8 = 4
           guard true, %2, []
           term [%1]
           ; peel
           %0: i8 = 4
-          %1: i1 = 1
           term [%0]
         ",
         );
@@ -1162,14 +1156,11 @@ pub(in crate::compile::j2) mod test {
           %2: i8 = load %0
           %3: i8 = 4
           %4: i1 = icmp eq %2, %3
-          %5: i8 = 4
           guard true, %4, []
           term [%0, %3]
           ; peel
           %0: ptr = arg
           %1: i8 = 4
-          %2: i8 = 4
-          %3: i1 = 1
           term [%0, %1]
         ",
         );
