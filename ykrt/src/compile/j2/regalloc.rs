@@ -85,11 +85,41 @@ pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
 }
 
 impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
-    pub(super) fn new(m: &'a Mod<AB::Reg>, b: &'a Block, stack_off: u32) -> Self {
+    pub(super) fn new(
+        m: &'a Mod<AB::Reg>,
+        b: &'a Block,
+        args_vlocs: &'a [VarLocs<AB::Reg>],
+        stack_off: u32,
+    ) -> Self {
+        // Before processing the main body of a trace, set the stack offset (if any) of entry
+        // variables, so that we don't end up unnecessarily spilling them twice during execution.
+        // This is an optimisation rather than a necessity.
+        let mut istates = index_vec![IState::None; b.insts_len()];
+        for (iidx, vlocs) in args_vlocs
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (InstIdx::from_usize(i), x))
+        {
+            for vloc in vlocs.iter() {
+                match vloc {
+                    VarLoc::Stack(stack_off) => {
+                        assert_eq!(istates[iidx], IState::None);
+                        istates[iidx] = IState::Stack(*stack_off);
+                    }
+                    VarLoc::StackOff(stack_off) => {
+                        assert_eq!(istates[iidx], IState::None);
+                        istates[iidx] = IState::StackOff(*stack_off);
+                    }
+                    VarLoc::Reg(_, _) => (),
+                    VarLoc::Const(_) => (),
+                }
+            }
+        }
+
         Self {
             m,
             b,
-            istates: index_vec![IState::None; b.insts_len()],
+            istates,
             rstates: RStates::new(),
             is_used: Vob::from_elem(false, b.insts_len()),
             stack_off,
@@ -118,32 +148,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             out.push(vlocs);
         }
         out
-    }
-
-    /// Before processing the main body of a trace, set the stack offset (if any) of entry
-    /// variables, so that we don't end up unnecessarily spilling them twice during execution.
-    /// This is an optimisation rather than a necessity.
-    pub(super) fn set_entry_stacks_at_end(&mut self, args_vlocs: &[VarLocs<AB::Reg>]) {
-        for (iidx, vlocs) in args_vlocs
-            .iter()
-            .enumerate()
-            .map(|(i, x)| (InstIdx::from_usize(i), x))
-        {
-            for vloc in vlocs.iter() {
-                match vloc {
-                    VarLoc::Stack(stack_off) => {
-                        assert_eq!(self.istates[iidx], IState::None);
-                        self.istates[iidx] = IState::Stack(*stack_off);
-                    }
-                    VarLoc::StackOff(stack_off) => {
-                        assert_eq!(self.istates[iidx], IState::None);
-                        self.istates[iidx] = IState::StackOff(*stack_off);
-                    }
-                    VarLoc::Reg(_, _) => (),
-                    VarLoc::Const(_) => (),
-                }
-            }
-        }
     }
 
     /// After processing the main body of a trace, set the [VarLocs]s of the entry variables.
@@ -2540,7 +2544,7 @@ pub(crate) mod test {
         // output: they may need to be adjusted if the algorithm produces different output.
 
         // A direct cycle which must be broken.
-        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
+        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, &[], 0);
         let mut ractions = RegActions {
             unspills: Vec::new(),
             fill_changes: Vec::new(),
@@ -2575,7 +2579,7 @@ pub(crate) mod test {
         );
 
         // A direct cycle which must be broken
-        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
+        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, &[], 0);
         let mut ractions = RegActions {
             unspills: Vec::new(),
             fill_changes: Vec::new(),
@@ -2624,7 +2628,7 @@ pub(crate) mod test {
         );
 
         // A non-cycle, but which must be carefully ordered to avoid overwritings.
-        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, 0);
+        let ra = RegAlloc::<TestHirToAsm>::new(&m, b, &[], 0);
         let mut ractions = RegActions {
             unspills: Vec::new(),
             fill_changes: Vec::new(),
