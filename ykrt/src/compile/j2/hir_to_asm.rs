@@ -162,13 +162,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 .unwrap();
 
                 let (rec, _) = aot_smaps.get(usize::try_from(entry_safepoint.id).unwrap());
-                let mut entry_vlocs = rec
+                let mut args_vlocs = rec
                     .live_vals
                     .iter()
                     .map(|smap| AB::smp_to_vloc(smap, RegFill::Undefined))
                     .collect::<Vec<_>>();
 
-                for vlocs in entry_vlocs.iter_mut() {
+                for vlocs in args_vlocs.iter_mut() {
                     vlocs.retain(|x| {
                         if let VarLoc::Reg(reg, _fill) = x
                             && reg.is_caller_saved()
@@ -186,17 +186,17 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let (post_stack_label, entry_stack_off) = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
                         let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
-                        ra.set_entry_stacks_at_end(&entry_vlocs);
+                        ra.set_entry_stacks_at_end(&args_vlocs);
                         self.be.star_coupler_end(tgt_ctr)?;
                         ra.set_term_vlocs(
                             &mut self.be,
                             entry,
                             false,
-                            &entry_vlocs,
-                            tgt_ctr.entry_vlocs(),
+                            &args_vlocs,
+                            tgt_ctr.args_vlocs(),
                         )?;
                         let entry_stack_off =
-                            self.p_block(entry, Some(entry), ra, &entry_vlocs, logging)?;
+                            self.p_block(entry, Some(entry), ra, &args_vlocs, logging)?;
                         let post_stack_label = self.be.controlpoint_coupler_or_return_start(
                             entry_stack_off - base_stack_off,
                         )?;
@@ -204,10 +204,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                     TraceEnd::Loop { entry, peel } => match peel {
                         Some(peel) => {
-                            assert_eq!(entry_vlocs.len(), peel.term_vars().len());
+                            assert_eq!(args_vlocs.len(), peel.term_vars().len());
 
                             let mut ra = RegAlloc::<AB>::new(self.m, peel, base_stack_off);
-                            let peel_vlocs = self.peel_vlocs(&entry_vlocs, peel);
+                            let peel_vlocs = self.peel_vlocs(&args_vlocs, peel);
                             ra.set_entry_stacks_at_end(&peel_vlocs);
                             let peel_label = self.be.controlpoint_loop_end()?;
                             ra.set_term_vlocs(&mut self.be, peel, true, &peel_vlocs, &peel_vlocs)?;
@@ -220,16 +220,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             }
 
                             let mut ra = RegAlloc::<AB>::new(self.m, entry, peel_stack_off);
-                            ra.set_entry_stacks_at_end(&entry_vlocs);
-                            ra.set_term_vlocs(
-                                &mut self.be,
-                                entry,
-                                true,
-                                &entry_vlocs,
-                                &peel_vlocs,
-                            )?;
+                            ra.set_entry_stacks_at_end(&args_vlocs);
+                            ra.set_term_vlocs(&mut self.be, entry, true, &args_vlocs, &peel_vlocs)?;
                             let entry_stack_off =
-                                self.p_block(entry, Some(entry), ra, &entry_vlocs, logging)?;
+                                self.p_block(entry, Some(entry), ra, &args_vlocs, logging)?;
                             self.be.controlpoint_loop_start(
                                 iter0_label.clone(),
                                 entry_stack_off - base_stack_off,
@@ -238,17 +232,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         }
                         None => {
                             let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
-                            ra.set_entry_stacks_at_end(&entry_vlocs);
+                            ra.set_entry_stacks_at_end(&args_vlocs);
                             let iter0_label = self.be.controlpoint_loop_end()?;
-                            ra.set_term_vlocs(
-                                &mut self.be,
-                                entry,
-                                true,
-                                &entry_vlocs,
-                                &entry_vlocs,
-                            )?;
+                            ra.set_term_vlocs(&mut self.be, entry, true, &args_vlocs, &args_vlocs)?;
                             let entry_stack_off =
-                                self.p_block(entry, Some(entry), ra, &entry_vlocs, logging)?;
+                                self.p_block(entry, Some(entry), ra, &args_vlocs, logging)?;
                             self.be.controlpoint_loop_start(
                                 iter0_label.clone(),
                                 entry_stack_off - base_stack_off,
@@ -261,12 +249,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         exit_safepoint,
                     } => {
                         let mut ra = RegAlloc::<AB>::new(self.m, entry, base_stack_off);
-                        ra.set_entry_stacks_at_end(&entry_vlocs);
+                        ra.set_entry_stacks_at_end(&args_vlocs);
                         assert!(entry.term_vars().is_empty());
                         self.be.star_return_end(exit_safepoint)?;
-                        ra.set_term_vlocs(&mut self.be, entry, false, &entry_vlocs, &[])?;
+                        ra.set_term_vlocs(&mut self.be, entry, false, &args_vlocs, &[])?;
                         let entry_stack_off =
-                            self.p_block(entry, Some(entry), ra, &entry_vlocs, logging)?;
+                            self.p_block(entry, Some(entry), ra, &args_vlocs, logging)?;
                         let post_stack_label = self.be.controlpoint_coupler_or_return_start(
                             entry_stack_off - base_stack_off,
                         )?;
@@ -285,7 +273,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let (buf, log, mut labels_off) = self.be.build_exe(logging, &all_labels)?;
                 let sidetrace_off = labels_off.pop().unwrap();
                 let trace_start = J2TraceStart::ControlPoint {
-                    entry_vlocs,
+                    args_vlocs,
                     entry_safepoint,
                     stack_off: entry_stack_off,
                     sidetrace_off,
@@ -295,22 +283,22 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             TraceStart::Guard {
                 src_ctr,
                 src_gidx: src_gridx,
-                entry_vlocs,
+                args_vlocs,
             } => {
                 let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
                 let entry_stack_off = match &self.m.trace_end {
                     TraceEnd::Coupler { entry, tgt_ctr } => {
                         let mut ra = RegAlloc::<AB>::new(self.m, entry, src_stack_off);
-                        ra.set_entry_stacks_at_end(entry_vlocs);
+                        ra.set_entry_stacks_at_end(args_vlocs);
                         self.be.star_coupler_end(tgt_ctr)?;
                         ra.set_term_vlocs(
                             &mut self.be,
                             entry,
                             false,
-                            entry_vlocs,
-                            tgt_ctr.entry_vlocs(),
+                            args_vlocs,
+                            tgt_ctr.args_vlocs(),
                         )?;
-                        self.p_block(entry, Some(entry), ra, entry_vlocs, logging)?
+                        self.p_block(entry, Some(entry), ra, args_vlocs, logging)?
                     }
                     TraceEnd::Loop { .. } => unreachable!(),
                     TraceEnd::Return {
@@ -318,10 +306,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         exit_safepoint,
                     } => {
                         let mut ra = RegAlloc::<AB>::new(self.m, entry, src_stack_off);
-                        ra.set_entry_stacks_at_end(entry_vlocs);
+                        ra.set_entry_stacks_at_end(args_vlocs);
                         self.be.star_return_end(exit_safepoint)?;
-                        ra.set_term_vlocs(&mut self.be, entry, false, entry_vlocs, &[])?;
-                        self.p_block(entry, Some(entry), ra, entry_vlocs, logging)?
+                        ra.set_term_vlocs(&mut self.be, entry, false, args_vlocs, &[])?;
+                        self.p_block(entry, Some(entry), ra, args_vlocs, logging)?
                     }
                     #[cfg(test)]
                     TraceEnd::Test { .. } | TraceEnd::TestPeel { .. } => todo!(),
@@ -400,17 +388,17 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     /// they do not have to end in a [Term] instruction.
     #[cfg(test)]
     pub(super) fn build_test(mut self) -> Result<AB::BuildTest, CompilationError> {
-        let TraceEnd::Test { entry_vlocs, block } = &self.m.trace_end else {
+        let TraceEnd::Test { args_vlocs, block } = &self.m.trace_end else {
             panic!()
         };
         // Assemble the body
         let mut ra = RegAlloc::<AB>::new(self.m, block, 0);
-        ra.set_entry_stacks_at_end(entry_vlocs);
+        ra.set_entry_stacks_at_end(args_vlocs);
         // Currently we don't force tests to end with [Term] instructions.
         if let Inst::Term(_) = block.insts.last().unwrap() {
-            ra.set_term_vlocs(&mut self.be, block, true, entry_vlocs, entry_vlocs)?;
+            ra.set_term_vlocs(&mut self.be, block, true, args_vlocs, args_vlocs)?;
         }
-        let stack_off = self.p_block(block, Some(block), ra, entry_vlocs, true)?;
+        let stack_off = self.p_block(block, Some(block), ra, args_vlocs, true)?;
         self.be.guard_coupler_start(stack_off);
 
         self.asm_guards(true)?;
@@ -423,7 +411,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     #[cfg(test)]
     pub(super) fn build_test_peel(mut self) -> Result<AB::BuildTest, CompilationError> {
         let TraceEnd::TestPeel {
-            entry_vlocs,
+            args_vlocs,
             entry,
             peel,
         } = &self.m.trace_end
@@ -432,7 +420,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         };
         // Assemble the body
         let mut ra = RegAlloc::<AB>::new(self.m, peel, 0);
-        let peel_vlocs = self.peel_vlocs(entry_vlocs, peel);
+        let peel_vlocs = self.peel_vlocs(args_vlocs, peel);
         ra.set_entry_stacks_at_end(&peel_vlocs);
         let peel_label = self.be.controlpoint_loop_end()?;
         ra.set_term_vlocs(&mut self.be, peel, true, &peel_vlocs, &peel_vlocs)?;
@@ -440,9 +428,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         let iter0_label = self.be.controlpoint_peel_start(peel_label);
 
         let mut ra = RegAlloc::<AB>::new(self.m, entry, peel_stack_off);
-        ra.set_entry_stacks_at_end(entry_vlocs);
-        ra.set_term_vlocs(&mut self.be, entry, true, entry_vlocs, &peel_vlocs)?;
-        let entry_stack_off = self.p_block(entry, Some(entry), ra, entry_vlocs, true)?;
+        ra.set_entry_stacks_at_end(args_vlocs);
+        ra.set_term_vlocs(&mut self.be, entry, true, args_vlocs, &peel_vlocs)?;
+        let entry_stack_off = self.p_block(entry, Some(entry), ra, args_vlocs, true)?;
         self.be
             .controlpoint_loop_start(iter0_label.clone(), entry_stack_off);
 
@@ -452,18 +440,18 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     }
 
     /// Return decent (we can probably never get perfect!) VarLocs for the peeled block.
-    fn peel_vlocs(&self, entry_vlocs: &[VarLocs<AB::Reg>], peel: &Block) -> Vec<VarLocs<AB::Reg>> {
+    fn peel_vlocs(&self, args_vlocs: &[VarLocs<AB::Reg>], peel: &Block) -> Vec<VarLocs<AB::Reg>> {
         // The challenge we have is that we can't know exactly what would be best until we've
         // generated code, at which point it's far too late! Fortunately we can do some things that
         // are definite wins and some things that are likely to be wins.
         //
-        // We start by trimming `entry_vlocs` down so that (a) constants have no VarLocs (a
+        // We start by trimming `args_vlocs` down so that (a) constants have no VarLocs (a
         // definite win) (b) we get rid of any register allocations coming from LLVM where there is
         // a non-register in the VarLocs (we might not even use some of these variables in the
         // peeled loop, so we don't want to waste a register on them). Then we use a
         // [PeelRegsBuilderT] object to make a reasonable stab at initial register allocations for
         // the vlocs.
-        let mut peel_vlocs = entry_vlocs
+        let mut peel_vlocs = args_vlocs
             .iter()
             .enumerate()
             .map(|(iidx, vlocs)| {
@@ -487,7 +475,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
         let mut prb = AB::peel_regs_builder();
         // We now have to make sure we don't allocate the same register twice.
-        // There may still be registers we couldn't get rid of in `entry_vlocs`
+        // There may still be registers we couldn't get rid of in `args_vlocs`
         // (they may not have associated `Stack` / `StackOff`s) so enumerate
         // those.
         for vlocs in &peel_vlocs {
@@ -802,13 +790,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         b: &Block,
         b_self: Option<&'a Block>,
         mut ra: RegAlloc<AB>,
-        entry_vlocs: &[VarLocs<AB::Reg>],
+        args_vlocs: &[VarLocs<AB::Reg>],
         logging: bool,
     ) -> Result<u32, CompilationError> {
         let logging_show = if logging {
             let mut show = Vob::from_elem(false, b.insts_len());
             // Always show all of the block's arguments.
-            for i in 0..entry_vlocs.len() {
+            for i in 0..args_vlocs.len() {
                 show.set(i, true);
             }
             for (iidx, inst) in b.insts_iter(..).rev() {
@@ -1151,10 +1139,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // We deal with [Arg] instructions specially: they're best thought of as
         // pseudo-instructions in the sense that they define variables but don't directly
         // generate code themselves.
-        ra.set_entry_vlocs_at_start(&mut self.be, entry_vlocs);
+        ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
         if logging {
             for (iidx, _inst) in insts_iter {
-                let pp_vlocs = entry_vlocs[usize::from(iidx)]
+                let pp_vlocs = args_vlocs[usize::from(iidx)]
                     .iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()

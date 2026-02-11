@@ -118,9 +118,9 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         &self.guards[gidx]
     }
 
-    pub(super) fn entry_vlocs(&self) -> &[VarLocs<Reg>] {
+    pub(super) fn args_vlocs(&self) -> &[VarLocs<Reg>] {
         match &self.trace_start {
-            J2TraceStart::ControlPoint { entry_vlocs, .. } => entry_vlocs,
+            J2TraceStart::ControlPoint { args_vlocs, .. } => args_vlocs,
             J2TraceStart::Guard { stack_off: _ } => todo!(),
         }
     }
@@ -215,17 +215,17 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
 pub(super) enum J2TraceStart<Reg: RegT> {
     ControlPoint {
         entry_safepoint: &'static DeoptSafepoint,
-        /// Every entry in `entry_safepoint.lives` will have an entry in `entry_vlocs`, in order.
-        /// In other words, `entry_safepoint.lives.iter().zip(entry_vlocs.iter())` is guaranteed to
+        /// Every entry in `entry_safepoint.lives` will have an entry in `args_vlocs`, in order.
+        /// In other words, `entry_safepoint.lives.iter().zip(args_vlocs.iter())` is guaranteed to
         /// work as expected.
         ///
         /// However, some variables will have empty `VarLocs`. In other words, while this coupler
         /// trace guarantees to accept variables being set in accordance with
         /// `entry_safepoint.lives`, it is also happy with a non-strict subset of those. That means
         /// that other traces jumping to this coupler trace only need to deal with the subset
-        /// recorded in `entry_vlocs` (i.e. they can ignore the superset in
+        /// recorded in `args_vlocs` (i.e. they can ignore the superset in
         /// `entry_safepoint.lives`).
-        entry_vlocs: Vec<VarLocs<Reg>>,
+        args_vlocs: Vec<VarLocs<Reg>>,
         stack_off: u32,
         /// The offset into the compiled trace that sidetraces should jump to.
         sidetrace_off: usize,
@@ -354,7 +354,7 @@ mod tests {
     fn test_get_trace_name_control_loop() {
         let start = J2TraceStart::ControlPoint::<Reg> {
             entry_safepoint: &TEST_DEOPT_SAFEPOINT,
-            entry_vlocs: vec![],
+            args_vlocs: vec![],
             stack_off: 0,
             sidetrace_off: 0,
         };
@@ -373,7 +373,7 @@ mod tests {
         let trid = TraceId::from_u64(42);
         let start = J2TraceStart::ControlPoint::<Reg> {
             entry_safepoint: &TEST_DEOPT_SAFEPOINT,
-            entry_vlocs: vec![],
+            args_vlocs: vec![],
             stack_off: 0,
             sidetrace_off: 0,
         };

@@ -838,7 +838,7 @@ pub(in crate::compile::j2) mod test {
     pub(in crate::compile::j2) fn str_to_peel_mod<Reg: RegT>(mod_s: &str) -> Mod<Reg> {
         let m = str_to_mod::<Reg>(mod_s);
         let TraceEnd::Test {
-            entry_vlocs,
+            args_vlocs,
             block: Block {
                 insts,
                 guard_extras,
@@ -867,7 +867,7 @@ pub(in crate::compile::j2) mod test {
         // instruction to the optimiser.
         let mut opt_map = IndexVec::with_capacity(insts.len());
         let mut insts_iter = insts.into_iter();
-        for _ in 0..entry_vlocs.len() {
+        for _ in 0..args_vlocs.len() {
             opt_map.push(opt_map.len_idx());
             fopt.feed_arg(insts_iter.next().unwrap().clone()).unwrap();
         }
@@ -899,7 +899,7 @@ pub(in crate::compile::j2) mod test {
             trid: m.trid,
             trace_start: TraceStart::Test,
             trace_end: TraceEnd::TestPeel {
-                entry_vlocs: entry_vlocs.to_owned(),
+                args_vlocs: args_vlocs.to_owned(),
                 entry,
                 peel: peel.unwrap(),
             },
@@ -944,7 +944,7 @@ pub(in crate::compile::j2) mod test {
         let m = str_to_mod::<TestReg>(mod_s);
         let mut fopt = Box::new(FullOpt::new());
         let TraceEnd::Test {
-            entry_vlocs,
+            args_vlocs,
             block: Block {
                 insts,
                 guard_extras,
@@ -1019,7 +1019,7 @@ pub(in crate::compile::j2) mod test {
         let m = Mod {
             trid: m.trid,
             trace_start: TraceStart::Test,
-            trace_end: TraceEnd::Test { entry_vlocs, block },
+            trace_end: TraceEnd::Test { args_vlocs, block },
             tys,
             tyidx_int1,
             tyidx_ptr0,

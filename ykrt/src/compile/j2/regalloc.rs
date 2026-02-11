@@ -123,8 +123,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// Before processing the main body of a trace, set the stack offset (if any) of entry
     /// variables, so that we don't end up unnecessarily spilling them twice during execution.
     /// This is an optimisation rather than a necessity.
-    pub(super) fn set_entry_stacks_at_end(&mut self, entry_vlocs: &[VarLocs<AB::Reg>]) {
-        for (iidx, vlocs) in entry_vlocs
+    pub(super) fn set_entry_stacks_at_end(&mut self, args_vlocs: &[VarLocs<AB::Reg>]) {
+        for (iidx, vlocs) in args_vlocs
             .iter()
             .enumerate()
             .map(|(i, x)| (InstIdx::from_usize(i), x))
@@ -147,17 +147,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     }
 
     /// After processing the main body of a trace, set the [VarLocs]s of the entry variables.
-    pub(super) fn set_entry_vlocs_at_start(
-        &mut self,
-        be: &mut AB,
-        entry_vlocs: &[VarLocs<AB::Reg>],
-    ) {
+    pub(super) fn set_args_vlocs_at_start(&mut self, be: &mut AB, args_vlocs: &[VarLocs<AB::Reg>]) {
         // In essence, this is a simple, special case of normal register allocation. First we work
         // out what the rstate after trace entry will be, diff that, and generate the appropriate
         // code.
 
         let mut in_rstate = RStates::<AB::Reg>::new();
-        for (iidx, vlocs) in entry_vlocs
+        for (iidx, vlocs) in args_vlocs
             .iter()
             .enumerate()
             .map(|(x, y)| (InstIdx::from(x), y))
@@ -184,7 +180,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // now need to find all `arg` instructions that we need to spill i.e. those where (1) they
         // aren't spilt coming into the trace (2) during register allocation we've marked them down
         // as needing spilling.
-        for (iidx, vlocs) in entry_vlocs
+        for (iidx, vlocs) in args_vlocs
             .iter()
             .enumerate()
             .map(|(x, y)| (InstIdx::from(x), y))
@@ -209,7 +205,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         be: &mut AB,
         b: &Block,
         is_loop: bool,
-        all_entry_vlocs: &[VarLocs<AB::Reg>],
+        all_args_vlocs: &[VarLocs<AB::Reg>],
         all_term_vlocs: &[VarLocs<AB::Reg>],
     ) -> Result<(), CompilationError> {
         assert_eq!(b.term_vars().len(), all_term_vlocs.len());
@@ -309,8 +305,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 }
                 match vloc {
                     VarLoc::Stack(to_stack_off) => {
-                        if usize::from(*iidx) < all_entry_vlocs.len()
-                            && let Some(VarLoc::Stack(from_stack_off)) = all_entry_vlocs
+                        if usize::from(*iidx) < all_args_vlocs.len()
+                            && let Some(VarLoc::Stack(from_stack_off)) = all_args_vlocs
                                 [usize::from(*iidx)]
                             .iter()
                             .find(|vloc| matches!(vloc, VarLoc::Stack(_)))

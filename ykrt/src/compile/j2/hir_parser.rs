@@ -100,7 +100,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
             self.externs.insert(name, tyidx);
         }
 
-        let mut entry_vlocs = Vec::new();
+        let mut args_vlocs = Vec::new();
         let mut guards = IndexVec::new();
         let mut testregiter = Reg::iter_test_regs();
         let mut autoregused = false;
@@ -186,7 +186,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                 AstInst::Arg { local, ty, vlocs } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
-                    entry_vlocs.push(self.p_vlocs_with_auto(
+                    args_vlocs.push(self.p_vlocs_with_auto(
                         &mut autoregused,
                         &mut manualregused,
                         &mut testregiter,
@@ -891,7 +891,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
         let m = Mod {
             trid: TraceId::testing(),
             trace_start: TraceStart::Test,
-            trace_end: TraceEnd::Test { entry_vlocs, block },
+            trace_end: TraceEnd::Test { args_vlocs, block },
             tys: self.tys,
             tyidx_int1: self.tyidx_int1,
             tyidx_ptr0: self.tyidx_ptr0,
