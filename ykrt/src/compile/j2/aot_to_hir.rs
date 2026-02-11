@@ -1234,6 +1234,10 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let cnd_bid = self.ta_to_bid(&ta).unwrap();
             self.check_correct_successor(prev_bid, cnd_bid)?;
 
+            if recurse == 0 && cnd_bid == tgt_bid {
+                break;
+            }
+
             if cnd_bid.funcidx() == tgt_bid.funcidx() {
                 if cnd_bid.is_entry() {
                     assert!(!self.am.bblock(&cnd_bid).is_return());
@@ -1241,10 +1245,6 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 } else if self.am.bblock(&cnd_bid).is_return() {
                     assert!(recurse > 0);
                     recurse -= 1;
-                }
-
-                if recurse == 0 && cnd_bid == tgt_bid {
-                    break;
                 }
             }
 

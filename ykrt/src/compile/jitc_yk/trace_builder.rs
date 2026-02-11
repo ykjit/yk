@@ -1774,20 +1774,6 @@ impl TraceBuilder {
                                 "irregular control flow detected (outline recursion)".into(),
                             ));
                         }
-                        if bid.funcidx() == tgtbid.funcidx() {
-                            // We are inside the same function that started outlining.
-                            if bid.is_entry() {
-                                // We are recursing into the function that started
-                                // outlining.
-                                self.recursion_count += 1;
-                            }
-                            if self.aot_mod.bblock(&bid).is_return() {
-                                // We are returning from the function that started
-                                // outlining. This may be one of multiple inlined calls, so
-                                // we may not be done outlining just yet.
-                                self.recursion_count = self.recursion_count.checked_sub(1).unwrap();
-                            }
-                        }
                         if self.recursion_count == 0 && bid == *tgtbid {
                             // We've reached the successor block of the function/block that
                             // started outlining. We are done and can continue processing
@@ -1797,6 +1783,22 @@ impl TraceBuilder {
                             // no longer needed.
                             self.last_interp_call = None;
                         } else {
+                            // Carry on outlining.
+                            if bid.funcidx() == tgtbid.funcidx() {
+                                // We are inside the same function that started outlining.
+                                if bid.is_entry() {
+                                    // We are recursing into the function that started
+                                    // outlining.
+                                    self.recursion_count += 1;
+                                }
+                                if self.aot_mod.bblock(&bid).is_return() {
+                                    // We are returning from the function that started
+                                    // outlining. This may be one of multiple inlined calls, so
+                                    // we may not be done outlining just yet.
+                                    self.recursion_count =
+                                        self.recursion_count.checked_sub(1).unwrap();
+                                }
+                            }
                             // We are outlining so just skip this block. However, we still need to
                             // process promoted values to make sure we've processed all promotion
                             // data and haven't messed up the mapping.
