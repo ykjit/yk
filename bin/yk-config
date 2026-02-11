@@ -95,20 +95,13 @@ handle_arg() {
             # Don't optimise functions by changing their calling convention.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-dont-opt-func-abi"
 
-            # Tracer-specific flags.
-            if [ "${YKB_TRACER}" = "hwt" ]; then
-                # HWT-specific flags.
-                #
-                # Fallthrough optimisations distort block mapping.
-                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-no-fallthrough"
-            else
-                # SWT-specific flags.
-                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
-                # Wrap promote calls with TLS check to skip when not tracing.
-                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-conditional-promote-calls"
-                # Make optimised clones of functions.
-                OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"
-            fi
+            # Enable software trace recorder calls.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
+            # Wrap promote calls with TLS check to skip when not tracing.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-conditional-promote-calls"
+            # Make optimised clones of functions.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-module-clone"
+
             # Use direct calls (bypassing PLT) for yk patchpoint functions.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-patchpoint-direct-functions-call"
             # Disable backend optimisations that Yk can't handle by adding the
