@@ -65,9 +65,6 @@ handle_arg() {
             # Add wrapper for `pthread_exit`.
             OUTPUT="${OUTPUT} -Wl,--wrap=pthread_exit"
 
-            # Interferes with the JIT's inlining stack.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-disable-tail-call-codegen"
-
             # Ensure control point is patched.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-patch-control-point"
 
