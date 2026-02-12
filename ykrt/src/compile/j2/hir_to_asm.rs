@@ -376,7 +376,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 "".to_owned()
             };
             log_ir(&format!(
-                "--- Begin jit-asm{ds} ---\n{}\n--- End jit-asm ---\n",
+                "--- Begin jit-asm{ds} ---\n; {}\n{}\n--- End jit-asm ---\n",
+                self.m
+                    .json_info()
+                    .split("\n")
+                    .collect::<Vec<_>>()
+                    .join("\n; "),
                 log.unwrap()
             ));
         }

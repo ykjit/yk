@@ -52,7 +52,7 @@
 //! prove that instruction A is equivalent to instruction B, that knowledge is only correct for
 //! instructions at positions > X. In other words, that knowledge is correctly iff one has
 //! consecutively executed all instructions (notably guards!) up to, and including, X. After
-//! optimisation is complete, and a HIR [Module] is created, we throw away all notions of
+//! optimisation is complete, and a HIR [Mod] is created, we throw away all notions of
 //! equivalence: they are by definition baked into the optimised trace.
 //!
 //! Equivalence is identified in two distinct ways:

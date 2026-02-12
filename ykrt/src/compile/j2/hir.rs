@@ -338,31 +338,76 @@ impl<Reg: RegT> Mod<Reg> {
             }
         }
     }
+
+    /// Return information about this trace in JSON format. Exactly what's contained in the output
+    /// is intentionally underspecified: we may change this arbitrarily in the future.
+    pub fn json_info(&self) -> String {
+        let mut out = vec![
+            "{".to_owned(),
+            format!("  \"trid\": \"{}\",", self.trid),
+            "  \"start\": {".to_owned(),
+        ];
+        match &self.trace_start {
+            TraceStart::ControlPoint { .. } => out.push("    \"kind\": \"ControlPoint\"".to_owned()),
+            TraceStart::Guard {
+                src_ctr, src_gidx, ..
+            } => out.push(format!(
+                "    \"kind\": \"Guard\",\n    \"src_trid\": \"{}\",\n    \"gidx\": \"{src_gidx:?}\"",
+                src_ctr.trid
+            )),
+            #[cfg(test)]
+            TraceStart::Test => out.push("    \"kind\": \"Test\"".to_owned()),
+        }
+        out.push("  },\n  \"end\": {".to_owned());
+        match &self.trace_end {
+            TraceEnd::Coupler { tgt_ctr, .. } => out.push(format!(
+                "    \"kind\": \"Coupler\",\n    \"tgt_trid\": \"{}\"",
+                tgt_ctr.trid
+            )),
+            TraceEnd::Loop { .. } => out.push("    \"kind\": \"Loop\"".to_owned()),
+            TraceEnd::Return { .. } => out.push("    \"kind\": \"Return\"".to_owned()),
+            #[cfg(test)]
+            TraceEnd::Test { .. } => out.push("    \"kind\": \"Test\"".to_owned()),
+            #[cfg(test)]
+            TraceEnd::TestPeel { .. } => out.push("    \"kind\": \"TestPeel\"".to_owned()),
+        }
+        out.push("  }\n}".to_owned());
+        out.join("\n")
+    }
 }
 
 impl<Reg: RegT> Display for Mod<Reg> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let json_info = format!(
+            "; {}",
+            self.json_info()
+                .split("\n")
+                .collect::<Vec<_>>()
+                .join("\n; ")
+        );
         match &self.trace_end {
-            TraceEnd::Coupler { entry, .. } => write!(f, "{}", entry.to_string(self)),
+            TraceEnd::Coupler { entry, .. } => write!(f, "{json_info}\n{}", entry.to_string(self)),
             TraceEnd::Loop { entry, peel, .. } => match peel {
                 Some(x) => write!(
                     f,
-                    "{}\n; peel\n{}",
+                    "{json_info}\n{}\n; peel\n{}",
                     entry.to_string(self),
                     x.to_string(self)
                 ),
-                None => write!(f, "{}", entry.to_string(self)),
+                None => write!(f, "{json_info}\n{}", entry.to_string(self)),
             },
-            TraceEnd::Return { entry, .. } => write!(f, "{}", entry.to_string(self)),
+            TraceEnd::Return { entry, .. } => write!(f, "{json_info}\n{}", entry.to_string(self)),
             #[cfg(test)]
             TraceEnd::Test { block, .. } => write!(f, "{}", block.to_string(self)),
             #[cfg(test)]
-            TraceEnd::TestPeel { entry, peel, .. } => write!(
-                f,
-                "{}\n; peel\n{}",
-                entry.to_string(self),
-                peel.to_string(self)
-            ),
+            TraceEnd::TestPeel { entry, peel, .. } => {
+                write!(
+                    f,
+                    "{}\n; peel\n{}",
+                    entry.to_string(self),
+                    peel.to_string(self)
+                )
+            }
         }
     }
 }
