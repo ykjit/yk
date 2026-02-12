@@ -176,7 +176,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         let mut ractions = RegActions::new();
-        self.rstate_diff_to_action(&in_rstate, &mut ractions);
+        self.rstate_diff_to_action(be, &mut in_rstate, &mut ractions, false);
         self.toposort_distinct_copies(&mut ractions).unwrap();
         self.asm_ractions(be, &ractions).unwrap();
 
@@ -818,7 +818,19 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // unspill others, to get into the right state for *n:out*. First we calculate a simple
         // "diff", which will happily give us register copies that overwrite each other...
         let mut ractions = RegActions::new();
-        self.rstate_diff_to_action(&n_out, &mut ractions);
+        for (reg, cnstr) in allocs.iter().cloned().zip(cnstrs.iter_mut()) {
+            match cnstr {
+                RegCnstr::Clobber { .. }
+                | RegCnstr::Input { clobber: true, .. }
+                | RegCnstr::InputOutput { .. }
+                | RegCnstr::Output { .. }
+                | RegCnstr::Cast { .. }
+                | RegCnstr::Temp { .. } => ractions.clobbers.push(reg),
+                RegCnstr::Input { clobber: false, .. } => (),
+                RegCnstr::KeepAlive { .. } => (),
+            }
+        }
+        self.rstate_diff_to_action(be, &mut n_out, &mut ractions, true);
         // ...so we then topologically sort the distinct copies, which will break any cycles.
         self.toposort_distinct_copies(&mut ractions)?;
         // We now have an [RegActions] which we can directly generate code from.
@@ -1200,11 +1212,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
     /// Given a new [RStates], produce a [RegActions] which is a diff telling us how to get from
     /// the current [self.rstates] to the new `src_rstates` (bearing in mind "src" and "dst" are
-    /// relative to reverse code generation).
+    /// relative to reverse code generation). Set `moveable` to true if values can be moved rather
+    /// than spilled (assuming there are spare registers).
     fn rstate_diff_to_action(
         &self,
-        src_rstates: &RStates<AB::Reg>,
+        be: &mut AB,
+        src_rstates: &mut RStates<AB::Reg>,
         ractions: &mut RegActions<AB::Reg>,
+        moveable: bool,
     ) {
         'a: for (dst_reg, dst_rstate) in self.rstates.iter().filter(|(_, x)| !x.iidxs.is_empty()) {
             if src_rstates.iidxs(dst_reg) == &dst_rstate.iidxs {
@@ -1242,6 +1257,30 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             dst_fill: dst_rstate.fill,
                         });
                         continue 'a;
+                    }
+                }
+
+                if moveable {
+                    for (src_reg, src_rstate) in src_rstates.iter_mut() {
+                        if src_rstate.iidxs.is_empty()
+                            && !ractions.clobbers.contains(&src_reg)
+                            && dst_rstate
+                                .iidxs
+                                .iter()
+                                .all(|x| be.iter_possible_regs(self.b, *x).any(|y| src_reg == y))
+                        {
+                            assert!(!ractions.unspills.iter().any(|x| x.reg == dst_reg));
+                            *src_rstate = dst_rstate.clone();
+                            let max_bitw = iidxs_maxbitw(self.m, self.b, &dst_rstate.iidxs);
+                            ractions.distinct_copies.push(RegCopy {
+                                bitw: max_bitw,
+                                src_reg,
+                                src_fill: dst_rstate.fill,
+                                dst_reg,
+                                dst_fill: dst_rstate.fill,
+                            });
+                            continue 'a;
+                        }
                     }
                 }
 
@@ -1736,6 +1775,8 @@ struct RegActions<Reg: RegT> {
     distinct_copies: Vec<RegCopy<Reg>>,
     /// An unordered set of instructions .
     spills: Vec<RegSpill>,
+    /// Which registers will be clobbered at the end of this instruction?
+    clobbers: Vec<Reg>,
 }
 
 impl<Reg: RegT> RegActions<Reg> {
@@ -1745,6 +1786,7 @@ impl<Reg: RegT> RegActions<Reg> {
             fill_changes: Vec::new(),
             distinct_copies: Vec::new(),
             spills: Vec::new(),
+            clobbers: Vec::new(),
         }
     }
 }
@@ -2416,6 +2458,18 @@ pub(crate) mod test {
           copy_reg from=GPR0 to=GPR1
           spill GPR1 Undefined stack_off=8 bitw=8
         ",
+                "
+          alloc %7 GPR0 GPR1
+          copy_reg from=GPR2 to=GPR0
+          alloc %6 GPR0 GPR1
+          copy_reg from=GPR0 to=GPR2
+          alloc %5 GPR0 GPR3
+          alloc %4 GPR0 GPR2
+          unspill stack_off=8 GPR0 Undefined bitw=8
+          copy_reg from=GPR0 to=GPR1
+          copy_reg from=GPR1 to=GPR3
+          spill GPR3 Undefined stack_off=8 bitw=8
+        ",
             ],
         );
 
@@ -2463,34 +2517,18 @@ pub(crate) mod test {
           blackbox %7
         "#,
             |s| !s.starts_with("arrange_fill"),
-            &[
-                "
+            &["
           alloc %7 GPR0 GPR1
-          unspill stack_off=8 GPR0 Zeroed bitw=8
+          copy_reg from=GPR2 to=GPR0
           alloc %6 GPR0 GPR1
-          spill GPR0 Undefined stack_off=8 bitw=8
-          alloc %5 GPR0 GPR2
-          alloc %4 GPR0 GPR3
-          unspill stack_off=16 GPR0 Undefined bitw=8
+          copy_reg from=GPR0 to=GPR2
+          alloc %5 GPR0 GPR3
+          alloc %4 GPR0 GPR2
+          unspill stack_off=8 GPR0 Undefined bitw=8
           copy_reg from=GPR0 to=GPR1
-          copy_reg from=GPR1 to=GPR2
-          copy_reg from=GPR2 to=GPR3
-          spill GPR3 Undefined stack_off=16 bitw=8
-        ",
-                "
-          alloc %7 GPR0 GPR1
-          unspill stack_off=8 GPR0 Zeroed bitw=8
-          alloc %6 GPR0 GPR1
-          spill add GPR0 Undefined stack_off=8 bitw=8
-          alloc %5 GPR0 GPR2
-          alloc %4 GPR0 GPR3
-          unspill stack_off=16 GPR1 Undefined bitw=8
-          copy_reg from=GPR1 to=GPR2
-          copy_reg from=GPR2 to=GPR3
-          copy_reg from=GPR3 to=GPR0
-          spill GPR0 Undefined stack_off=16 bitw=8
-        ",
-            ],
+          copy_reg from=GPR1 to=GPR3
+          spill GPR3 Undefined stack_off=8 bitw=8
+        "],
         );
     }
 
@@ -2527,6 +2565,7 @@ pub(crate) mod test {
                 },
             ],
             spills: Vec::new(),
+            clobbers: Vec::new(),
         };
         ra.toposort_distinct_copies(&mut ractions).unwrap();
         assert_eq!(ractions.spills.len(), 1);
@@ -2568,6 +2607,7 @@ pub(crate) mod test {
                 },
             ],
             spills: Vec::new(),
+            clobbers: Vec::new(),
         };
         ra.toposort_distinct_copies(&mut ractions).unwrap();
         assert_eq!(ractions.spills.len(), 1);
@@ -2616,6 +2656,7 @@ pub(crate) mod test {
                 },
             ],
             spills: Vec::new(),
+            clobbers: Vec::new(),
         };
         ra.toposort_distinct_copies(&mut ractions).unwrap();
         assert_eq!(ractions.spills.len(), 0);
@@ -2734,13 +2775,15 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          unspill stack_off=8 GPR1 Undefined bitw=64
+          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
+          copy_reg from=GPR2 to=GPR1
           alloc %2 GPR1 GPR0
-          unspill stack_off=16 GPR0 Undefined bitw=64
+          unspill stack_off=8 GPR0 Undefined bitw=64
+          arrange_fill GPR2 from=Undefined dst_bitw=64 to=Undefined
+          copy_reg from=GPR0 to=GPR2
           arrange_fill GPR1 from=Undefined dst_bitw=64 to=Zeroed
           copy_reg from=GPR0 to=GPR1
-          spill GPR0 Undefined stack_off=8 bitw=64
-          spill GPR1 Undefined stack_off=16 bitw=64
+          spill GPR1 Undefined stack_off=8 bitw=64
         "],
         );
     }
@@ -2759,9 +2802,11 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          unspill stack_off=8 GPR0 Undefined bitw=64
+          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
+          copy_reg from=GPR1 to=GPR0
           trunc %1 GPR0
-          spill GPR0 Undefined stack_off=8 bitw=64
+          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
+          copy_reg from=GPR0 to=GPR1
         "],
         );
 

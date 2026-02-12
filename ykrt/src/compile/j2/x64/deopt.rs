@@ -352,7 +352,7 @@ fn reconstruct(
                     VarLoc::StackOff(_) => todo!(),
                     VarLoc::Reg(_, _) => todo!(),
                     VarLoc::Const(kind) => match kind {
-                        ConstKind::Double(_) => todo!(),
+                        ConstKind::Double(x) => x.to_bits(),
                         ConstKind::Float(_) => todo!(),
                         ConstKind::Int(x) => x.to_zero_ext_u64().unwrap(),
                         ConstKind::Ptr(x) => u64::try_from(*x).unwrap(),

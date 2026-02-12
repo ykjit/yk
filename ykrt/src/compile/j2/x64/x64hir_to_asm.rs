@@ -4972,7 +4972,7 @@ mod test {
               ; %0: ptr = arg [Reg("rax", Undefined)]
               ; %1: float = arg [Reg("xmm15", Undefined)]
               ; %2: double = arg [Reg("xmm14", Undefined)]
-              ...
+              ..~
               mov r.64.x, rax
               movsd xmm1, xmm14
               movsd xmm0, xmm15
@@ -5278,8 +5278,11 @@ mod test {
               blackbox %6
               term [%0, %1]
             ",
-            &["
+            &[r#"
               ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.z", Undefined)]
+              mov r.64.y, r.64.z
               ; %2: ptr = dynptradd %0, %1, 1
               lea r.64._, [r.64.x+r.64.y]
               ; %3: ptr = dynptradd %0, %1, 2
@@ -5289,10 +5292,10 @@ mod test {
               ; %5: ptr = dynptradd %0, %1, 8
               lea r.64._, [r.64.x+r.64.y*8]
               ; %6: ptr = dynptradd %0, %1, 16
-              shl r.64.y, 4
-              add r.64.y, r.64.x
+              shl r.64.z, 4
+              add r.64.z, r.64.x
               ...
-            "],
+            "#],
         );
 
         // not a power of 2
@@ -5338,8 +5341,12 @@ mod test {
               blackbox %6
               term [%0, %1]
             ",
-            &["
+            &[r#"
               ...
+              ; %0: ptr = arg [Reg("r.64.y", Undefined)]
+              ; %1: i32 = arg [Reg("r.64.z", Undefined)]
+              movsxd r.64.z, r.32.z
+              mov r.64.x, r.64.z
               movsxd r.64.x, r.32.x
               ; %2: ptr = dynptradd %0, %1, 1
               lea r.64._, [r.64.y+r.64.x]
@@ -5350,10 +5357,10 @@ mod test {
               ; %5: ptr = dynptradd %0, %1, 8
               lea r.64._, [r.64.y+r.64.x*8]
               ; %6: ptr = dynptradd %0, %1, 16
-              shl r.64.x, 4
-              add r.64.x, r.64.y
+              shl r.64.z, 4
+              add r.64.z, r.64.y
               ...
-            "],
+            "#],
         );
     }
 
@@ -6147,8 +6154,8 @@ mod test {
             &[r#"
               ...
               ; %0: i32 = arg [Reg("r.64.x", Undefined)]
-              ......
               mov r.32.x, r.32.x
+              ......
               ; %1: ptr = inttoptr %0
               ...
             "#],
