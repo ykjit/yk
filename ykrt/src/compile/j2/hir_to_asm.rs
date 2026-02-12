@@ -388,7 +388,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
         Ok(Arc::new(J2CompiledTrace::<AB::Reg>::new(
             mt,
-            self.m.trid,
+            self.m,
             Arc::downgrade(&self.hl),
             buf,
             guards,

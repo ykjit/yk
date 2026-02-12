@@ -262,7 +262,14 @@ impl Compiler for J2 {
         #[cfg(target_arch = "x86_64")]
         let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf);
 
-        hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt)
+        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt.clone())?;
+
+        // Register JITted code (if required).
+        mt.trace_profiler().register_ctr(&ct).map_err(|e| {
+            CompilationError::General(format!("failed to register jitted code with profiler: {e}"))
+        })?;
+
+        Ok(ct)
     }
 
     fn sidetrace_compile(
@@ -304,7 +311,14 @@ impl Compiler for J2 {
         #[cfg(target_arch = "x86_64")]
         let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf);
 
-        hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt)
+        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt.clone())?;
+
+        // Register JITted code (if required).
+        mt.trace_profiler().register_ctr(&ct).map_err(|e| {
+            CompilationError::General(format!("failed to register jitted code with profiler: {e}"))
+        })?;
+
+        Ok(ct)
     }
 }
 
