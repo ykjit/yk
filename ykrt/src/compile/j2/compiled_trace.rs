@@ -4,7 +4,7 @@ use crate::{
         guard::{Guard, GuardId},
         j2::{
             codebuf::ExeCodeBuf,
-            hir::Switch,
+            hir::{Mod, Switch, TraceEnd, TraceStart},
             regalloc::{RegT, VarLocs},
         },
         jitc_yk::aot_ir::{self, DeoptSafepoint, InstId},
@@ -30,24 +30,79 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     codebuf: ExeCodeBuf,
     pub guards: IndexVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
     pub trace_start: J2TraceStart<Reg>,
+    /// The name used for this trace as linker symbol.
+    symbol_name: String,
 }
 
 impl<Reg: RegT> J2CompiledTrace<Reg> {
     pub(super) fn new(
         mt: Arc<MT>,
-        trid: TraceId,
+        m: &Mod<Reg>,
         hl: Weak<Mutex<HotLocation>>,
         codebuf: ExeCodeBuf,
         guards: IndexVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
         trace_start: J2TraceStart<Reg>,
     ) -> Self {
+        // Extract source trace ID for guard traces.
+        let src_ctr = match &m.trace_start {
+            TraceStart::Guard { src_ctr, .. } => Some(src_ctr.trid),
+            _ => None,
+        };
+
+        // Extract target trace ID for coupler traces.
+        let tgt_ctr = match &m.trace_end {
+            TraceEnd::Coupler { tgt_ctr, .. } => Some(tgt_ctr.trid),
+            _ => None,
+        };
+
+        let symbol_name =
+            Self::get_trace_name(m.trid, &trace_start, &m.trace_end, src_ctr, tgt_ctr);
+
         Self {
             mt,
-            trid,
+            trid: m.trid,
             hl,
             codebuf,
             guards,
             trace_start,
+            symbol_name,
+        }
+    }
+
+    /// Generate a linker symbol name for the compiled trace.
+    ///
+    /// The symbol name follows the format `__yk_trace_{trid}_{start_type}_{end_type}`, where:
+    /// - `start_type` is either `control` (for control point traces) or `guard` (for guard traces,
+    ///   optionally including the source trace ID).
+    /// - `end_type` indicates how the trace terminates (`loop`, `coupler`, `return`, etc.).
+    fn get_trace_name<R: RegT>(
+        trid: TraceId,
+        trace_start: &J2TraceStart<R>,
+        trace_end: &TraceEnd<R>,
+        src_ctr: Option<TraceId>,
+        tgt_ctr: Option<TraceId>,
+    ) -> String {
+        let trace_name = match (trace_start, src_ctr) {
+            (J2TraceStart::ControlPoint { .. }, _) => {
+                format!("__yk_trace_{trid}_control")
+            }
+            (J2TraceStart::Guard { .. }, Some(src)) => {
+                format!("__yk_trace_{trid}_guard_{src}")
+            }
+            (J2TraceStart::Guard { .. }, None) => format!("__yk_trace_{trid}_guard"),
+        };
+
+        match trace_end {
+            TraceEnd::Loop { .. } => format!("{trace_name}_loop"),
+            TraceEnd::Coupler { .. } => {
+                let tgt = tgt_ctr.unwrap();
+                format!("{trace_name}_coupler_{tgt}")
+            }
+            TraceEnd::Return { .. } => format!("{trace_name}_return"),
+            #[cfg(test)]
+            TraceEnd::Test { .. } => format!("{trace_name}_test"),
+            #[cfg(test)]
+            TraceEnd::TestPeel { .. } => format!("{trace_name}_testpeel"),
         }
     }
 
@@ -147,11 +202,11 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     }
 
     fn code(&self) -> &[u8] {
-        todo!()
+        unsafe { std::slice::from_raw_parts(self.codebuf.as_ptr(), self.codebuf.len()) }
     }
 
     fn name(&self) -> String {
-        todo!()
+        self.symbol_name.clone()
     }
 }
 
@@ -271,4 +326,104 @@ pub(super) struct DeoptVar<Reg: RegT> {
 
 index_vec::define_index_type! {
     pub(super) struct CompiledGuardIdx = u16;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compile::j2::{
+        hir::{Block, TraceEnd},
+        x64::Reg,
+    };
+    use index_vec::IndexVec;
+
+    fn empty_block() -> Block {
+        Block {
+            insts: IndexVec::new(),
+            guard_extras: IndexVec::new(),
+        }
+    }
+
+    // Dummy DeoptSafepoint for testing
+    static TEST_DEOPT_SAFEPOINT: DeoptSafepoint = DeoptSafepoint {
+        id: 0,
+        lives: Vec::new(),
+    };
+
+    #[test]
+    fn test_get_trace_name_control_loop() {
+        let start = J2TraceStart::ControlPoint::<Reg> {
+            entry_safepoint: &TEST_DEOPT_SAFEPOINT,
+            entry_vlocs: vec![],
+            stack_off: 0,
+            sidetrace_off: 0,
+        };
+        let end = TraceEnd::Loop::<Reg> {
+            entry: empty_block(),
+            peel: None,
+        };
+        assert_eq!(
+            J2CompiledTrace::<Reg>::get_trace_name(TraceId::from_u64(42), &start, &end, None, None),
+            "__yk_trace_42_control_loop"
+        );
+    }
+
+    #[test]
+    fn test_format_trace_name_control_return() {
+        let trid = TraceId::from_u64(42);
+        let start = J2TraceStart::ControlPoint::<Reg> {
+            entry_safepoint: &TEST_DEOPT_SAFEPOINT,
+            entry_vlocs: vec![],
+            stack_off: 0,
+            sidetrace_off: 0,
+        };
+        let end = TraceEnd::Return::<Reg> {
+            entry: empty_block(),
+            exit_safepoint: &TEST_DEOPT_SAFEPOINT,
+        };
+        assert_eq!(
+            J2CompiledTrace::<Reg>::get_trace_name(trid, &start, &end, None, None),
+            "__yk_trace_42_control_return"
+        );
+    }
+
+    #[test]
+    fn test_get_trace_name_guard_loop() {
+        let trid = TraceId::from_u64(42);
+        let start = J2TraceStart::Guard::<Reg> { stack_off: 0 };
+        let end = TraceEnd::Loop::<Reg> {
+            entry: empty_block(),
+            peel: None,
+        };
+        assert_eq!(
+            J2CompiledTrace::<Reg>::get_trace_name(
+                trid,
+                &start,
+                &end,
+                Some(TraceId::from_u64(5)),
+                None
+            ),
+            "__yk_trace_42_guard_5_loop"
+        );
+    }
+
+    #[test]
+    fn test_get_trace_name_guard_return() {
+        let trid = TraceId::from_u64(42_u64);
+        let start = J2TraceStart::Guard::<Reg> { stack_off: 0 };
+        let end = TraceEnd::Return::<Reg> {
+            entry: empty_block(),
+            exit_safepoint: &TEST_DEOPT_SAFEPOINT,
+        };
+        assert_eq!(
+            J2CompiledTrace::<Reg>::get_trace_name(
+                trid,
+                &start,
+                &end,
+                Some(TraceId::from_u64(5_u64)),
+                None
+            ),
+            "__yk_trace_42_guard_5_return"
+        );
+    }
 }
