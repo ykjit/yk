@@ -4728,6 +4728,7 @@ mod test {
 
     #[test]
     fn cg_call() {
+        // Basic cases
         codegen_and_test(
             "
               extern abort()
@@ -4815,6 +4816,7 @@ mod test {
             ],
         );
 
+        // Indirect call
         codegen_and_test(
             "
               extern puts(ptr) -> i32
@@ -4838,6 +4840,7 @@ mod test {
             "],
         );
 
+        // varargs
         codegen_and_test(
             "
               extern printf(ptr, ...) -> i32
@@ -4863,6 +4866,7 @@ mod test {
             "],
         );
 
+        // varargs indirect call
         codegen_and_test(
             "
               extern printf(ptr, ...) -> i32
@@ -4876,7 +4880,7 @@ mod test {
               blackbox %5
               term [%0, %1]
             ",
-            &["
+            &[r#"
               ...
               ; %3: i32 = call %1(%0, %2)
               mov eax, 0
@@ -4885,9 +4889,33 @@ mod test {
               ; %5: i32 = add %3, %4
               add r.32._, 1
               ...
-            "],
+            "#],
         );
 
+        // Don't clobber caller saved registers
+        codegen_and_test(
+            r#"
+              extern printf(ptr, ...) -> i32
+
+              %0: ptr = arg [reg("r12", undefined)]
+              %1: i64 = arg [reg("r13", undefined)]
+              %2: ptr = @printf
+              %3: i32 = call printf %2(%0)
+              %4: i64 = add %1, %1
+              term [%0, %4]
+            "#,
+            &[r#"
+              ...
+              ; %3: i32 = call %2(%0)
+              mov eax, 0
+              call ...
+              ; %4: i64 = add %1, %1
+              add r13, r.64._
+              ; term [%0, %4]
+            "#],
+        );
+
+        // floating point args
         codegen_and_test(
             r#"
               extern f(float, double)
