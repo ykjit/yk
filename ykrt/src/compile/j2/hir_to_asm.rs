@@ -812,6 +812,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         let mut gcopy = Vob::from_elem(false, b.insts_len());
         let mut gqueue = Vec::new();
 
+        self.be.about_to_process_block(b, args_vlocs);
+
         let mut insts_iter = b.insts_iter(..).rev().peekable();
         loop {
             if let Some((_iidx, Inst::Arg(_))) = insts_iter.peek() {
@@ -1206,6 +1208,18 @@ pub(super) trait HirToAsmBackend {
     /// semantically correct, though may cause other problems) *but* it is unacceptable to
     /// return a register that `iidx` is not allowed to end up in.
     fn iter_possible_regs(&self, b: &Block, iidx: InstIdx) -> impl Iterator<Item = Self::Reg>;
+
+    /// When processing the instruction at `cur_iidx`, what is a good register for `hint_iidx` to
+    /// end up in? This is strictly optional: it is always acceptable to return `None`.
+    fn reg_hint(
+        &self,
+        b: &Block,
+        args_vlocs: &[VarLocs<Self::Reg>],
+        cur_iidx: InstIdx,
+        hint_iidx: InstIdx,
+    ) -> Option<Self::Reg>;
+
+    fn about_to_process_block(&mut self, b: &Block, args_vlocs: &[VarLocs<Self::Reg>]);
 
     fn log(&mut self, s: String);
 
@@ -1907,6 +1921,20 @@ mod test {
                 Ty::Void => todo!(),
             }
         }
+
+        fn reg_hint(
+            &self,
+            _b: &Block,
+            _args_vlocs: &[VarLocs<Self::Reg>],
+            _cur_iidx: InstIdx,
+            _hint_iidx: InstIdx,
+        ) -> Option<Self::Reg> {
+            None
+        }
+
+        /// This function is called when a [Block] is about to be processed. A backend can use this
+        /// for whatever purposes it wants (e.g. building up a register hints cache).
+        fn about_to_process_block(&mut self, _b: &Block, _args_vlocs: &[VarLocs<Self::Reg>]) {}
 
         fn log(&mut self, s: String) {
             self.log.push(format!("; {s}"));
