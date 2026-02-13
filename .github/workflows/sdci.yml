@@ -2,10 +2,34 @@ on:
   pull_request:
   merge_group:
 
-# This is required to silence emails about the workflow having no jobs.
-# We simply define a dummy job that does nothing much.
 jobs:
-  dummy:
+  fmt:
+    name: Format Check
     runs-on: ubuntu-latest
     steps:
-      - run: /usr/bin/true
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Run cargo fmt check
+        run: cargo fmt --all --check
