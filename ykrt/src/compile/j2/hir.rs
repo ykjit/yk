@@ -324,17 +324,17 @@ impl<Reg: RegT> Mod<Reg> {
         match &self.trace_end {
             TraceEnd::Coupler { .. } | TraceEnd::Loop { .. } | TraceEnd::Return { .. } => todo!(),
             #[cfg(test)]
-            TraceEnd::Test { entry_vlocs, block } => {
-                block.assert_well_formed(self, entry_vlocs, entry_vlocs);
+            TraceEnd::Test { args_vlocs, block } => {
+                block.assert_well_formed(self, args_vlocs, args_vlocs);
             }
             #[cfg(test)]
             TraceEnd::TestPeel {
-                entry_vlocs,
+                args_vlocs,
                 entry,
                 peel,
             } => {
-                entry.assert_well_formed(self, entry_vlocs, entry_vlocs);
-                peel.assert_well_formed(self, entry_vlocs, entry_vlocs);
+                entry.assert_well_formed(self, args_vlocs, args_vlocs);
+                peel.assert_well_formed(self, args_vlocs, args_vlocs);
             }
         }
     }
@@ -448,7 +448,7 @@ pub(super) enum TraceStart<Reg: RegT> {
     Guard {
         src_ctr: Arc<J2CompiledTrace<Reg>>,
         src_gidx: CompiledGuardIdx,
-        entry_vlocs: Vec<VarLocs<Reg>>,
+        args_vlocs: Vec<VarLocs<Reg>>,
     },
     /// This is a trace intended for unit testing.
     #[cfg(test)]
@@ -475,13 +475,13 @@ pub(super) enum TraceEnd<Reg: RegT> {
     /// This is a trace intended for unit testing.
     #[cfg(test)]
     Test {
-        entry_vlocs: Vec<VarLocs<Reg>>,
+        args_vlocs: Vec<VarLocs<Reg>>,
         block: Block,
     },
     /// This is a trace intended for unit testing peeled loops.
     #[cfg(test)]
     TestPeel {
-        entry_vlocs: Vec<VarLocs<Reg>>,
+        args_vlocs: Vec<VarLocs<Reg>>,
         entry: Block,
         peel: Block,
     },
@@ -500,11 +500,11 @@ impl Block {
     pub(super) fn assert_well_formed<Reg: RegT>(
         &self,
         m: &dyn ModLikeT,
-        entry_vlocs: &[VarLocs<Reg>],
+        args_vlocs: &[VarLocs<Reg>],
         exit_vlocs: &[VarLocs<Reg>],
     ) {
         for (iidx, inst) in self.insts_iter(..) {
-            if iidx < InstIdx::from(entry_vlocs.len()) {
+            if iidx < InstIdx::from(args_vlocs.len()) {
                 assert_matches!(
                     inst,
                     Inst::Arg(_) | Inst::Const(_),
@@ -521,7 +521,7 @@ impl Block {
                     "%{iidx:?}: number of term vars does not match number of term VarLocs"
                 );
 
-                for (i, (x, y)) in entry_vlocs.iter().zip(exit_vlocs.iter()).enumerate() {
+                for (i, (x, y)) in args_vlocs.iter().zip(exit_vlocs.iter()).enumerate() {
                     let entry_tyidx = self.insts[InstIdx::from(i)].tyidx(m);
                     let exit_tyidx = self.insts[term_vars[i]].tyidx(m);
                     if entry_tyidx != exit_tyidx {
@@ -5907,7 +5907,7 @@ mod test {
         // the optimiser.
         let mut opt = FullOpt::new_testing(m.tys);
         let TraceEnd::Test {
-            entry_vlocs: _,
+            args_vlocs: _,
             block: Block {
                 insts,
                 guard_extras,

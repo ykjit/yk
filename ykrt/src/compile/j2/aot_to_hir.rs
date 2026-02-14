@@ -189,7 +189,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     .as_any()
                     .downcast::<J2CompiledTrace<Reg>>()
                     .unwrap();
-                let entry_vlocs = self.p_start_side(&src_ctr, src_gidx, &tgt_ctr)?;
+                let args_vlocs = self.p_start_side(&src_ctr, src_gidx, &tgt_ctr)?;
                 if let Some(hir::Switch {
                     iid,
                     seen_bbidxs: seen_blocks,
@@ -205,7 +205,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
                 BuildModKind::Side {
                     prev_bid,
-                    entry_vlocs,
+                    args_vlocs,
                     src_ctr,
                     src_gidx,
                     tgt_ctr,
@@ -281,7 +281,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 }
             },
             BuildModKind::Side {
-                entry_vlocs,
+                args_vlocs,
                 src_ctr,
                 src_gidx,
                 tgt_ctr,
@@ -291,7 +291,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 match return_safepoint {
                     None => (
                         hir::TraceStart::Guard {
-                            entry_vlocs,
+                            args_vlocs,
                             src_ctr,
                             src_gidx,
                         },
@@ -300,7 +300,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     ),
                     Some(exit_safepoint) => (
                         hir::TraceStart::Guard {
-                            entry_vlocs,
+                            args_vlocs,
                             src_ctr,
                             src_gidx,
                         },
@@ -1947,7 +1947,7 @@ enum BuildModKind<Reg: RegT> {
     },
     Side {
         prev_bid: BBlockId,
-        entry_vlocs: Vec<VarLocs<Reg>>,
+        args_vlocs: Vec<VarLocs<Reg>>,
         src_ctr: Arc<J2CompiledTrace<Reg>>,
         src_gidx: CompiledGuardIdx,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,

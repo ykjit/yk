@@ -42,7 +42,9 @@ use crate::{
             effects::Effects,
             hir::*,
             hir_to_asm::HirToAsmBackend,
-            regalloc::{AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, VarLoc, VarLocs},
+            regalloc::{
+                AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, RegT, VarLoc, VarLocs,
+            },
             x64::{
                 asm::{Asm, BLOCK_ALIGNMENT, LabelIdx, RelocKind},
                 x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
@@ -54,6 +56,7 @@ use crate::{
 };
 use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
+use index_vec::IndexVec;
 use smallvec::SmallVec;
 use std::{assert_matches, collections::HashMap, debug_assert_matches, ffi::c_void, sync::Arc};
 
@@ -61,6 +64,7 @@ use std::{assert_matches, collections::HashMap, debug_assert_matches, ffi::c_voi
 pub(in crate::compile::j2) struct X64HirToAsm<'a> {
     m: &'a Mod<Reg>,
     asm: Asm,
+    reg_hints: IndexVec<InstIdx, Reg>,
     /// The data section: we map any given (align, byte sequence) pair to [LabelIdx]s, which will
     /// eventually be output as their own pseudo-block.
     data_sec: HashMap<Vec<u8>, (u32, LabelIdx)>,
@@ -97,6 +101,7 @@ impl<'a> X64HirToAsm<'a> {
         Self {
             m,
             asm: Asm::new(buf),
+            reg_hints: IndexVec::new(),
             data_sec: HashMap::new(),
         }
     }
@@ -849,6 +854,122 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             Ty::Int(_) | Ty::Ptr(_) => NORMAL_GP_REGS.iter().cloned(),
             Ty::Void => todo!(),
         }
+    }
+
+    fn reg_hint(
+        &self,
+        b: &Block,
+        _args_vlocs: &[VarLocs<Self::Reg>],
+        cur_iidx: InstIdx,
+        hint_iidx: InstIdx,
+    ) -> Option<Self::Reg> {
+        let cnd = self.reg_hints[hint_iidx];
+        // There's no point giving register hints for caller saved registers that span `Call`s.
+        if cnd == Reg::Undefined
+            || (cnd.is_caller_saved()
+                && b.insts_iter(hint_iidx + 1..cur_iidx)
+                    .any(|(_, inst)| matches!(inst, Inst::Call(_))))
+        {
+            None
+        } else {
+            Some(cnd)
+        }
+    }
+
+    fn about_to_process_block(&mut self, b: &Block, args_vlocs: &[VarLocs<Self::Reg>]) {
+        // To calculate `self.reg_hints` we use a simple O(n) algorithm which uses these basic
+        // ideas:
+        //
+        //  1. For some instructions (e.g. arguments, calls) we know exactly which register a value
+        //     will end up in. Forcibly set those instruction's register hints to that known
+        //     register.
+        //  2. For some other instructions (e.g. adds) we know that they are two operand
+        //     instructions that will use, and clobber, their `lhs`. We thus want to reuse the hint
+        //     for `lhs`.
+        //  3. There is no point carrying register hints for caller saved registers across calls,
+        //     as they will be clobbered. So we track the `InstIdx` of the last call and when
+        //     processing instructions in (2) we don't keep the forwarded register hint if it
+        //     crosses a call.
+
+        self.reg_hints.clear();
+        // Make sure that we reserve enough space in `self.reg_hints` in one shot, but don't shrink
+        // it if it has more space than we need.
+        self.reg_hints
+            .reserve(b.insts_len().saturating_sub(self.reg_hints.len()));
+
+        let mut last_call = InstIdx::new(0);
+        for (iidx, inst) in b.insts_iter(..) {
+            // Instructions that want to forward a register hint return a `cnd_iidx`: those that
+            // have a definite register hint `continue` and avoid the code after this `let`.
+            let cnd_iidx = match inst {
+                // Two operand instructions that implicitly clobber `lhs`.
+                Inst::Add(Add { lhs, .. })
+                | Inst::And(And { lhs, .. })
+                | Inst::AShr(AShr { lhs, .. })
+                | Inst::LShr(LShr { lhs, .. })
+                | Inst::Or(Or { lhs, .. })
+                | Inst::Shl(Shl { lhs, .. })
+                | Inst::SMax(SMax { lhs, .. })
+                | Inst::SMin(SMin { lhs, .. })
+                | Inst::Sub(Sub { lhs, .. })
+                | Inst::Xor(Xor { lhs, .. }) => *lhs,
+
+                // Args are special.
+                Inst::Arg(_) => {
+                    if let Some(x) = args_vlocs[usize::from(iidx)].iter().find_map(|x| {
+                        if let VarLoc::Reg(reg, _) = x {
+                            Some(*reg)
+                        } else {
+                            None
+                        }
+                    }) {
+                        self.reg_hints.push(x);
+                    } else {
+                        self.reg_hints.push(Reg::Undefined);
+                    }
+                    continue;
+                }
+
+                // Casts are often mergeable, so be optimistic and assume that happens.
+                Inst::IntToPtr(IntToPtr { val, .. })
+                | Inst::SExt(SExt { val, .. })
+                | Inst::Trunc(Trunc { val, .. })
+                | Inst::ZExt(ZExt { val, .. }) => *val,
+
+                // Calls need to update `last_call`.
+                Inst::Call(_) => {
+                    self.reg_hints.push(Reg::RAX);
+                    last_call = iidx;
+                    continue;
+                }
+
+                // DynPtrAdd and PtrAdd don't always clobber, but they often do, so forwarding the
+                // hint is probably a win overall.
+                Inst::DynPtrAdd(DynPtrAdd { ptr, .. }) | Inst::PtrAdd(PtrAdd { ptr, .. }) => *ptr,
+
+                Inst::Mul(_) | Inst::SDiv(_) | Inst::UDiv(_) => {
+                    self.reg_hints.push(Reg::RAX);
+                    continue;
+                }
+                Inst::SRem(_) => {
+                    self.reg_hints.push(Reg::RDX);
+                    continue;
+                }
+
+                _ => {
+                    self.reg_hints.push(Reg::Undefined);
+                    continue;
+                }
+            };
+
+            let cnd_reg = self.reg_hints[cnd_iidx];
+            if cnd_reg.is_caller_saved() && cnd_iidx < last_call {
+                self.reg_hints.push(Reg::Undefined);
+            } else {
+                self.reg_hints.push(cnd_reg);
+            }
+        }
+        assert_eq!(b.insts_len(), self.reg_hints.len());
     }
 
     fn build_exe(
@@ -1885,7 +2006,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                             in_iidx: *tgt,
                             in_fill: RegCnstrFill::Undefined,
                             regs: &NORMAL_GP_REGS,
-                            clobber: true,
+                            clobber: false,
                         });
                     }
                 }
@@ -1913,7 +2034,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                             in_iidx: *tgt,
                             in_fill: RegCnstrFill::Undefined,
                             regs: &NORMAL_GP_REGS,
-                            clobber: true,
+                            clobber: false,
                         });
                     }
                 } else {
@@ -1938,7 +2059,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                             in_iidx: *tgt,
                             in_fill: RegCnstrFill::Undefined,
                             regs: &NORMAL_GP_REGS,
-                            clobber: true,
+                            clobber: false,
                         });
                     }
                 }
@@ -3353,9 +3474,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let [_] = ra.alloc(
             self,
             iidx,
-            [RegCnstr::InputOutput {
+            [RegCnstr::Cast {
                 in_iidx: *val,
-                in_fill: RegCnstrFill::Signed,
                 out_fill: RegCnstrFill::Signed,
                 regs: &NORMAL_GP_REGS,
             }],
@@ -3484,7 +3604,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Signed,
                     out_fill: RegCnstrFill::Signed,
-                    regs: &[Reg::RAX],
+                    regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
@@ -3525,7 +3645,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Signed,
                     out_fill: RegCnstrFill::Signed,
-                    regs: &[Reg::RAX],
+                    regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
@@ -3966,7 +4086,7 @@ mod test {
             codebuf::CodeBufInProgress,
             hir::{InstIdx, Mod, TraceEnd},
             hir_parser::str_to_mod,
-            hir_to_asm::HirToAsm,
+            hir_to_asm::{HirToAsm, HirToAsmBackend},
             x64::x64regalloc::Reg,
         },
         location::{HotLocation, HotLocationKind},
@@ -4322,6 +4442,75 @@ mod test {
         assert_eq!(
             be.try_load_to_mem_op(b, InstIdx::from(14), InstIdx::from(13)),
             Some((InstIdx::from(0), 0))
+        );
+    }
+
+    #[test]
+    fn reg_hints() {
+        let m = str_to_mod::<Reg>(
+            r#"
+          extern putchar(i8) -> i8
+
+          %0: i8 = arg [reg("R8", undefined)]
+          %1: i8 = arg [reg("R13", undefined)]
+          %2: i8 = add %0, %1
+          %3: i8 = add %2, %2
+          %4: ptr = @putchar
+          %5: i8 = call putchar %4(%3)
+          blackbox %5
+          term [%0, %1]
+        "#,
+        );
+        let TraceEnd::Test {
+            block: b,
+            args_vlocs,
+        } = &m.trace_end
+        else {
+            panic!()
+        };
+        let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
+        x64be.about_to_process_block(b, args_vlocs);
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(2), InstIdx::new(0)),
+            Some(Reg::R8)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(2), InstIdx::new(1)),
+            Some(Reg::R13)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(3), InstIdx::new(2)),
+            Some(Reg::R8)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(3)),
+            Some(Reg::R8)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(4)),
+            None
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(6), InstIdx::new(5)),
+            Some(Reg::RAX)
+        );
+
+        // Check clobbers either side of the `call`
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(0)),
+            Some(Reg::R8)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(1)),
+            Some(Reg::R13)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(7), InstIdx::new(0)),
+            None
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(7), InstIdx::new(1)),
+            Some(Reg::R13)
         );
     }
 
@@ -5000,14 +5189,17 @@ mod test {
               ; %0: ptr = arg [Reg("rax", Undefined)]
               ; %1: float = arg [Reg("xmm15", Undefined)]
               ; %2: double = arg [Reg("xmm14", Undefined)]
-              ..~
+              ...
               mov r.64.x, rax
               movsd xmm1, xmm14
               movsd xmm0, xmm15
               ; call %0(%1, %2)
               mov eax, 2
               call r.64.x
-              ...
+              mov rax, r.64.x
+              movsd xmm14, [rbp-...
+              movss xmm15, [rbp-...
+              ; term [%0, %1, %2]
             "#],
         );
 
