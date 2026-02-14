@@ -1918,8 +1918,7 @@ impl<'a> Assemble<'a> {
             }
             x => {
                 // If we have an optimised clone of the function, call it.
-                let va = symbol_to_ptr(&format!("__yk_opt_{x}"))
-                    .or_else(|_| symbol_to_ptr(x))
+                let va = symbol_to_ptr(&format!("__yk_opt_{x}")).or_else(|_| symbol_to_ptr(x))
                     .map_err(|e| CompilationError::General(e.to_string()))?;
                 self.emit_call(iidx, fty, Some(va), None, &args)
             }
