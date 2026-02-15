@@ -7,23 +7,32 @@
 --     0
 --     1
 --     2
---     yk-tracing: start-tracing: for_loop.lua:34: GETTABUP
+--     yk-tracing: start-tracing: for_loop.lua:43: GETTABUP
 --     3
---     yk-tracing: stop-tracing: for_loop.lua:34: GETTABUP
---     --- Begin debugstrs: header: for_loop.lua:34: GETTABUP ---
---       for_loop.lua:34: GETTABUP
---       for_loop.lua:34: GETFIELD
---       for_loop.lua:34: SELF
---       for_loop.lua:34: GETTABUP
---       for_loop.lua:34: MOVE
---       for_loop.lua:34: CALL
---       for_loop.lua:34: LOADK
---       for_loop.lua:34: CALL
---       for_loop.lua:35: ADDI
---       for_loop.lua:33: FORLOOP
+--     yk-tracing: stop-tracing: for_loop.lua:43: GETTABUP
+--     --- Begin debugstrs: for_loop.lua:43: GETTABUP ---
+--     ; {
+--     ;   "trid": "0",
+--     ;   "start": {
+--     ;     "kind": "ControlPoint"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Loop"
+--     ;   }
+--     ; }
+--     for_loop.lua:43: GETTABUP
+--     for_loop.lua:43: GETFIELD
+--     for_loop.lua:43: SELF
+--     for_loop.lua:43: GETTABUP
+--     for_loop.lua:43: MOVE
+--     for_loop.lua:43: CALL
+--     for_loop.lua:43: LOADK
+--     for_loop.lua:43: CALL
+--     for_loop.lua:44: ADDI
+--     for_loop.lua:42: FORLOOP
 --     --- End debugstrs ---
 --     4
---     yk-execution: enter-jit-code: for_loop.lua:34: GETTABUP
+--     yk-execution: enter-jit-code: for_loop.lua:43: GETTABUP
 --     5
 --     6
 --     yk-execution: deoptimise ...

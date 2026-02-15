@@ -7,36 +7,55 @@
 --     8
 --     7
 --     6
---     yk-tracing: start-tracing: recursive_function_indirect.lua:47: GETTABUP
+--     yk-tracing: start-tracing: recursive_function_indirect.lua:66: GETTABUP
 --     5
---     yk-tracing: stop-tracing: recursive_function_indirect.lua:47: GETTABUP
---     --- Begin debugstrs: header: recursive_function_indirect.lua:47: GETTABUP ---
---       recursive_function_indirect.lua:47: GETTABUP
---       recursive_function_indirect.lua:47: GETFIELD
---       recursive_function_indirect.lua:47: SELF
---       recursive_function_indirect.lua:47: GETTABUP
---       recursive_function_indirect.lua:47: MOVE
---       recursive_function_indirect.lua:47: CALL
---       recursive_function_indirect.lua:47: LOADK
---       recursive_function_indirect.lua:47: CALL
---       recursive_function_indirect.lua:48: GTI
---       recursive_function_indirect.lua:49: GETTABUP
---       recursive_function_indirect.lua:49: ADDI
---       recursive_function_indirect.lua:49: CALL
---       recursive_function_indirect.lua:54: GETTABUP
---       recursive_function_indirect.lua:54: MOVE
---       recursive_function_indirect.lua:54: TAILCALL
+--     yk-tracing: stop-tracing: recursive_function_indirect.lua:66: GETTABUP
+--     --- Begin debugstrs: recursive_function_indirect.lua:66: GETTABUP ---
+--     ; {
+--     ;   "trid": "0",
+--     ;   "start": {
+--     ;     "kind": "ControlPoint"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Loop"
+--     ;   }
+--     ; }
+--     recursive_function_indirect.lua:66: GETTABUP
+--     recursive_function_indirect.lua:66: GETFIELD
+--     recursive_function_indirect.lua:66: SELF
+--     recursive_function_indirect.lua:66: GETTABUP
+--     recursive_function_indirect.lua:66: MOVE
+--     recursive_function_indirect.lua:66: CALL
+--     recursive_function_indirect.lua:66: LOADK
+--     recursive_function_indirect.lua:66: CALL
+--     recursive_function_indirect.lua:67: GTI
+--     recursive_function_indirect.lua:68: GETTABUP
+--     recursive_function_indirect.lua:68: ADDI
+--     recursive_function_indirect.lua:68: CALL
+--     recursive_function_indirect.lua:73: GETTABUP
+--     recursive_function_indirect.lua:73: MOVE
+--     recursive_function_indirect.lua:73: TAILCALL
 --     --- End debugstrs ---
 --     4
---     yk-tracing: start-tracing: recursive_function_indirect.lua:54: GETTABUP
---     yk-tracing: stop-tracing: recursive_function_indirect.lua:47: GETTABUP
---     --- Begin debugstrs: connector: recursive_function_indirect.lua:54: GETTABUP ---
---       recursive_function_indirect.lua:54: GETTABUP
---       recursive_function_indirect.lua:54: MOVE
---       recursive_function_indirect.lua:54: TAILCALL
+--     yk-tracing: start-tracing: recursive_function_indirect.lua:73: GETTABUP
+--     yk-tracing: stop-tracing: recursive_function_indirect.lua:66: GETTABUP
+--     --- Begin debugstrs: recursive_function_indirect.lua:73: GETTABUP ---
+--     ; {
+--     ;   "trid": "1",
+--     ;   "start": {
+--     ;     "kind": "ControlPoint"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Coupler",
+--     ;     "tgt_trid": "0"
+--     ;   }
+--     ; }
+--     recursive_function_indirect.lua:73: GETTABUP
+--     recursive_function_indirect.lua:73: MOVE
+--     recursive_function_indirect.lua:73: TAILCALL
 --     --- End debugstrs ---
 --     3
---     yk-execution: enter-jit-code: recursive_function_indirect.lua:54: GETTABUP
+--     yk-execution: enter-jit-code: recursive_function_indirect.lua:73: GETTABUP
 --     2
 --     1
 --     0

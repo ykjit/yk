@@ -334,7 +334,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         };
 
         if should_log_ir(IRPhase::DebugStrs) {
-            todo!();
+            log_ir(&format!(
+                "--- Begin debugstrs{ds} ---\n; {}\n{}\n--- End debugstrs ---\n",
+                m.json_info().split("\n").collect::<Vec<_>>().join("\n; "),
+                self.debug_strs.join("\n")
+            ));
         }
 
         if should_log_ir(IRPhase::PreOpt) {

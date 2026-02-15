@@ -8,46 +8,67 @@
 --     <0
 --     <1
 --     <2
---     yk-tracing: start-tracing: sidetrace.lua:58: LTI
+--     yk-tracing: start-tracing: sidetrace.lua:79: LTI
 --     <3
---     yk-tracing: stop-tracing: sidetrace.lua:58: LTI
---     --- Begin debugstrs: header: sidetrace.lua:58: LTI ---
---       sidetrace.lua:58: LTI
---       sidetrace.lua:59: GETTABUP
---       sidetrace.lua:59: GETFIELD
---       sidetrace.lua:59: SELF
---       sidetrace.lua:59: LOADK
---       sidetrace.lua:59: GETTABUP
---       sidetrace.lua:59: MOVE
---       sidetrace.lua:59: CALL
---       sidetrace.lua:59: LOADK
---       sidetrace.lua:59: CALL
---       sidetrace.lua:59: JMP
---       sidetrace.lua:57: FORLOOP
+--     yk-tracing: stop-tracing: sidetrace.lua:79: LTI
+--     --- Begin debugstrs: sidetrace.lua:79: LTI ---
+--     ; {
+--     ;   "trid": "0",
+--     ;   "start": {
+--     ;     "kind": "ControlPoint"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Loop"
+--     ;   }
+--     ; }
+--     sidetrace.lua:79: LTI
+--     sidetrace.lua:80: GETTABUP
+--     sidetrace.lua:80: GETFIELD
+--     sidetrace.lua:80: SELF
+--     sidetrace.lua:80: LOADK
+--     sidetrace.lua:80: GETTABUP
+--     sidetrace.lua:80: MOVE
+--     sidetrace.lua:80: CALL
+--     sidetrace.lua:80: LOADK
+--     sidetrace.lua:80: CALL
+--     sidetrace.lua:80: JMP
+--     sidetrace.lua:78: FORLOOP
 --     --- End debugstrs ---
 --     <4
---     yk-execution: enter-jit-code: sidetrace.lua:58: LTI
+--     yk-execution: enter-jit-code: sidetrace.lua:79: LTI
 --     yk-execution: deoptimise ...
 --     >=5
---     yk-execution: enter-jit-code: sidetrace.lua:58: LTI
+--     yk-execution: enter-jit-code: sidetrace.lua:79: LTI
 --     yk-execution: deoptimise ...
---     yk-tracing: start-side-tracing: sidetrace.lua:58: LTI
+--     yk-tracing: start-side-tracing: sidetrace.lua:79: LTI
 --     >=6
---     yk-tracing: stop-tracing: sidetrace.lua:58: LTI
---     --- Begin debugstrs: side-trace: sidetrace.lua:58: LTI ---
---       sidetrace.lua:61: GETTABUP
---       sidetrace.lua:61: GETFIELD
---       sidetrace.lua:61: SELF
---       sidetrace.lua:61: LOADK
---       sidetrace.lua:61: GETTABUP
---       sidetrace.lua:61: MOVE
---       sidetrace.lua:61: CALL
---       sidetrace.lua:61: LOADK
---       sidetrace.lua:61: CALL
---       sidetrace.lua:57: FORLOOP
+--     yk-tracing: stop-tracing: sidetrace.lua:79: LTI
+--     --- Begin debugstrs: sidetrace.lua:79: LTI ---
+--     ; {
+--     ;   "trid": "1",
+--     ;   "start": {
+--     ;     "kind": "Guard",
+--     ;     "src_trid": "0",
+--     ;     "gidx": "72"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Coupler",
+--     ;     "tgt_trid": "0"
+--     ;   }
+--     ; }
+--     sidetrace.lua:82: GETTABUP
+--     sidetrace.lua:82: GETFIELD
+--     sidetrace.lua:82: SELF
+--     sidetrace.lua:82: LOADK
+--     sidetrace.lua:82: GETTABUP
+--     sidetrace.lua:82: MOVE
+--     sidetrace.lua:82: CALL
+--     sidetrace.lua:82: LOADK
+--     sidetrace.lua:82: CALL
+--     sidetrace.lua:78: FORLOOP
 --     --- End debugstrs ---
 --     >=7
---     yk-execution: enter-jit-code: sidetrace.lua:58: LTI
+--     yk-execution: enter-jit-code: sidetrace.lua:79: LTI
 --     >=8
 --     >=9
 --     >=10

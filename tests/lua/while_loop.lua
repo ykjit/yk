@@ -7,27 +7,36 @@
 --     0
 --     1
 --     2
---     yk-tracing: start-tracing: while_loop.lua:34: LEI
+--     yk-tracing: start-tracing: while_loop.lua:43: LEI
 --     3
---     yk-tracing: stop-tracing: ...
---     --- Begin debugstrs: header: while_loop.lua:34: LEI ---
---       while_loop.lua:34: LEI
---       while_loop.lua:35: GETTABUP
---       while_loop.lua:35: GETFIELD
---       while_loop.lua:35: SELF
---       while_loop.lua:35: GETTABUP
---       while_loop.lua:35: MOVE
---       while_loop.lua:35: CALL
---       while_loop.lua:35: LOADK
---       while_loop.lua:35: CALL
---       while_loop.lua:36: ADDI
---       while_loop.lua:36: JMP
+--     yk-tracing: stop-tracing: while_loop.lua:43: LEI
+--     --- Begin debugstrs: while_loop.lua:43: LEI ---
+--     ; {
+--     ;   "trid": "0",
+--     ;   "start": {
+--     ;     "kind": "ControlPoint"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Loop"
+--     ;   }
+--     ; }
+--     while_loop.lua:43: LEI
+--     while_loop.lua:44: GETTABUP
+--     while_loop.lua:44: GETFIELD
+--     while_loop.lua:44: SELF
+--     while_loop.lua:44: GETTABUP
+--     while_loop.lua:44: MOVE
+--     while_loop.lua:44: CALL
+--     while_loop.lua:44: LOADK
+--     while_loop.lua:44: CALL
+--     while_loop.lua:45: ADDI
+--     while_loop.lua:45: JMP
 --     --- End debugstrs ---
 --     4
---     yk-execution: enter-jit-code: while_loop.lua:34: LEI
+--     yk-execution: enter-jit-code: while_loop.lua:43: LEI
 --     5
 --     6
---     yk-execution: deoptimise ...
+--     yk-execution: deoptimise TraceId(0) GuardId(33)
 --     exit
 
 local x = 0

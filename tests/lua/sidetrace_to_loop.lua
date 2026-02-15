@@ -6,42 +6,72 @@
 --   env-var: YKD_SERIALISE_COMPILATION=1
 --   stderr:
 --     h1
---     yk-tracing: start-tracing: sidetrace_to_loop.lua:48: GTI
---     yk-tracing: stop-tracing: sidetrace_to_loop.lua:48: GTI
---     --- Begin debugstrs: header: sidetrace_to_loop.lua:48: GTI ---
---       sidetrace_to_loop.lua:48: GTI
---       sidetrace_to_loop.lua:49: TEST
---       sidetrace_to_loop.lua:49: JMP
---       sidetrace_to_loop.lua:58: ADDI
---       sidetrace_to_loop.lua:58: JMP
+--     yk-tracing: start-tracing: sidetrace_to_loop.lua:78: GTI
+--     yk-tracing: stop-tracing: sidetrace_to_loop.lua:78: GTI
+--     --- Begin debugstrs: sidetrace_to_loop.lua:78: GTI ---
+--     ; {
+--     ;   "trid": "0",
+--     ;   "start": {
+--     ;     "kind": "ControlPoint"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Loop"
+--     ;   }
+--     ; }
+--     sidetrace_to_loop.lua:78: GTI
+--     sidetrace_to_loop.lua:79: TEST
+--     sidetrace_to_loop.lua:79: JMP
+--     sidetrace_to_loop.lua:88: ADDI
+--     sidetrace_to_loop.lua:88: JMP
 --     --- End debugstrs ---
 --     h2
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:48: GTI
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:78: GTI
 --     yk-execution: deoptimise ...
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:48: GTI
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:78: GTI
 --     yk-execution: deoptimise ...
 --     h3
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:48: GTI
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:78: GTI
 --     yk-execution: deoptimise ...
---     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:48: GTI
---     yk-tracing: stop-tracing: sidetrace_to_loop.lua:53: FORLOOP
---     yk-tracing: start-tracing: sidetrace_to_loop.lua:53: FORLOOP
---     yk-tracing: stop-tracing: sidetrace_to_loop.lua:53: FORLOOP
---     --- Begin debugstrs: header: sidetrace_to_loop.lua:53: FORLOOP ---
---       sidetrace_to_loop.lua:53: FORLOOP
+--     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:78: GTI
+--     yk-tracing: stop-tracing: sidetrace_to_loop.lua:83: FORLOOP
+--     yk-tracing: start-tracing: sidetrace_to_loop.lua:83: FORLOOP
+--     yk-tracing: stop-tracing: sidetrace_to_loop.lua:83: FORLOOP
+--     --- Begin debugstrs: sidetrace_to_loop.lua:83: FORLOOP ---
+--     ; {
+--     ;   "trid": "2",
+--     ;   "start": {
+--     ;     "kind": "ControlPoint"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Loop"
+--     ;   }
+--     ; }
+--     sidetrace_to_loop.lua:83: FORLOOP
 --     --- End debugstrs ---
---     --- Begin debugstrs: side-trace: sidetrace_to_loop.lua:48: GTI ---
---       sidetrace_to_loop.lua:52: TEST
---       sidetrace_to_loop.lua:53: LOADI
---       sidetrace_to_loop.lua:53: LOADI
---       sidetrace_to_loop.lua:53: LOADI
---       sidetrace_to_loop.lua:53: FORPREP
+--     --- Begin debugstrs: sidetrace_to_loop.lua:78: GTI ---
+--     ; {
+--     ;   "trid": "1",
+--     ;   "start": {
+--     ;     "kind": "Guard",
+--     ;     "src_trid": "0",
+--     ;     "gidx": "5"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Coupler",
+--     ;     "tgt_trid": "2"
+--     ;   }
+--     ; }
+--     sidetrace_to_loop.lua:82: TEST
+--     sidetrace_to_loop.lua:83: LOADI
+--     sidetrace_to_loop.lua:83: LOADI
+--     sidetrace_to_loop.lua:83: LOADI
+--     sidetrace_to_loop.lua:83: FORPREP
 --     --- End debugstrs ---
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:53: FORLOOP
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:83: FORLOOP
 --     yk-execution: deoptimise ...
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:48: GTI
+--     yk-execution: enter-jit-code: sidetrace_to_loop.lua:78: GTI
 --     yk-execution: deoptimise ...
---     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:48: GTI
+--     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:78: GTI
 --     exit
 
 function h(i, b1, b2)
