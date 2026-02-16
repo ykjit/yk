@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
@@ -12,7 +11,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     call @never_inline_into_trace(...
+//     call %{{_}}(%{{_}}) ; @__yk_opt_never_inline_into_trace
 //     ...
 //     --- End jit-pre-opt ---
 

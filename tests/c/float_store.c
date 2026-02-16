@@ -1,6 +1,5 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-post-opt
+//   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -11,20 +10,14 @@
 //     4 -> 3.252033
 //     4 -> 3.252033
 //     yk-tracing: stop-tracing
-//     --- Begin aot ---
+//     --- Begin jit-pre-opt ---
 //     ...
-//     func main(%arg0: i32, %arg1: ptr) -> i32 {
+//     %{{38}}: float = load %{{_}}
 //     ...
-//     %{{12_1}}: float = si_to_fp %{{_}}, float
-//     %{{_}}: float = fdiv %{{12_1}}, 1.23float
+//     %{{46}}: double = fdiv %{{_}}, %{{_}}
+//     store %{{46}}, %{{_}}
 //     ...
-//     --- End aot ---
-//     --- Begin jit-post-opt ---
-//     ...
-//     %{{12}}: float = si_to_fp %{{_}}
-//     %{{_}}: float = fdiv %{{12}}, 1.23float
-//     ...
-//     --- End jit-post-opt ---
+//     --- End jit-pre-opt ---
 //     3 -> 2.439024
 //     3 -> 2.439024
 //     3 -> 2.439024
@@ -43,7 +36,7 @@
 //     1 -> 0.813008
 //     yk-execution: deoptimise ...
 
-// Check basic 32-bit float support.
+// Check that load / stores to floats work.
 
 #include <assert.h>
 #include <stdio.h>

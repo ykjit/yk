@@ -25,8 +25,8 @@ mod x64;
 
 use crate::{
     compile::{
-        CompilationError, CompiledTrace, Compiler, GuardId, TraceEndFrame,
-        j2::codebuf::CodeBufInProgress, jitc_yk::AOT_MOD,
+        CompilationError, CompiledTrace, Compiler, GuardId, j2::codebuf::CodeBufInProgress,
+        jitc_yk::AOT_MOD,
     },
     location::HotLocation,
     mt::{MT, TraceId},
@@ -233,7 +233,6 @@ impl Compiler for J2 {
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
         coupler: Option<std::sync::Arc<dyn CompiledTrace>>,
-        _endframe: TraceEndFrame,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let kind = match coupler {
             Some(tgt_ctr) => aot_to_hir::BuildKind::Coupler { tgt_ctr },
@@ -283,7 +282,6 @@ impl Compiler for J2 {
         hl: Arc<Mutex<HotLocation>>,
         promotions: Box<[u8]>,
         debug_strs: Vec<String>,
-        _endframe: TraceEndFrame,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         #[cfg(target_arch = "x86_64")]
         type AotToHir = aot_to_hir::AotToHir<x64::Reg>;

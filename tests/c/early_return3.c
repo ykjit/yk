@@ -3,21 +3,33 @@
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_LOG=4
 //   stderr:
+//     7
 //     yk-tracing: start-tracing
-//     early return
 //     6
+//     yk-tracing: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ...
+//     --- End jit-pre-opt ---
+//     5
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise ...
+//     yk-tracing: start-side-tracing
+//     early return
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     term []
 //     --- End jit-pre-opt ---
-//     ...
+//     3
+//     yk-execution: enter-jit-code
+//     2
+//     1
+//     yk-execution: deoptimise ...
+//     yk-tracing: start-side-tracing
 //     return
 //     exit
 
-// Used to check that early return from a recursive interpreter loop aborts
-// tracing, but doesn't stop a location being retraced. Now, simply checks that
-// we can trace and compile an early return.
+// Check that (Guard, Return) traces work correctly.
 
 #include <assert.h>
 #include <stdio.h>
@@ -32,10 +44,7 @@ void loop(YkMT *mt, YkLocation *loc, int i) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, loc);
-    if (i == 7) {
-      loop(mt, loc, i - 1);
-      i--;
-    } else if (i == 6) {
+    if (i == 4) {
       fprintf(stderr, "early return\n");
       return;
     }
@@ -49,10 +58,12 @@ void loop(YkMT *mt, YkLocation *loc, int i) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 1);
+  yk_mt_sidetrace_threshold_set(mt, 1);
   YkLocation loc = yk_location_new();
 
   NOOPT_VAL(loc);
   loop(mt, &loc, 7);
+  loop(mt, &loc, 3);
   fprintf(stderr, "exit\n");
   yk_location_drop(loc);
   yk_mt_shutdown(mt);

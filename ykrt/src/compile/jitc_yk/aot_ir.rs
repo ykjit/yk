@@ -25,6 +25,7 @@
 //! Textual IR can be generated in the same way as in the JIT IR (i.e. using `std::fmt::Display`
 //! and/or `display()`). The same naming conventions are used in the textual AOT IR as in the
 //! textual JIT IR. See the docstring for the [super::jit_ir] module.
+#![allow(dead_code)]
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;

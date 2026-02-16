@@ -1,11 +1,12 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     %{{30}}: i1 = sgt %{{_}}, 0i32
-//     guard true, %{{22}}, [{{0}}:%{{0_8}}: %{{0}}, {{0}}:%{{0_9}}: %{{1}}, {{0}}:%{{0_10}}: %{{2}}, {{0}}:%{{0_11}}: %{{3}}, {{0}}:%{{9_1}}: 0i1] ; ...
+//     %{{9}}: i1 = 0
+//     ...
+//     %{{24}}: i1 = icmp sgt %{{_}}, %{{_}}
+//     guard true, %{{24}}, [%{{_}}, %{{_}}, %{{_}}, %{{_}}, %{{9}}]
 //     ...
 
 // Check that if a guard's life variables include the condition operand, that

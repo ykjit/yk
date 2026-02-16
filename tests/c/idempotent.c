@@ -1,21 +1,16 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt,jit-post-opt
+//   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
-//     4: 39 39
 //     4: 41 41
 //     4: 43 43
 //     yk-tracing: stop-tracing
 //     ...
 //     --- Begin aot ---
-//     ...
-//     #[yk_idempotent, yk_outline]
-//     func add_uintptr_t(...
 //     ...
 //     #[yk_idempotent, yk_outline]
 //     func add_uint32_t(...
@@ -25,52 +20,40 @@
 //     ...
 //     func main(...
 //     ...
-//     %{{_}}: i{{size}} = call idempotent add_uint64_t(...
+//     %{{_}}: i64 = call idempotent add_uint64_t(...
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i{{size}} = call @add_uintptr_t(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
+//     %{{6}}: i32 = 3
 //     ...
-//     %{{_}}: i32 = call @add_uint32_t(%{{_}}, 3i32) <idem_const 41i32>
+//     %{{8}}: i32 = call %{{_}}(%{{_}}, %{{6}}) ; @__yk_opt_add_uint32_t
 //     ...
-//     %{{_}}: i64 = call @add_uint64_t(%{{_}}, 4i64) <idem_const 43i64>
+//     %{{10}}: i64 = 4
 //     ...
-//     %{{_}}: i{{size}} = call @add_uintptr_t(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
+//     %{{12}}: i64 = call %{{_}}(%{{_}}, %{{10}}) ; @__yk_opt_add_uint64_t
 //     ...
-//     %{{_}}: i32 = call @add_uint32_t(%{{_}}, 3i32) <idem_const 41i32>
+//     %{{21}}: i32 = 41
 //     ...
-//     %{{_}}: i64 = call @add_uint64_t(%{{_}}, 4i64) <idem_const 43i64>
+//     %{{23}}: i64 = 43
+//     ...
+//     %{{26}}: i64 = load %{{_}}
+//     ...
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{26}}, %{{8}}, %{{21}}) ; @fprintf
+//     ...
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{12}}, %{{23}}) ; @fprintf
 //     ...
 //     --- End jit-pre-opt ---
-//     --- Begin jit-post-opt ---
-//     ...
-//     %{{_}}: i{{size}} = call @add_uintptr_t(%{{_}}, 2i{{size}}) <idem_const 39i{{size}}>
-//     ...
-//     %{{_}}: i32 = call @add_uint32_t(%{{_}}, 3i32) <idem_const 41i32>
-//     ...
-//     %{{_}}: i64 = call @add_uint64_t(%{{_}}, 4i64) <idem_const 43i64>
-//     ...
-//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{_}}, 39i{{size}})
-//     ...
-//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{_}}, 41i32)
-//     ...
-//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{_}}, 43i64)
-//     ...
-//     --- End jit-post-opt ---
-//     3: 39 39
 //     3: 41 41
 //     3: 43 43
 //     yk-execution: enter-jit-code
-//     2: 39 39
 //     2: 41 41
 //     2: 43 43
-//     1: 39 39
 //     1: 41 41
 //     1: 43 43
 //     yk-execution: deoptimise ...
 
-// Check that idempotent functions work.
+// Check that idempotent functions work, both when arguments are and aren't promoted.
 
 #include <assert.h>
 #include <inttypes.h>
@@ -79,11 +62,6 @@
 #include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
-
-__attribute__((yk_idempotent))
-uintptr_t add_uintptr_t(uintptr_t x, uintptr_t y) {
-  return x + y;
-}
 
 __attribute__((yk_idempotent))
 uint32_t add_uint32_t(uint32_t x, uint32_t y) {
@@ -101,29 +79,23 @@ int main(int argc, char **argv) {
   YkLocation loc = yk_location_new();
 
   size_t li = 4;
-  uintptr_t j = 37;
   uint32_t k = 38;
   uint64_t l = 39;
   NOOPT_VAL(loc);
   NOOPT_VAL(li);
-  NOOPT_VAL(j);
   NOOPT_VAL(k);
   NOOPT_VAL(l);
   while (li > 0) {
     yk_mt_control_point(mt, &loc);
     // This call to the idempotent function cannot be elided as the trace
-    // optimiser will be unable to figure out that `j` is constant.
-    uintptr_t a = add_uintptr_t(j, 2);
+    // optimiser will be unable to figure out that `k` & `l` are constants.
     uint32_t b = add_uint32_t(k, 3);
     uint64_t c = add_uint64_t(l, 4);
-    uintptr_t d = yk_promote(j);
     uint32_t e = yk_promote(k);
     uint64_t f = yk_promote(l);
     // These calls to idempotent functions will be elided.
-    uintptr_t g = add_uintptr_t(d, 2);
     uint32_t h = add_uint32_t(e, 3);
     uint64_t i = add_uint64_t(f, 4);
-    fprintf(stderr, "%zu: %" PRIuPTR " %" PRIuPTR "\n", li, a, g);
     fprintf(stderr, "%zu: %" PRIu32 " %" PRIu32 "\n", li, b, h);
     fprintf(stderr, "%zu: %" PRIu64 " %" PRIu64 "\n", li, c, i);
     li--;

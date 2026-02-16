@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0 -Xclang -disable-O0-optnone -Xlinker --lto-newpm-passes=instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>
 // Run-time:
@@ -20,9 +19,9 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{19}}: i32 = call @f()
+//     %{{19}}: i32 = call %{{_}}() ; @f
 //     ...
-//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{19}})
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{19}}) ; @fprintf
 //     ...
 //     --- End jit-pre-opt ---
 //     i=3, val=3

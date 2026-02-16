@@ -1,6 +1,6 @@
-// ignore-if: test "$YKB_TRACER" != "swt" -o "$YK_JITC" = "j2"
+// ignore-if: test "$YKB_TRACER" != "swt" -o "$YK_JITC" != "j2"
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt,jit-post-opt
+//   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=4
 //   stderr:
@@ -25,14 +25,11 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i32 = icall %{{_}}(%{{_}})...
+//     %{{11}}: ptr = load %4
+//     %{{12}}: i32 = load %{{_}}
+//     %{{13}}: i32 = call %11(%{{12}})
 //     ...
 //     --- End jit-pre-opt ---
-//     --- Begin jit-post-opt ---
-//     ...
-//     %{{_}}: i32 = icall %{{_}}(%{{_}})...
-//     ...
-//     --- End jit-post-opt ---
 //     3
 //     2
 //     1

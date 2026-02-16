@@ -1,5 +1,3 @@
-// ## longjmp mitigation broke this
-// ignore-if: true || test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -19,7 +17,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     call @foo(%{{4}})
+//     call %{{_}}(%{{4}}) ; @__yk_opt_foo
 //     ...
 //     --- End jit-pre-opt ---
 //     0

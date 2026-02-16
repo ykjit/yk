@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
@@ -17,9 +16,13 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i1 = sgt %{{2}}, 1i32
+//     %{{11}}: i32 = 1
+//     %{{12}}: i1 = icmp sgt %{{_}}, %{{11}}
 //     ...
-//     %{{3}}: i64 = call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{18}}: i64 = 4
+//     %{{19}}: i64 = 1
+//     ......
+//     %{{21}}: i64 = call %{{_}}(%{{_}}, %{{18}}, %{{19}}, %{{_}}) ; @fwrite
 //     ...
 //     --- End jit-pre-opt ---
 //     3

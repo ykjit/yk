@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -9,12 +8,12 @@
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{14_2}}: ptr = ptr_add %{{14_1}}, -{{4}}
+//     %{{14_2}}: ptr = ptr_add %{{14_1}}, -4
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{14}}: ptr = ptr_add %{{13}}, -{{4i32}}
+//     %{{14}}: ptr = ptradd %{{13}}, -4
 //     ...
 //     --- End jit-pre-opt ---
 //     i=9

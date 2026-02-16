@@ -1,53 +1,54 @@
 // Run-time:
+//   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
-//   env-var: YKD_LOG_IR=jit-pre-opt
 //   stderr:
 //     yk-tracing: start-tracing
-//     x=0
+//     foo 7
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{12}}: i32 = call %{{_}}(%{{8}}) ; @call_me
+//     %{{5}}: ptr = load ...
+//     ...
+//     %{{7}}: i32 = call %{{5}}(%{{_}})
 //     ...
 //     --- End jit-pre-opt ---
-//     ...
+//     foo 6
 //     yk-execution: enter-jit-code
-//     x=0
-//     x=0
+//     foo 5
+//     foo 4
 //     yk-execution: deoptimise ...
+//     exit
 
-// Check that we can call a static function with internal linkage from the same
-// compilation unit.
+// Check that indirect calls work.
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline, yk_outline)) static int call_me(int x) {
-  NOOPT_VAL(x);
-  if (x == 5)
-    return 1;
-  else
-    return 0;
-}
+__attribute__((noinline)) int foo(int i) { return i + 3; }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int x = 999, i = 4;
+  int i = 4;
+  int (*fn)(int) = foo;
+
+  NOOPT_VAL(loc);
   NOOPT_VAL(i);
+  NOOPT_VAL(fn);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    x = call_me(argc);
-    fprintf(stderr, "x=%d\n", x);
+    int x = fn(i);
+    fprintf(stderr, "foo %d\n", x);
     i--;
   }
-  assert(x == 0);
-
+  fprintf(stderr, "exit\n");
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);

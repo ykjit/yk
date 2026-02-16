@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
@@ -21,10 +20,10 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{12}}: float = si_to_fp %{{11}}
-//     %{{13}}: double = fp_ext %{{12}}
+//     %{{6}}: float = sitofp %{{_}}
+//     %{{7}}: double = fpext %{{6}}
 //     ...
-//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{11}}, %{{13}})
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{11}}, %{{7}}) ; @fprintf
 //     ...
 //     --- End jit-pre-opt ---
 //     3 -> 3.000000

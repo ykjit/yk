@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0 -Xclang -disable-O0-optnone -Xlinker --lto-newpm-passes=instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>
 // Run-time:
@@ -11,7 +10,9 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{result}}: i64 = ashr %{{1}}, 2i64
+//     %{{12}}: i64 = sub ...
+//     %{{13}}: i64 = 2
+//     %{{14}}: i64 = ashr %{{_}}, %{{13}}
 //     ...
 //     --- End jit-pre-opt ---
 //     ashr 3

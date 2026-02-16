@@ -1,24 +1,25 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
+//   env-var: YKD_OPT=0
 //   stderr:
 //     ...
-//     %{{8}}: ptr = lookup_global @shadowstack_0
-//     %{{9}}: ptr = load %{{8}}
+//     %{{7}}: ptr = threadlocal shadowstack_0
+//     %{{8}}: ptr = load %{{7}}
 //     ...
-//     %{{14}}: ptr = ptr_add %{{_}}, 8
+//     %{{12}}: ptr = ptradd %{{_}}, 8
 //     ...
-//     %{{18}}: i32 = mul %{{17}}, 2i32
-//     %{{19}}: ptr = load %{{14}}
-//     *%{{19}} = %{{18}}
+//     %{{16}}: i32 = 3
+//     %{{17}}: i32 = mul %{{_}}, %{{16}}
+//     %{{18}}: ptr = load %{{12}}
+//     store %{{17}}, %{{18}}
 //     ...
 //     Run trace in a thread.
 //     ...
-//     res: {{thread_ptr}} 2
+//     res: {{thread_ptr}} 3
 //     yk-execution: deoptimise ...
-//     res: {{thread_ptr}} 2
+//     res: {{thread_ptr}} 3
 //     ...
 
 // Check that threads use a different shadow stack than normal execution.
@@ -43,7 +44,7 @@ struct thread_data {
 
 __attribute__((noinline))
 void foo(int a, int *res) {
-  *res = a * 2;
+  *res = a * 3;
 }
 
 // Decrement an integer from ITERS down to the thread's number, then return it.

@@ -1,8 +1,8 @@
-// ignore-if: test "$YK_JITC" = "j2"
+// ignore-if: true # not yet supported by j2
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-post-opt
+//   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:

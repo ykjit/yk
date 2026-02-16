@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_IR=jit-pre-opt
@@ -9,7 +8,9 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i{{_}} = call @call_callback(0x{{_}}, %{{_}}, %{{_}})
+//     %{{8}}: ptr = 0x{{_}} ; @callback
+//     ...
+//     %{{10}}: i32 = call %{{_}}(%{{8}}, %{{_}}, %{{_}}) ; @call_callback
 //     ...
 //     --- End jit-pre-opt ---
 //     ...
@@ -17,7 +18,7 @@
 //     yk-execution: enter-jit-code
 //     2: 3
 //     1: 2
-//     yk-execution: deoptimise TraceId(0) GuardId(1)
+//     yk-execution: deoptimise ...
 
 
 // Check that we can reliably deal with "foreign" (not compiled with ykllvm)
