@@ -1100,8 +1100,10 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
 
         if !func.is_declaration()
             && !func.is_outline()
-            // FIXME: We currently don't handle va_start
-            && !func.contains_call_to(self.am, "llvm.va_start")
+            // FIXME: We currently don't handle va_start.
+            // It would be better if ykllvm marked functions containing `llvm.va_start.p*` with
+            // `yk_outline` (at least until we can inline calls to that intrinsic).
+            && !func.contains_call_to(self.am, "llvm.va_start.p0")
             // Is this a recursive call?
             && !self.frames.iter().any(|f| f.pc.as_ref().unwrap().funcidx() == *callee)
         {
