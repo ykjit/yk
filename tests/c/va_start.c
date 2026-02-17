@@ -8,7 +8,7 @@
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     call llvm.va_start(%{{_}})
+//     call llvm.va_start.p0(%{{_}})
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---

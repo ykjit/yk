@@ -6,57 +6,43 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
-//     ashr 4
+//     4: -134217720 2047
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{12}}: i64 = sub ...
-//     %{{13}}: i64 = 2
-//     %{{14}}: i64 = ashr %{{_}}, %{{13}}
+//     %{{9}}: i32 = ashr %{{8}}, %{{7}}
 //     ...
 //     --- End jit-pre-opt ---
-//     ashr 3
+//     3: -268435440 4095
 //     yk-execution: enter-jit-code
-//     ashr 2
-//     ashr 1
+//     2: -536870880 8191
+//     1: -1073741760 16383
 //     yk-execution: deoptimise ...
 //     exit
 
 // Test ashr instructions.
 
-#include <assert.h>
+#include <inttypes.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/types.h>
 #include <yk.h>
 #include <yk_testing.h>
-
-struct P {
-  int *yklocs;
-  int *code;
-};
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
+  int32_t x = 0x80000081;
+  int16_t y = 0x7fff;
   int i = 4;
-  struct P p;
-  p.yklocs = malloc(sizeof(int) * 4);
-  p.code = &p.yklocs[0];
-  p.yklocs[4] = 4;
-  p.yklocs[3] = 3;
-  p.yklocs[2] = 2;
-  p.yklocs[1] = 1;
   NOOPT_VAL(loc);
   NOOPT_VAL(i);
+  NOOPT_VAL(x);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    int *elem = &p.yklocs[i];
-    int ashr = p.yklocs[elem - p.code];
-    fprintf(stderr, "ashr %d\n", ashr);
+    fprintf(stderr, "%d: %" PRId32 " %" PRId16 "\n", i, x >> i, y >> i);
     i--;
   }
   fprintf(stderr, "exit\n");
