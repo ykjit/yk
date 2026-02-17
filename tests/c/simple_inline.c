@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
@@ -11,9 +10,10 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{result}}: i32 = add %{{1}}, 3i32
+//     %{{4}}: i32 = 3
+//     %{{5}}: i32 = add %{{1}}, %{{4}}
 //     ...
-//     %{{2}}: i32 = call @fprintf(%{{3}}, %{{4}}, %{{result}})
+//     %{{10}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{5}}) ; @fprintf
 //     ...
 //     --- End jit-pre-opt ---
 //     foo 6

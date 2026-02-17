@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -14,10 +13,12 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{21}}: i1 = eq %{{20}}, 299i32
-//     %{{22}}: i1 = eq %{{20}}, 298i32
-//     %{{23}}: i1 = or %{{21}}, %{{22}}
-//     guard false, %{{23}}, ...
+//     %{{11}}: i32 = 299
+//     %{{12}}: i1 = icmp eq %{{10}}, %{{11}}
+//     %{{13}}: i32 = 298
+//     %{{14}}: i1 = icmp eq %{{10}}, %{{13}}
+//     %{{15}}: i1 = or %{{12}}, %{{14}}
+//     guard false, %{{15}}, ...
 //     ...
 //     --- End jit-pre-opt ---
 //     i=2

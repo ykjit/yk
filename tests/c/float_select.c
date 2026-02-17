@@ -1,4 +1,5 @@
 // Compiler:
+//   env-var: YKB_EXTRA_LD_FLAGS=-lm
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
@@ -6,50 +7,55 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
-//     foo 3
+//     10: 10.840000
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{6}}: i32 = 3
-//     ...
-//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{6}}) ; @fprintf
+//     %{{12}}: double = sitofp %{{_}}
+//     %{{13}}: double = fneg %{{_}}
+//     %{{14}}: double = select %{{_}}, %{{12}}, %{{13}}
 //     ...
 //     --- End jit-pre-opt ---
-//     foo 3
+//     9: -8.160000
 //     yk-execution: enter-jit-code
-//     foo 3
-//     foo 3
+//     8: 8.840000
+//     7: -6.160000
+//     6: 6.840000
+//     5: -4.160000
+//     4: 4.840000
+//     3: -2.160000
+//     2: 2.840000
+//     1: -0.160000
 //     yk-execution: deoptimise ...
 //     exit
 
-// Check that constant return values of functions inlined into a trace are
-// properly mapped.
+// Check floating point `select` works.
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int foo(int i) { return 3; }
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int i = 4;
+  int i = 10;
+  double d = 0.84;
   NOOPT_VAL(loc);
+  NOOPT_VAL(d);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    int x = foo(i);
-    fprintf(stderr, "foo %d\n", x);
+    fprintf(stderr, "%d: %f\n", i, i % 2 == 0 ? d + i : d - i);
     i--;
   }
-  fprintf(stderr, "exit\n");
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
+  fprintf(stderr, "exit\n");
   return (EXIT_SUCCESS);
 }

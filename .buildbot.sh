@@ -175,9 +175,6 @@ for _ in $(seq 10); do
     YKB_TRACER=swt RUST_TEST_SHUFFLE=1 cargo test
 done
 
-# Keep j2 honest w.r.t. lang_tests
-YK_JITC=j2 RUST_TEST_SHUFFLE=1 cargo test lang_tests::
-
 # test yklua/swt in debug mode.
 PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug YKB_TRACER=swt test_yklua
 
@@ -244,7 +241,7 @@ for tracer in $TRACERS; do
     # changes, so for now just nuke any existing yklua to force a rebuild.
     rm -rf target/release/yklua
 
-    RUST_TEST_SHUFFLE=1 YK_JITC=j2 cargo test --release
+    RUST_TEST_SHUFFLE=1 cargo test --release
 
     if [ "${tracer}" = "swt" ]; then
         # test yklua/swt in release mode.

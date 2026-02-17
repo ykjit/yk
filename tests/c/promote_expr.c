@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
@@ -9,8 +8,9 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{16}}: i1 = eq %{{_}}, 50i64
-//     guard true, %{{16}}, ...
+//     %{{17}}: i64 = 50
+//     %{{18}}: i1 = icmp eq %{{_}}, %{{17}}
+//     guard true, %{{18}}, ...
 //     ...
 //     --- End jit-pre-opt ---
 //     y=100

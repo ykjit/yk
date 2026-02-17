@@ -22,21 +22,6 @@ pub fn main() {
 
     // We need to explicitly tell Cargo to track these files otherwise it won't rebuild when they
     // change.
-    println!("cargo::rerun-if-changed=src/compile/jitc_yk/jit_ir/jit_ir.y");
-    println!("cargo::rerun-if-changed=src/compile/jitc_yk/jit_ir/jit_ir.l");
-    CTLexerBuilder::<DefaultLexerTypes<u8>>::new_with_lexemet()
-        .lrpar_config(|ctp| {
-            ctp.yacckind(YaccKind::Grmtools)
-                .grammar_in_src_dir("compile/jitc_yk/jit_ir/jit_ir.y")
-                .unwrap()
-        })
-        .lexer_in_src_dir("compile/jitc_yk/jit_ir/jit_ir.l")
-        .unwrap()
-        .build()
-        .unwrap();
-
-    // We need to explicitly tell Cargo to track these files otherwise it won't rebuild when they
-    // change.
     println!("cargo::rerun-if-changed=src/compile/j2/hir.l");
     println!("cargo::rerun-if-changed=src/compile/j2/hir.y");
     CTLexerBuilder::<DefaultLexerTypes<u16>>::new_with_lexemet()

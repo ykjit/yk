@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG=4
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
@@ -16,7 +15,7 @@
 //     ...
 //     --- Begin jit-pre-opt ---
 //     ...
-//     call @call_me()...
+//     call %{{3}}() ; @__yk_opt_call_me
 //     ...
 //     --- End jit-pre-opt ---
 //     Can't JIT this!

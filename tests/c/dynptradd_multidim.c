@@ -2,40 +2,36 @@
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0 -Xclang -disable-O0-optnone -Xlinker --lto-newpm-passes=instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>
 // Run-time:
 //   env-var: YKD_LOG_IR=aot,jit-pre-opt
-//   env-var: YKD_LOG=4
 //   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
-//     i=4, val=6
+//     i=0, elem=000
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{23_0}}: i32 = phi bb{{bb22}} -> 100i32, bb{{bb21}} -> 6i32
-//     ...
-//     %{{24_0}}: i32 = phi bb{{bb23}} -> %{{23_0}}, bb{{bb19}} -> 3i32
-//     ...
-//     %{{25_0}}: i32 = phi bb{{bb24}} -> %{{24_0}}, bb{{bb17}} -> 2i32
-//     ...
-//     %{{26_0}}: i32 = phi bb{{bb25}} -> %{{25_0}}, bb{{bb15}} -> 1i32
+//     %{{10_13}}: ptr = ptr_add %{{0_5}}, 0 + (%{{10_8}} * 64) + (%{{10_10}} * 16) + (%{{%10_12}} * 4)
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{26}}: i32 = 6
-//     ...
-//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{26}}) ; @fprintf
+//     %{{16}}: ptr = dynptradd %{{3}}, %{{_}}, 64
+//     %{{17}}: ptr = dynptradd %{{16}}, %{{_}}, {{_}}
+//     %{{_}}: ptr = dynptradd %{{17}}, %{{_}}, {{_}}
 //     ...
 //     --- End jit-pre-opt ---
-//     i=3, val=6
+//     i=1, elem=111
 //     yk-execution: enter-jit-code
-//     i=2, val=6
-//     i=1, val=6
+//     i=2, elem=222
+//     i=3, elem=333
 //     yk-execution: deoptimise ...
 
-// Check that PHI nodes JIT properly.
+// Check dynamic ptradd instructions work.
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
@@ -44,28 +40,25 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int val = 0;
-  int cond = -3;
-  int i = 4;
-  NOOPT_VAL(loc);
-  NOOPT_VAL(val);
-  NOOPT_VAL(i);
-  while (i > 0) {
-    yk_mt_control_point(mt, &loc);
-    NOOPT_VAL(cond);
-    if (cond > 0) {
-      val = 1;
-    } else if (cond == -1) {
-      val = 2;
-    } else if (cond == -2) {
-      val = 3;
-    } else if (cond == -3) {
-      val = 6;
-    } else {
-      val = 100;
+  // Load up a big multi-dimentsional array that we will dynamically index.
+  uint32_t array[4][4][4];
+  for (int x = 0; x < 4; x++) {
+    for (int y = 0; y < 4; y++) {
+      for (int z = 0; z < 4; z++) {
+        int val = x * 100 + y * 10 + z;
+        array[x][y][z] = val;
+      }
     }
-    fprintf(stderr, "i=%d, val=%d\n", i, val);
-    i--;
+  }
+
+  int i = 0;
+  NOOPT_VAL(loc);
+  NOOPT_VAL(array);
+  NOOPT_VAL(i);
+  while (i < 4) {
+    yk_mt_control_point(mt, &loc);
+    fprintf(stderr, "i=%d, elem=%03d\n", i, array[i][i][i]);
+    i++;
   }
   yk_location_drop(loc);
   yk_mt_shutdown(mt);

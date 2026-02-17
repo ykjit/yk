@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
@@ -9,7 +8,7 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //       ...
-//       call @indirect(%17, %18, %19, %20, %21)
+//       call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{_}}, %{{_}}) ; @__yk_opt_indirect
 //       ...
 //     --- End jit-pre-opt ---
 //     0: 4
@@ -19,8 +18,8 @@
 //     1: 3
 //     0: 2
 //     0: 1
-//     yk-warning: tracing-aborted: tracing continued into a JIT frame
 //     yk-execution: deoptimise ...
+//     yk-warning: tracing-aborted: tracing continued into a JIT frame
 //     exit
 
 // Test that we don't record a successful trace if we started tracing in an

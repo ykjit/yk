@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_LOG=4
@@ -33,28 +32,20 @@
 //     18
 //     yk-execution: enter-jit-code
 //     yk-execution: deoptimise ...
-//     20
-//     yk-execution: enter-jit-code
-//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
-//     22
+//     20
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
-//     24
+//     22
 //     yk-execution: enter-jit-code
+//     24
 //     26
 //     28
 //     30
-//     ...
-//     36
-//     yk-execution: enter-jit-code
 //     yk-execution: deoptimise ...
 //     ...
-//     42
-//     yk-execution: enter-jit-code
-//     yk-execution: deoptimise ...
 //     yk-tracing: start-side-tracing
 //     45
 //     yk-tracing: stop-tracing

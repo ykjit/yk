@@ -19,10 +19,7 @@ use parking_lot_core::SpinWait;
 
 use crate::{
     aotsmp::{AOT_STACKMAPS, load_aot_stackmaps},
-    compile::{
-        CompilationError, CompiledTrace, Compiler, GuardId, default_compiler,
-        jitc_yk::jit_ir::TraceEndFrame,
-    },
+    compile::{CompilationError, CompiledTrace, Compiler, GuardId, default_compiler},
     job_queue::{Job, JobQueue},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     log::{
@@ -286,7 +283,6 @@ impl MT {
         hl_arc: Arc<Mutex<HotLocation>>,
         trid: TraceId,
         connector_tid: Option<TraceId>,
-        endframe: TraceEndFrame,
     ) {
         self.stats.trace_recorded_ok();
 
@@ -307,7 +303,6 @@ impl MT {
                 trace_iter.1,
                 trace_iter.2,
                 connector_ctr,
-                endframe,
             ) {
                 Ok(ctr) => {
                     assert_eq!(ctr.ctrid(), trid);
@@ -394,7 +389,6 @@ impl MT {
         parent_ctr: Arc<dyn CompiledTrace>,
         gid: GuardId,
         connector_tid: TraceId,
-        endframe: TraceEndFrame,
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
@@ -419,7 +413,6 @@ impl MT {
                 Arc::clone(&hl_arc),
                 trace_iter.1,
                 trace_iter.2,
-                endframe,
             ) {
                 Ok(ctr) => {
                     assert_eq!(ctr.ctrid(), trid);
@@ -569,7 +562,6 @@ impl MT {
                             parent_ctr,
                             gid,
                             connector_tid,
-                            TraceEndFrame::Same,
                         );
                         if start {
                             self.start_tracing(
@@ -649,14 +641,14 @@ impl MT {
     /// resulting trace will be a connector trace.
     fn stop_tracing(
         self: &Arc<Self>,
-        frameaddr: *mut c_void,
+        _frameaddr: *mut c_void,
         _loc: &Location,
         trid: TraceId,
         connector_tid: Option<TraceId>,
     ) {
         // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
         // will have put a `Some` in the `Rc`.
-        let (hl, thread_tracer, promotions, debug_strs, endframe) =
+        let (hl, thread_tracer, promotions, debug_strs) =
             MTThread::with_borrow_mut(|mtt| match mtt.pop_tstate() {
                 MTThreadState::Tracing {
                     trid: _,
@@ -664,14 +656,13 @@ impl MT {
                     thread_tracer,
                     promotions,
                     debug_strs,
-                    frameaddr: tracing_frameaddr,
+                    frameaddr: _,
                     seen_hls: _,
                     gtrace: _,
                 } => {
                     // If this assert fails then the code in `transition_control_point`,
                     // which rejects traces that end in another frame, didn't work.
-                    let endframe = TraceEndFrame::from_frames(tracing_frameaddr, frameaddr);
-                    (hl, thread_tracer, promotions, debug_strs, endframe)
+                    (hl, thread_tracer, promotions, debug_strs)
                 }
                 _ => unreachable!(),
             });
@@ -690,7 +681,6 @@ impl MT {
                     hl,
                     trid,
                     connector_tid,
-                    endframe,
                 );
             }
             Err(e) => {

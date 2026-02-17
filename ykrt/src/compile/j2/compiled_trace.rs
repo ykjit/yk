@@ -17,7 +17,6 @@ use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::{
     any::Any,
-    error::Error,
     ffi::c_void,
     sync::{Arc, Weak},
 };
@@ -153,10 +152,6 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
         self.trid
     }
 
-    fn safepoint(&self) -> &Option<aot_ir::DeoptSafepoint> {
-        todo!()
-    }
-
     fn as_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static> {
         self
     }
@@ -189,16 +184,8 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
         self.codebuf.as_ptr() as *const c_void
     }
 
-    fn entry_sp_off(&self) -> usize {
-        todo!()
-    }
-
     fn hl(&self) -> &std::sync::Weak<parking_lot::Mutex<HotLocation>> {
         &self.hl
-    }
-
-    fn disassemble(&self, _with_addrs: bool) -> Result<String, Box<dyn Error>> {
-        todo!()
     }
 
     fn code(&self) -> &[u8] {

@@ -1,28 +1,24 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
-//     4 -> 3.350000, 4.500000
+//     4 -> 3.350000 3.350000 4.350000
 //     yk-tracing: stop-tracing
-//     --- Begin aot ---
-//     ...
-//     func main(%arg0: i32, %arg1: ptr) -> i32 {
-//     ...
-//     %{{_}}: i32 = call fprintf(%{{_}}, @{{_}}, %{{_}}, 3.3499999046325684double, 4.5double)
-//     ...
-//     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, 3.3499999046325684double, 4.5double)
+//     %{{6}}: float = 3.35
+//     ...
+//     %{{7}}: double = 3.3499999046325684
+//     ...
+//     %{{8}}: double = 4.349999904632568
 //     ...
 //     --- End jit-pre-opt ---
-//     3 -> 3.350000, 4.500000
+//     3 -> 3.350000 3.350000 4.350000
 //     yk-execution: enter-jit-code
-//     2 -> 3.350000, 4.500000
-//     1 -> 3.350000, 4.500000
+//     2 -> 3.350000 3.350000 4.350000
+//     1 -> 3.350000 3.350000 4.350000
 //     yk-execution: deoptimise ...
 
 // Check 32- and 64-bit float constants work properly.
@@ -34,6 +30,16 @@
 #include <yk.h>
 #include <yk_testing.h>
 
+__attribute__((noinline, yk_outline))
+double double_id(double x) {
+  return x;
+}
+
+__attribute__((noinline, yk_outline))
+float float_id(float x) {
+  return x;
+}
+
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
@@ -44,7 +50,10 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d -> %f, %f\n", i, 3.35f, 4.5);
+    float x = float_id(3.35);
+    double y = double_id(3.35f);
+    double z = double_id(4.35f);
+    fprintf(stderr, "%d -> %f %f %f\n", i, x, y, z);
     i--;
   }
   yk_location_drop(loc);

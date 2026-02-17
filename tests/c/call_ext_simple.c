@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
@@ -6,9 +5,7 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     func_decl putc (i32, ptr) -> i32
-//     ...
-//     %{{6}}: i32 = call @putc...
+//     %{{7}}: i32 = call %{{_}}(%{{_}}, %{{_}}) ; @putc
 //     ...
 //   stdout:
 //     12

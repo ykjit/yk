@@ -1,4 +1,3 @@
-// ignore-if: test "$YK_JITC" = "j2"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
@@ -10,8 +9,9 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i1 = eq %{{_}}, 0i32
-//     guard true, %{{1}}, ...
+//     %{{9}}: i32 = 0
+//     %{{10}}: i1 = icmp eq %{{_}}, %{{9}}
+//     guard true, %{{10}}, ...
 //     ...
 //     --- End jit-pre-opt ---
 //     1 0: zero
@@ -27,16 +27,17 @@
 //     11 1: one
 //     12 1: one
 //     13 1: one
-//     14 1: one
 //     yk-tracing: start-side-tracing
-//     15 1: one
+//     14 1: one
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{2}}: i1 = eq %{{_}}, 1i32
-//     guard true, %{{2}}, ...
+//     %{{5}}: i32 = 1
+//     %{{6}}: i1 = icmp eq %{{_}}, %{{5}}
+//     guard true, %{{6}}, ...
 //     ...
 //     --- End jit-pre-opt ---
+//     15 1: one
 //     16 1: one
 //     17 1: one
 //     18 1: one
@@ -50,8 +51,9 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{3}}: i1 = eq %{{_}}, 2i32
-//     guard true, %{{3}}, ...
+//     %{{5}}: i32 = 2
+//     %{{6}}: i1 = icmp eq %{{_}}, %{{5}}
+//     guard true, %{{6}}, ...
 //     ...
 //     --- End jit-pre-opt ---
 //     25 2: two
@@ -68,12 +70,8 @@
 //     yk-tracing: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{4}}: i1 = eq %{{c}}, 0i32
-//     %{{5}}: i1 = eq %{{c}}, 1i32
-//     %{{6}}: i1 = eq %{{c}}, 2i32
-//     %{{7}}: i1 = or %{{4}}, %{{5}}
-//     %{{8}}: i1 = or %{{7}}, %{{6}}
-//     guard false, %{{8}}, ...
+//     %{{4}}: i32 = arg
+//     %{{5}}: ...
 //     ...
 //     --- End jit-pre-opt ---
 //     35 99: default
@@ -84,7 +82,8 @@
 //     exit
 
 // Check that guards for switches are emitted correctly, including in
-// side-traces.
+// side-traces, and that the `default` case does not lead to a guard being
+// emitted.
 
 #include <stdio.h>
 #include <stdlib.h>

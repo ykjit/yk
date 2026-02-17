@@ -1,29 +1,22 @@
-// Compiler:
-//   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG=4
 //   stderr:
-//     yk-tracing: start-tracing
-//     foo 3
-//     yk-tracing: stop-tracing
+//     hello 0 4
+//     ...
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{6}}: i32 = 3
+//     %{{16}}: ptr = 0x{{_}} ; @my_print0
 //     ...
-//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{6}}) ; @fprintf
+//     call %{{16}}(%{{_}}) ; @my_print0
 //     ...
 //     --- End jit-pre-opt ---
-//     foo 3
-//     yk-execution: enter-jit-code
-//     foo 3
-//     foo 3
-//     yk-execution: deoptimise ...
+//     hello 0 3
+//     hello 0 2
+//     hello 0 1
 //     exit
 
-// Check that constant return values of functions inlined into a trace are
-// properly mapped.
+// Check that constant promoted values have their symbols attached.
 
 #include <assert.h>
 #include <stdio.h>
@@ -32,7 +25,25 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int foo(int i) { return 3; }
+static void my_print0(int x) {
+    fprintf(stderr, "hello 0 %d\n", x);
+}
+
+static void my_print1(int x) {
+    fprintf(stderr, "hello 1 %d\n", x);
+}
+
+typedef void (*func_ty)(int);
+
+void *funcptr_table[2] = {
+    (void *)my_print0,
+    (void *)my_print1,
+};
+
+static void call(int x, int id) {
+    func_ty callable = (func_ty)yk_promote(funcptr_table[id]);
+    callable(x);
+}
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
@@ -44,12 +55,12 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    int x = foo(i);
-    fprintf(stderr, "foo %d\n", x);
+    call(i, 0);
     i--;
   }
-  fprintf(stderr, "exit\n");
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
+  fprintf(stderr, "exit\n");
+
   return (EXIT_SUCCESS);
 }
