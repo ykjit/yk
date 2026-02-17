@@ -3,7 +3,7 @@
 #[cfg(test)]
 use crate::compile::j2::regalloc::TestRegIter;
 use crate::compile::j2::{
-    hir::{Block, InstIdx, Mod, Ty},
+    hir::{Block, BlockLikeT, Call, Inst, InstIdx, Mod, Ty},
     regalloc::{PeelRegsBuilderT, RegT},
 };
 use iced_x86::Register;
@@ -438,10 +438,11 @@ index_vec::define_index_type! {
     IMPL_RAW_CONVERSIONS = true;
 }
 
-// These are deliberately in reverse order: we prefer allocating registers such as R15, as they are
-// not clobbered by CALLs / MULs (etc), and are less likely to need to be copied around, so we put
-// those first.
+/// The normal, usable, general purposes x64 registers (excluding RSP, RBP, and so on).
 pub(super) const NORMAL_GP_REGS: [Reg; 14] = [
+    // These are deliberately in reverse order: we prefer allocating registers such as R15, as they are
+    // not clobbered by CALLs / MULs (etc), and are less likely to need to be copied around, so we put
+    // those first. If you change this order at all, you must also update `CALLEE_SAVED_MASK`.
     Reg::R15,
     Reg::R14,
     Reg::R13,
@@ -477,6 +478,20 @@ pub(super) const ALL_XMM_REGS: [Reg; 16] = [
     Reg::XMM15,
 ];
 
+/// A bitmask of callee saved registers suitable for [PeelRegsBuilder::used_gp]. Ideally we would
+/// calculate this in `const` fashion along the lines of:
+///
+/// ```text
+/// const mask: u16 = [Reg::RBX, Reg::R12, Reg::R13, Reg::R14, Reg::R15]
+///     .map(|x| 1 << (x as u16))
+///     .iter()
+///     .fold(0, |x, y| x | y);
+/// ```
+///
+/// However that involves both non-stabilised and non-existent features, so we have to manually
+/// create and maintain this bitmask.
+const CALLEE_SAVED_MASK: u16 = 0b00010000001111;
+
 pub struct PeelRegsBuilder<Reg: RegT> {
     /// A bit field with one bit set for each [NORMAL_GP_REGS] set.
     used_gp: u16,
@@ -497,16 +512,22 @@ impl PeelRegsBuilder<Reg> {
         }
     }
 
-    fn is_gp_full(&self) -> bool {
-        // As a rough heuristic, leave 3 registers unallocated (for intermediate values) before
-        // declaring that we can't allocate any more.
-        self.used_gp.count_ones() > u32::try_from(NORMAL_GP_REGS.len() - 3).unwrap()
+    fn is_gp_full(&self, ignore_caller_saved: bool) -> bool {
+        if self.used_gp.count_ones() > u32::try_from(NORMAL_GP_REGS.len() - 4).unwrap() {
+            // As a rough heuristic, leave 3 registers unallocated (for intermediate values) before
+            // declaring that we can't allocate any more.
+            true
+        } else if ignore_caller_saved {
+            (self.used_gp & CALLEE_SAVED_MASK) == CALLEE_SAVED_MASK
+        } else {
+            false
+        }
     }
 
     fn is_fp_full(&self) -> bool {
         // As a rough heuristic, leave 3 registers unallocated (for intermediate values) before
         // declaring that we can't allocate any more.
-        self.used_xmm.count_ones() > u32::try_from(ALL_XMM_REGS.len() - 3).unwrap()
+        self.used_xmm.count_ones() > u32::try_from(ALL_XMM_REGS.len() - 4).unwrap()
     }
 }
 
@@ -522,14 +543,74 @@ impl PeelRegsBuilderT<Reg> for PeelRegsBuilder<Reg> {
         }
     }
 
-    fn is_full(&self) -> bool {
-        self.is_gp_full() && self.is_fp_full()
+    fn is_full(&self, ignore_caller_saved: bool) -> bool {
+        if ignore_caller_saved {
+            self.is_gp_full(true)
+        } else {
+            self.is_gp_full(false) && self.is_fp_full()
+        }
     }
 
-    fn try_alloc_reg_for(&mut self, m: &Mod<Reg>, b: &Block, iidx: InstIdx) -> Option<Reg> {
-        match b.inst_ty(m, iidx) {
+    fn try_alloc_reg_for(
+        &mut self,
+        m: &Mod<Reg>,
+        b: &Block,
+        ignore_caller_saved: bool,
+        cur_iidx: InstIdx,
+        op_iidx: InstIdx,
+    ) -> Option<Reg> {
+        // We treat call instructions specially: we really would like to put their arguments in the
+        // right registers if possible.
+        if !ignore_caller_saved && let Inst::Call(Call { args, .. }) = b.inst(cur_iidx) {
+            debug_assert!(args.contains(&op_iidx));
+            // We actually stand a chance of putting this value in the right register: we now need
+            // to work out which register it should go in.
+            let mut gp_off = 0;
+            let mut fp_off = 0; // See FIXME below.
+            for x in args {
+                if op_iidx == *x {
+                    break;
+                }
+                match b.inst_ty(m, *x) {
+                    Ty::Int(_) | Ty::Ptr(_) => gp_off += 1,
+                    Ty::Double | Ty::Float => fp_off += 1,
+                    Ty::Func(_) => todo!(),
+                    Ty::Void => unreachable!(),
+                }
+            }
+            if let Ty::Int(_) | Ty::Ptr(_) = b.inst_ty(m, op_iidx) {
+                let reg = match gp_off {
+                    0 => Some(Reg::RDI),
+                    1 => Some(Reg::RSI),
+                    2 => Some(Reg::RDX),
+                    3 => Some(Reg::RCX),
+                    4 => Some(Reg::R8),
+                    5 => Some(Reg::R9),
+                    _ => None,
+                };
+                if let Some(reg) = reg {
+                    // With luck exactly the right register is still available.
+                    let i = NORMAL_GP_REGS.iter().position(|x| *x == reg).unwrap();
+                    if self.used_gp & (1 << i) == 0 {
+                        // It is available!
+                        self.used_gp |= 1 << i;
+                        return Some(reg);
+                    }
+                    // Annoyingly, it wasn't available: we'll fall back on "normal" register
+                    // picking. It's still generally better to put values in a register than not at
+                    // all. We'll fall back to the general case a bit below.
+                }
+            } else {
+                // FIXME: Assign floating point args.
+                let _ = fp_off;
+                return None;
+            }
+        }
+
+        // The general case: we want to put values in _a_ register, if there's room.
+        match b.inst_ty(m, op_iidx) {
             Ty::Double | Ty::Float => {
-                if !self.is_fp_full() {
+                if !ignore_caller_saved && !self.is_fp_full() {
                     let i = self.used_xmm.trailing_ones();
                     self.used_xmm |= 1 << i;
                     Some(ALL_XMM_REGS[usize::try_from(i).unwrap()])
@@ -539,15 +620,194 @@ impl PeelRegsBuilderT<Reg> for PeelRegsBuilder<Reg> {
             }
             Ty::Func(_) => todo!(),
             Ty::Int(_) | Ty::Ptr(_) => {
-                if !self.is_gp_full() {
-                    let i = self.used_gp.trailing_ones();
-                    self.used_gp |= 1 << i;
-                    Some(NORMAL_GP_REGS[usize::try_from(i).unwrap()])
-                } else {
-                    None
+                if !ignore_caller_saved {
+                    if self.is_gp_full(false) {
+                        return None;
+                    }
+                    let masked = self.used_gp | CALLEE_SAVED_MASK;
+                    let i = masked.trailing_ones();
+                    if usize::try_from(i).unwrap() < NORMAL_GP_REGS.len() {
+                        self.used_gp |= 1 << i;
+                        return Some(NORMAL_GP_REGS[usize::try_from(i).unwrap()]);
+                    }
+                    // We ran out of caller saved registers, so now we'll have to dive into callee
+                    // saved registers.
+                } else if self.is_gp_full(true) {
+                    return None;
                 }
+                let i = if ignore_caller_saved {
+                    self.used_gp | !CALLEE_SAVED_MASK
+                } else {
+                    self.used_gp
+                }
+                .trailing_ones();
+                self.used_gp |= 1 << i;
+                Some(NORMAL_GP_REGS[usize::try_from(i).unwrap()])
             }
             Ty::Void => unreachable!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::compile::j2::{hir::TraceEnd, hir_parser::str_to_mod};
+
+    #[test]
+    fn basic() {
+        let m = str_to_mod::<Reg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = add %0, %0
+        ",
+        );
+        let TraceEnd::Test {
+            block: b,
+            args_vlocs: _,
+        } = &m.trace_end
+        else {
+            panic!()
+        };
+
+        // Test that we leave some registers spare.
+        let mut prb = PeelRegsBuilder::new();
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R11)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R10)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R9)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R8)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::RDI)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::RSI)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::RDX)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::RCX)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::RAX)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R15)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R14)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            None
+        );
+        // RBX, R12, R13 left free
+
+        // Test that we don't allocate caller saved registers after a call.
+        let mut prb = PeelRegsBuilder::new();
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R11)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R10)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R15)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R14)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R13)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::R12)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            Some(Reg::RBX)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            None
+        );
+    }
+
+    #[test]
+    fn call() {
+        let m = str_to_mod::<Reg>(
+            "
+          extern f(i8, i8)
+
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = arg [reg]
+          %3: i8 = arg [reg]
+          %4: ptr = 0x1234
+          call f %4(%0, %1)
+          call f %4(%0, %1)
+          %7: i8 = add %2, %2
+          %8: i8 = add %3, %2
+        ",
+        );
+        let TraceEnd::Test {
+            block: b,
+            args_vlocs: _,
+        } = &m.trace_end
+        else {
+            panic!()
+        };
+
+        // Check that we put call arguments in sensible registers.
+        let mut prb = PeelRegsBuilder::new();
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(5), InstIdx::new(0)),
+            Some(Reg::RDI)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(5), InstIdx::new(1)),
+            Some(Reg::RSI)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(6), InstIdx::new(0)),
+            Some(Reg::R15)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(6), InstIdx::new(1)),
+            Some(Reg::R14)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(7), InstIdx::new(2)),
+            Some(Reg::R13)
+        );
+        assert_eq!(
+            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(8), InstIdx::new(3)),
+            Some(Reg::R12)
+        );
     }
 }

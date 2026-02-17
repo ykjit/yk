@@ -4447,6 +4447,48 @@ mod test {
 
     #[test]
     fn reg_hints() {
+        // Check ptradd/dynptradd instructions forward hints onwards.
+        let m = str_to_mod::<Reg>(
+            r#"
+          extern putchar(i8) -> i8
+
+          %0: ptr = arg [reg("R8", undefined)]
+          %1: ptr = arg [reg("R9", undefined)]
+          %2: ptr = ptradd %0, 4
+          %3: ptr = ptradd %2, 8
+          %4: i32 = 4
+          %5: ptr = dynptradd %1, %4, 4
+          %6: ptr = dynptradd %5, %4, 8
+          term [%2, %3]
+        "#,
+        );
+        let TraceEnd::Test {
+            block: b,
+            args_vlocs,
+        } = &m.trace_end
+        else {
+            panic!()
+        };
+        let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
+        x64be.about_to_process_block(b, args_vlocs);
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(2), InstIdx::new(0)),
+            Some(Reg::R8)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(3), InstIdx::new(2)),
+            Some(Reg::R8)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(1)),
+            Some(Reg::R9)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(6), InstIdx::new(1)),
+            Some(Reg::R9)
+        );
+
+        // Check clobbers either side of calls
         let m = str_to_mod::<Reg>(
             r#"
           extern putchar(i8) -> i8

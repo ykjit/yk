@@ -434,11 +434,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         Ok(self.be.build_test(&[]))
     }
 
-    /// Return decent (we can probably never get perfect!) VarLocs for the peeled block.
+    /// Return decent (we can probably never get perfect!) [VarLocs] for the peeled block.
     fn peel_vlocs(&self, args_vlocs: &[VarLocs<AB::Reg>], peel: &Block) -> Vec<VarLocs<AB::Reg>> {
-        // The challenge we have is that we can't know exactly what would be best until we've
-        // generated code, at which point it's far too late! Fortunately we can do some things that
-        // are definite wins and some things that are likely to be wins.
+        // The challenge we have is that we can't know exactly what would the best set of [VarLocs]
+        // will be until we've generated code, at which point it's far too late. Fortunately we can
+        // do some things that are definite wins and some things that are likely to be wins.
         //
         // We start by trimming `args_vlocs` down so that (a) constants have no VarLocs (a
         // definite win) (b) we get rid of any register allocations coming from LLVM where there is
@@ -469,10 +469,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             .collect::<Vec<_>>();
 
         let mut prb = AB::peel_regs_builder();
-        // We now have to make sure we don't allocate the same register twice.
-        // There may still be registers we couldn't get rid of in `args_vlocs`
-        // (they may not have associated `Stack` / `StackOff`s) so enumerate
-        // those.
+        // We now have to make sure we don't allocate the same register twice. There may still be
+        // registers we couldn't get rid of in `args_vlocs` (they may not have associated `Stack` /
+        // `StackOff`s) so enumerate those.
         for vlocs in &peel_vlocs {
             for vloc in vlocs.iter() {
                 if let VarLoc::Reg(reg, _) = vloc {
@@ -481,41 +480,52 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
         }
 
-        let mut process = |prb: &mut AB::PeelRegsBuilder, iidx| {
-            if let Inst::Arg(_) = peel.inst(iidx)
-                && !peel_vlocs[usize::from(iidx)]
+        let mut process = |prb: &mut AB::PeelRegsBuilder,
+                           ignore_caller_save: bool,
+                           cur_iidx: InstIdx,
+                           op_iidx: InstIdx| {
+            if let Inst::Arg(_) = peel.inst(op_iidx)
+                && !peel_vlocs[usize::from(op_iidx)]
                     .iter()
                     .any(|x| matches!(x, VarLoc::Reg(_, _)))
-                && let Some(reg) = prb.try_alloc_reg_for(self.m, peel, iidx)
+                && let Some(reg) =
+                    prb.try_alloc_reg_for(self.m, peel, ignore_caller_save, cur_iidx, op_iidx)
             {
-                peel_vlocs[usize::from(iidx)] = varlocs![VarLoc::Reg(reg, RegFill::Undefined)];
+                if peel.term_vars().contains(&op_iidx) {
+                    // For loop invariant values, we want to reuse stack values if there are any:
+                    // donig so means we won't need to respill in the peel.
+                    peel_vlocs[usize::from(op_iidx)].push(VarLoc::Reg(reg, RegFill::Undefined));
+                } else {
+                    // If this value isn't loop invariant, erasing any stack values is a win: if
+                    // we're really lucky the value will never need to be spilt; if we're unlucky,
+                    // it will at worst be spilt part of the way through a trace (and won't need a
+                    // costly move at the trace's end).
+                    peel_vlocs[usize::from(op_iidx)] =
+                        varlocs![VarLoc::Reg(reg, RegFill::Undefined)];
+                }
             }
         };
-        for (_, inst) in peel
+        let mut ignore_caller_save = false;
+        for (iidx, inst) in peel
             .insts_iter(..)
             .skip_while(|(_, x)| matches!(x, Inst::Arg(_) | Inst::Const(_)))
             .take_while(|(_, x)| !matches!(x, Inst::Term(_)))
         {
-            if prb.is_full() {
+            if prb.is_full(ignore_caller_save) {
                 break;
             }
             if let Inst::Guard(Guard { cond, .. }) = inst {
                 // We don't want guard exit variables to end up in registers,
                 // but we do want the condition variable to do so (if it makes
                 // sense).
-                process(&mut prb, *cond);
+                process(&mut prb, ignore_caller_save, iidx, *cond);
                 continue;
             }
             for op_iidx in inst.iter_iidxs(peel) {
-                process(&mut prb, op_iidx);
+                process(&mut prb, ignore_caller_save, iidx, op_iidx);
             }
             if let Inst::Call(_) = inst {
-                // If we hit a call, we're likely to hit the problem of
-                // allocating caller saved registers. We might be able to be
-                // clever in this regard, but it seems likely to lead to
-                // diminishing returns, so this isn't a bad point at which to
-                // bail out.
-                break;
+                ignore_caller_save = true;
             }
         }
 
@@ -1874,7 +1884,7 @@ mod test {
             self.set_regs[usize::from(reg.regidx())] = true;
         }
 
-        fn is_full(&self) -> bool {
+        fn is_full(&self, _ignore_caller_save: bool) -> bool {
             self.set_regs.iter().filter(|x| **x).count() > GP_REGS.len() - 1
         }
 
@@ -1882,7 +1892,9 @@ mod test {
             &mut self,
             _m: &Mod<TestReg>,
             _b: &Block,
-            _iidx: InstIdx,
+            _ignore_caller_save: bool,
+            _cur_iidx: InstIdx,
+            _op_iidx: InstIdx,
         ) -> Option<TestReg> {
             todo!()
         }
