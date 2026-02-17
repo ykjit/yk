@@ -54,7 +54,7 @@
 --     ;   "start": {
 --     ;     "kind": "Guard",
 --     ;     "src_trid": "0",
---     ;     "gidx": "5"
+--     ;     "gidx": "${{5}}"
 --     ;   },
 --     ;   "end": {
 --     ;     "kind": "Coupler",

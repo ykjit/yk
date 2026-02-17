@@ -1493,10 +1493,22 @@ pub(super) trait PeelRegsBuilderT<Reg: RegT> {
     fn force_set(&mut self, reg: Reg);
     /// If `self` has no more registers to hand out, returns `true`, preventing [super::hir_to_asm]
     /// from wasting time calling [PeelRegsBuilderT::find_reg_for] pointlessly.
-    fn is_full(&self) -> bool;
-    /// Try allocating a register or `iidx` in `b`. Returns `Some` if it succeeded in doing so:
-    /// that register must then not be handed out on future calls to this function.
-    fn try_alloc_reg_for(&mut self, m: &Mod<Reg>, b: &Block, iidx: InstIdx) -> Option<Reg>;
+    fn is_full(&self, ignore_caller_saved: bool) -> bool;
+    /// At instruction `cur_iidx`, try allocating a register for its operand `op_iidx`.
+    /// `ignore_caller_save` should be `false` before the first call in a trace and `true`
+    /// henceforth: this allows the [PeelRegsBuilder] to choose registers intelligently across
+    /// calls.
+    ///
+    /// Returns `Some` if it succeeded in doing so: that register must then not be handed out on
+    /// future calls to this function.
+    fn try_alloc_reg_for(
+        &mut self,
+        m: &Mod<Reg>,
+        b: &Block,
+        ignore_caller_save: bool,
+        cur_iidx: InstIdx,
+        cnd_iidx: InstIdx,
+    ) -> Option<Reg>;
 }
 
 #[cfg(test)]
