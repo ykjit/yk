@@ -94,7 +94,7 @@ impl<'a> X64HirToAsm<'a> {
             #[cfg(test)]
             TraceEnd::TestPeel { entry, peel, .. } => entry.insts_len() + peel.insts_len(),
         };
-        num_hir_insts * 30
+        num_hir_insts * 40
     }
 
     pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>, buf: CodeBufInProgress) -> Self {

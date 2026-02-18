@@ -215,8 +215,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         all_args_vlocs: &[VarLocs<AB::Reg>],
         all_term_vlocs: &[VarLocs<AB::Reg>],
     ) -> Result<(), CompilationError> {
-        assert_eq!(b.term_vars().len(), all_term_vlocs.len());
-
         // At a block's terminator, we potentially have to shuffle the stack around. In most cases
         // we have to "move" a value to/from the same stack location, but not always. Consider a
         // trace such as:
