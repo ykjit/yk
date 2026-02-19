@@ -830,6 +830,18 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
+    fn tmp_reg_from_vlocs(vlocs: &[VarLocs<Self::Reg>]) -> Self::Reg {
+        // If the unwrap fails, we've failed to find a temporary register.
+        *NORMAL_GP_REGS
+            .iter()
+            .find(|x| {
+                vlocs
+                    .iter()
+                    .all(|y| y.iter().all(|z| !matches!(z, VarLoc::Reg(a, _) if *x == a)))
+            })
+            .unwrap()
+    }
+
     fn thread_local_off(addr: *const c_void) -> u32 {
         let mut fsaddr: *mut c_void;
         unsafe {
@@ -1300,7 +1312,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn move_stack_val(
+    fn move_stack_val_at_term(
         &mut self,
         bitw: u32,
         src_stack_off: u32,
@@ -4087,10 +4099,12 @@ mod test {
             hir::{InstIdx, Mod, TraceEnd},
             hir_parser::str_to_mod,
             hir_to_asm::{HirToAsm, HirToAsmBackend},
-            x64::x64regalloc::Reg,
+            regalloc::{RegFill, VarLoc},
+            x64::x64regalloc::{NORMAL_GP_REGS, Reg},
         },
         location::{HotLocation, HotLocationKind},
         mt::MT,
+        varlocs,
     };
     use fm::{FMBuilder, FMatcher};
     use lazy_static::lazy_static;
@@ -4574,6 +4588,21 @@ mod test {
               ...
             "],
         );
+    }
+
+    #[test]
+    fn tmp_reg() {
+        // Check that all combinations of NORMAL_GP_REGS with one register removed return that
+        // register.
+        for reg in NORMAL_GP_REGS.iter() {
+            let mut vlocs = Vec::with_capacity(NORMAL_GP_REGS.len() - 1);
+            for x in NORMAL_GP_REGS.iter() {
+                if x != reg {
+                    vlocs.push(varlocs![VarLoc::Reg(*x, RegFill::Undefined)]);
+                }
+            }
+            assert_eq!(X64HirToAsm::tmp_reg_from_vlocs(&vlocs), *reg);
+        }
     }
 
     // Individual instructions.
