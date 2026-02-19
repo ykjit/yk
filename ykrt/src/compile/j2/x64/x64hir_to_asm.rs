@@ -348,10 +348,8 @@ impl<'a> X64HirToAsm<'a> {
             };
 
             let label = self.asm.mk_label();
-            self.asm.push_reloc(
-                IcedInst::with_branch(c, 0),
-                RelocKind::NearWithLabel(label),
-            );
+            self.asm
+                .push_reloc(IcedInst::with_branch(c, 0), RelocKind::NearWithLabel(label));
             self.i_icmp_const(bitw, rmop, imm);
             Ok(label)
         } else {
@@ -400,10 +398,8 @@ impl<'a> X64HirToAsm<'a> {
                     (RegOrMemOp::Reg(lhsr), rhsr)
                 };
             let label = self.asm.mk_label();
-            self.asm.push_reloc(
-                IcedInst::with_branch(c, 0),
-                RelocKind::NearWithLabel(label),
-            );
+            self.asm
+                .push_reloc(IcedInst::with_branch(c, 0), RelocKind::NearWithLabel(label));
             self.i_icmp_reg(bitw, rmop, rhsr);
             Ok(label)
         }
@@ -1439,10 +1435,24 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             },
             J2TraceStart::Guard { .. } => todo!(),
         };
-        self.asm.push_reloc(
-            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::NearWithAddr(addr.addr()),
-        );
+        if self.asm.is_near_callable(addr.addr()) {
+            self.asm.push_reloc(
+                IcedInst::with_branch(Code::Jmp_rel32_64, 0),
+                RelocKind::NearWithAddr(addr.addr()),
+            );
+        } else {
+            let J2TraceStart::ControlPoint { args_vlocs, .. } = &ctr.trace_start else {
+                panic!()
+            };
+            let tmp_reg = Self::tmp_reg_from_vlocs(args_vlocs);
+            self.asm
+                .push_inst(IcedInst::with1(Code::Call_rm64, tmp_reg.to_reg64()));
+            self.asm.push_inst(IcedInst::with2(
+                Code::Mov_r64_imm64,
+                tmp_reg.to_reg64(),
+                u64::try_from(addr.addr()).unwrap().cast_signed(),
+            ));
+        }
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,
             IcedReg::RSP,
@@ -1471,6 +1481,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         &mut self,
         trid: TraceId,
         gidx: CompiledGuardIdx,
+        vlocs: &[VarLocs<Self::Reg>],
     ) -> Result<LabelIdx, CompilationError> {
         self.asm
             .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
@@ -1500,9 +1511,14 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let patch_label = self.asm.mk_label();
         let dummy_label = self.asm.mk_label();
         self.asm.attach_label(dummy_label);
+        let tmp_reg = Self::tmp_reg_from_vlocs(vlocs);
+        self.asm
+            .push_inst(IcedInst::with1(Code::Jmp_rm64, tmp_reg.to_reg64()));
+        // FIXME: If this spans a cache line we are technically in risk of seeing tearing and then
+        // execution will go off the rails.
         self.asm.push_reloc(
-            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::NearWithLabel(dummy_label),
+            IcedInst::with2(Code::Mov_r64_imm64, tmp_reg.to_reg64(), 0),
+            RelocKind::AbsoluteWithLabel(dummy_label),
         );
         self.asm.attach_label(patch_label);
 
@@ -6075,7 +6091,8 @@ mod test {
               sub rsp, 0x80
               ; term []
               ; l1
-              jmp l2
+              mov r.64.x, 0x...
+              jmp r.64.x
               ; l2
               mov rdi, rbp
               mov rsi, 0
@@ -6101,7 +6118,8 @@ mod test {
               sub rsp, 0x80
               ; term []
               ; l1
-              jmp l2
+              mov r.64.x, 0x...
+              jmp r.64.x
               ; l2
               mov rdi, rbp
               mov rsi, 0

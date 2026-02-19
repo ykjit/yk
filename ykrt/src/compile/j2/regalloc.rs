@@ -2286,6 +2286,7 @@ pub(crate) mod test {
             &mut self,
             _trid: crate::mt::TraceId,
             _gridx: CompiledGuardIdx,
+            _args_vlocs: &[VarLocs<Self::Reg>],
         ) -> Result<Self::Label, CompilationError> {
             Ok(TestLabelIdx::new(0))
         }

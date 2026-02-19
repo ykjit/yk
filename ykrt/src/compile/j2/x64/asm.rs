@@ -98,10 +98,7 @@ impl Asm {
         op: Result<iced_x86::Instruction, iced_x86::IcedError>,
         reloc: RelocKind,
     ) {
-        let x64inst = op.unwrap();
-        // Having a branch target of 0 is relied upon in the relocation process.
-        assert_eq!(x64inst.near_branch64(), 0);
-        let idx = self.insts.push(x64inst);
+        let idx = self.insts.push(op.unwrap());
         self.relocs.push((self.blocks.len_idx(), idx, reloc));
     }
 
@@ -189,6 +186,22 @@ impl Asm {
             let inst_boff = usize::try_from(offs[inst_off].0).unwrap();
             let next_ip_boff = u64::try_from(inst_boff + offs[inst_off].1).unwrap();
             match reloc {
+                RelocKind::AbsoluteWithLabel(lidx) => {
+                    let patch_boff = if let 0x48 | 0x49 = enc[inst_boff] {
+                        inst_boff + 2 // mov r64, imm64
+                    } else {
+                        todo!("{:?}", &enc[inst_boff..inst_boff + 2])
+                    };
+                    let (lab_bidx, lab_opidx) = self.labels[lidx].unwrap();
+                    let to_inst_off =
+                        usize::from(blk_offs[lab_bidx] + self.blocks[lab_bidx].len() - lab_opidx);
+                    let to_boff = offs[to_inst_off].0;
+                    let addr = base + to_boff;
+                    enc[patch_boff..patch_boff + 8].copy_from_slice(&addr.to_le_bytes());
+                    if log {
+                        self.blocks[bidx][opidx].set_immediate64(addr);
+                    }
+                }
                 RelocKind::NearWithAddr(_) | RelocKind::NearWithLabel(_) => {
                     // We now have a not-very-nice hack where we examine the instruction to see
                     // which part of it we write the relocation to.
@@ -328,9 +341,11 @@ impl Asm {
 /// A relocation kind: these are all relative to the eventual address of the associated operation.
 #[derive(Clone, Debug)]
 pub(super) enum RelocKind {
+    /// A relocation to an absolute address referenced by `LabelIdx`.
+    AbsoluteWithLabel(LabelIdx),
     /// A relative branch to the address at `usize`.
     NearWithAddr(usize),
-    /// An instruction with  near reference, which must have been validated by
+    /// An instruction with a near reference, which must have been validated by
     /// [Asm::is_near_callable]. Using this requires teaching `into_exe` about the specific
     /// encoding and the offset of the address in the instruction. Instructions supported are: JMP,
     /// JCC, MOVSD, MOVSS, PUNPCKLDQ, and SUBPD.
