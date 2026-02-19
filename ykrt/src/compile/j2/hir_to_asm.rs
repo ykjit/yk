@@ -711,7 +711,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let patch_label = self.be.guard_end(self.m.trid, gidx)?;
+            let vlocs = deopt_vars
+                .iter()
+                .map(|x| x.fromvlocs.clone())
+                .collect::<Vec<_>>();
+            let patch_label = self.be.guard_end(self.m.trid, gidx, &vlocs)?;
             ra.keep_alive_at_term(InstIdx::from(gblock.insts.len() - 1), gblock.term_vars());
             stack_off = self.p_block(&gblock, None, ra, &gexit.exit_vlocs, logging)?;
             let extra_stack_len = stack_off - gexit.stack_off;
@@ -1354,6 +1358,7 @@ pub(super) trait HirToAsmBackend {
         &mut self,
         trid: TraceId,
         gidx: CompiledGuardIdx,
+        vlocs: &[VarLocs<Self::Reg>],
     ) -> Result<Self::Label, CompilationError>;
 
     /// The current guard has been completed. `start_label` should be set to the beginning of the
@@ -2030,6 +2035,7 @@ mod test {
             &mut self,
             _trid: TraceId,
             _gidx: CompiledGuardIdx,
+            _args_vlocs: &[VarLocs<Self::Reg>],
         ) -> Result<Self::Label, CompilationError> {
             Ok(TestLabelIdx::new(0))
         }
