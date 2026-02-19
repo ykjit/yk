@@ -350,7 +350,7 @@ impl<'a> X64HirToAsm<'a> {
             let label = self.asm.mk_label();
             self.asm.push_reloc(
                 IcedInst::with_branch(c, 0),
-                RelocKind::RipRelativeWithLabel(label),
+                RelocKind::NearWithLabel(label),
             );
             self.i_icmp_const(bitw, rmop, imm);
             Ok(label)
@@ -402,7 +402,7 @@ impl<'a> X64HirToAsm<'a> {
             let label = self.asm.mk_label();
             self.asm.push_reloc(
                 IcedInst::with_branch(c, 0),
-                RelocKind::RipRelativeWithLabel(label),
+                RelocKind::NearWithLabel(label),
             );
             self.i_icmp_reg(bitw, rmop, rhsr);
             Ok(label)
@@ -1384,7 +1384,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let label = self.asm.mk_label();
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::RipRelativeWithLabel(label),
+            RelocKind::NearWithLabel(label),
         );
         Ok(label)
     }
@@ -1441,7 +1441,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         };
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::BranchWithAddr(addr.addr()),
+            RelocKind::NearWithAddr(addr.addr()),
         );
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,
@@ -1502,7 +1502,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm.attach_label(dummy_label);
         self.asm.push_reloc(
             IcedInst::with_branch(Code::Jmp_rel32_64, 0),
-            RelocKind::RipRelativeWithLabel(dummy_label),
+            RelocKind::NearWithLabel(dummy_label),
         );
         self.asm.attach_label(patch_label);
 
@@ -2549,7 +2549,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         tmpr.to_xmm(),
                         MemoryOperand::with_base_displ(IcedReg::RIP, 0),
                     ),
-                    RelocKind::RipRelativeWithLabel(lidx),
+                    RelocKind::NearWithLabel(lidx),
                 );
             }
             Ty::Float => {
@@ -2565,7 +2565,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         tmpr.to_xmm(),
                         MemoryOperand::with_base_displ(IcedReg::RIP, 0),
                     ),
-                    RelocKind::RipRelativeWithLabel(lidx),
+                    RelocKind::NearWithLabel(lidx),
                 );
             }
             _ => panic!(),
@@ -2720,7 +2720,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             } else {
                 IcedInst::with_branch(Code::Jb_rel32_64, 0)
             },
-            RelocKind::RipRelativeWithLabel(label),
+            RelocKind::NearWithLabel(label),
         );
         self.asm
             .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, cndr.to_reg32(), 0));
@@ -3300,7 +3300,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         ));
                         self.asm.push_reloc(
                             IcedInst::with_branch(Code::Jb_rel32_64, 0),
-                            RelocKind::RipRelativeWithLabel(end_lidx),
+                            RelocKind::NearWithLabel(end_lidx),
                         );
                         self.asm.push_inst(IcedInst::with2(
                             Code::Bt_rm32_imm8,
@@ -3975,7 +3975,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         tmpr.to_xmm(),
                         MemoryOperand::with_base_displ(IcedReg::RIP, 0),
                     ),
-                    RelocKind::RipRelativeWithLabel(c1_lidx),
+                    RelocKind::NearWithLabel(c1_lidx),
                 );
                 self.asm.push_reloc(
                     IcedInst::with2(
@@ -3983,7 +3983,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         tmpr.to_xmm(),
                         MemoryOperand::with_base_displ(IcedReg::RIP, 0),
                     ),
-                    RelocKind::RipRelativeWithLabel(c0_lidx),
+                    RelocKind::NearWithLabel(c0_lidx),
                 );
                 self.asm.push_inst(IcedInst::with2(
                     Code::Movq_xmm_rm64,

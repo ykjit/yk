@@ -189,7 +189,7 @@ impl Asm {
             let inst_boff = usize::try_from(offs[inst_off].0).unwrap();
             let next_ip_boff = u64::try_from(inst_boff + offs[inst_off].1).unwrap();
             match reloc {
-                RelocKind::BranchWithAddr(_) | RelocKind::RipRelativeWithLabel(_) => {
+                RelocKind::NearWithAddr(_) | RelocKind::NearWithLabel(_) => {
                     // We now have a not-very-nice hack where we examine the instruction to see
                     // which part of it we write the relocation to.
                     #[allow(clippy::if_same_then_else)]
@@ -215,7 +215,7 @@ impl Asm {
                     };
 
                     let addr = match reloc {
-                        RelocKind::BranchWithAddr(addr) => {
+                        RelocKind::NearWithAddr(addr) => {
                             let diff = i32::try_from(
                                 u64::try_from(addr)
                                     .unwrap()
@@ -226,7 +226,7 @@ impl Asm {
                             enc[patch_boff..patch_boff + 4].copy_from_slice(&diff.to_le_bytes());
                             u64::try_from(addr).unwrap()
                         }
-                        RelocKind::RipRelativeWithLabel(lidx) => {
+                        RelocKind::NearWithLabel(lidx) => {
                             let (lab_bidx, lab_opidx) = self.labels[lidx].unwrap();
                             let to_inst_off = usize::from(
                                 blk_offs[lab_bidx] + self.blocks[lab_bidx].len() - lab_opidx,
@@ -304,7 +304,7 @@ impl Asm {
                     let mut inst_s = String::new();
                     fmtr.format(&inst, &mut inst_s);
                     if relocs_iter.peek().map(|(x, y, _)| (*x, *y)) == Some((bidx, opidx))
-                        && let RelocKind::RipRelativeWithLabel(lidx) = relocs_iter.next().unwrap().2
+                        && let RelocKind::NearWithLabel(lidx) = relocs_iter.next().unwrap().2
                     {
                         inst_s.replace_range(
                             inst_s.rfind(' ').unwrap()..,
@@ -329,11 +329,12 @@ impl Asm {
 #[derive(Clone, Debug)]
 pub(super) enum RelocKind {
     /// A relative branch to the address at `usize`.
-    BranchWithAddr(usize),
-    /// An instruction refering to the label at [LabelIdx] relative to RIP. Using this requires
-    /// teaching `into_exe` about the specific encoding and the offset of the address in the
-    /// instruction. Instructions supported are: JMP, JCC, MOVSD, MOVSS, PUNPCKLDQ, and SUBPD.
-    RipRelativeWithLabel(LabelIdx),
+    NearWithAddr(usize),
+    /// An instruction with  near reference, which must have been validated by
+    /// [Asm::is_near_callable]. Using this requires teaching `into_exe` about the specific
+    /// encoding and the offset of the address in the instruction. Instructions supported are: JMP,
+    /// JCC, MOVSD, MOVSS, PUNPCKLDQ, and SUBPD.
+    NearWithLabel(LabelIdx),
     /// A near call to the address at `usize`. That this is possible should have been validated
     /// with [Asm::near_callable], or an exception will ensue.
     NearCallWithAddr(usize),
