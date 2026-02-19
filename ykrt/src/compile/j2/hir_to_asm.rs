@@ -1194,6 +1194,11 @@ pub(super) trait HirToAsmBackend {
         smp_locs: &SmallVec<[yksmp::Location; 1]>,
         reg_fill: RegFill,
     ) -> VarLocs<Self::Reg>;
+
+    /// Given a set of [VarLocs], return a register that is not used by them. That register must be
+    /// suitable for things like moving stack values, and pushing constants.
+    fn tmp_reg_from_vlocs(vlocs: &[VarLocs<Self::Reg>]) -> Self::Reg;
+
     fn thread_local_off(addr: *const c_void) -> u32;
 
     /// Assemble everything into machine code. If `log` is `true`, return `Some(log)`. For each
@@ -1293,8 +1298,9 @@ pub(super) trait HirToAsmBackend {
         bitw: u32,
     ) -> Result<(), CompilationError>;
 
-    /// Move a value of `bitw` on the stack from `src_stack_off` to `dst_stack_off` using `tmp_reg`.
-    fn move_stack_val(
+    /// At a `term` instruction move a value of `bitw` on the stack from `src_stack_off` to
+    /// `dst_stack_off` using `tmp_reg`.
+    fn move_stack_val_at_term(
         &mut self,
         bitw: u32,
         src_stack_off: u32,
