@@ -511,8 +511,19 @@ fn opt_memcpy(opt: &mut PassOpt, mut inst: MemCpy) -> OptOutcome {
         dst,
         src,
         len,
-        volatile: _,
+        is_volatile,
     } = inst;
+
+    if let Some(ConstKind::Int(len_c)) = opt.as_constkind(len)
+        && let Some(0) = len_c.to_zero_ext_u8()
+    {
+        // memcpy of zero bytes. This is safe to remove even for volatile `memcpy`s.
+        return OptOutcome::NotNeeded;
+    }
+
+    if is_volatile {
+        return OptOutcome::Rewritten(inst.into());
+    }
 
     // LLVM's `memcpy` allows `dst` and `src` to point to the same memory, at which point `memcpy`
     // is a no-op.
@@ -527,13 +538,6 @@ fn opt_memcpy(opt: &mut PassOpt, mut inst: MemCpy) -> OptOutcome {
         false
     };
     if equiv {
-        return OptOutcome::NotNeeded;
-    }
-
-    if let Some(ConstKind::Int(len_c)) = opt.as_constkind(len)
-        && let Some(0) = len_c.to_zero_ext_u8()
-    {
-        // memcpy of zero bytes. Not needed.
         return OptOutcome::NotNeeded;
     }
 
@@ -2452,6 +2456,49 @@ mod test {
           %1: ptr = 0x1234
           %2: i64 = 0
           memcpy %0, %1, %2, false
+        ",
+            "
+          %0: ptr = 0x4321
+          %1: ptr = 0x1234
+          %2: i64 = 0
+        ",
+        );
+
+        // Check that volatile memcpys of non-zero length aren't optimised away
+        test_sf(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1234
+          %2: i64 = 4
+          memcpy %0, %1, %2, true
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = 0x1234
+          %2: i64 = 4
+          memcpy %0, %1, %2, true
+        ",
+        );
+
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: i64 = 4
+          memcpy %0, %0, %1, true
+        ",
+            "
+          %0: ptr = arg
+          %1: i64 = 4
+          memcpy %0, %0, %1, true
+        ",
+        );
+
+        test_sf(
+            "
+          %0: ptr = 0x4321
+          %1: ptr = 0x1234
+          %2: i64 = 0
+          memcpy %0, %1, %2, true
         ",
             "
           %0: ptr = 0x4321

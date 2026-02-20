@@ -963,9 +963,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     while let Some(giidx) = gqueue.pop() {
                         let inst = b.inst(giidx);
 
-                        if let Inst::Load(_) = inst {
-                            // We can copy `Load`s in if there are no write effects between the
-                            // `Load` and the current guard.
+                        if let Inst::Load(Load {
+                            is_volatile: false, ..
+                        }) = inst
+                        {
+                            // We can copy non-volatile `Load`s in if there are no write effects
+                            // between the `Load` and the current guard.
                             if ra.is_used(giidx)
                                 || b.insts_iter(giidx + 1..iidx).any(|(_, inst)| {
                                     inst.write_effects()
@@ -2504,6 +2507,30 @@ mod test {
           ; store %2, %1
           load: R3=*R1
           ; %3: i8 = load %1
+          ...
+        "#],
+        );
+    }
+
+    #[test]
+    fn gbody_volatile_load() {
+        // Volatile loads cannot be moved into guard bodies, and their presence stops preceeding
+        // loads from being copied in too.
+        build_and_test(
+            r#"
+          %0: ptr = arg [reg]
+          %1: i1 = arg [reg]
+          %2: i8 = load %0
+          %3: i8 = load volatile %0
+          %4: i8 = load %0
+          guard true, %1, [%2, %3, %4], [[[reg("R0", undefined)]], [[reg("R1", undefined)]], [[reg("R2", undefined)]]]
+          term [%0, %1]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0, %1]
+          i_guard: [%0, %2, %3]
+          ; guard true, %1, [%2, %3, %4]
           ...
         "#],
         );
