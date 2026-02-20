@@ -1448,7 +1448,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             CastKind::SIToFP => hir::SIToFP { tyidx, val }.into(),
             CastKind::FPExt => hir::FPExt { tyidx, val }.into(),
             CastKind::FPToSI => hir::FPToSI { tyidx, val }.into(),
-            CastKind::BitCast => todo!(),
+            CastKind::BitCast => hir::BitCast { tyidx, val }.into(),
             CastKind::PtrToInt => hir::PtrToInt { tyidx, val }.into(),
             CastKind::IntToPtr => hir::IntToPtr { tyidx, val }.into(),
             CastKind::UIToFP => hir::UIToFP {
