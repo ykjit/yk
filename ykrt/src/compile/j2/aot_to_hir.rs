@@ -1360,7 +1360,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             "memcpy" => {
                 let [dst, src, len, volatile]: [hir::InstIdx; 4] =
                     jargs.into_vec().try_into().unwrap();
-                let volatile = if let hir::Inst::Const(hir::Const {
+                let is_volatile = if let hir::Inst::Const(hir::Const {
                     kind: hir::ConstKind::Int(x),
                     ..
                 }) = self.opt.inst(volatile)
@@ -1374,14 +1374,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     dst,
                     src,
                     len,
-                    volatile,
+                    is_volatile,
                 };
                 self.opt.feed_void(hinst.into()).map(|_| ())
             }
             "memset" => {
                 let [dst, val, len, volatile]: [hir::InstIdx; 4] =
                     jargs.into_vec().try_into().unwrap();
-                let volatile = if let hir::Inst::Const(hir::Const {
+                let is_volatile = if let hir::Inst::Const(hir::Const {
                     kind: hir::ConstKind::Int(x),
                     ..
                 }) = self.opt.inst(volatile)
@@ -1395,7 +1395,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     dst,
                     val,
                     len,
-                    volatile,
+                    is_volatile,
                 };
                 self.opt.feed_void(hinst.into()).map(|_| ())
             }

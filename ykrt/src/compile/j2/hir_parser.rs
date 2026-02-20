@@ -564,7 +564,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     dst,
                     src,
                     len,
-                    volatile,
+                    is_volatile,
                 } => {
                     let dst = self.p_local(dst);
                     let src = self.p_local(src);
@@ -574,7 +574,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                             dst,
                             src,
                             len,
-                            volatile,
+                            is_volatile,
                         }
                         .into(),
                     );
@@ -583,7 +583,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     dst,
                     val,
                     len,
-                    volatile,
+                    is_volatile,
                 } => {
                     let dst = self.p_local(dst);
                     let val = self.p_local(val);
@@ -593,7 +593,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                             dst,
                             val,
                             len,
-                            volatile,
+                            is_volatile,
                         }
                         .into(),
                     );
@@ -1302,13 +1302,13 @@ enum AstInst {
         dst: Span,
         src: Span,
         len: Span,
-        volatile: bool,
+        is_volatile: bool,
     },
     MemSet {
         dst: Span,
         val: Span,
         len: Span,
-        volatile: bool,
+        is_volatile: bool,
     },
     Mul {
         local: Span,

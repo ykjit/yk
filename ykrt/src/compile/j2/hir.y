@@ -138,10 +138,10 @@ Inst -> Result<AstInst, Box<dyn Error>>:
       Ok(AstInst::PtrToInt { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
   | "MEMCPY" "LOCAL" "," "LOCAL" "," "LOCAL" "," Bool {
-      Ok(AstInst::MemCpy { dst: $2?.span(), src: $4?.span(), len: $6?.span(), volatile: $8? })
+      Ok(AstInst::MemCpy { dst: $2?.span(), src: $4?.span(), len: $6?.span(), is_volatile: $8? })
     }
   | "MEMSET" "LOCAL" "," "LOCAL" "," "LOCAL" "," Bool {
-      Ok(AstInst::MemSet { dst: $2?.span(), val: $4?.span(), len: $6?.span(), volatile: $8? })
+      Ok(AstInst::MemSet { dst: $2?.span(), val: $4?.span(), len: $6?.span(), is_volatile: $8? })
     }
   | "LOCAL" ":" Ty "=" "SDIV" "LOCAL" "," "LOCAL" {
        Ok(AstInst::SDiv { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })

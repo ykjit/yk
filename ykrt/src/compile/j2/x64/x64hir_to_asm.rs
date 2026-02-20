@@ -2956,7 +2956,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             dst,
             src,
             len,
-            volatile: _,
+            is_volatile: _,
         }: &MemCpy,
     ) -> Result<(), CompilationError> {
         let [Reg::RDI, Reg::RSI, Reg::RCX] = ra.alloc(
@@ -3004,7 +3004,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             dst,
             val,
             len,
-            volatile: _,
+            is_volatile: _,
         }: &MemSet,
     ) -> Result<(), CompilationError> {
         let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(

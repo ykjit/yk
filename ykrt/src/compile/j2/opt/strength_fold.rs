@@ -511,7 +511,7 @@ fn opt_memcpy(opt: &mut PassOpt, mut inst: MemCpy) -> OptOutcome {
         dst,
         src,
         len,
-        volatile: _,
+        is_volatile,
     } = inst;
 
     // LLVM's `memcpy` allows `dst` and `src` to point to the same memory, at which point `memcpy`

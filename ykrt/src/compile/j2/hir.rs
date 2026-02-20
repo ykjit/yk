@@ -2833,7 +2833,7 @@ pub(super) struct MemCpy {
     pub dst: InstIdx,
     pub src: InstIdx,
     pub len: InstIdx,
-    pub volatile: bool,
+    pub is_volatile: bool,
 }
 
 impl InstT for MemCpy {
@@ -2860,16 +2860,16 @@ impl InstT for MemCpy {
     }
 
     fn read_effects(&self) -> Effects {
-        if self.volatile {
-            Effects::none().add_volatile()
+        if self.is_volatile {
+            Effects::none().add_volatile().add_heap()
         } else {
             Effects::none().add_heap()
         }
     }
 
     fn write_effects(&self) -> Effects {
-        if self.volatile {
-            Effects::none().add_volatile()
+        if self.is_volatile {
+            Effects::none().add_volatile().add_heap()
         } else {
             Effects::none().add_heap()
         }
@@ -2894,7 +2894,7 @@ impl InstT for MemCpy {
             usize::from(self.dst),
             usize::from(self.src),
             usize::from(self.len),
-            if self.volatile { "true" } else { "false" }
+            if self.is_volatile { "true" } else { "false" }
         )
     }
 
@@ -2909,7 +2909,7 @@ pub(super) struct MemSet {
     pub dst: InstIdx,
     pub val: InstIdx,
     pub len: InstIdx,
-    pub volatile: bool,
+    pub is_volatile: bool,
 }
 
 impl InstT for MemSet {
@@ -2942,16 +2942,16 @@ impl InstT for MemSet {
     }
 
     fn read_effects(&self) -> Effects {
-        if self.volatile {
-            Effects::none().add_volatile()
+        if self.is_volatile {
+            Effects::none().add_volatile().add_heap()
         } else {
             Effects::none()
         }
     }
 
     fn write_effects(&self) -> Effects {
-        if self.volatile {
-            Effects::none().add_volatile()
+        if self.is_volatile {
+            Effects::none().add_volatile().add_heap()
         } else {
             Effects::none().add_heap()
         }
@@ -2976,7 +2976,7 @@ impl InstT for MemSet {
             usize::from(self.dst),
             usize::from(self.val),
             usize::from(self.len),
-            if self.volatile { "true" } else { "false" }
+            if self.is_volatile { "true" } else { "false" }
         )
     }
 
