@@ -623,7 +623,7 @@ mod test {
           %1: ptr = arg [reg]
           %2: i64 = arg [reg]
           %3: i8 = load %0
-          memcpy %0, %1, %2, true
+          memcpy %0, %1, %2, false
           %5: i8 = load %0
         ",
             "
@@ -631,7 +631,7 @@ mod test {
           %1: ptr = arg
           %2: i64 = arg
           %3: i8 = load %0
-          memcpy %0, %1, %2, true
+          memcpy %0, %1, %2, false
           %5: i8 = load %0
         ",
         );
@@ -643,7 +643,7 @@ mod test {
           %1: i8 = arg [reg]
           %2: i32 = arg [reg]
           %3: i8 = load %0
-          memset %0, %1, %2, true
+          memset %0, %1, %2, false
           %5: i8 = load %0
         ",
             "
@@ -651,7 +651,7 @@ mod test {
           %1: i8 = arg
           %2: i32 = arg
           %3: i8 = load %0
-          memset %0, %1, %2, true
+          memset %0, %1, %2, false
           %5: i8 = load %0
         ",
         );
