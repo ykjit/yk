@@ -418,13 +418,26 @@ impl OptT for FullOpt {
         }
 
         // Feed each instruction from `entry` (except the arguments!) into the peel.
-        for (iidx, inst) in entry
-            .insts_iter(..)
-            .skip(entry.term_vars().len()) // Skip `Arg` instructions
-            .filter(|(iidx, _)| is_used[usize::from(*iidx)])
-        {
-            let mut inst = inst.clone();
+        for iidx in (entry.term_vars().len()..entry.insts_len()).map(InstIdx::new) {
+            if !is_used[usize::from(iidx)] {
+                continue;
+            }
+            let mut inst = entry.inst(iidx).clone();
             if let Inst::Guard(mut x) = inst {
+                if let Inst::Const(Const {
+                    kind: ConstKind::Int(y),
+                    ..
+                }) = self.inst(self.equiv_iidx(map[x.cond]))
+                {
+                    let v = y.to_zero_ext_u8().unwrap();
+                    if (x.expect && v == 0) || (!x.expect && v == 1) {
+                        // We've found a contradiction. The peel is semi-pointless: we could
+                        // generate it up to this instruction, but the risk of creating extra
+                        // sidetraces doesn't seem worth it.
+                        return Ok((entry, None, self.inner.tys));
+                    }
+                }
+
                 let old_gextra = &entry.guard_extras[x.geidx];
                 let gextra = GuardExtra {
                     bid: old_gextra.bid,
@@ -438,8 +451,6 @@ impl OptT for FullOpt {
                 };
                 x.cond = map[x.cond];
                 x.geidx = GuardExtraIdx::MAX;
-                // FIXME: Peeled guards can find contradictions because not all loops are
-                // control-flow stable.
                 self.feed_guard(x, gextra)?;
             } else if inst.tyidx(&*self) == self.inner.tyidx_void {
                 inst.rewrite_iidxs(&mut *self, |x| map[x]);
@@ -895,14 +906,22 @@ pub(in crate::compile::j2) mod test {
         let tyidx_ptr0 = fopt.inner.tyidx_ptr0;
         let tyidx_void = fopt.inner.tyidx_void;
         let (entry, peel, tys) = fopt.build_with_peel().unwrap();
+        let trace_end = if let Some(peel) = peel {
+            TraceEnd::TestPeel {
+                args_vlocs: args_vlocs.to_owned(),
+                entry,
+                peel,
+            }
+        } else {
+            TraceEnd::Test {
+                args_vlocs: args_vlocs.to_owned(),
+                block: entry,
+            }
+        };
         Mod {
             trid: m.trid,
             trace_start: TraceStart::Test,
-            trace_end: TraceEnd::TestPeel {
-                args_vlocs: args_vlocs.to_owned(),
-                entry,
-                peel: peel.unwrap(),
-            },
+            trace_end,
             tys,
             tyidx_int1,
             tyidx_ptr0,
@@ -1162,6 +1181,26 @@ pub(in crate::compile::j2) mod test {
           %0: ptr = arg
           %1: i8 = 4
           term [%0, %1]
+        ",
+        );
+
+        // Guard contradiction prevents a peel being created.
+        full_opt_test(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          %4: i8 = 1
+          term [%4]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          %5: i8 = 1
+          term [%5]
         ",
         );
     }

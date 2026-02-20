@@ -2601,18 +2601,15 @@ mod test {
           %1: i8 = 4
           %2: i1 = icmp eq %0, %1
           guard true, %2, [%0], [[[reg("R2", undefined)]]]
-          %4: i8 = 1
-          %5: i8 = add %0, %4
-          term [%5]
+          term [%0]
         "#,
             |_| true,
             &[r#"
           controlpoint_loop_end
           ; term [%0]
-          ; %0: i8 = 5
+          ; %0: i8 = 4
           controlpoint_peel_start 1
-          ; term [%6]
-          ; %6: i8 = 5
+          ; term [%1]
           i_guard: [%0]
           ; guard true, %2, [%0]
           ; %2: i1 = icmp eq %0, %1
