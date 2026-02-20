@@ -116,8 +116,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ICMP" IPred "LOCAL" "," "LOCAL" {
       Ok(AstInst::ICmp{ local: $1?.span(), ty: $3?, pred: $6?, lhs: $7?.span(), rhs: $9?.span() })
     }
-  | "LOCAL" ":" Ty "=" "LOAD" "LOCAL" {
-      Ok(AstInst::Load { local: $1?.span(), ty: $3?, ptr: $6?.span() })
+  | "LOCAL" ":" Ty "=" "LOAD" Volatile "LOCAL" {
+      Ok(AstInst::Load { local: $1?.span(), ty: $3?, is_volatile: $6?, ptr: $7?.span() })
     }
   | "LOCAL" ":" Ty "=" "INTTOPTR" "LOCAL" {
       Ok(AstInst::IntToPtr { local: $1?.span(), ty: $3?, val: $6?.span() })
@@ -173,8 +173,8 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "SUB" "LOCAL" "," "LOCAL" {
        Ok(AstInst::Sub { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
-  | "STORE" "LOCAL" "," "LOCAL" {
-      Ok(AstInst::Store { val: $2?.span(), ptr: $4?.span() })
+  | "STORE" Volatile "LOCAL" "," "LOCAL" {
+      Ok(AstInst::Store{ is_volatile: $2?, val: $3?.span(), ptr: $5?.span() })
     }
   | "LOCAL" ":" Ty "=" "UITOFP" "LOCAL" {
       Ok(AstInst::UIToFP { local: $1?.span(), ty: $3?, val: $6?.span() })
@@ -291,6 +291,11 @@ RegFill -> Result<RegFill, Box<dyn Error>>:
     "UNDEFINED" { Ok(RegFill::Undefined) }
   | "SIGNED" { Ok(RegFill::Signed) }
   | "ZEROED" { Ok(RegFill::Zeroed) }
+  ;
+
+Volatile -> Result<bool, Box<dyn Error>>:
+    "VOLATILE" { Ok(true) }
+  | { Ok(false) }
   ;
 
 Unmatched -> ():

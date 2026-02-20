@@ -522,7 +522,12 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let val = self.p_local(val);
                     self.insts.push(IntToPtr { tyidx, val }.into());
                 }
-                AstInst::Load { local, ty, ptr } => {
+                AstInst::Load {
+                    local,
+                    ty,
+                    ptr,
+                    is_volatile,
+                } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
                     let ptr = self.p_local(ptr);
@@ -530,7 +535,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         Load {
                             tyidx,
                             ptr,
-                            is_volatile: false,
+                            is_volatile,
                         }
                         .into(),
                     );
@@ -779,14 +784,18 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let rhs = self.p_local(rhs);
                     self.insts.push(SRem { tyidx, lhs, rhs }.into());
                 }
-                AstInst::Store { val, ptr } => {
+                AstInst::Store {
+                    val,
+                    ptr,
+                    is_volatile,
+                } => {
                     let val = self.p_local(val);
                     let ptr = self.p_local(ptr);
                     self.insts.push(
                         Store {
                             val,
                             ptr,
-                            is_volatile: false,
+                            is_volatile,
                         }
                         .into(),
                     );
@@ -1281,6 +1290,7 @@ enum AstInst {
         local: Span,
         ty: AstTy,
         ptr: Span,
+        is_volatile: bool,
     },
     LShr {
         local: Span,
@@ -1373,6 +1383,7 @@ enum AstInst {
     Store {
         val: Span,
         ptr: Span,
+        is_volatile: bool,
     },
     Sub {
         local: Span,

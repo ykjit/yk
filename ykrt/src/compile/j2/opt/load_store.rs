@@ -738,4 +738,43 @@ mod test {
         ",
         );
     }
+
+    #[test]
+    fn volatiles() {
+        // Volatile loads fill the cache but aren't removed
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = load volatile %0
+          %2: i8 = load %0
+          %3: i8 = load volatile %0
+          term [%0]
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = load volatile %0
+          %2: i8 = load volatile %0
+          term [%0]
+        ",
+        );
+
+        // Volatile stores fill the cache but aren't removed
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = arg [reg]
+          store volatile %1, %0
+          store %1, %0
+          store volatile %1, %0
+          term [%0, %1]
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = arg
+          store volatile %1, %0
+          store volatile %1, %0
+          term [%0, %1]
+        ",
+        );
+    }
 }

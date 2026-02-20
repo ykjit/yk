@@ -2713,6 +2713,14 @@ impl InstT for Load {
 
     fn write_effects(&self) -> Effects {
         if self.is_volatile {
+            // It may seem surprising that a `Load` can have write effects but as LLVM says:
+            //
+            //  > Any volatile operation can have side effects, and any volatile operation can read
+            //  > and/or modify state which is not accessible via a regular load or store in this >
+            //  > module.
+            //
+            //  My interpretation of this (which matches others I have found) is "volatile loads
+            //  may also cause writes".
             Effects::none().add_volatile()
         } else {
             Effects::none()
@@ -2731,7 +2739,11 @@ impl InstT for Load {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("load %{}", usize::from(self.ptr))
+        if self.is_volatile {
+            format!("load volatile %{}", usize::from(self.ptr))
+        } else {
+            format!("load %{}", usize::from(self.ptr))
+        }
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -3858,7 +3870,6 @@ impl InstT for SRem {
 pub(super) struct Store {
     pub val: InstIdx,
     pub ptr: InstIdx,
-    #[allow(unused)]
     pub is_volatile: bool,
 }
 
@@ -3910,7 +3921,8 @@ impl InstT for Store {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
-            "store %{}, %{}",
+            "store {}%{}, %{}",
+            if self.is_volatile { "volatile " } else { "" },
             usize::from(self.val),
             usize::from(self.ptr)
         )
