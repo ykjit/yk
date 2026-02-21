@@ -376,7 +376,11 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
     // recanonicalising the guard would change the `entry_vars` in a semantically incorrect way.
 
     let cond = opt.equiv_iidx(cond);
-    if let Inst::Const(_) = opt.inst(cond) {
+    if let Some(ConstKind::Int(x)) = opt.as_constkind(cond) {
+        // Contradictions should have been spotted before we get to here.
+        assert!(
+            (expect && x.to_zero_ext_u8() == Some(1)) || (!expect && x.to_zero_ext_u8() == Some(0))
+        );
         // A guard that references a constant is, by definition, not needed and doesn't affect
         // future analyses.
         return OptOutcome::NotNeeded;
