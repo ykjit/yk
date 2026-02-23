@@ -26,50 +26,63 @@ use crate::compile::{
     CompilationError,
     j2::codebuf::{CodeBufInProgress, ExeCodeBuf},
 };
-use iced_x86::{Code, Encoder, Instruction as Op};
+use iced_x86::{Encoder, Formatter, Instruction as Op, NasmFormatter};
 use index_vec::{IndexVec, index_vec};
-use std::mem::replace;
+use std::slice;
 
-/// We guarantee to align the start of blocks to `BLOCK_ALIGNMENT` bytes.
-pub(super) static BLOCK_ALIGNMENT: usize = 16;
-
-#[derive(Debug)]
 pub(super) struct Asm {
     buf: CodeBufInProgress,
-    /// The blocks we are assembling. By definition, the first block will be the main body of the
-    /// trace, and any subsequent blocks will be guard bodies.
-    blocks: IndexVec<BlockIdx, IndexVec<OpIdx, Op>>,
-    /// As a simple optimisation, this is the currently-process block's instructions. When
-    /// `block_complete` is called, we will move the entire contents of this into [Self::blocks].
-    insts: IndexVec<OpIdx, Op>,
+    /// The offset from the end of [Self::buf] we are currently at. This starts at
+    /// [Self::buf.len] and counts down to zero.
+    buf_end_off: u32,
+    /// A scratch Icedx86 encoding buffer used solely by [Self::push_inst] to avoid
+    /// reallocations.
+    enc: Encoder,
+    /// A scratch Icedx86 formatter used solely by [Self::push_inst]. Set to `None` if logging is
+    /// not enabled.
+    fmtr: Option<NasmFormatter>,
     /// Labels. New labels start with a value of `None`; when they are assigned to an instruction,
     /// this will become `Some(...)`.
-    labels: IndexVec<LabelIdx, Option<(BlockIdx, OpIdx)>>,
+    labels: IndexVec<LabelIdx, Option<u32>>,
     /// Operations (CALLs, JMPs), which need relocating. These are not stored in any particular
     /// order.
-    relocs: Vec<(BlockIdx, OpIdx, RelocKind)>,
-    log: IndexVec<BlockIdx, Vec<(OpIdx, String)>>,
+    relocs: Vec<(u32, u8, RelocKind)>,
+    /// If `Some(...)`, log instructions.
+    log: Option<Vec<String>>,
 }
 
 impl Asm {
-    pub(super) fn new(buf: CodeBufInProgress) -> Self {
+    pub(super) fn new(buf: CodeBufInProgress, log: bool) -> Self {
+        let buf_used = u32::try_from(buf.len()).unwrap();
+        let fmtr = if log {
+            let mut fmtr = iced_x86::NasmFormatter::new();
+            fmtr.options_mut().set_branch_leading_zeros(false);
+            fmtr.options_mut().set_hex_prefix("0x");
+            fmtr.options_mut().set_hex_suffix("");
+            fmtr.options_mut().set_rip_relative_addresses(true);
+            fmtr.options_mut().set_show_branch_size(false);
+            fmtr.options_mut().set_space_after_operand_separator(true);
+            Some(fmtr)
+        } else {
+            None
+        };
         Asm {
             buf,
-            blocks: index_vec![],
-            insts: index_vec![],
+            buf_end_off: buf_used,
+            enc: Encoder::new(64),
+            fmtr,
             labels: index_vec![],
             relocs: Vec::new(),
-            log: index_vec![vec![]],
+            log: if log { Some(Vec::new()) } else { None },
         }
     }
 
-    pub(super) fn block_completed(&mut self) {
-        self.blocks.push(replace(&mut self.insts, index_vec![]));
-        self.log.push(Vec::new());
-    }
+    pub(super) fn block_completed(&mut self) {}
 
     pub(super) fn log(&mut self, s: String) {
-        self.log.last_mut().unwrap().push((self.insts.len_idx(), s));
+        if let Some(x) = &mut self.log {
+            x.push(format!("; {s}"))
+        }
     }
 
     /// Create a new free-floating label: it will only be attached when `attach_label` is called on
@@ -81,12 +94,114 @@ impl Asm {
     /// Attach `lidx` to the most recently pushed instruction (i.e. the last instruction `push`ed
     /// before `attach_label` is called).
     pub(super) fn attach_label(&mut self, lidx: LabelIdx) {
-        self.labels[lidx] = Some((self.blocks.len_idx(), self.insts.len_idx()));
+        if let Some(log) = &mut self.log {
+            log.push(format!("; l{}", usize::from(lidx)));
+        }
+        self.labels[lidx] = Some(self.buf_end_off);
+    }
+
+    pub(super) fn align(&mut self, align: u32) {
+        self.buf_end_off = (self.buf_end_off / align) * align;
+    }
+
+    /// Return the current offset, in bytes, from the end of the code buffer. That end is
+    /// guaranteed to be aligned to a page boundary.
+    pub(super) fn buf_end_off(&self) -> usize {
+        usize::try_from(self.buf_end_off).unwrap()
+    }
+
+    /// Push `n` bytes of `nop` instructions.
+    pub(super) fn push_nops(&mut self, mut n: usize) {
+        // From https://en.wikipedia.org/wiki/NOP_(code)
+        while n > 0 {
+            let bytes: &[u8] = match n {
+                1 => &[0x90],
+                2 => &[0x66, 0x90],
+                3 => &[0x0F, 0x1F, 0x00],
+                4 => &[0x0F, 0x1F, 0x40, 0x00],
+                5 => &[0x0F, 0x1F, 0x44, 0x00, 0x00],
+                6 => &[0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00],
+                7 => &[0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00],
+                8 => &[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+                _ => &[0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+            };
+            self.buf_end_off = self
+                .buf_end_off
+                .checked_sub(u32::try_from(bytes.len()).unwrap())
+                .expect("Would exceed preallocated code buffer");
+            unsafe {
+                self.buf
+                    .as_ptr()
+                    .byte_add(usize::try_from(self.buf_end_off).unwrap())
+                    .copy_from_nonoverlapping(bytes.as_ptr(), bytes.len())
+            };
+            if let Some(log) = &mut self.log {
+                log.push(
+                    match n {
+                        1 => "nop",
+                        2 => "xchg ax, ax",
+                        3 => "nop dword ptr [rax]",
+                        4 => "nop dword ptr [rax+0x0]",
+                        5 => "nop dword ptr [rax+rax*1+0x0]",
+                        6 => "nop word ptr [rax+rax*1+0x0]",
+                        7 => "nop dword ptr [rax+0x0]",
+                        8 => "nop dword ptr [rax+rax*1+0x0]",
+                        _ => "nop word ptr [rax+rax*1+0x0]",
+                    }
+                    .to_string(),
+                );
+            }
+            n -= bytes.len();
+        }
     }
 
     /// Push an icedx64 [Op].
     pub(super) fn push_inst(&mut self, op: Result<Op, iced_x86::IcedError>) {
-        self.insts.push(op.unwrap());
+        let mut inst = op.unwrap();
+
+        // At this point we don't necessarily know where
+        // branch/jump/other-memory-displacement operations should go to: if they have an
+        // address of 0, we know we'll be relocating the operation later. However, icedx86
+        // will (rightfully) complain about address 0, so we stuff in a dummy IP that's nearby, and
+        // which we'll patch later.
+        let ip = u64::try_from(self.buf.as_ptr().addr()).unwrap();
+        if (inst.is_call_near() || inst.is_jmp_near() || inst.is_jcc_near())
+            && inst.near_branch64() == 0
+        {
+            inst.set_near_branch64(ip);
+        }
+        if inst.is_ip_rel_memory_operand() && inst.memory_displacement64() == 0 {
+            inst.set_memory_displacement64(ip);
+        }
+        self.enc.encode(&inst, ip).unwrap();
+
+        let mut enc_buf = self.enc.take_buffer();
+        let len = enc_buf.len();
+        self.buf_end_off = self
+            .buf_end_off
+            .checked_sub(u32::try_from(len).unwrap())
+            .expect("Would exceed preallocated code buffer");
+        unsafe {
+            self.buf
+                .as_ptr()
+                .byte_add(usize::try_from(self.buf_end_off).unwrap())
+                .copy_from_nonoverlapping(enc_buf.as_ptr(), len)
+        };
+        enc_buf.clear();
+        self.enc.set_buffer(enc_buf);
+
+        if let Some(log) = &mut self.log {
+            let ip = u64::try_from(
+                self.buf.as_ptr().addr() + usize::try_from(self.buf_end_off).unwrap(),
+            )
+            .unwrap();
+            if inst.is_ip_rel_memory_operand() && inst.memory_displacement64() == 0 {
+                inst.set_memory_displacement64(ip);
+            }
+            let mut inst_s = String::new();
+            self.fmtr.as_mut().unwrap().format(&inst, &mut inst_s);
+            log.push(inst_s);
+        }
     }
 
     /// Push an operation and an associated [RelocKind].
@@ -98,8 +213,27 @@ impl Asm {
         op: Result<iced_x86::Instruction, iced_x86::IcedError>,
         reloc: RelocKind,
     ) {
-        let idx = self.insts.push(op.unwrap());
-        self.relocs.push((self.blocks.len_idx(), idx, reloc));
+        let old_buf_off = self.buf_end_off;
+        self.push_inst(op);
+
+        if let Some(log) = &mut self.log {
+            let s = log.last_mut().unwrap();
+            let off = s.rfind(' ').unwrap();
+            match &reloc {
+                RelocKind::AbsoluteWithLabel(lidx) | RelocKind::NearWithLabel(lidx) => {
+                    s.replace_range(off.., &format!(" l{}", usize::from(*lidx)));
+                }
+                RelocKind::NearWithAddr(addr) | RelocKind::NearCallWithAddr(addr) => {
+                    s.replace_range(off.., &format!(" 0x{addr:X}"));
+                }
+            }
+        }
+
+        self.relocs.push((
+            self.buf_end_off,
+            u8::try_from(old_buf_off - self.buf_end_off).unwrap(),
+            reloc,
+        ));
     }
 
     /// Is `addr` representable as an x64 near call (a signed 32 bit int) relative to where this
@@ -123,218 +257,87 @@ impl Asm {
     /// If `block_completed` has not been called immediately prior to this function.
     pub(super) fn into_exe(
         mut self,
-        log: bool,
+        entry_label: LabelIdx,
         labels: &[LabelIdx],
     ) -> Result<(ExeCodeBuf, Option<String>, Vec<usize>), CompilationError> {
-        // Convert the operations into a byte sequence, recording byte offsets as we go, which we
-        // need for labels and relocations.
-        let mut enc = Encoder::new(64);
-        let base = u64::try_from(self.buf.as_ptr().addr()).unwrap();
-        let mut off: u64 = 0;
-        let mut offs = Vec::new();
-        let mut blk_offs = IndexVec::with_capacity(self.blocks.len());
-        assert!(self.insts.is_empty());
-        for b in self.blocks.iter_mut() {
-            blk_offs.push(offs.len());
-            // Ensure the start of the block is properly aligned.
-            while !off.is_multiple_of(u64::try_from(BLOCK_ALIGNMENT).unwrap()) {
-                let ip = base + off;
-                let lenb = enc.encode(&Op::with(Code::Nopd), ip).unwrap();
-                off += u64::try_from(lenb).unwrap();
-            }
-
-            for (opidx, inst) in b.iter_mut_enumerated().rev() {
-                let ip = base + off;
-                inst.set_ip(ip);
-                // At this point we don't necessarily know where
-                // branch/jump/other-memory-displacement operations should go to: if they have an
-                // address of 0, we know we'll be relocating the operation later. However, icedx86
-                // will (rightfully) complain about address 0, so we stuff in a dummy jump address
-                // (to the operation itself) which we'll patch a little below.
-                if (inst.is_call_near() || inst.is_jmp_near() || inst.is_jcc_near())
-                    && inst.near_branch64() == 0
-                {
-                    inst.set_near_branch64(ip);
-                }
-                if inst.is_ip_rel_memory_operand() && inst.memory_displacement64() == 0 {
-                    inst.set_memory_displacement64(ip);
-                }
-                let lenb = enc
-                    .encode(inst, ip)
-                    .unwrap_or_else(|e| panic!("At machine {opidx:?} {inst:?}: {e:?}"));
-                offs.push((off, lenb));
-                off += u64::try_from(lenb).unwrap();
-            }
-        }
-        // Relocations in the final instruction need to know the offset of the "next" instruction.
-        offs.push((off, 0));
-
-        // We now have the information we need to create label offsets.
-        let label_offs = labels
-            .iter()
-            .map(|label| {
-                let (bidx, opidx) = self.labels[*label].unwrap();
-                let off = usize::from(blk_offs[bidx] + self.blocks[bidx].len() - opidx);
-                usize::try_from(offs[off].0).unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        // Perform relocations.
-        let mut enc = enc.take_buffer();
-        for (bidx, opidx, reloc) in self.relocs.iter().cloned() {
-            let inst_off = usize::from(blk_offs[bidx] + self.blocks[bidx].len() - opidx - 1);
-            let inst_boff = usize::try_from(offs[inst_off].0).unwrap();
-            let next_ip_boff = u64::try_from(inst_boff + offs[inst_off].1).unwrap();
+        let base = self.buf.as_ptr().addr();
+        let bufs = unsafe { slice::from_raw_parts_mut(self.buf.as_ptr(), self.buf.len()) };
+        for (off, inst_len, reloc) in self.relocs {
+            let off = usize::try_from(off).unwrap();
+            let inst_len = usize::from(inst_len);
+            let next_ip = unsafe { self.buf.as_ptr().byte_add(off + inst_len) }.addr();
+            // We now have a not-very-nice hack where we examine the instruction to see
+            // which part of it we write the relocation to.
             match reloc {
                 RelocKind::AbsoluteWithLabel(lidx) => {
-                    let patch_boff = if let 0x48 | 0x49 = enc[inst_boff] {
-                        inst_boff + 2 // mov r64, imm64
+                    let patch_off = if let 0x48 | 0x49 = bufs[off] {
+                        off + 2 // mov r64, imm64
                     } else {
-                        todo!("{:?}", &enc[inst_boff..inst_boff + 2])
+                        todo!("{:?}", &bufs[off..off + 2])
                     };
-                    let (lab_bidx, lab_opidx) = self.labels[lidx].unwrap();
-                    let to_inst_off =
-                        usize::from(blk_offs[lab_bidx] + self.blocks[lab_bidx].len() - lab_opidx);
-                    let to_boff = offs[to_inst_off].0;
-                    let addr = base + to_boff;
-                    enc[patch_boff..patch_boff + 8].copy_from_slice(&addr.to_le_bytes());
-                    if log {
-                        self.blocks[bidx][opidx].set_immediate64(addr);
-                    }
+                    let addr = base + usize::try_from(self.labels[lidx].unwrap()).unwrap();
+                    bufs[patch_off..patch_off + 8].copy_from_slice(&addr.to_le_bytes());
                 }
                 RelocKind::NearWithAddr(_) | RelocKind::NearWithLabel(_) => {
-                    // We now have a not-very-nice hack where we examine the instruction to see
-                    // which part of it we write the relocation to.
                     #[allow(clippy::if_same_then_else)]
-                    let patch_boff = if enc[inst_boff] == 0xe9 {
-                        inst_boff + 1 // JMP
-                    } else if enc[inst_boff] == 0x0F
-                        && enc[inst_boff + 1] >= 0x80
-                        && enc[inst_boff + 1] <= 0x08F
+                    let patch_off = if bufs[off] == 0xe9 {
+                        off + 1 // JMP
+                    } else if bufs[off] == 0x0F && bufs[off + 1] >= 0x80 && bufs[off + 1] <= 0x08F {
+                        off + 2 // JCC
+                    } else if bufs[off] == 0x66
+                        && bufs[off + 1] == 0x0F
+                        && (bufs[off + 2] >= 0x5C && bufs[off + 2] <= 0x62)
                     {
-                        inst_boff + 2 // JCC
-                    } else if enc[inst_boff] == 0x66
-                        && enc[inst_boff + 1] == 0x0F
-                        && (enc[inst_boff + 2] >= 0x5C && enc[inst_boff + 2] <= 0x62)
+                        off + 4 // PUNPCKLDQ / SUBPD
+                    } else if (bufs[off] == 0xF2 || bufs[off] == 0xF3)
+                        && bufs[off + 1] == 0x0F
+                        && bufs[off + 2] == 0x10
                     {
-                        inst_boff + 4 // PUNPCKLDQ / SUBPD
-                    } else if (enc[inst_boff] == 0xF2 || enc[inst_boff] == 0xF3)
-                        && enc[inst_boff + 1] == 0x0F
-                        && enc[inst_boff + 2] == 0x10
-                    {
-                        inst_boff + 4 // MOVSD / MOVSS
+                        off + 4 // MOVSD / MOVSS
                     } else {
-                        todo!("{:X?}", &enc[inst_boff..inst_boff + 3])
+                        todo!("{:X?}", &bufs[off..off + 3])
                     };
-
                     let addr = match reloc {
-                        RelocKind::NearWithAddr(addr) => {
-                            let diff = i32::try_from(
-                                u64::try_from(addr)
-                                    .unwrap()
-                                    .checked_signed_diff(base + next_ip_boff)
-                                    .unwrap(),
-                            )
-                            .unwrap();
-                            enc[patch_boff..patch_boff + 4].copy_from_slice(&diff.to_le_bytes());
-                            u64::try_from(addr).unwrap()
-                        }
+                        RelocKind::NearWithAddr(addr) => addr,
                         RelocKind::NearWithLabel(lidx) => {
-                            let (lab_bidx, lab_opidx) = self.labels[lidx].unwrap();
-                            let to_inst_off = usize::from(
-                                blk_offs[lab_bidx] + self.blocks[lab_bidx].len() - lab_opidx,
-                            );
-                            let to_boff = offs[to_inst_off].0;
-                            let diff =
-                                i32::try_from(to_boff.checked_signed_diff(next_ip_boff).unwrap())
-                                    .unwrap();
-                            enc[patch_boff..patch_boff + 4].copy_from_slice(&diff.to_le_bytes());
-                            base + to_boff
+                            base + usize::try_from(self.labels[lidx].unwrap()).unwrap()
                         }
                         _ => unreachable!(),
                     };
-
-                    if log {
-                        self.blocks[bidx][opidx].set_near_branch64(addr);
+                    let diff = i32::try_from(addr.checked_signed_diff(next_ip).unwrap()).unwrap();
+                    if bufs[off] == 0x66 {
+                        println!("{patch_off} {diff}");
                     }
+                    bufs[patch_off..patch_off + 4].copy_from_slice(&diff.to_le_bytes());
                 }
                 RelocKind::NearCallWithAddr(addr) => {
-                    assert_eq!(enc[inst_boff], 0xE8);
-                    let addr = u64::try_from(addr).unwrap();
-                    let next_ip = base + next_ip_boff;
+                    assert_eq!(bufs[off], 0xE8);
                     let diff = i32::try_from(addr.checked_signed_diff(next_ip).unwrap()).unwrap();
-                    enc[inst_boff + 1..inst_boff + 1 + 4].copy_from_slice(&diff.to_le_bytes());
-                    if log {
-                        self.blocks[bidx][opidx].set_near_branch64(addr);
-                    }
+                    bufs[off + 1..off + 1 + 4].copy_from_slice(&diff.to_le_bytes());
                 }
             }
         }
 
-        // Copy into the executable buffer.
-        if enc.len() > self.buf.len() {
-            // If we've ended up here, it really suggests that our `buflen` heuristic is too
-            // stingy. We _could_, though, restart the whole assembly process with a bigger buffer
-            // if we really wanted to.
-            todo!();
-        }
-
-        let exe = unsafe { self.buf.into_execodebuf(enc.as_ptr(), enc.len()) };
-
-        let log = if log {
-            // When we're replacing labels below, we'll be iterating over blocks in order 0..n but
-            // op indexes in order n..0. We thus need to sort `self.relocs` according to this need.
-            self.relocs
-                .sort_by(|(lhs_bidx, lhs_opidx, _), (rhs_bidx, rhs_opidx, _)| {
-                    lhs_bidx
-                        .cmp(rhs_bidx)
-                        .then_with(|| rhs_opidx.cmp(lhs_opidx))
-                });
-
-            use iced_x86::Formatter;
-            let mut fmtr = iced_x86::NasmFormatter::new();
-            fmtr.options_mut().set_branch_leading_zeros(false);
-            fmtr.options_mut().set_hex_prefix("0x");
-            fmtr.options_mut().set_hex_suffix("");
-            fmtr.options_mut().set_rip_relative_addresses(true);
-            fmtr.options_mut().set_show_branch_size(false);
-            fmtr.options_mut().set_space_after_operand_separator(true);
-
-            let mut relocs_iter = self.relocs.into_iter().peekable();
-            let mut logs_iter = self.log.into_iter();
-            let mut out = Vec::new();
-            for (bidx, b) in self.blocks.into_iter_enumerated() {
-                let log = logs_iter.next().unwrap_or_default();
-                let mut log_iter = log.into_iter().rev().peekable();
-                let _b_len = b.len();
-                for (opidx, inst) in b.into_iter_enumerated().rev() {
-                    while log_iter.peek().map(|x| x.0) > Some(opidx) {
-                        out.push(format!("; {}", log_iter.next().unwrap().1));
-                    }
-                    if let Some(lidx) = self.labels.position(|x| x == &Some((bidx, opidx + 1))) {
-                        out.push(format!("; l{}", usize::from(lidx)));
-                    }
-                    let mut inst_s = String::new();
-                    fmtr.format(&inst, &mut inst_s);
-                    if relocs_iter.peek().map(|(x, y, _)| (*x, *y)) == Some((bidx, opidx))
-                        && let RelocKind::NearWithLabel(lidx) = relocs_iter.next().unwrap().2
-                    {
-                        inst_s.replace_range(
-                            inst_s.rfind(' ').unwrap()..,
-                            &format!(" l{}", usize::from(lidx)),
-                        );
-                    }
-                    out.push(inst_s);
-                }
-                out.extend(log_iter.map(|x| format!("; {}", x.1)));
-            }
-
-            Some(out.join("\n"))
+        let entry_off = usize::try_from(self.labels[entry_label].unwrap()).unwrap();
+        let entry_addr = unsafe { self.buf.as_ptr().byte_add(entry_off) };
+        let used = self.buf.len() - usize::try_from(self.buf_end_off).unwrap();
+        let exe = unsafe { self.buf.into_execodebuf(used, entry_addr) };
+        let log = if let Some(mut log) = self.log.take() {
+            log.reverse();
+            Some(log.join("\n"))
         } else {
             None
         };
-
-        Ok((exe, log, label_offs))
+        Ok((
+            exe,
+            log,
+            labels
+                .iter()
+                .map(|lidx| {
+                    usize::try_from(self.labels[*lidx].unwrap() - self.buf_end_off).unwrap()
+                })
+                .collect::<Vec<_>>(),
+        ))
     }
 }
 

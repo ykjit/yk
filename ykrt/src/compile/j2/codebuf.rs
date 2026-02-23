@@ -62,29 +62,29 @@ impl CodeBufInProgress {
     }
 
     /// Copy `other_len` bytes from `other` into `self` and produce an [ExeCodeBuf].
-    pub unsafe fn into_execodebuf(self, other: *const u8, other_len: usize) -> ExeCodeBuf {
-        assert!(other_len <= self.len);
-        unsafe {
-            self.buf.copy_from_nonoverlapping(other, other_len);
-        }
-
-        // If there's more than a page's worth of unused space in the buffer, return it to the OS.
-        let unused = self.len - other_len.next_multiple_of(page_size::get());
+    pub unsafe fn into_execodebuf(mut self, used: usize, entry: *mut u8) -> ExeCodeBuf {
+        // If there's more than a page's worth of unused space in the buffer, return it to the OS,
+        // and update `self.buf` and `self.len` appropriately.
+        let unused = self.len - used.next_multiple_of(page_size::get());
         if unused > 0 {
-            let rtn =
-                unsafe { munmap(self.buf.byte_add(self.len - unused) as *mut c_void, unused) };
+            let rtn = unsafe { munmap(self.buf as *mut c_void, unused) };
             if rtn != 0 {
                 todo!();
             }
+            self.buf = unsafe { self.buf.byte_add(unused) };
+            self.len -= unused;
         }
 
-        let used = other_len.next_multiple_of(page_size::get());
-        if unsafe { mprotect(self.buf as *mut c_void, used, PROT_EXEC | PROT_READ) } == -1 {
+        // Remove write permissions.
+        if unsafe { mprotect(self.buf as *mut c_void, self.len, PROT_EXEC | PROT_READ) } == -1 {
             todo!();
         }
+
         ExeCodeBuf {
             buf: SyncSafePtr(self.buf),
-            len: used,
+            start_off: self.len - used,
+            len: self.len,
+            entry: SyncSafePtr(entry),
             patch_lock: Mutex::new(()),
         }
     }
@@ -95,8 +95,12 @@ impl CodeBufInProgress {
 pub(super) struct ExeCodeBuf {
     /// A pointer to the beginning of the `mmap`ed buffer.
     buf: SyncSafePtr<*mut u8>,
-    /// How many bytes have we allocated to the buffer?
+    /// The offset of the start of the used part of [Self::buf].
+    start_off: usize,
+    /// How many bytes have we allocated to [Self::buf]?
     len: usize,
+    /// A pointer to the executable entry point in this buffer.
+    entry: SyncSafePtr<*mut u8>,
     /// This lock is used during patching: it is a simple way of ensuring that we don't race with
     /// another thread when `mprotect`ing page permissions. Note: this works because we assume that
     /// each [ExeCodeBuf] has allocated its own page. If we start sharing traces within pages, a
@@ -105,9 +109,14 @@ pub(super) struct ExeCodeBuf {
 }
 
 impl ExeCodeBuf {
+    /// Get a raw pointer to the start of the executable part of the code buffer.
+    pub fn entry_ptr(&self) -> *const u8 {
+        self.entry.0
+    }
+
     /// Get a raw pointer to the start of the executable code buffer.
-    pub fn as_ptr(&self) -> *const u8 {
-        self.buf.0
+    pub fn sidetrace_entry(&self, sidetrace_off: usize) -> *const u8 {
+        unsafe { self.buf.0.byte_add(self.start_off + sidetrace_off) }
     }
 
     /// Return the size of this buffer in bytes.
@@ -120,19 +129,22 @@ impl ExeCodeBuf {
     /// start of the buffer will be temporarily marked writable, at which point `f` will be called
     /// with the concrete address starting at `patch_off`. When `f` has completed, the executable
     /// buffer will have writable permissions removed.
-    pub fn patch<F>(&self, patch_off: usize, len: usize, f: F)
+    pub fn patch<F>(&self, patch_off: usize, patch_len: usize, f: F)
     where
         F: FnOnce(*mut u8),
     {
-        let patch_ptr = unsafe { self.buf.0.byte_add(patch_off) };
+        let patch_ptr = unsafe { self.buf.0.byte_add(self.start_off + patch_off) };
         // mprotect requires a page-aligned address so round `patch_ptr` down.
         let page_ptr = ((patch_ptr.addr() / page_size::get()) * page_size::get()) as *mut u8;
-        let page_len = patch_off + len - (page_ptr.addr() - self.buf.0.addr());
+        // `len` could span more than one page, so we need to account for that.
+        let len =
+            (patch_ptr.addr() + patch_len).next_multiple_of(page_size::get()) - page_ptr.addr();
+
         let _lk = self.patch_lock.lock();
         if unsafe {
             mprotect(
                 page_ptr as *mut c_void,
-                page_len,
+                len,
                 PROT_EXEC | PROT_READ | PROT_WRITE,
             )
         } == -1
@@ -140,7 +152,7 @@ impl ExeCodeBuf {
             todo!("{}", unsafe { *__errno_location() });
         }
         f(patch_ptr);
-        if unsafe { mprotect(page_ptr as *mut c_void, page_len, PROT_EXEC | PROT_READ) } == -1 {
+        if unsafe { mprotect(page_ptr as *mut c_void, len, PROT_EXEC | PROT_READ) } == -1 {
             todo!("{}", unsafe { *__errno_location() });
         }
     }

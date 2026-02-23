@@ -19,7 +19,6 @@ memmap2 = "0.9"
 num-traits = "0.2.16"
 num_cpus = "1.13.1"
 page_size = "0.6.0"
-cache-size = "0.7.0"
 parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
 smallvec = { version = "1.15.1", features = ["const_generics", "const_new", "union"] }

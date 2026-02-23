@@ -125,10 +125,6 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         }
     }
 
-    pub(super) fn exe(&self) -> *mut c_void {
-        self.codebuf.as_ptr() as *mut c_void
-    }
-
     pub(super) fn guard_stack_off(&self, gidx: CompiledGuardIdx) -> u32 {
         match self.trace_start {
             J2TraceStart::ControlPoint { stack_off, .. }
@@ -145,6 +141,10 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
             J2TraceStart::ControlPoint { stack_off, .. }
             | J2TraceStart::Guard { stack_off, .. } => stack_off,
         }
+    }
+
+    pub(super) fn sidetrace_entry(&self, sidetrace_off: usize) -> *const u8 {
+        self.codebuf.sidetrace_entry(sidetrace_off)
     }
 }
 
@@ -181,7 +181,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     }
 
     fn entry(&self) -> *const c_void {
-        self.codebuf.as_ptr() as *const c_void
+        self.codebuf.entry_ptr() as *const c_void
     }
 
     fn hl(&self) -> &std::sync::Weak<parking_lot::Mutex<HotLocation>> {
@@ -189,7 +189,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     }
 
     fn code(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.codebuf.as_ptr(), self.codebuf.len()) }
+        unsafe { std::slice::from_raw_parts(self.codebuf.entry_ptr(), self.codebuf.len()) }
     }
 
     fn name(&self) -> String {
