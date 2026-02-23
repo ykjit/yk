@@ -143,8 +143,18 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         }
     }
 
-    pub(super) fn sidetrace_entry(&self, sidetrace_off: usize) -> *const u8 {
-        self.codebuf.sidetrace_entry(sidetrace_off)
+    /// If a sidetrace can jump straight to this trace, return the address it should jump to.
+    ///
+    /// # Panics
+    ///
+    /// If this trace cannot be jumped straight to by a sidetrace.
+    pub(super) fn sidetrace_entry(&self) -> *const u8 {
+        match self.trace_start {
+            J2TraceStart::ControlPoint { sidetrace_off, .. } => {
+                self.codebuf.sidetrace_entry(sidetrace_off)
+            }
+            J2TraceStart::Guard { .. } => unreachable!(),
+        }
     }
 }
 

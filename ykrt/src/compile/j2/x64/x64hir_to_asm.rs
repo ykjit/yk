@@ -1422,10 +1422,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         &mut self,
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
-        let addr = match &ctr.trace_start {
-            J2TraceStart::ControlPoint { sidetrace_off, .. } => ctr.sidetrace_entry(*sidetrace_off),
-            J2TraceStart::Guard { .. } => todo!(),
-        };
+        let addr = ctr.sidetrace_entry();
         if self.asm.is_near_callable(addr.addr()) {
             self.asm.push_reloc(
                 IcedInst::with_branch(Code::Jmp_rel32_64, 0),
