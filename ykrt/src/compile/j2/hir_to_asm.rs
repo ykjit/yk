@@ -708,6 +708,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 {
                     gidx = cnd_gidx;
                     merged = true;
+                    break;
                 }
             }
 
