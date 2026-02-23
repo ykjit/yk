@@ -46,7 +46,7 @@ use crate::{
                 AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, RegT, VarLoc, VarLocs,
             },
             x64::{
-                asm::{Asm, BLOCK_ALIGNMENT, LabelIdx, RelocKind},
+                asm::{Asm, LabelIdx, RelocKind},
                 x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
             },
         },
@@ -60,10 +60,12 @@ use index_vec::IndexVec;
 use smallvec::SmallVec;
 use std::{assert_matches, collections::HashMap, debug_assert_matches, ffi::c_void, sync::Arc};
 
-#[derive(Debug)]
 pub(in crate::compile::j2) struct X64HirToAsm<'a> {
     m: &'a Mod<Reg>,
     asm: Asm,
+    /// The label for the main entry point into the trace we're about to compile. We create this
+    /// up-front and only attach it later.
+    entry_label: LabelIdx,
     reg_hints: IndexVec<InstIdx, Reg>,
     /// The data section: we map any given (align, byte sequence) pair to [LabelIdx]s, which will
     /// eventually be output as their own pseudo-block.
@@ -76,13 +78,6 @@ impl<'a> X64HirToAsm<'a> {
         // perfection here: if we guess too much we waste OS time and RAM, if we guess too little
         // we may have to redo the whole compilation! The least worst option is therefore to guess
         // too much and free memory afterwards.
-        //
-        // A quick measurement shows that each HIR instruction leads, on average, to about 8 bytes
-        // of assembled stuff. We will need to revisit this when guard bodies (etc.) are
-        // implemented, but it'll do for now.
-        //
-        // On that basis, we therefore over-guess that each HIR instruction needs 12 bytes of
-        // storage. We thus request that, and free what's unused at the end.
         let num_hir_insts = match &m.trace_end {
             TraceEnd::Coupler { entry, .. } => entry.insts_len(),
             TraceEnd::Loop { entry, peel } => {
@@ -94,13 +89,16 @@ impl<'a> X64HirToAsm<'a> {
             #[cfg(test)]
             TraceEnd::TestPeel { entry, peel, .. } => entry.insts_len() + peel.insts_len(),
         };
-        num_hir_insts * 40
+        num_hir_insts * 30
     }
 
-    pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>, buf: CodeBufInProgress) -> Self {
+    pub(in crate::compile::j2) fn new(m: &'a Mod<Reg>, buf: CodeBufInProgress, log: bool) -> Self {
+        let mut asm = Asm::new(buf, log);
+        let entry_label = asm.mk_label();
         Self {
             m,
-            asm: Asm::new(buf),
+            asm,
+            entry_label,
             reg_hints: IndexVec::new(),
             data_sec: HashMap::new(),
         }
@@ -982,30 +980,23 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn build_exe(
         mut self,
-        log: bool,
         labels: &[Self::Label],
     ) -> Result<(ExeCodeBuf, Option<String>, Vec<usize>), CompilationError> {
         // Push the data section as its own block. This rests on the assumption that the start of
         // each block is aligned.
-        let mut data_off = BLOCK_ALIGNMENT;
         for (data, (align, lidx)) in self.data_sec.into_iter() {
-            let align = usize::try_from(align).unwrap();
-            if !data_off.is_multiple_of(align) {
-                let pad_len = data_off.next_multiple_of(align) - data_off;
-                self.asm
-                    .push_inst(IcedInst::with_declare_byte(&vec![0u8; pad_len]));
-            }
+            let align = align - (u32::try_from(data.len()).unwrap() % align);
+            self.asm.align(align);
             self.asm.push_inst(IcedInst::with_declare_byte(&data));
             self.asm.attach_label(lidx);
-            data_off += data.len();
         }
         self.asm.block_completed();
-        self.asm.into_exe(log, labels)
+        self.asm.into_exe(self.entry_label, labels)
     }
 
     #[cfg(test)]
     fn build_test(self, labels: &[Self::Label]) -> Self::BuildTest {
-        self.build_exe(true, labels).unwrap().1.unwrap()
+        self.build_exe(labels).unwrap().1.unwrap()
     }
 
     fn log(&mut self, s: String) {
@@ -1356,6 +1347,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RSP,
             stack_off.next_multiple_of(16),
         ));
+        self.asm.attach_label(self.entry_label);
         self.asm.block_completed();
         Ok(label)
     }
@@ -1368,6 +1360,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RSP,
             stack_off.next_multiple_of(16),
         ));
+        self.asm.attach_label(self.entry_label);
         self.asm.block_completed();
     }
 
@@ -1430,9 +1423,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ctr: &Arc<J2CompiledTrace<Self::Reg>>,
     ) -> Result<(), CompilationError> {
         let addr = match &ctr.trace_start {
-            J2TraceStart::ControlPoint { sidetrace_off, .. } => unsafe {
-                ctr.exe().byte_add(*sidetrace_off)
-            },
+            J2TraceStart::ControlPoint { sidetrace_off, .. } => ctr.sidetrace_entry(*sidetrace_off),
             J2TraceStart::Guard { .. } => todo!(),
         };
         if self.asm.is_near_callable(addr.addr()) {
@@ -1473,6 +1464,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RSP,
             stack_off.next_multiple_of(16),
         ));
+        self.asm.attach_label(self.entry_label);
         self.asm.block_completed();
     }
 
@@ -2558,7 +2550,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     outr.to_xmm(),
                     tmpr.to_xmm(),
                 ));
-                let lidx = self.push_data(8, &[0, 0, 0, 0, 0, 0, 0, 0x80]);
+                let lidx = self.push_data(16, &[0, 0, 0, 0, 0, 0, 0, 0x80]);
                 self.asm.push_reloc(
                     IcedInst::with2(
                         Code::Movsd_xmm_xmmm64,
@@ -2574,7 +2566,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     outr.to_xmm(),
                     tmpr.to_xmm(),
                 ));
-                let lidx = self.push_data(4, &[0, 0, 0, 0x80]);
+                let lidx = self.push_data(16, &[0, 0, 0, 0x80]);
                 self.asm.push_reloc(
                     IcedInst::with2(
                         Code::Movss_xmm_xmmm32,
@@ -3967,9 +3959,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 // We generate similar code to LLVM in X86ISelLowering. Note: this is non-strict
                 // floating point: it produces -0.0 instead of +0.0!
                 let c0_lidx =
-                    self.push_data(8, &[0, 0, 48, 67, 0, 0, 48, 69, 0, 0, 0, 0, 0, 0, 0, 0]);
+                    self.push_data(16, &[0, 0, 48, 67, 0, 0, 48, 69, 0, 0, 0, 0, 0, 0, 0, 0]);
                 let c1_lidx =
-                    self.push_data(8, &[0, 0, 0, 0, 0, 0, 48, 67, 0, 0, 0, 0, 0, 0, 48, 69]);
+                    self.push_data(16, &[0, 0, 0, 0, 0, 0, 48, 67, 0, 0, 0, 0, 0, 0, 48, 69]);
                 self.asm.push_inst(IcedInst::with2(
                     Code::Addsd_xmm_xmmm64,
                     tgtr.to_xmm(),
@@ -4300,8 +4292,8 @@ mod test {
             #[cfg(feature = "ykd")]
             debug_str: None,
         }));
-        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
-        let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), true);
+        let log = HirToAsm::new(&m, hl, be, true).build_test().unwrap();
 
         let mut failures = Vec::new();
         for ptn in ptns {
@@ -4333,7 +4325,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
 
         assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(0)), Some(0));
         assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(1)), Some(0xFF));
@@ -4371,7 +4363,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
 
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(6)), Some(0));
         assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(7)), Some(-1));
@@ -4439,7 +4431,7 @@ mod test {
         else {
             panic!()
         };
-        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
+        let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
 
         assert_eq!(
             be.try_load_to_mem_op(b, InstIdx::from(3), InstIdx::from(1)),
@@ -4499,7 +4491,7 @@ mod test {
         else {
             panic!()
         };
-        let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
+        let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
         x64be.about_to_process_block(b, args_vlocs);
         assert_eq!(
             x64be.reg_hint(b, args_vlocs, InstIdx::new(2), InstIdx::new(0)),
@@ -4540,7 +4532,7 @@ mod test {
         else {
             panic!()
         };
-        let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing());
+        let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
         x64be.about_to_process_block(b, args_vlocs);
         assert_eq!(
             x64be.reg_hint(b, args_vlocs, InstIdx::new(2), InstIdx::new(0)),
@@ -5959,13 +5951,13 @@ mod test {
               term [%1]
             ",
             &["
+              ; l{{1}}
+              db 0, 0, 0, 0x80
               ...
               ; %1: float = fneg %0
-              movss fp.128.x, l0
+              movss fp.128.x, l{{1}}
               xorps fp.128.y, fp.128.x
               ; term [%1]
-              ; l0
-              db 0, 0, 0, 0x80
             "],
         );
 
@@ -5977,13 +5969,13 @@ mod test {
               term [%1]
             ",
             &["
+              ; l{{1}}
+              db 0, 0, 0, 0, 0, 0, 0, 0x80
               ...
               ; %1: double = fneg %0
-              movsd fp.128.x, l0
+              movsd fp.128.x, l{{1}}
               xorpd fp.128.y, fp.128.x
               ; term [%1]
-              ; l0
-              db 0, 0, 0, 0, 0, 0, 0, 0x80
             "],
         );
     }
@@ -6082,23 +6074,23 @@ mod test {
               term [%0]
             ",
             &["
-              ...
-              ; guard true, %0, []
-              bt r.32._, 0
-              jae l0
-              ; term [%0]
-              ; l0
+              ; l{{1}}
               sub rsp, 0x80
               ; term []
-              ; l1
-              mov r.64.x, 0x...
+              ; l{{2}}
+              mov r.64.x, l{{3}}
               jmp r.64.x
-              ; l2
+              ; l{{3}}
               mov rdi, rbp
               mov rsi, 0
               mov edx, 0
               mov rax, {{_}}
               call rax
+              ...
+              ; guard true, %0, []
+              bt r.32._, 0
+              jae l{{1}}
+              ; term [%0]
             "],
         );
 
@@ -6109,23 +6101,23 @@ mod test {
               term [%0]
             ",
             &["
-              ...
-              ; guard false, %0, []
-              bt r.32._, 0
-              jb l0
-              ; term [%0]
-              ; l0
+              ; l{{1}}
               sub rsp, 0x80
               ; term []
-              ; l1
-              mov r.64.x, 0x...
+              ; l{{2}}
+              mov r.64.x, l{{3}}
               jmp r.64.x
-              ; l2
+              ; l{{3}}
               mov rdi, rbp
               mov rsi, 0
               mov edx, 0
               mov rax, {{_}}
               call rax
+              ...
+              ; guard false, %0, []
+              bt r.32._, 0
+              jb l{{1}}
+              ; term [%0]
             "],
         );
 
@@ -6143,9 +6135,8 @@ mod test {
               ; %2: i1 = icmp eq %0, %1
               ; guard true, %2, []
               cmp r.32.x, r.32.y
-              jne l0
+              jne l{{1}}
               ; term [%0, %1]
-              ...
             "],
         );
 
@@ -6166,7 +6157,7 @@ mod test {
               ; %2: i1 = icmp eq %0, %1
               ; guard true, %2, []
               cmp r.32.x, 0xFEDC
-              jne l0
+              jne l{{1}}
               ...
             "#],
         );
@@ -6184,9 +6175,8 @@ mod test {
               ; %2: i1 = icmp eq %0, %1
               ; guard true, %2, []
               cmp r.32.x, 0x14
-              jne l0
+              jne l{{1}}
               ; term [%0]
-              ...
             "],
         );
 
@@ -6208,9 +6198,8 @@ mod test {
               ; %2: i1 = icmp eq %0, %1
               ; guard true, %2, []
               cmp r.32.x, r.32.y
-              jne l0
+              jne l{{1}}
               ; term [%0, %1]
-              ...
             "#],
         );
 
@@ -6231,9 +6220,8 @@ mod test {
               ; %2: i1 = icmp sgt %0, %1
               ; guard true, %2, []
               cmp r.32.x, r.32.y
-              jle l0
+              jle l{{1}}
               ; term [%0, %1]
-              ...
             "#],
         );
 
@@ -6254,9 +6242,8 @@ mod test {
               ; %2: i1 = icmp ugt %0, %1
               ; guard true, %2, []
               cmp r.32.x, r.32.y
-              jbe l0
+              jbe l{{1}}
               ; term [%0, %1]
-              ...
             "#],
         );
 
@@ -6280,9 +6267,8 @@ mod test {
               ; %3: i1 = icmp ugt %2, %1
               ; guard true, %3, []
               cmp [r.32.x], r.32.y
-              jbe l0
+              jbe l{{1}}
               ; term [%0, %1]
-              ...
             "#],
         );
 
@@ -6304,9 +6290,8 @@ mod test {
               ; %3: i1 = icmp ugt %2, %1
               ; guard true, %3, []
               cmp [r.64.x], r.64.y
-              jbe l0
+              jbe l{{1}}
               ; term [%0, %1]
-              ...
             "#],
         );
 
@@ -6330,9 +6315,8 @@ mod test {
               ; %3: i1 = icmp ugt %1, %2
               ; guard true, %3, []
               cmp byte [r.64.x], 7
-              jbe l0
+              jbe l{{1}}
               ; term [%0]
-              ...
             "#],
         );
 
@@ -6354,9 +6338,8 @@ mod test {
               ; %3: i1 = icmp ugt %1, %2
               ; guard true, %3, []
               cmp word [r.64.x], 7
-              jbe l0
+              jbe l{{1}}
               ; term [%0]
-              ...
             "#],
         );
 
@@ -6378,9 +6361,8 @@ mod test {
               ; %3: i1 = icmp ugt %1, %2
               ; guard true, %3, []
               cmp dword [r.64.x], 7
-              jbe l0
+              jbe l{{1}}
               ; term [%0]
-              ...
             "#],
         );
 
@@ -6402,9 +6384,8 @@ mod test {
               ; %3: i1 = icmp ugt %1, %2
               ; guard true, %3, []
               cmp qword [r.64.x], 7
-              jbe l0
+              jbe l{{l}}
               ; term [%0]
-              ...
             "#],
         );
     }
@@ -7184,9 +7165,9 @@ mod test {
               ...
               ; %3: double = select %0, %1, %2
               bt r.32._, 0
-              jb l1
+              jb l{{2}}
               movsd fp.128.x, fp.128._
-              ; l1
+              ; l{{2}}
               ...
             "#],
         );
@@ -8402,38 +8383,38 @@ mod test {
             ",
             &[
                 r#"
+              ; l{{1}}
+              db 0, 0, 0x30, 0x43, 0, 0, 0x30, 0x45, 0, 0, 0, 0, 0, 0, 0, 0
+              ; l{{2}}
+              db 0, 0, 0, 0, 0, 0, 0x30, 0x43, 0, 0, 0, 0, 0, 0, 0x30, 0x45
               ...
               ; %0: i64 = arg [Reg("r.64.x", Undefined)]
               ; %1: double = uitofp %0
               movq fp.128.x, r.64.x
-              punpckldq fp.128.x, l0
-              subpd fp.128.x, l1
+              punpckldq fp.128.x, l{{1}}
+              subpd fp.128.x, l{{2}}
               movapd fp.128.y, fp.128.x
               unpckhpd fp.128.y, fp.128.x
               addsd fp.128.y, fp.128.x
               ; blackbox %1
               ; term [%0]
-              ; l0
-              db 0, 0, 0x30, 0x43, 0, 0, 0x30, 0x45, 0, 0, 0, 0, 0, 0, 0, 0
-              ; l1
-              db 0, 0, 0, 0, 0, 0, 0x30, 0x43, 0, 0, 0, 0, 0, 0, 0x30, 0x45
             "#,
                 r#"
+              ; l{{2}}
+              db 0, 0, 0, 0, 0, 0, 0x30, 0x43, 0, 0, 0, 0, 0, 0, 0x30, 0x45
+              ; l{{1}}
+              db 0, 0, 0x30, 0x43, 0, 0, 0x30, 0x45, 0, 0, 0, 0, 0, 0, 0, 0
               ...
               ; %0: i64 = arg [Reg("r.64.x", Undefined)]
               ; %1: double = uitofp %0
               movq fp.128.x, r.64.x
-              punpckldq fp.128.x, l0
-              subpd fp.128.x, l1
+              punpckldq fp.128.x, l{{1}}
+              subpd fp.128.x, l{{2}}
               movapd fp.128.y, fp.128.x
               unpckhpd fp.128.y, fp.128.x
               addsd fp.128.y, fp.128.x
               ; blackbox %1
               ; term [%0]
-              ; l1
-              db 0, 0, 0, 0, 0, 0, 0x30, 0x43, 0, 0, 0, 0, 0, 0, 0x30, 0x45
-              ; l0
-              db 0, 0, 0x30, 0x43, 0, 0, 0x30, 0x45, 0, 0, 0, 0, 0, 0, 0, 0
             "#,
             ],
         );

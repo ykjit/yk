@@ -2519,7 +2519,7 @@ pub(crate) mod test {
         }));
 
         let be = TestHirToAsm::new(&m);
-        let log = HirToAsm::new(&m, hl, be).build_test().unwrap();
+        let log = HirToAsm::new(&m, hl, be, true).build_test().unwrap();
         let log = log
             .lines()
             .filter(|s| log_filter(s))
@@ -2571,7 +2571,7 @@ pub(crate) mod test {
         }));
 
         let be = TestHirToAsm::new(&m);
-        let log = HirToAsm::new(&m, hl, be).build_test_peel().unwrap();
+        let log = HirToAsm::new(&m, hl, be, true).build_test_peel().unwrap();
         let log = log
             .lines()
             .filter(|s| log_filter(s))

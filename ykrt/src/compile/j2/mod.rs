@@ -29,6 +29,7 @@ use crate::{
         jitc_yk::AOT_MOD,
     },
     location::HotLocation,
+    log::{IRPhase, should_log_ir},
     mt::{MT, TraceId},
     trace::AOTTraceIterator,
 };
@@ -255,13 +256,15 @@ impl Compiler for J2 {
         )
         .build()?;
 
+        let log = should_log_ir(IRPhase::Asm);
+
         #[cfg(target_arch = "x86_64")]
         let minlen = x64::x64hir_to_asm::X64HirToAsm::codebuf_minlen(&hm);
         let buf = self.mmap_codebufinprogress(minlen);
         #[cfg(target_arch = "x86_64")]
-        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf);
+        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf, log);
 
-        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt.clone())?;
+        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be, log).build(mt.clone())?;
 
         // Register JITted code (if required).
         mt.trace_profiler().register_ctr(&ct).map_err(|e| {
@@ -303,13 +306,15 @@ impl Compiler for J2 {
         )
         .build()?;
 
+        let log = should_log_ir(IRPhase::Asm);
+
         #[cfg(target_arch = "x86_64")]
         let minlen = x64::x64hir_to_asm::X64HirToAsm::codebuf_minlen(&hm);
         let buf = self.mmap_codebufinprogress(minlen);
         #[cfg(target_arch = "x86_64")]
-        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf);
+        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf, log);
 
-        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be).build(mt.clone())?;
+        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be, log).build(mt.clone())?;
 
         // Register JITted code (if required).
         mt.trace_profiler().register_ctr(&ct).map_err(|e| {
