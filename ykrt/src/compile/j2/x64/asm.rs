@@ -104,6 +104,57 @@ impl Asm {
         self.buf_end_off = (self.buf_end_off / align) * align;
     }
 
+    /// Return the current offset, in bytes, from the end of the code buffer. That end is
+    /// guaranteed to be aligned to a page boundary.
+    pub(super) fn buf_end_off(&self) -> usize {
+        usize::try_from(self.buf_end_off).unwrap()
+    }
+
+    /// Push `n` bytes of `nop` instructions.
+    pub(super) fn push_nops(&mut self, mut n: usize) {
+        // From https://en.wikipedia.org/wiki/NOP_(code)
+        while n > 0 {
+            let bytes: &[u8] = match n {
+                1 => &[0x90],
+                2 => &[0x66, 0x90],
+                3 => &[0x0F, 0x1F, 0x00],
+                4 => &[0x0F, 0x1F, 0x40, 0x00],
+                5 => &[0x0F, 0x1F, 0x44, 0x00, 0x00],
+                6 => &[0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00],
+                7 => &[0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00],
+                8 => &[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+                _ => &[0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00],
+            };
+            self.buf_end_off = self
+                .buf_end_off
+                .checked_sub(u32::try_from(bytes.len()).unwrap())
+                .expect("Would exceed preallocated code buffer");
+            unsafe {
+                self.buf
+                    .as_ptr()
+                    .byte_add(usize::try_from(self.buf_end_off).unwrap())
+                    .copy_from_nonoverlapping(bytes.as_ptr(), bytes.len())
+            };
+            if let Some(log) = &mut self.log {
+                log.push(
+                    match n {
+                        1 => "nop",
+                        2 => "xchg ax, ax",
+                        3 => "nop dword ptr [rax]",
+                        4 => "nop dword ptr [rax+0x0]",
+                        5 => "nop dword ptr [rax+rax*1+0x0]",
+                        6 => "nop word ptr [rax+rax*1+0x0]",
+                        7 => "nop dword ptr [rax+0x0]",
+                        8 => "nop dword ptr [rax+rax*1+0x0]",
+                        _ => "nop word ptr [rax+rax*1+0x0]",
+                    }
+                    .to_string(),
+                );
+            }
+            n -= bytes.len();
+        }
+    }
+
     /// Push an icedx64 [Op].
     pub(super) fn push_inst(&mut self, op: Result<Op, iced_x86::IcedError>) {
         let mut inst = op.unwrap();

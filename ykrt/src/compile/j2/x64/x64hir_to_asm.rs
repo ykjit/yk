@@ -1473,8 +1473,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         &mut self,
         trid: TraceId,
         gidx: CompiledGuardIdx,
-        vlocs: &[VarLocs<Self::Reg>],
+        _vlocs: &[VarLocs<Self::Reg>],
     ) -> Result<LabelIdx, CompilationError> {
+        // For both the call to `__yk_j2_deopt` and the patchable jump, we use `RAX`.
         self.asm
             .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
         self.asm.push_inst(IcedInst::with2(
@@ -1503,15 +1504,24 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let patch_label = self.asm.mk_label();
         let dummy_label = self.asm.mk_label();
         self.asm.attach_label(dummy_label);
-        let tmp_reg = Self::tmp_reg_from_vlocs(vlocs);
         self.asm
-            .push_inst(IcedInst::with1(Code::Jmp_rm64, tmp_reg.to_reg64()));
-        // FIXME: If this spans a cache line we are technically in risk of seeing tearing and then
-        // execution will go off the rails.
+            .push_inst(IcedInst::with1(Code::Jmp_rm64, IcedReg::RAX));
+        // mov r64, imm64 is 10 bytes long, of which the immediate is the last 8 bytes. We need
+        // those entire 10 bytes to sit within a naturally aligned 16 byte block (which by
+        // definition cannot span a cache line).
+        let off = self.asm.buf_end_off() - 10;
+        let mut align = (off + 2) % 8;
+        if (off + 2 - align).is_multiple_of(16) {
+            align += 8
+        }
+        self.asm.push_nops(align);
         self.asm.push_reloc(
-            IcedInst::with2(Code::Mov_r64_imm64, tmp_reg.to_reg64(), 0),
+            IcedInst::with2(Code::Mov_r64_imm64, IcedReg::RAX, 0),
             RelocKind::AbsoluteWithLabel(dummy_label),
         );
+        // Check that we've aligned the immediate to 8 bytes...
+        assert_eq!((self.asm.buf_end_off() + 2) % 8, 0);
+        assert_eq!((self.asm.buf_end_off() + 2) % 16, 8);
         self.asm.attach_label(patch_label);
 
         Ok(patch_label)
@@ -6079,6 +6089,7 @@ mod test {
               ; term []
               ; l{{2}}
               mov r.64.x, l{{3}}
+              ...
               jmp r.64.x
               ; l{{3}}
               mov rdi, rbp
@@ -6106,6 +6117,7 @@ mod test {
               ; term []
               ; l{{2}}
               mov r.64.x, l{{3}}
+              ...
               jmp r.64.x
               ; l{{3}}
               mov rdi, rbp
