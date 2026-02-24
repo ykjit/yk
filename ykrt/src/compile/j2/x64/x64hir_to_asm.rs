@@ -1003,52 +1003,39 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm.log(s);
     }
 
-    fn const_needs_tmp_reg(&self, _reg: Reg, c: &ConstKind) -> Option<impl Iterator<Item = Reg>> {
-        match c {
-            ConstKind::Double(_) | ConstKind::Float(_) => Some(NORMAL_GP_REGS.iter().cloned()),
-            ConstKind::Int(_) | ConstKind::Ptr(_) => None,
-        }
-    }
-
     fn move_const(
         &mut self,
         reg: Reg,
-        tmp_reg: Option<Self::Reg>,
         tgt_bitw: u32,
         tgt_fill: RegFill,
         kind: &ConstKind,
     ) -> Result<(), CompilationError> {
         match kind {
             ConstKind::Double(x) => {
-                let tmp_reg = tmp_reg.unwrap();
-                assert!(tmp_reg.is_gp());
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Movq_xmm_rm64,
-                    reg.to_xmm(),
-                    tmp_reg.to_reg64(),
-                ));
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Mov_r64_imm64,
-                    tmp_reg.to_reg64(),
-                    x.to_bits().cast_signed(),
-                ));
+                assert_matches!(tgt_fill, RegFill::Undefined | RegFill::Zeroed);
+                let lidx = self.push_data(8, &x.to_le_bytes());
+                self.asm.push_reloc(
+                    IcedInst::with2(
+                        Code::Movsd_xmm_xmmm64,
+                        reg.to_xmm(),
+                        MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                    ),
+                    RelocKind::NearWithLabel(lidx),
+                );
             }
             ConstKind::Float(x) => {
-                let tmp_reg = tmp_reg.unwrap();
-                assert!(tmp_reg.is_gp());
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Movd_xmm_rm32,
-                    reg.to_xmm(),
-                    tmp_reg.to_reg32(),
-                ));
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Mov_r32_imm32,
-                    tmp_reg.to_reg32(),
-                    x.to_bits().cast_signed(),
-                ));
+                assert_matches!(tgt_fill, RegFill::Undefined | RegFill::Zeroed);
+                let lidx = self.push_data(8, &x.to_le_bytes());
+                self.asm.push_reloc(
+                    IcedInst::with2(
+                        Code::Movss_xmm_xmmm32,
+                        reg.to_xmm(),
+                        MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                    ),
+                    RelocKind::NearWithLabel(lidx),
+                );
             }
             ConstKind::Int(x) => {
-                assert!(tmp_reg.is_none());
                 assert!(tgt_bitw >= x.bitw());
                 self.asm.push_inst(
                     if tgt_fill == RegFill::Undefined || tgt_fill == RegFill::Zeroed {
@@ -1084,7 +1071,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 );
             }
             ConstKind::Ptr(x) => {
-                assert!(tmp_reg.is_none());
                 assert_ne!(tgt_fill, RegFill::Signed);
                 assert_eq!(tgt_bitw, 64);
                 self.asm.push_inst(IcedInst::with2(
@@ -5492,19 +5478,38 @@ mod test {
               blackbox %2
               term []
             ",
-            &["
+            &[
+                "
+              ; l{{2}}
+              db 0x9A, 0x99, 0x99, 0x99, 0x99, 0x99, 0xF1, 0x3F
+              ; l{{1}}
+              db 0xCD, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0, 0x40
               ...
               ; %0: double = 1.1
-              mov r.64.x, 0x3FF199999999999A
-              movq fp.128.x, r.64.x
+              movsd fp.128.x, l{{2}}
               ; %1: double = 2.1
-              mov r.64._, 0x4000CCCCCCCCCCCD
-              movq fp.128.y, r.64._
+              movsd fp.128.y, l{{1}}
               ; %2: double = fadd %0, %1
               addsd fp.128.x, fp.128.y
               ; blackbox %2
               ; term []
-            "],
+             ",
+                "
+              ; l{{1}}
+              db 0xCD, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0, 0x40
+              ; l{{2}}
+              db 0x9A, 0x99, 0x99, 0x99, 0x99, 0x99, 0xF1, 0x3F
+              ...
+              ; %0: double = 1.1
+              movsd fp.128.x, l{{2}}
+              ; %1: double = 2.1
+              movsd fp.128.y, l{{1}}
+              ; %2: double = fadd %0, %1
+              addsd fp.128.x, fp.128.y
+              ; blackbox %2
+              ; term []
+             ",
+            ],
         );
 
         // Floats
@@ -5516,19 +5521,38 @@ mod test {
               blackbox %2
               term []
             ",
-            &["
+            &[
+                "
+              ; l{{2}}
+              db 0xCD, 0xCC, 0x8C, 0x3F
+              ; l{{1}}
+              db 0x66, 0x66, 6, 0x40
               ...
               ; %0: float = 1.1
-              mov r.32.x, 0x3F8CCCCD
-              movd fp.128.x, r.32.x
+              movss fp.128.x, l{{2}}
               ; %1: float = 2.1
-              mov r.32._, 0x40066666
-              movd fp.128.y, r.32._
+              movss fp.128.y, l{{1}}
               ; %2: float = fadd %0, %1
               addss fp.128.x, fp.128.y
               ; blackbox %2
               ; term []
-            "],
+            ",
+                "
+              ; l{{1}}
+              db 0x66, 0x66, 6, 0x40
+              ; l{{2}}
+              db 0xCD, 0xCC, 0x8C, 0x3F
+              ...
+              ; %0: float = 1.1
+              movss fp.128.x, l{{2}}
+              ; %1: float = 2.1
+              movss fp.128.y, l{{1}}
+              ; %2: float = fadd %0, %1
+              addss fp.128.x, fp.128.y
+              ; blackbox %2
+              ; term []
+            ",
+            ],
         );
     }
 
