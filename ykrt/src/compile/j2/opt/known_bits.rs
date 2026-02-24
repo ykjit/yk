@@ -56,19 +56,19 @@ impl PassT for KnownBits {
     fn prepare_for_peel(
         &mut self,
         opt: &mut PassOpt,
-        _entry: &Block,
-        _map: &IndexVec<InstIdx, InstIdx>,
+        entry: &Block,
+        map: &IndexVec<InstIdx, InstIdx>,
     ) {
         assert!(self.pending_commit.is_none());
-        self.known_bits.clear();
-        for iidx in (0..opt.insts_len()).map(InstIdx::from) {
-            if let Some(ConstKind::Int(x)) = opt.as_constkind(iidx) {
-                self.known_bits
-                    .push(Some(KnownBitValue::from_const(x.clone())));
+        let mut new = IndexVec::with_capacity(entry.insts_len());
+        for iidx in entry.term_vars().iter().cloned() {
+            if let Some(ConstKind::Int(x)) = opt.as_constkind(map[iidx]) {
+                new.push(Some(KnownBitValue::from_const(x.clone())));
             } else {
-                self.known_bits.push(None);
+                new.push(self.known_bits[iidx].clone());
             }
         }
+        self.known_bits = new;
     }
 }
 
@@ -363,7 +363,7 @@ impl KnownBits {
 /// To ensure monotonicity,transitions from `?` to` 0` or `1` are valid, but not the other way
 /// around. `illegal` occurs when both `0` and `1` are set and known, which is impossible in a
 /// valid program. `illegal` indicates a likely bug in the optimizer/IR.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct KnownBitValue {
     ones: ArbBitInt,
     unknowns: ArbBitInt,
@@ -523,7 +523,9 @@ impl KnownBitValue {
 mod test {
     use super::*;
     use crate::compile::j2::opt::{
-        cse::CSE, fullopt::test::user_defined_opt_test, strength_fold::StrengthFold,
+        cse::CSE,
+        fullopt::test::{full_opt_test, user_defined_opt_test},
+        strength_fold::StrengthFold,
     };
     use std::{cell::RefCell, rc::Rc};
 
@@ -572,6 +574,37 @@ mod test {
             ptn,
         );
     }
+
+    #[test]
+    fn peeling() {
+        // Optimise in the peel based on known bits: all we know about `%5` is that it doesn't have
+        // the least significant bit set.
+        full_opt_test(
+            r#"
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i1 = icmp ne %0, %1
+          guard true, %2, []
+          %4: i8 = 254
+          %5: i8 = and %0, %4
+          term [%5]
+        "#,
+            "
+          %0: i8 = arg
+          %1: i8 = 1
+          %2: i1 = icmp ne %0, %1
+          guard true, %2, []
+          %4: i8 = 254
+          %5: i8 = and %0, %4
+          term [%5]
+          ; peel
+          %0: i8 = arg
+          term [%0]
+        ",
+        );
+    }
+
+    // Individual instructions
 
     #[test]
     fn opt_ashr() {
