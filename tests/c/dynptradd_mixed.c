@@ -11,18 +11,19 @@
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{9_4}}: ptr = ptr_add @line, 4 + (%{{9_3}} * 8)
+//     %{{9_4}}: ptr = ptr_add @line, 0 + (%{{9_3}} * 8)
+//     %{{9_5}}: ptr = ptr_add %{{9_4}}, 4
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{14}}: ptr = ptradd %{{_}}, 4
-//     %{{_}}: ptr = dynptradd %{{14}}, %{{_}}, 8
+//     %{{14}}: ptr = dynptradd %{{_}}, %{{_}}, 8
+//     %{{_}}: ptr = ptradd %{{14}}, 4
 //     ...
 //     --- End jit-pre-opt ---
-//     i=3, y=6
+//     i=3, y=1
 //     yk-execution: enter-jit-code
-//     i=2, y=5
+//     i=2, y=3
 //     i=1, y=4
 //     yk-execution: deoptimise ...
 
@@ -41,7 +42,7 @@ struct point {
 };
 
 struct point line[] = {
-    {3, 3}, {4, 4}, {5, 5}, {6, 6}, {7, 7},
+    {5, 1}, {3, 4}, {4, 3}, {1, 1}, {0, 7},
 };
 
 int main(int argc, char **argv) {

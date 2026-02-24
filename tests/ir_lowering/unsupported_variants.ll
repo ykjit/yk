@@ -13,14 +13,14 @@
 ;         %{{_}}: ptr = unimplemented <<  %{{8}} = alloca i32, i32 %2, align 4>>
 ;         br bb{{_}}
 ;      bb{{_}}:
-;         %{{_}}: float = unimplemented <<  %{{13}} = fadd nnan float %{{3}}, %{{3}}, ...
+;         %{{_}}: float = unimplemented <<  %{{13}} = fadd nsz float %{{3}}, %{{3}}, ...
 ;         %{{_}}: ?ty<<4 x i32>> = unimplemented <<  %{{15}} = add <4 x i32> %{{44}}, %{{44}}>>
 ;         br bb{{_}}
 ;      bb{{_}}:
 ;         %{{_}}: i32 = unimplemented <<  %{{17}} = call i32 @f(i32 swiftself 5), !yk-swt-bb-purpose !4 <note: swiftself param attr>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{18}} = call inreg i32 @f(i32 5) <note: inreg ret attr>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{19}} = call i32 @f(i32 5) #{{0}} <note: alignstack(8) fn attr>>>
-;         %{{_}}: float = unimplemented <<  %{{20}} = call nnan float @g() <note: fastmath>>>
+;         %{{_}}: float = unimplemented <<  %{{20}} = call nsz float @g() <note: fastmath>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{21}} = call ghccc i32 @f(i32 5) <note: cconv>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{22}} = call i32 @f(i32 5) [ "kcfi"(i32 1234) ] <note: bundles>>>
 ;         %{{_}}: ptr = unimplemented <<  %{{23}} = call addrspace(6) ptr @p() <note: addrspace>>>
@@ -40,7 +40,7 @@
 ;         %{{_}}: i32 = load %0_0
 ;         br ...
 ;         ...
-;       %{{_}}: float = unimplemented <<  %{{_}} = phi nnan float...
+;       %{{_}}: float = unimplemented <<  %{{_}} = phi nsz float...
 ;       br bb{{_}}
 ;     bb{{_}}:
 ;       unimplemented <<  store atomic i32 0, ptr %0 release, align 4, ...
@@ -91,7 +91,7 @@ allocas:
   br label %binops
 binops:
   ; fast math flags
-  %binop_fmathflag = fadd nnan float %flt, %flt
+  %binop_fmathflag = fadd nsz float %flt, %flt
   ; vectors
   %binop_vec = add <4 x i32> %vecnums, %vecnums
   br label %calls
@@ -107,7 +107,7 @@ calls:
   ; func attrs
   %call_alignstack = call i32 @f(i32 5) alignstack(8)
   ; fast math flags
-  %call_fmathflag = call nnan float @g()
+  %call_fmathflag = call nsz float @g()
   ; Non-C calling conventions
   %call_cconv = call ghccc i32 @f(i32 5)
   ; operand bundles
@@ -152,7 +152,7 @@ phi_false:
   br label %phis
 phis:
   ; fast math flags
-  %phi_fastmath = phi nnan float [0.0, %phi_true], [0.0, %phi_false]
+  %phi_fastmath = phi nsz float [0.0, %phi_true], [0.0, %phi_false]
   br label %stores
 stores:
   ; atomic store

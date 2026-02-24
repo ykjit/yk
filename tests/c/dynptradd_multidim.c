@@ -10,14 +10,21 @@
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{10_13}}: ptr = ptr_add %{{0_5}}, 0 + (%{{10_8}} * 64) + (%{{10_10}} * 16) + (%{{%10_12}} * 4)
+//     func main(...
+//     ...
+//     %{{21_2}}: i64 = sext %{{21_1}}, i64
+//     %{{21_3}}: ptr = ptr_add %{{_}}, 0 + (%{{21_2}} * 64)
+//     %{{21_4}}: i64 = sext %{{21_1}}, i64
+//     %{{21_5}}: ptr = ptr_add %{{21_3}}, 0 + (%{{21_4}} * 16)
+//     %{{21_6}}: i64 = sext %{{21_1}}, i64
+//     %{{_}}: ptr = ptr_add %{{21_5}}, 0 + (%{{21_6}} * 4)
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{16}}: ptr = dynptradd %{{3}}, %{{_}}, 64
-//     %{{17}}: ptr = dynptradd %{{16}}, %{{_}}, {{_}}
-//     %{{_}}: ptr = dynptradd %{{17}}, %{{_}}, {{_}}
+//     %{{17}}: ptr = dynptradd %{{16}}, %{{_}}, 16
+//     %{{_}}: ptr = dynptradd %{{17}}, %{{_}}, 4
 //     ...
 //     --- End jit-pre-opt ---
 //     i=1, elem=111
@@ -35,13 +42,9 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_new(NULL);
-  yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
-
+__attribute__((noinline))
+void init(uint32_t array[4][4][4]) {
   // Load up a big multi-dimentsional array that we will dynamically index.
-  uint32_t array[4][4][4];
   for (int x = 0; x < 4; x++) {
     for (int y = 0; y < 4; y++) {
       for (int z = 0; z < 4; z++) {
@@ -50,6 +53,15 @@ int main(int argc, char **argv) {
       }
     }
   }
+}
+
+int main(int argc, char **argv) {
+  YkMT *mt = yk_mt_new(NULL);
+  yk_mt_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
+
+  uint32_t array[4][4][4];
+  init(array);
 
   int i = 0;
   NOOPT_VAL(loc);
