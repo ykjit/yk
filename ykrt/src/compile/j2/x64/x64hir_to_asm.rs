@@ -1434,7 +1434,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             };
             let tmp_reg = Self::tmp_reg_from_vlocs(args_vlocs);
             self.asm
-                .push_inst(IcedInst::with1(Code::Call_rm64, tmp_reg.to_reg64()));
+                .push_inst(IcedInst::with1(Code::Jmp_rm64, tmp_reg.to_reg64()));
             self.asm.push_inst(IcedInst::with2(
                 Code::Mov_r64_imm64,
                 tmp_reg.to_reg64(),
