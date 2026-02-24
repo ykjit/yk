@@ -1003,17 +1003,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm.log(s);
     }
 
-    fn const_needs_tmp_reg(&self, _reg: Reg, c: &ConstKind) -> Option<impl Iterator<Item = Reg>> {
-        match c {
-            ConstKind::Double(_) | ConstKind::Float(_) => Some(NORMAL_GP_REGS.iter().cloned()),
-            ConstKind::Int(_) | ConstKind::Ptr(_) => None,
-        }
-    }
-
     fn move_const(
         &mut self,
         reg: Reg,
-        tmp_reg: Option<Self::Reg>,
         tgt_bitw: u32,
         tgt_fill: RegFill,
         kind: &ConstKind,
@@ -1044,7 +1036,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 );
             }
             ConstKind::Int(x) => {
-                assert!(tmp_reg.is_none());
                 assert!(tgt_bitw >= x.bitw());
                 self.asm.push_inst(
                     if tgt_fill == RegFill::Undefined || tgt_fill == RegFill::Zeroed {
@@ -1080,7 +1071,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 );
             }
             ConstKind::Ptr(x) => {
-                assert!(tmp_reg.is_none());
                 assert_ne!(tgt_fill, RegFill::Signed);
                 assert_eq!(tgt_bitw, 64);
                 self.asm.push_inst(IcedInst::with2(

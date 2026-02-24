@@ -1243,22 +1243,10 @@ pub(super) trait HirToAsmBackend {
 
     fn log(&mut self, s: String);
 
-    /// If the constant `c` will need a temporary register in order to put it into `reg`, return an
-    /// iterator with the possible temporary registers. One of those will be selected and passed to
-    /// [Self::move_const]. Note: this may end up spilling other registers, so if you can avoid
-    /// allocating a temporary register, you should probably avoid doing so.
-    fn const_needs_tmp_reg(
-        &self,
-        reg: Self::Reg,
-        c: &ConstKind,
-    ) -> Option<impl Iterator<Item = Self::Reg>>;
-    /// Move the constant `c` into `bitw` bits of `reg`, filling upper bits as per `tgt_fill`. If
-    /// [Self::const_needs_tmp_reg] returned `Some`, then a temporary register will be passed as
-    /// `Some(Self::Reg))`
+    /// Move the constant `c` into `bitw` bits of `reg`, filling upper bits as per `tgt_fill`.
     fn move_const(
         &mut self,
         reg: Self::Reg,
-        tmp_reg: Option<Self::Reg>,
         tgt_bitw: u32,
         tgt_fill: RegFill,
         c: &ConstKind,
@@ -1962,14 +1950,6 @@ mod test {
 
         fn log(&mut self, s: String) {
             self.log.push(format!("; {s}"));
-        }
-
-        fn const_needs_tmp_reg(
-            &self,
-            _reg: Self::Reg,
-            _c: &ConstKind,
-        ) -> Option<impl Iterator<Item = Self::Reg>> {
-            None::<std::iter::Empty<Self::Reg>>
         }
 
         fn arrange_fill(
