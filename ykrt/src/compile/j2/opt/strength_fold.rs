@@ -61,6 +61,8 @@ impl PassT for StrengthFold {
         }
     }
 
+    fn preinst_committed(&mut self, _opt: &CommitInstOpt, _iidx: InstIdx, _preinst: &Inst) {}
+
     fn inst_committed(&mut self, _opt: &CommitInstOpt, _iidx: InstIdx, _inst: &Inst) {}
 
     fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
