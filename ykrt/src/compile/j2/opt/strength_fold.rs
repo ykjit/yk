@@ -117,6 +117,50 @@ fn opt_add(opt: &mut PassOpt, mut inst: Add) -> OptOutcome {
                 // Reduce `x + 0` to `x`.
                 return OptOutcome::Equiv(lhs);
             }
+
+            let mut lhs_inst = opt.inst(lhs).to_owned();
+            lhs_inst.canonicalise(opt);
+            if let Inst::Add(Add {
+                tyidx: _,
+                lhs: lhs_lhs,
+                rhs: lhs_rhs,
+                nuw: false,
+                nsw: false,
+            }) = lhs_inst
+                && let Some(ConstKind::Int(lhs_rhs_c)) = opt.as_constkind(lhs_rhs)
+            {
+                let c_iidx = opt.push_pre_inst(Inst::Const(Const {
+                    tyidx,
+                    kind: ConstKind::Int(rhs_c.wrapping_add(&lhs_rhs_c)),
+                }));
+                return OptOutcome::Rewritten(Inst::Add(Add {
+                    tyidx,
+                    lhs: lhs_lhs,
+                    rhs: c_iidx,
+                    nuw: false,
+                    nsw: false,
+                }));
+            } else if let Inst::Sub(Sub {
+                tyidx: _,
+                lhs: lhs_lhs,
+                rhs: lhs_rhs,
+                nuw: false,
+                nsw: false,
+            }) = lhs_inst
+                && let Some(ConstKind::Int(lhs_rhs_c)) = opt.as_constkind(lhs_rhs)
+            {
+                let c_iidx = opt.push_pre_inst(Inst::Const(Const {
+                    tyidx,
+                    kind: ConstKind::Int(rhs_c.wrapping_sub(&lhs_rhs_c)),
+                }));
+                return OptOutcome::Rewritten(Inst::Add(Add {
+                    tyidx,
+                    lhs: lhs_lhs,
+                    rhs: c_iidx,
+                    nuw: false,
+                    nsw: false,
+                }));
+            }
         }
         _ => (),
     }
@@ -1048,6 +1092,44 @@ mod test {
             "
           %0: i8 = arg
           term [%0]
+        ",
+        );
+
+        // Chained constant folding
+
+        // `x + 1 + 2` == `x + 3`
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i8 = add %0, %1
+          %3: i8 = 2
+          %4: i8 = add %2, %3
+          blackbox %4
+        ",
+            "
+          ...
+          %4: i8 = 3
+          %5: i8 = add %0, %4
+          blackbox %5
+        ",
+        );
+
+        // `x - 3 + 5` == `x + 2`
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 3
+          %2: i8 = sub %0, %1
+          %3: i8 = 5
+          %4: i8 = add %2, %3
+          blackbox %4
+        ",
+            "
+          ...
+          %4: i8 = 2
+          %5: i8 = add %0, %4
+          blackbox %5
         ",
         );
     }
