@@ -275,7 +275,7 @@ impl FullOpt {
 
     fn commit_preinst(&mut self, inst: Inst) -> InstIdx {
         self.commit_inst_internal(
-            |pass, opt, iidx, inst| pass.inst_committed(opt, iidx, inst),
+            |pass, opt, iidx, inst| pass.preinst_committed(opt, iidx, inst),
             inst,
         )
     }
@@ -640,9 +640,14 @@ pub(super) trait PassT {
     /// Feed [inst] instruction into the optimiser.
     fn feed(&mut self, opt: &mut PassOpt, inst: Inst) -> OptOutcome;
 
-    /// After an instruction has been committed to the trace -- i.e. there is
-    /// no possibility that an optimisation pass will remove it -- this
-    /// function will be called on all passes.
+    /// After a pass has completed, it may have generated preinsts: for each, it will be appended
+    /// to the trace and this function will be called on all passes (including the pass that
+    /// generated the preinst).
+    fn preinst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx, preinst: &Inst);
+
+    /// After all passes have completed, if `inst` -- which may have been rewritten many times --
+    /// is still needed, it will be appended to the trace and then this function will be called on
+    /// all passes.
     fn inst_committed(&mut self, ci: &CommitInstOpt, iidx: InstIdx, inst: &Inst);
 
     /// `equiv1` and `equiv2` have been identified as equivalent and henceforth `equiv1` will be

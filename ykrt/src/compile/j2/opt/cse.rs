@@ -83,6 +83,10 @@ impl PassT for CSE {
         OptOutcome::Rewritten(inst)
     }
 
+    fn preinst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx, preinst: &Inst) {
+        self.inst_committed(opt, iidx, preinst);
+    }
+
     fn inst_committed(&mut self, _opt: &CommitInstOpt, _iidx: InstIdx, inst: &Inst) {
         let dim_off = InstDiscriminants::from(inst) as usize;
         let prev = self.heads[dim_off];

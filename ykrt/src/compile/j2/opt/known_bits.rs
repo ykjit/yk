@@ -44,9 +44,32 @@ impl PassT for KnownBits {
         }
     }
 
-    fn inst_committed(&mut self, _opt: &CommitInstOpt, iidx: InstIdx, _inst: &Inst) {
+    fn preinst_committed(&mut self, _opt: &CommitInstOpt, iidx: InstIdx, preinst: &Inst) {
         assert_eq!(iidx.index(), self.known_bits.len());
-        self.known_bits.push(self.pending_commit.clone());
+        if let Inst::Const(Const {
+            kind: ConstKind::Int(x),
+            ..
+        }) = preinst
+        {
+            self.known_bits
+                .push(Some(KnownBitValue::from_const(x.to_owned())));
+        } else {
+            self.known_bits.push(None);
+        }
+    }
+
+    fn inst_committed(&mut self, _opt: &CommitInstOpt, iidx: InstIdx, inst: &Inst) {
+        assert_eq!(iidx.index(), self.known_bits.len());
+        if let Inst::Const(Const {
+            kind: ConstKind::Int(x),
+            ..
+        }) = inst
+        {
+            self.known_bits
+                .push(Some(KnownBitValue::from_const(x.to_owned())));
+        } else {
+            self.known_bits.push(self.pending_commit.take());
+        }
     }
 
     fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx) {

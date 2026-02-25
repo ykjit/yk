@@ -123,6 +123,10 @@ impl PassT for LoadStore {
         }
     }
 
+    fn preinst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx, preinst: &Inst) {
+        self.inst_committed(opt, iidx, preinst);
+    }
+
     fn inst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx, inst: &Inst) {
         match inst {
             Inst::Load(Load {
