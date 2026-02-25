@@ -226,7 +226,7 @@ impl FullOpt {
             let fed = self.passes[i].feed(&mut opt, inst);
 
             for inst in popt_inner.pre_insts.drain(..) {
-                self.commit_inst_dedup_opt(inst);
+                self.commit_preinst(inst);
             }
 
             match fed {
@@ -257,26 +257,38 @@ impl FullOpt {
             assert!(popt_inner.gextra.is_none());
         }
 
-        Ok(Some(self.commit_inst_dedup_opt(inst)))
-    }
-
-    /// Commit `inst` to this trace, deduplicating constants if they already exist earlier in the
-    /// trace.
-    fn commit_inst_dedup_opt(&mut self, inst: Inst) -> InstIdx {
         if let Inst::Const(x) = &inst
             && let Some(x) = self.inner.consts_map.get(&HashableConst(x.to_owned()))
         {
-            return *x;
+            return Ok(Some(*x));
         }
-        self.commit_inst(inst)
+
+        Ok(Some(self.commit_inst(inst)))
     }
 
-    /// Commit `inst` to this trace, without deduplicating constants.
     fn commit_inst(&mut self, inst: Inst) -> InstIdx {
+        self.commit_inst_internal(
+            |pass, opt, iidx, inst| pass.inst_committed(opt, iidx, inst),
+            inst,
+        )
+    }
+
+    fn commit_preinst(&mut self, inst: Inst) -> InstIdx {
+        self.commit_inst_internal(
+            |pass, opt, iidx, inst| pass.inst_committed(opt, iidx, inst),
+            inst,
+        )
+    }
+
+    /// Commit `inst` to this trace, calling `f` for each pass in this optimiser.
+    fn commit_inst_internal<F>(&mut self, mut f: F, inst: Inst) -> InstIdx
+    where
+        F: FnMut(&mut dyn PassT, &CommitInstOpt, InstIdx, &Inst),
+    {
         let opt = CommitInstOpt { inner: &self.inner };
         let iidx = self.inner.insts.len_idx();
         for pass in &mut self.passes {
-            pass.inst_committed(&opt, iidx, &inst);
+            f(&mut **pass, &opt, iidx, &inst);
         }
 
         if let Inst::Const(x) = &inst {
@@ -414,7 +426,7 @@ impl OptT for FullOpt {
         assert!(popt_inner.gextra.is_none());
         assert!(popt_inner.new_equivs.is_empty());
         for inst in popt_inner.pre_insts.drain(..) {
-            self.commit_inst(inst);
+            self.commit_preinst(inst);
         }
 
         // Feed each instruction from `entry` (except the arguments!) into the peel.
@@ -669,11 +681,15 @@ impl PassOpt<'_> {
         self.optinternal.push_ty(ty)
     }
 
-    /// Add the "pre-instruction" `preinst`: when the current pass has completed, `inst` will be
-    /// committed to the trace, and immediately available to subsequent passes. The [InstIdx] that
-    /// is returned will be `preinst`'s [InstIdx] _after_ it is committed. In other words, during
-    /// the current pass, [InstIdx] is invalid, and attempting any operations with it will lead to
-    /// undefined behaviour.
+    /// Add the "preinstruction" `preinst`. After the current pass has completed, `inst` is
+    /// guaranteed to have been committed to the trace, and will be available to subsequent passes.
+    ///
+    /// The [InstIdx] returned is only valid for use _after_ the current pass has completed.
+    /// Attempting to make use of it (e.g. by querying `Opt`) is undefined behaviour.
+    ///
+    /// Note the careful wording in the above: it is possible that the optimiser will prove `inst`
+    /// is equivalent to an existing instruction. However, that cannot be guaranteed, and must not
+    /// be relied upon in any way.undefined behaviour.
     pub(super) fn push_pre_inst(&mut self, preinst: Inst) -> InstIdx {
         if let Inst::Const(c) = &preinst
             && let Some(x) = self
