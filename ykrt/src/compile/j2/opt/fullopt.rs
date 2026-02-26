@@ -267,39 +267,34 @@ impl FullOpt {
     }
 
     fn commit_inst(&mut self, inst: Inst) -> InstIdx {
-        self.commit_inst_internal(
-            |pass, opt, iidx, inst| pass.inst_committed(opt, iidx, inst),
-            inst,
-        )
+        self.commit_inst_internal(|pass, opt, iidx| pass.inst_committed(opt, iidx), inst)
     }
 
     fn commit_preinst(&mut self, inst: Inst) -> InstIdx {
-        self.commit_inst_internal(
-            |pass, opt, iidx, inst| pass.preinst_committed(opt, iidx, inst),
-            inst,
-        )
+        self.commit_inst_internal(|pass, opt, iidx| pass.preinst_committed(opt, iidx), inst)
     }
 
     /// Commit `inst` to this trace, calling `f` for each pass in this optimiser.
     fn commit_inst_internal<F>(&mut self, mut f: F, inst: Inst) -> InstIdx
     where
-        F: FnMut(&mut dyn PassT, &CommitInstOpt, InstIdx, &Inst),
+        F: FnMut(&mut dyn PassT, &CommitInstOpt, InstIdx),
     {
-        let opt = CommitInstOpt { inner: &self.inner };
-        let iidx = self.inner.insts.len_idx();
-        for pass in &mut self.passes {
-            f(&mut **pass, &opt, iidx, &inst);
-        }
-
         if let Inst::Const(x) = &inst {
+            let iidx = self.inner.insts.len_idx();
             self.inner
                 .consts_map
                 .insert(HashableConst(x.to_owned()), iidx);
         }
-        self.inner.insts.push(InstEquiv {
+        let iidx = self.inner.insts.push(InstEquiv {
             inst,
             equiv: InstIdx::MAX,
-        })
+        });
+
+        let opt = CommitInstOpt { inner: &self.inner };
+        for pass in &mut self.passes {
+            f(&mut **pass, &opt, iidx);
+        }
+        iidx
     }
 }
 
@@ -643,12 +638,12 @@ pub(super) trait PassT {
     /// After a pass has completed, it may have generated preinsts: for each, it will be appended
     /// to the trace and this function will be called on all passes (including the pass that
     /// generated the preinst).
-    fn preinst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx, preinst: &Inst);
+    fn preinst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx);
 
     /// After all passes have completed, if `inst` -- which may have been rewritten many times --
     /// is still needed, it will be appended to the trace and then this function will be called on
     /// all passes.
-    fn inst_committed(&mut self, ci: &CommitInstOpt, iidx: InstIdx, inst: &Inst);
+    fn inst_committed(&mut self, ci: &CommitInstOpt, iidx: InstIdx);
 
     /// `equiv1` and `equiv2` have been identified as equivalent and henceforth `equiv1` will be
     /// rewritten to `equiv2`.
@@ -978,7 +973,7 @@ pub(in crate::compile::j2) mod test {
         ptn: &str,
     ) where
         for<'a> F: Fn(&'a mut PassOpt, Inst) -> OptOutcome,
-        for<'a> G: Fn(&'a CommitInstOpt, InstIdx, &Inst),
+        for<'a> G: Fn(&'a CommitInstOpt, InstIdx),
         for<'a> H: Fn(InstIdx, InstIdx),
     {
         let m = str_to_mod::<TestReg>(mod_s);
@@ -1011,13 +1006,12 @@ pub(in crate::compile::j2) mod test {
             let fed = feed_f(&mut opt, inst);
 
             for inst in popt_inner.pre_insts.drain(..) {
-                let iidx = fopt.inner.insts.len_idx();
-                let opt = CommitInstOpt { inner: &fopt.inner };
-                inst_committed_f(&opt, iidx, &inst);
-                fopt.inner.insts.push(InstEquiv {
+                let iidx = fopt.inner.insts.push(InstEquiv {
                     inst,
                     equiv: InstIdx::MAX,
                 });
+                let opt = CommitInstOpt { inner: &fopt.inner };
+                inst_committed_f(&opt, iidx);
             }
 
             for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
@@ -1045,12 +1039,12 @@ pub(in crate::compile::j2) mod test {
 
             let iidx = fopt.inner.insts.len_idx();
             opt_map.push(iidx);
-            let opt = CommitInstOpt { inner: &fopt.inner };
-            inst_committed_f(&opt, iidx, &inst);
             fopt.inner.insts.push(InstEquiv {
                 inst,
                 equiv: InstIdx::MAX,
             });
+            let opt = CommitInstOpt { inner: &fopt.inner };
+            inst_committed_f(&opt, iidx);
         }
         let tyidx_int1 = fopt.inner.tyidx_int1;
         let tyidx_ptr0 = fopt.inner.tyidx_ptr0;
@@ -1093,7 +1087,7 @@ pub(in crate::compile::j2) mod test {
                     inst.canonicalise(opt);
                     StrengthFold::new().feed(opt, inst)
                 },
-                |_, _, _| (),
+                |_, _| (),
                 |_, _| (),
                 ptn,
             );
