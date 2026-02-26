@@ -241,17 +241,13 @@ where
                 kind: ConstKind::Int(c),
             }));
         }
-        (_, Some(ConstKind::Int(rhs_c))) => {
-            if rhs_c.to_zero_ext_u8() == Some(0) {
-                // Reduce `x >> 0` to `x`.
-                return OptOutcome::Equiv(lhs);
-            }
+        (_, Some(ConstKind::Int(rhs_c))) if rhs_c.to_zero_ext_u8() == Some(0) => {
+            // Reduce `x >> 0` to `x`.
+            return OptOutcome::Equiv(lhs);
         }
-        (Some(ConstKind::Int(lhs_c)), _) => {
-            if lhs_c.to_zero_ext_u8() == Some(0) {
-                // Reduce `0 >> x` to `0`.
-                return OptOutcome::Equiv(lhs);
-            }
+        (Some(ConstKind::Int(lhs_c)), _) if lhs_c.to_zero_ext_u8() == Some(0) => {
+            // Reduce `0 >> x` to `0`.
+            return OptOutcome::Equiv(lhs);
         }
         _ => (),
     }
@@ -812,17 +808,13 @@ fn opt_shl(opt: &mut PassOpt, mut inst: Shl) -> OptOutcome {
                 kind: ConstKind::Int(c),
             }));
         }
-        (_, Some(ConstKind::Int(rhs_c))) => {
-            if rhs_c.to_zero_ext_u8() == Some(0) {
-                // Reduce `x << 0` to `x`.
-                return OptOutcome::Equiv(lhs);
-            }
+        (_, Some(ConstKind::Int(rhs_c))) if rhs_c.to_zero_ext_u8() == Some(0) => {
+            // Reduce `x << 0` to `x`.
+            return OptOutcome::Equiv(lhs);
         }
-        (Some(ConstKind::Int(lhs_c)), _) => {
-            if lhs_c.to_zero_ext_u8() == Some(0) {
-                // Reduce `0 << x` to `0`.
-                return OptOutcome::Equiv(lhs);
-            }
+        (Some(ConstKind::Int(lhs_c)), _) if lhs_c.to_zero_ext_u8() == Some(0) => {
+            // Reduce `0 << x` to `0`.
+            return OptOutcome::Equiv(lhs);
         }
         _ => (),
     }
@@ -868,11 +860,9 @@ fn opt_sub(opt: &mut PassOpt, mut inst: Sub) -> OptOutcome {
                 kind: ConstKind::Int(lhs_c.wrapping_sub(&rhs_c)),
             }));
         }
-        (_, Some(ConstKind::Int(rhs_c))) => {
-            if rhs_c.to_zero_ext_u8() == Some(0) {
-                // Reduce `x - 0` to `x`.
-                return OptOutcome::Equiv(lhs);
-            }
+        (_, Some(ConstKind::Int(rhs_c))) if rhs_c.to_zero_ext_u8() == Some(0) => {
+            // Reduce `x - 0` to `x`.
+            return OptOutcome::Equiv(lhs);
         }
         _ => (),
     }
@@ -975,11 +965,9 @@ fn opt_xor(opt: &mut PassOpt, mut inst: Xor) -> OptOutcome {
                 kind: ConstKind::Int(lhs_c.bitxor(&rhs_c)),
             }));
         }
-        (_, Some(ConstKind::Int(rhs_c))) => {
-            if rhs_c.to_zero_ext_u8() == Some(0) {
-                // Reduce `x ^ 0` to `x`.
-                return OptOutcome::Equiv(lhs);
-            }
+        (_, Some(ConstKind::Int(rhs_c))) if rhs_c.to_zero_ext_u8() == Some(0) => {
+            // Reduce `x ^ 0` to `x`.
+            return OptOutcome::Equiv(lhs);
         }
         _ => (),
     }

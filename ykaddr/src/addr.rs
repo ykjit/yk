@@ -191,9 +191,9 @@ mod tests {
     #[test]
     fn vaddr_to_obj_and_off_main_exe() {
         let vaddr = vaddr_to_obj_and_off_main_exe as *const () as usize;
-        let (obj, off) = vaddr_to_obj_and_off(vaddr as usize).unwrap();
+        let (obj, off) = vaddr_to_obj_and_off(vaddr).unwrap();
         // because the loader will load the object a +ve offset from the start of the address space.
-        assert!(off < u64::try_from(vaddr as usize).unwrap());
+        assert!(off < u64::try_from(vaddr).unwrap());
         assert!(
             obj.file_name()
                 .unwrap()
