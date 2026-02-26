@@ -10,6 +10,8 @@ YKLUA_COMMIT=$(git -C tests/yklua rev-parse HEAD)
 YKCBF_REPO="https://github.com/ykjit/ykcbf.git"
 YKCBF_COMMIT="431b92593180e1e376d08ecf383c4a1ab8473b3d"
 
+YKLUA_TESTS_REPO="https://github.com/ykjit/yklua-tests"
+
 TRACERS="swt"
 
 # Build yklua and run the test suite.
@@ -32,6 +34,15 @@ test_yklua() {
     YKD_SERIALISE_COMPILATION=1 ../src/lua -e"_U=true" all.lua
     ../src/lua -e"_U=true" all.lua
     cd ../..
+
+    # external test suites
+    if [ ! -e "yklua-tests" ]; then
+        git clone --recursive --depth=1 "$YKLUA_TESTS_REPO"
+    fi
+    cd yklua-tests
+    sh run.sh $(realpath ../yklua/src/lua)
+    YKD_SERIALISE_COMPILATION=1 sh run.sh $(realpath ../yklua/src/lua)
+    cd ..
 }
 
 # Check that the ykllvm commit in the submodule is from the main branch.
