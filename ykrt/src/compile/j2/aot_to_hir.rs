@@ -1317,8 +1317,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         name: &str,
         jargs: SmallVec<[hir::InstIdx; 1]>,
     ) -> Result<(), CompilationError> {
-        assert!(name.starts_with("llvm."));
-        match name.split_once(".").unwrap().1.split_once(".").unwrap().0 {
+        let parts = name.split(".").collect::<Vec<&str>>();
+        assert_eq!(parts[0], "llvm");
+        match parts[1] {
             "abs" => {
                 let [src, int_min_poison]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let int_min_poison = if let hir::Inst::Const(hir::Const {
@@ -1338,6 +1339,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
+            "assume" => Ok(()),
             "ctpop" => {
                 let [src]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
                 let fty = self.opt.func_ty(ftyidx);
