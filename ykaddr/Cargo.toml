@@ -9,7 +9,6 @@ license = "Apache-2.0 OR MIT"
 cached = { version = "0.55.1", features = ["proc_macro"] }
 libc = "0.2"
 memmap2 = "0.9.4"
-phdrs = { git = "https://github.com/softdevteam/phdrs" }
 
 [build-dependencies]
 cc = "1.0.83"
