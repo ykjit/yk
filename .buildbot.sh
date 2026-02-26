@@ -12,8 +12,6 @@ YKCBF_COMMIT="431b92593180e1e376d08ecf383c4a1ab8473b3d"
 
 YKLUA_TESTS_REPO="https://github.com/ykjit/yklua-tests"
 
-TRACERS="swt"
-
 # Build yklua and run the test suite.
 #
 # Before calling this:
@@ -156,47 +154,32 @@ opt-level = 3
 codegen-units = 16
 EOF
 
-for tracer in ${TRACERS}; do
-    export YKB_TRACER="${tracer}"
-    # Check for annoying compiler warnings in each package.
-    WARNING_DEFINES="-D unused-variables -D dead-code -D unused-imports"
-    for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
-      Cargo.toml | \
-      tr -d ' \t\",' | grep -v xtask); do
-        echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --lib --
-        # For some reason, we can't do these checks on crates with binary targets.
-        if [ "$p" != "ykrt" ] && [ "$p" != "tests" ]; then
-            echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --tests --
-            echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --benches --
-        fi
-    done
-    echo "$WARNING_DEFINES" | xargs cargo rustc -p tests --profile check --bin dump_ir --
-    echo "$WARNING_DEFINES" | xargs cargo rustc -p tests --profile check --bin gdb_c_test --
-    echo "$WARNING_DEFINES" | xargs cargo rustc -p xtask --profile check --bin xtask --
-
-    # Error if Clippy detects any warnings introduced in lines changed in this PR.
-    cargo-clippy-diff origin/master -- --all-features --tests -- -D warnings
-done
-
-# Run the tests multiple times on swt to try and catch non-deterministic
-# failures. But running everything so often is expensive, so run other tracers'
-# tests just once.
-echo "===> Running swt tests"
-for _ in $(seq 10); do
-    YKB_TRACER=swt RUST_TEST_SHUFFLE=1 cargo test
-done
-
-# test yklua/swt in debug mode.
-PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug YKB_TRACER=swt test_yklua
-
-for tracer in ${TRACERS}; do
-    if [ "$tracer" = "swt" ]; then
-        # already tested above.
-        continue
+# Check for annoying compiler warnings in each package.
+WARNING_DEFINES="-D unused-variables -D dead-code -D unused-imports"
+for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
+  Cargo.toml | \
+  tr -d ' \t\",' | grep -v xtask); do
+    echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --lib --
+    # For some reason, we can't do these checks on crates with binary targets.
+    if [ "$p" != "ykrt" ] && [ "$p" != "tests" ]; then
+        echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --tests --
+        echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --benches --
     fi
-    echo "===> Running ${tracer} tests"
+done
+echo "$WARNING_DEFINES" | xargs cargo rustc -p tests --profile check --bin dump_ir --
+echo "$WARNING_DEFINES" | xargs cargo rustc -p tests --profile check --bin gdb_c_test --
+echo "$WARNING_DEFINES" | xargs cargo rustc -p xtask --profile check --bin xtask --
+
+# Error if Clippy detects any warnings introduced in lines changed in this PR.
+cargo-clippy-diff origin/master -- --all-features --tests -- -D warnings
+
+# Run the tests multiple times to try and catch non-deterministic failures.
+for _ in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test
 done
+
+# test yklua in debug mode.
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug test_yklua
 
 # Test with LLVM sanitisers
 rustup component add rust-src
@@ -214,24 +197,21 @@ race:core::sync::atomic::atomic_
 race:<ykrt::location::Location>::count_to_hot_location
 EOF
 
-for tracer in $TRACERS; do
-    export YKB_TRACER="${tracer}"
-    cargo build
-    ASAN_SYMBOLIZER_PATH="${YKLLVM_BIN_DIR}/llvm-symbolizer" \
-      RUSTFLAGS="-Z sanitizer=address" \
-      RUSTDOCFLAGS="-Z sanitizer=address" \
-      cargo test \
-      -Z build-std \
-      --target x86_64-unknown-linux-gnu
+cargo build
+ASAN_SYMBOLIZER_PATH="${YKLLVM_BIN_DIR}/llvm-symbolizer" \
+  RUSTFLAGS="-Z sanitizer=address" \
+  RUSTDOCFLAGS="-Z sanitizer=address" \
+  cargo test \
+  -Z build-std \
+  --target x86_64-unknown-linux-gnu
 
-    RUST_TEST_THREADS=1 \
-      RUSTFLAGS="-Z sanitizer=thread" \
-      RUSTDOCFLAGS="-Z sanitizer=thread" \
-      TSAN_OPTIONS="suppressions=$suppressions_path" \
-      cargo test \
-      -Z build-std \
-      --target x86_64-unknown-linux-gnu
-done
+RUST_TEST_THREADS=1 \
+  RUSTFLAGS="-Z sanitizer=thread" \
+  RUSTDOCFLAGS="-Z sanitizer=thread" \
+  TSAN_OPTIONS="suppressions=$suppressions_path" \
+  cargo test \
+  -Z build-std \
+  --target x86_64-unknown-linux-gnu
 
 # Later on we are going to need to install cargo-deny and mdbook. We kick the
 # install jobs off now so that at least some work (e.g. downloading crates) can
@@ -243,44 +223,28 @@ cargo_deny_mdbook_tmp=$(mktemp)
 cargo_deny_mdbook_pid=$!
 
 # We now want to test building with `--release`.
+RUST_TEST_SHUFFLE=1 cargo test --release
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release test_yklua
 
-for tracer in $TRACERS; do
-    export YKB_TRACER="${tracer}"
-    echo "===> Running ${tracer} tests"
-
-    # The lua test harness isn't clever enough to rebuild yklua when YKB_TRACER
-    # changes, so for now just nuke any existing yklua to force a rebuild.
-    rm -rf target/release/yklua
-
-    RUST_TEST_SHUFFLE=1 cargo test --release
-
-    if [ "${tracer}" = "swt" ]; then
-        # test yklua/swt in release mode.
-        PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release YKB_TRACER=${tracer} test_yklua
-
-        # Do a quick run of the benchmark suite as a smoke test.
-        pipx install rebench
-        git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/ykjit/yk-benchmarks
-        cd yk-benchmarks
-        ln -s ../yklua .
-        sed -e 's/executions: \[Lua, YkLua\]/executions: [YkLua]/' \
-            -e 's/executable: yklua/executable: lua/' \
-            rebench.conf > rebench2.conf
-        # Initialise extra benchmarks.
-        sh setup.sh yklua/src/lua
-        ~/.local/bin/rebench --quick --no-denoise -c rebench2.conf
-        cd ..
-    fi
-done
+# Do a quick run of the benchmark suite as a smoke test.
+pipx install rebench
+git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/ykjit/yk-benchmarks
+cd yk-benchmarks
+ln -s ../yklua .
+sed -e 's/executions: \[Lua, YkLua\]/executions: [YkLua]/' \
+    -e 's/executable: yklua/executable: lua/' \
+    rebench.conf > rebench2.conf
+# Initialise extra benchmarks.
+sh setup.sh yklua/src/lua
+~/.local/bin/rebench --quick --no-denoise -c rebench2.conf
+cd ..
 
 # We want to check that the benchmarks build and run correctly, but want to
 # ignore the results, so run them for the minimum possible time.
 #
 # Note that --profile-time doesn't work without --bench, so we have to run each
 # benchmark individually.
-YKB_TRACER=swt cargo bench --bench promote -- --profile-time 1
-# Keep j2 honest
-YK_JITC=j2 YKB_TRACER=swt cargo bench --bench promote -- --profile-time 1
+cargo bench --bench promote -- --profile-time 1
 
 # Test some BF programs.
 git clone --depth=1 "$YKCBF_REPO"
