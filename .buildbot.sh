@@ -223,7 +223,9 @@ cargo_deny_mdbook_tmp=$(mktemp)
 cargo_deny_mdbook_pid=$!
 
 # We now want to test building with `--release`.
-RUST_TEST_SHUFFLE=1 cargo test --release
+for _ in $(seq 10); do
+    RUST_TEST_SHUFFLE=1 cargo test --release
+done
 PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release test_yklua
 
 # Do a quick run of the benchmark suite as a smoke test.
