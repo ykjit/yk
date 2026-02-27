@@ -1492,6 +1492,47 @@ pub(crate) struct Func {
 const FUNCFLAG_OUTLINE: u8 = 1;
 const FUNCFLAG_IDEMPOTENT: u8 = 1 << 1;
 const FUNCFLAG_INDIRECT_INLINE: u8 = 1 << 2;
+const FUNCFLAG_MEMORY_HI: u8 = 1 << 3;
+const FUNCFLAG_MEMORY_LO: u8 = 1 << 4;
+
+const FUNCFLAG_SHIFT_MEM: u8 = 3;
+
+/// The memory capabilities of a function.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum FuncMemory {
+    // Does not read or write any memory.
+    None = 0b00,
+    // May read (but not write) memory.
+    Read = 0b01,
+    // May write (but not read) memory.
+    Write = 0b10,
+    // May read or write memory.
+    ReadWrite = 0b11,
+}
+
+impl Display for FuncMemory {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "memory(none)"),
+            Self::Read => write!(f, "memory(read)"),
+            Self::Write => write!(f, "memory(write)"),
+            Self::ReadWrite => write!(f, "memory(readwrite)"),
+        }
+    }
+}
+
+impl TryFrom<u8> for FuncMemory {
+    type Error = &'static str;
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        match v {
+            x if x == FuncMemory::None as u8 => Ok(FuncMemory::None),
+            x if x == FuncMemory::Read as u8 => Ok(FuncMemory::Read),
+            x if x == FuncMemory::Write as u8 => Ok(FuncMemory::Write),
+            x if x == FuncMemory::ReadWrite as u8 => Ok(FuncMemory::ReadWrite),
+            _ => Err("bad FuncMemory bits"),
+        }
+    }
+}
 
 impl Func {
     pub(crate) fn is_declaration(&self) -> bool {
@@ -1508,6 +1549,11 @@ impl Func {
 
     pub(crate) fn is_indirect_inline(&self) -> bool {
         self.flags & FUNCFLAG_INDIRECT_INLINE != 0
+    }
+
+    pub(crate) fn memory(&self) -> FuncMemory {
+        let bits = (self.flags & (FUNCFLAG_MEMORY_HI | FUNCFLAG_MEMORY_LO)) >> FUNCFLAG_SHIFT_MEM;
+        FuncMemory::try_from(bits).unwrap()
     }
 
     /// Return the [BBlock] at the specified index.
@@ -1578,6 +1624,11 @@ impl fmt::Display for DisplayableFunc<'_> {
             }
             if self.func_.is_indirect_inline() {
                 attrs.push("yk_indirect_inline");
+            }
+            let mem = self.func_.memory();
+            let mem_s = mem.to_string();
+            if mem != FuncMemory::ReadWrite {
+                attrs.push(&mem_s);
             }
             let attrs = if !attrs.is_empty() {
                 &format!("#[{}]\n", attrs.join(", "))
