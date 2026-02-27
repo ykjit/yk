@@ -5850,7 +5850,7 @@ mod test {
                     inst.canonicalise(&mut *opt);
                     OptOutcome::Rewritten(inst)
                 },
-                |_, _, _| (),
+                |_, _| (),
                 |_, _| (),
                 ptn,
             );

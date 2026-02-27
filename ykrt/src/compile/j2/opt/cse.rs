@@ -83,11 +83,12 @@ impl PassT for CSE {
         OptOutcome::Rewritten(inst)
     }
 
-    fn preinst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx, preinst: &Inst) {
-        self.inst_committed(opt, iidx, preinst);
+    fn preinst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx) {
+        self.inst_committed(opt, iidx);
     }
 
-    fn inst_committed(&mut self, _opt: &CommitInstOpt, _iidx: InstIdx, inst: &Inst) {
+    fn inst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx) {
+        let inst = opt.inst(iidx);
         let dim_off = InstDiscriminants::from(inst) as usize;
         let prev = self.heads[dim_off];
         self.predecessors.push(prev);
@@ -131,7 +132,7 @@ mod test {
                     cse.borrow_mut().feed(opt, inst)
                 }
             },
-            |opt, iidx, inst| cse.borrow_mut().inst_committed(opt, iidx, inst),
+            |opt, iidx| cse.borrow_mut().inst_committed(opt, iidx),
             |_, _| (),
             ptn,
         );

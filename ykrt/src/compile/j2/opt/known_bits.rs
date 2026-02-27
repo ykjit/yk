@@ -44,12 +44,11 @@ impl PassT for KnownBits {
         }
     }
 
-    fn preinst_committed(&mut self, _opt: &CommitInstOpt, iidx: InstIdx, preinst: &Inst) {
-        assert_eq!(iidx.index(), self.known_bits.len());
+    fn preinst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx) {
         if let Inst::Const(Const {
             kind: ConstKind::Int(x),
             ..
-        }) = preinst
+        }) = opt.inst(iidx)
         {
             self.known_bits
                 .push(Some(KnownBitValue::from_const(x.to_owned())));
@@ -58,12 +57,11 @@ impl PassT for KnownBits {
         }
     }
 
-    fn inst_committed(&mut self, _opt: &CommitInstOpt, iidx: InstIdx, inst: &Inst) {
-        assert_eq!(iidx.index(), self.known_bits.len());
+    fn inst_committed(&mut self, opt: &CommitInstOpt, iidx: InstIdx) {
         if let Inst::Const(Const {
             kind: ConstKind::Int(x),
             ..
-        }) = inst
+        }) = opt.inst(iidx)
         {
             self.known_bits
                 .push(Some(KnownBitValue::from_const(x.to_owned())));
@@ -561,7 +559,7 @@ mod test {
                 OptOutcome::Rewritten(new_inst) => known_bits.borrow_mut().feed(opt, new_inst),
                 x => x,
             },
-            |opt, iidx, inst| known_bits.borrow_mut().inst_committed(opt, iidx, inst),
+            |opt, iidx| known_bits.borrow_mut().inst_committed(opt, iidx),
             |equiv1, equiv2| known_bits.borrow_mut().equiv_committed(equiv1, equiv2),
             ptn,
         );
@@ -586,9 +584,9 @@ mod test {
                     }
                 }
             },
-            |opt, iidx, inst| {
-                cse.borrow_mut().inst_committed(opt, iidx, inst);
-                known_bits.borrow_mut().inst_committed(opt, iidx, inst);
+            |opt, iidx| {
+                cse.borrow_mut().inst_committed(opt, iidx);
+                known_bits.borrow_mut().inst_committed(opt, iidx);
             },
             |equiv1, equiv2| {
                 cse.borrow_mut().equiv_committed(equiv1, equiv2);
