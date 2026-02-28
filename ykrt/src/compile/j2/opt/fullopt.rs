@@ -373,7 +373,12 @@ impl OptT for FullOpt {
         // can't possibly be used.
         let mut is_used = Vob::from_elem(false, entry.insts.len());
         for (iidx, inst) in entry.insts_iter(..).rev() {
-            if is_used[usize::from(iidx)] || inst.write_effects().interferes(Effects::all()) {
+            if is_used[usize::from(iidx)]
+                || inst
+                    .read_effects()
+                    .interferes(Effects::none().add_volatile())
+                || inst.write_effects().interferes(Effects::all())
+            {
                 is_used.set(usize::from(iidx), true);
                 for op_iidx in inst.iter_iidxs(&entry) {
                     is_used.set(usize::from(op_iidx), true);
