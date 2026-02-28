@@ -15,6 +15,9 @@
 //!    [GuardExtra::deopt_vars]. The former are reordered and deduplicated as appropriate.
 //! 5. Guards can optionally specify an additional list which is the stack of frames, and the
 //!    [VarLocs] for their corresponding [GuardExtra::deopt_vars].
+//! 6. Function types and declarations are merged into one concept: that means that e.g. function
+//!    attributes are associated with a type (unlike LLVM IR where attributes are associated with
+//!    definitions and not with types).
 
 #[cfg(test)]
 use crate::compile::jitc_yk::aot_ir::{BBlockInstIdx, InstId};
@@ -51,7 +54,7 @@ static TEST_DEOPT_SAFEPOINT: DeoptSafepoint = DeoptSafepoint {
 
 struct HirParser<'lexer, 'input: 'lexer, Reg: RegT> {
     lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
-    externs: HashMap<&'input str, TyIdx>,
+    externs: HashMap<&'input str, (TyIdx, Vec<AstFuncAttr>)>,
     insts: IndexVec<InstIdx, Inst>,
     tys: IndexVec<TyIdx, Ty>,
     /// The [TyIdx] for [Ty::Int(1)].
@@ -83,6 +86,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     arg_tys,
                     has_varargs,
                     rtn_ty,
+                    attrs,
                 },
         } in astexterns
         {
@@ -97,7 +101,34 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                 has_varargs,
                 rtn_tyidx,
             })));
-            self.externs.insert(name, tyidx);
+            let mut processed_attrs = Vec::with_capacity(attrs.len());
+            for attr in attrs {
+                match attr {
+                    AstFuncAttr::MemoryNone
+                    | AstFuncAttr::MemoryRead
+                    | AstFuncAttr::MemoryWrite
+                    | AstFuncAttr::MemoryReadWrite => {
+                        if processed_attrs
+                            .iter()
+                            .find(|x| {
+                                matches!(
+                                    x,
+                                    AstFuncAttr::MemoryNone
+                                        | AstFuncAttr::MemoryRead
+                                        | AstFuncAttr::MemoryWrite
+                                        | AstFuncAttr::MemoryReadWrite
+                                )
+                            })
+                            .is_some()
+                        {
+                            // Only one memory effect can be specified
+                            todo!();
+                        }
+                        processed_attrs.push(attr);
+                    }
+                }
+            }
+            self.externs.insert(name, (tyidx, processed_attrs));
         }
 
         let mut args_vlocs = Vec::new();
@@ -213,7 +244,17 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     if let (Some(local), Some(_ty)) = (local, ty) {
                         self.p_def_local(local);
                     }
-                    let func_tyidx = self.externs[self.lexer.span_str(extern_)];
+                    let (func_tyidx, attrs) = &self.externs[self.lexer.span_str(extern_)];
+                    let func_tyidx = *func_tyidx;
+                    let mut effects = CallEffects::ReadWrite;
+                    for attr in attrs {
+                        match attr {
+                            AstFuncAttr::MemoryNone => effects = CallEffects::None,
+                            AstFuncAttr::MemoryRead => effects = CallEffects::Read,
+                            AstFuncAttr::MemoryWrite => effects = CallEffects::Write,
+                            AstFuncAttr::MemoryReadWrite => effects = CallEffects::ReadWrite,
+                        }
+                    }
                     let tgt = self.p_local(tgt);
                     let args = args
                         .iter()
@@ -224,6 +265,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                             tgt,
                             func_tyidx,
                             args,
+                            effects,
                         }
                         .into(),
                     );
@@ -1150,6 +1192,15 @@ struct AstFuncTy {
     arg_tys: Vec<AstTy>,
     has_varargs: bool,
     rtn_ty: AstTy,
+    attrs: Vec<AstFuncAttr>,
+}
+
+#[allow(clippy::enum_variant_names)]
+enum AstFuncAttr {
+    MemoryNone,
+    MemoryRead,
+    MemoryWrite,
+    MemoryReadWrite,
 }
 
 enum AstInst {

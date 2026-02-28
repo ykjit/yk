@@ -1156,10 +1156,18 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
             let tgt_iidx = self.const_to_iidx(tyidx, hir::ConstKind::Ptr(addr))?;
 
+            let effects = match func.memory() {
+                FuncMemory::None => hir::CallEffects::None,
+                FuncMemory::Read => hir::CallEffects::Read,
+                FuncMemory::Write => hir::CallEffects::Write,
+                FuncMemory::ReadWrite => hir::CallEffects::ReadWrite,
+            };
+
             let inst = hir::Call {
                 tgt: tgt_iidx,
                 func_tyidx: ftyidx,
                 args: jargs,
+                effects,
             }
             .into();
             let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
@@ -1201,6 +1209,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             tgt: tgt_iidx,
             func_tyidx: ftyidx,
             args: jargs,
+            effects: hir::CallEffects::ReadWrite,
         };
         let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
             panic!()
