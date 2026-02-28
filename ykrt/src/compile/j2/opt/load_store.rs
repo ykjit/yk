@@ -186,7 +186,7 @@ impl PassT for LoadStore {
             }
             _ => {
                 if inst
-                    .read_write_effects()
+                    .write_effects()
                     .interferes(Effects::none().add_heap().add_volatile())
                 {
                     self.hv.clear();
@@ -602,6 +602,8 @@ mod test {
         // Test that the things that should be barriers really do act as barriers.
 
         // Calls
+
+        // Write barrier
         test_ls(
             "
           extern f()
@@ -618,6 +620,82 @@ mod test {
           %2: ptr = 0x1234
           call %2()
           store %1, %0
+        ",
+        );
+
+        test_ls(
+            "
+          extern f() memory(readwrite)
+
+          %0: ptr = arg [reg]
+          %1: i8 = load %0
+          %2: ptr = 0x1234
+          call f %2()
+          store %1, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = load %0
+          %2: ptr = 0x1234
+          call %2()
+          store %1, %0
+        ",
+        );
+
+        test_ls(
+            "
+          extern f() memory(write)
+
+          %0: ptr = arg [reg]
+          %1: i8 = load %0
+          %2: ptr = 0x1234
+          call f %2()
+          store %1, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = load %0
+          %2: ptr = 0x1234
+          call %2()
+          store %1, %0
+        ",
+        );
+
+        // Read/none barrier
+
+        test_ls(
+            "
+          extern f() memory(read)
+
+          %0: ptr = arg [reg]
+          %1: i8 = load %0
+          %2: ptr = 0x1234
+          call f %2()
+          store %1, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = load %0
+          %2: ptr = 0x1234
+          call %2()
+        ",
+        );
+
+        test_ls(
+            "
+          extern f() memory(none)
+
+          %0: ptr = arg [reg]
+          %1: i8 = load %0
+          %2: ptr = 0x1234
+          call f %2()
+          store %1, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = load %0
+          %2: ptr = 0x1234
+          call %2()
         ",
         );
 

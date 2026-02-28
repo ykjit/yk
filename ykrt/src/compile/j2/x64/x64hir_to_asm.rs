@@ -1854,6 +1854,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             tgt,
             func_tyidx,
             args,
+            effects: _,
         }: &Call,
     ) -> Result<(), CompilationError> {
         // Calls on x64 with the SysV ABI have complex requirements and fiddly optimisation
