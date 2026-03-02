@@ -626,7 +626,12 @@ impl Block {
                 show.set(i, true);
             }
             for (iidx, inst) in self.insts_iter(..).rev() {
-                if show[usize::from(iidx)] || inst.write_effects().interferes(Effects::all()) {
+                if show[usize::from(iidx)]
+                    || inst.write_effects().interferes(Effects::all())
+                    || inst
+                        .read_effects()
+                        .interferes(Effects::none().add_volatile())
+                {
                     show.set(usize::from(iidx), true);
                     for op_iidx in inst.iter_iidxs(self) {
                         show.set(usize::from(op_iidx), true);
@@ -1344,6 +1349,7 @@ impl InstT for BlackBox {
 pub(super) struct Call {
     pub tgt: InstIdx,
     pub func_tyidx: TyIdx,
+    pub effects: CallEffects,
     pub args: SmallVec<[InstIdx; 1]>,
 }
 
@@ -1380,15 +1386,25 @@ impl InstT for Call {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
-        Effects::none().add_heap().add_volatile()
+        match self.effects {
+            CallEffects::None => Effects::none(),
+            CallEffects::Read | CallEffects::ReadWrite => Effects::none().add_heap().add_volatile(),
+            CallEffects::Write => Effects::none(),
+        }
     }
 
     fn write_effects(&self) -> Effects {
-        Effects::none().add_heap().add_volatile()
+        match self.effects {
+            CallEffects::None => Effects::none(),
+            CallEffects::Read => Effects::none(),
+            CallEffects::ReadWrite | CallEffects::Write => {
+                Effects::none().add_heap().add_volatile()
+            }
+        }
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -1430,6 +1446,14 @@ impl InstT for Call {
     fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
         m.func_ty(self.func_tyidx).rtn_tyidx
     }
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum CallEffects {
+    None,
+    Read,
+    Write,
+    ReadWrite,
 }
 
 #[derive(Clone, Debug)]
@@ -2705,26 +2729,14 @@ impl InstT for Load {
 
     fn read_effects(&self) -> Effects {
         if self.is_volatile {
-            Effects::none().add_volatile()
+            Effects::none().add_volatile().add_heap()
         } else {
             Effects::none().add_heap()
         }
     }
 
     fn write_effects(&self) -> Effects {
-        if self.is_volatile {
-            // It may seem surprising that a `Load` can have write effects but as LLVM says:
-            //
-            //  > Any volatile operation can have side effects, and any volatile operation can read
-            //  > and/or modify state which is not accessible via a regular load or store in this >
-            //  > module.
-            //
-            //  My interpretation of this (which matches others I have found) is "volatile loads
-            //  may also cause writes".
-            Effects::none().add_volatile()
-        } else {
-            Effects::none()
-        }
+        Effects::none()
     }
 
     fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
@@ -3892,16 +3904,12 @@ impl InstT for Store {
     }
 
     fn read_effects(&self) -> Effects {
-        if self.is_volatile {
-            Effects::none().add_volatile()
-        } else {
-            Effects::none()
-        }
+        Effects::none()
     }
 
     fn write_effects(&self) -> Effects {
         if self.is_volatile {
-            Effects::none().add_volatile()
+            Effects::none().add_heap().add_volatile()
         } else {
             Effects::none().add_heap()
         }
@@ -4545,6 +4553,7 @@ impl<'a> Iterator for IterIidxsIterator<'a> {
                 tgt,
                 func_tyidx: _,
                 args,
+                effects: _,
             }) => {
                 if self.i == 1 {
                     return Some(*tgt);

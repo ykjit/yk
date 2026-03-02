@@ -808,7 +808,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 show.set(i, true);
             }
             for (iidx, inst) in b.insts_iter(..).rev() {
-                if show[usize::from(iidx)] || inst.write_effects().interferes(Effects::all()) {
+                if show[usize::from(iidx)]
+                    || inst.write_effects().interferes(Effects::all())
+                    || inst
+                        .read_effects()
+                        .interferes(Effects::none().add_volatile())
+                {
                     show.set(usize::from(iidx), true);
                     for op_iidx in inst.iter_iidxs(b) {
                         show.set(usize::from(op_iidx), true);
@@ -2493,8 +2498,7 @@ mod test {
 
     #[test]
     fn gbody_volatile_load() {
-        // Volatile loads cannot be moved into guard bodies, and their presence stops preceeding
-        // loads from being copied in too.
+        // Volatile loads cannot be moved into guard bodies.
         build_and_test(
             r#"
           %0: ptr = arg [reg]
@@ -2508,7 +2512,7 @@ mod test {
             |_| true,
             &[r#"
           ; term [%0, %1]
-          i_guard: [%0, %2, %3]
+          i_guard: [%0, %3]
           ; guard true, %1, [%2, %3, %4]
           ...
         "#],

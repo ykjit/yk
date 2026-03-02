@@ -15,9 +15,9 @@ Externs -> Result<Vec<AstExtern>, Box<dyn Error>>:
   ;
 
 Extern -> Result<AstExtern, Box<dyn Error>>:
-    "EXTERN" "ID" "(" FuncArgs ")" FuncRtnType {
+    "EXTERN" "ID" "(" FuncArgs ")" FuncRtnType FuncAttrs {
       let (arg_tys, has_varargs) = $4?;
-      let ty = AstFuncTy { arg_tys, has_varargs, rtn_ty: $6? };
+      let ty = AstFuncTy { arg_tys, has_varargs, rtn_ty: $6?, attrs: $7? };
       Ok(AstExtern{name: $2?.span(), ty})
     }
   ;
@@ -38,6 +38,18 @@ NormalFuncArgs -> Result<Vec<AstTy>, Box<dyn Error>>:
 FuncRtnType -> Result<AstTy, Box<dyn Error>>:
     "->" Ty { $2 }
   | { Ok(AstTy::Void) }
+  ;
+
+FuncAttrs -> Result<Vec<AstFuncAttr>, Box<dyn Error>>:
+    FuncAttrs FuncAttr { flattenr($1, $2) }
+  | { Ok(Vec::new()) }
+  ;
+
+FuncAttr -> Result<AstFuncAttr, Box<dyn Error>>:
+    "MEMORY" "(" "NONE" ")" { Ok(AstFuncAttr::MemoryNone) }
+  | "MEMORY" "(" "READ" ")" { Ok(AstFuncAttr::MemoryRead) }
+  | "MEMORY" "(" "WRITE" ")" { Ok(AstFuncAttr::MemoryWrite) }
+  | "MEMORY" "(" "READWRITE" ")" { Ok(AstFuncAttr::MemoryReadWrite) }
   ;
 
 Insts -> Result<Vec<AstInst>, Box<dyn Error>>:
