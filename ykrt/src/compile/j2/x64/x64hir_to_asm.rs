@@ -3551,7 +3551,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             )?;
             self.asm.push_inst(match bitw {
                 64 => IcedInst::with2(Code::Shl_rm64_imm8, lhsr.to_reg64(), imm),
-                32 => IcedInst::with2(Code::Shl_rm32_imm8, lhsr.to_reg32(), imm),
+                8..=32 => IcedInst::with2(Code::Shl_rm32_imm8, lhsr.to_reg32(), imm),
                 x => todo!("{x}"),
             });
         } else {
