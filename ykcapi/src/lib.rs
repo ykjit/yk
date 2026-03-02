@@ -23,7 +23,7 @@ use std::{
     ptr,
     sync::Arc,
 };
-use ykrt::{HotThreshold, Location, MT};
+use ykrt::{HotThreshold, Location, MT, MTThread};
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
@@ -143,6 +143,13 @@ pub unsafe extern "C" fn yk_mt_sidetrace_threshold_set(mt: *const MT, hot_thresh
 #[unsafe(no_mangle)]
 pub extern "C" fn yk_location_new() -> Location {
     Location::new()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn yk_is_interpreting() -> bool {
+    // aot_to_hir turns this function call into the constant `false` so all we need to do here is
+    // say "are we tracing or not?"
+    !MTThread::is_tracing()
 }
 
 #[cfg(feature = "ykd")]

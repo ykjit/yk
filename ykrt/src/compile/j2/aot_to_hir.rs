@@ -1077,6 +1077,14 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             return Ok(false);
         }
 
+        if func.name() == "yk_is_interpreting" {
+            let i1_tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
+            let ciidx =
+                self.const_to_iidx(i1_tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(1, 0)))?;
+            self.frames.last_mut().unwrap().set_local(iid, ciidx);
+            return Ok(false);
+        }
+
         let mut jargs = SmallVec::with_capacity(args.len());
         for x in args {
             jargs.push(self.p_operand(x)?);
