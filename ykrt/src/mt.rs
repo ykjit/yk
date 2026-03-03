@@ -1299,7 +1299,7 @@ impl MTThread {
     /// atomic counter to see if ANY thread is tracing. Only if that check passes does it
     /// perform the more expensive TLS lookup for this specific thread.
     #[inline(always)]
-    pub(crate) fn is_tracing() -> bool {
+    pub fn is_tracing() -> bool {
         // Fast path: if no thread is tracing globally, this thread definitely isn't
         if TRACING_THREAD_COUNT.load(Ordering::Relaxed) == 0 {
             return false;

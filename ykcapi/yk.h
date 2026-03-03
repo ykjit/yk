@@ -57,6 +57,11 @@ void yk_mt_hot_threshold_set(YkMT *, YkHotThreshold);
 // Set the threshold at which guard failures are considered hot.
 void yk_mt_sidetrace_threshold_set(YkMT *, YkHotThreshold);
 
+// Returns `true` if yk is running in the "pure" interpreter i.e. (1) without
+// tracing the code and (2) not in JIT compiled code. During trace
+// optimisation, calls to this function will be fully optimised away.
+bool yk_is_interpreting();
+
 // Create a new `YkLocation`.
 //
 // Note that a `YkLocation` created by this call must not simply be discarded:
