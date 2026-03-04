@@ -2,7 +2,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     debug_assert_matches, env,
     error::Error,
     ffi::c_void,
@@ -622,7 +622,7 @@ impl MT {
                         promotions: Vec::new(),
                         debug_strs: Vec::new(),
                         frameaddr,
-                        seen_hls: HashSet::new(),
+                        seen_hls: Vec::new(),
                         gtrace: None,
                     });
                 }
@@ -862,17 +862,10 @@ impl MT {
 
         match loc.hot_location() {
             Some(hl) => {
-                let mut akind = None;
                 assert!(std::ptr::eq(frameaddr, *tracing_frameaddr));
 
-                if let Some(x) = loc.hot_location().map(|x| x as *const Mutex<HotLocation>)
-                    && !seen_hls.insert(x)
-                {
+                if seen_hls.contains(&(hl as *const _)) {
                     // We have traced this location more than once.
-                    akind = Some(AbortKind::Unrolled);
-                }
-
-                if let Some(akind) = akind {
                     self.stats.trace_recorded_err();
                     let mut lk = tracing_hl.lock();
                     match &lk.kind {
@@ -894,8 +887,9 @@ impl MT {
                         }
                     }
 
-                    return TransitionControlPoint::AbortTracing(akind);
+                    return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
                 }
+                seen_hls.push(hl as *const _);
 
                 let mut lk = hl.lock();
 
@@ -941,9 +935,10 @@ impl MT {
                 };
                 if let Some(hl_ptr) = hl_ptr {
                     assert!(std::ptr::eq(frameaddr, *tracing_frameaddr));
-                    if !seen_hls.insert(hl_ptr) {
+                    if seen_hls.contains(&hl_ptr) {
                         return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
                     }
+                    seen_hls.push(hl_ptr);
                 }
                 TransitionControlPoint::NoAction
             }
@@ -1064,9 +1059,10 @@ impl MT {
                         // having failed to trace properly.
                         return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
                     }
-                    if !seen_hls.insert(hl_ptr) {
+                    if seen_hls.contains(&hl_ptr) {
                         return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
                     }
+                    seen_hls.push(hl_ptr);
                 }
                 TransitionControlPoint::NoAction
             }
@@ -1195,7 +1191,7 @@ impl MT {
                         promotions: Vec::new(),
                         debug_strs: Vec::new(),
                         frameaddr,
-                        seen_hls: HashSet::new(),
+                        seen_hls: Vec::new(),
                         gtrace: Some((parent, gid)),
                     }),
                     Err(e) => {
@@ -1242,7 +1238,7 @@ enum MTThreadState {
         /// the time being we force every `Location` that we encounter in a trace to become a
         /// [HotLocation] (with kind [HotLocationKind::Counting]) if it is not already. We can then
         /// use the (unmoving) pointer to a [HotLocation]'s inner [Mutex] as an ID.
-        seen_hls: HashSet<*const Mutex<HotLocation>>,
+        seen_hls: Vec<*const Mutex<HotLocation>>,
         /// The [HotLocation] the trace will end at. For a top-level trace, this will be the same
         /// [HotLocation] the trace started at; for a side-trace, tracing started elsewhere.
         hl: Arc<Mutex<HotLocation>>,
@@ -1643,7 +1639,7 @@ mod tests {
                 promotions: Vec::new(),
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
-                seen_hls: HashSet::new(),
+                seen_hls: Vec::new(),
                 gtrace: None,
             });
         });
@@ -1677,7 +1673,7 @@ mod tests {
                 promotions: Vec::new(),
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
-                seen_hls: HashSet::new(),
+                seen_hls: Vec::new(),
                 gtrace: Some((ctr, GuardId::from(0))),
             });
         });
@@ -1806,7 +1802,7 @@ mod tests {
                             promotions: Vec::new(),
                             debug_strs: Vec::new(),
                             frameaddr: ptr::null_mut(),
-                            seen_hls: HashSet::new(),
+                            seen_hls: Vec::new(),
                             gtrace: None,
                         });
                     });
@@ -2045,7 +2041,7 @@ mod tests {
                                     promotions: Vec::new(),
                                     debug_strs: Vec::new(),
                                     frameaddr: ptr::null_mut(),
-                                    seen_hls: HashSet::new(),
+                                    seen_hls: Vec::new(),
                                     gtrace: None,
                                 });
                             });
