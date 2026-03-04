@@ -2689,6 +2689,26 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_freeze(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        iidx: InstIdx,
+        Freeze { val, .. }: &Freeze,
+    ) -> Result<(), CompilationError> {
+        // For now a `freeze` is a no-op.
+        ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::InputOutput {
+                in_iidx: *val,
+                in_fill: RegCnstrFill::Undefined,
+                out_fill: RegCnstrFill::Undefined,
+                regs: &NORMAL_GP_REGS,
+            }],
+        )?;
+        Ok(())
+    }
+
     fn i_guard(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -8573,6 +8593,24 @@ mod test {
               ...
               ; %2: i64 = zext %0
               ; blackbox %2
+              ; term [%1]
+            "#],
+        );
+    }
+
+    #[test]
+    fn cg_freeze() {
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = freeze %0
+              blackbox %1
+              term [%1]
+            ",
+            &[r#"
+              ...
+              ; %1: i8 = freeze %0
+              ; blackbox %1
               ; term [%1]
             "#],
         );

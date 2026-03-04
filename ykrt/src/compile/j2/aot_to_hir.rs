@@ -885,6 +885,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 Inst::ExtractValue { .. } => todo!(),
                 Inst::FCmp { .. } => self.p_fcmp(pc.clone(), inst)?,
                 Inst::FNeg { .. } => self.p_fneg(pc.clone(), inst)?,
+                Inst::Freeze { .. } => self.p_freeze(pc.clone(), inst)?,
                 Inst::ICmp { .. } => self.p_icmp(pc.clone(), inst)?,
                 Inst::IndirectCall { .. } => {
                     if self.p_icall(pc.clone(), bid, inst)? {
@@ -1563,6 +1564,16 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         let tyidx = self.p_ty(val.type_(self.am))?;
         let val = self.p_operand(val)?;
         self.push_inst_and_link_local(iid, hir::FNeg { tyidx, val })
+            .map(|_| ())
+    }
+
+    fn p_freeze(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::Freeze { op, tyidx } = inst else {
+            panic!()
+        };
+        let tyidx = self.p_ty(self.am.type_(*tyidx))?;
+        let val = self.p_operand(op)?;
+        self.push_inst_and_link_local(iid, hir::Freeze { tyidx, val })
             .map(|_| ())
     }
 
