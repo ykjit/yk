@@ -1,6 +1,3 @@
--- Run-time:
---   env-var: YKD_SERIALISE_COMPILATION=1
-
 -- This program segfaulted before we correctly restored the shadow stack
 -- pointer after a longjmp().
 --
@@ -12,3 +9,6 @@ do
 	end
 	xpcall(A, A)
 end
+
+-- Run-time:
+--   env-var: YKD_SERIALISE_COMPILATION=1

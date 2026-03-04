@@ -175,14 +175,16 @@ mod inner {
                 p.extension().as_ref().and_then(|p| p.to_str()) == Some("lua")
             })
             .test_extract(move |p| {
-                read_to_string(p)
-                    .unwrap()
+                let s = read_to_string(p).unwrap();
+                let mut x = s
                     .lines()
+                    .rev()
                     .skip_while(|l| !l.starts_with(COMMENT))
                     .take_while(|l| l.starts_with(COMMENT))
                     .map(|l| &l[COMMENT.len()..])
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                    .collect::<Vec<_>>();
+                x.reverse();
+                x.join("\n")
             })
             .test_cmds(move |p| {
                 let mut yklua_exe = target_dir();
