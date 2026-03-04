@@ -1,3 +1,10 @@
+local x = 0
+for _ = 0, 6 do
+  io.stderr:write(tostring(x), "\n")
+  x = x + 1
+end
+io.stderr:write("exit\n")
+
 -- Run-time:
 --   env-var: YK_HOT_THRESHOLD=3
 --   env-var: YKD_LOG=4
@@ -7,10 +14,10 @@
 --     0
 --     1
 --     2
---     yk-tracing: start-tracing: for_loop.lua:43: GETTABUP
+--     yk-tracing: start-tracing: for_loop.lua:3: GETTABUP
 --     3
---     yk-tracing: stop-tracing: for_loop.lua:43: GETTABUP
---     --- Begin debugstrs: for_loop.lua:43: GETTABUP ---
+--     yk-tracing: stop-tracing: for_loop.lua:3: GETTABUP
+--     --- Begin debugstrs: for_loop.lua:3: GETTABUP ---
 --     ; {
 --     ;   "trid": "0",
 --     ;   "start": {
@@ -20,27 +27,20 @@
 --     ;     "kind": "Loop"
 --     ;   }
 --     ; }
---     for_loop.lua:43: GETTABUP
---     for_loop.lua:43: GETFIELD
---     for_loop.lua:43: SELF
---     for_loop.lua:43: GETTABUP
---     for_loop.lua:43: MOVE
---     for_loop.lua:43: CALL
---     for_loop.lua:43: LOADK
---     for_loop.lua:43: CALL
---     for_loop.lua:44: ADDI
---     for_loop.lua:42: FORLOOP
+--     for_loop.lua:3: GETTABUP
+--     for_loop.lua:3: GETFIELD
+--     for_loop.lua:3: SELF
+--     for_loop.lua:3: GETTABUP
+--     for_loop.lua:3: MOVE
+--     for_loop.lua:3: CALL
+--     for_loop.lua:3: LOADK
+--     for_loop.lua:3: CALL
+--     for_loop.lua:4: ADDI
+--     for_loop.lua:2: FORLOOP
 --     --- End debugstrs ---
 --     4
---     yk-execution: enter-jit-code: for_loop.lua:43: GETTABUP
+--     yk-execution: enter-jit-code: for_loop.lua:3: GETTABUP
 --     5
 --     6
 --     yk-execution: deoptimise ...
 --     exit
-
-local x = 0
-for _ = 0, 6 do
-  io.stderr:write(tostring(x), "\n")
-  x = x + 1
-end
-io.stderr:write("exit\n")
