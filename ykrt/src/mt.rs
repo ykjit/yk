@@ -544,7 +544,6 @@ impl MT {
                         }
                         _ => unreachable!(),
                     });
-                self.stats.timing_state(TimingState::TraceMapping);
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         MTThread::set_tracing(IsTracing::None);

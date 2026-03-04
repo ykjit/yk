@@ -24,7 +24,6 @@ Output from `YKD_LOG_STATS` looks as follows:
     "duration_deopting": 2.2638,
     "duration_jit_executing": 0.2,
     "duration_outside_yk": 0.142,
-    "duration_trace_mapping": 3.3797,
     "duration_tracing": 1.2345,
     "traces_collected_err": 0,                                                  
     "traces_collected_ok": 11,                                                  
@@ -46,8 +45,6 @@ Fields and their meaning are as follows:
    outside Yk counts as "interpreting" or not. For example, if an interpreter
    thread puts itself to sleep, we will still count it as time spent
    "outside yk".
- * `duration_trace_mapping`. Float, seconds. How long was spent mapping a "raw"
-   trace to compiler-ready IR?
  * `duration_tracing`. Float, seconds. How long was spent tracing?
  * `trace_executions`. Unsigned integer. How many times have traces been
    executed? Note that the same trace can count arbitrarily many times to this.
