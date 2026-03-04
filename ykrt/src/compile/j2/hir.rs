@@ -851,6 +851,7 @@ pub(super) enum Inst {
     FSub,
     FPExt,
     FPToSI,
+    Freeze,
     Guard,
     ICmp,
     IntToPtr,
@@ -2374,6 +2375,65 @@ impl InstT for FPToSI {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!("fptosi %{}", usize::from(self.val))
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
+/// Freeze poison/undef values.
+#[derive(Clone, Debug)]
+pub(super) struct Freeze {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+}
+
+impl InstT for Freeze {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            m.ty(self.tyidx),
+            m.ty(b.inst(self.val).tyidx(m)),
+            "%{iidx:?}: inconsistent return / operand types"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::Freeze(Freeze { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(b, self.val)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.val = iidx_map(self.val);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("freeze %{}", usize::from(self.val))
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -5824,6 +5884,17 @@ mod test {
             "
           %0: ptr = arg [reg]
           %1: i64 = zext %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: inconsistent return / operand types")]
+    fn freeze_must_return_same_type() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i32 = freeze %0
         ",
         );
     }

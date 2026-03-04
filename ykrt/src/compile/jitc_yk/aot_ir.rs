@@ -1023,6 +1023,8 @@ pub(crate) enum Inst {
         #[deku(count = "num_indices")]
         indices: Vec<usize>,
     },
+    #[deku(id = "23")]
+    Freeze { tyidx: TyIdx, op: Operand },
     #[deku(id = "255")]
     Unimplemented {
         tyidx: TyIdx,
@@ -1110,6 +1112,7 @@ impl Inst {
                 tyidx,
                 indices: _,
             } => Some(m.type_(*tyidx)),
+            Self::Freeze { tyidx, .. } => Some(m.type_(*tyidx)),
         }
     }
 
@@ -1405,6 +1408,9 @@ impl fmt::Display for DisplayableInst<'_> {
                 indices,
             } => {
                 write!(f, "extractvalue {}, {:?}", op.display(self.m), indices,)
+            }
+            Inst::Freeze { tyidx: _, op } => {
+                write!(f, "freeze {}", op.display(self.m))
             }
         }
     }
