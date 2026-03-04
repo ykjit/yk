@@ -332,6 +332,28 @@ impl std::fmt::Debug for HotLocationKind {
     }
 }
 
+/// Track [HotLocation]s seen while tracing to determine if unrolling has occurred.
+pub(super) struct SeenHotLocations {
+    seen: Vec<Arc<Mutex<HotLocation>>>,
+}
+
+impl SeenHotLocations {
+    /// Create a new [SeenHotLocations] starting from `initial`.
+    pub(super) fn new(initial: Arc<Mutex<HotLocation>>) -> Self {
+        Self {
+            seen: vec![initial],
+        }
+    }
+
+    /// Record that `hl` has been encountered during tracing. Return `true` if this indicates that
+    /// unrolling has occurred or `false` otherwise.
+    pub(super) fn push_and_check_unrolling(&mut self, hl: Arc<Mutex<HotLocation>>) -> bool {
+        let seen = self.seen.iter().skip(1).any(|x| Arc::ptr_eq(x, &hl));
+        self.seen.push(hl);
+        seen
+    }
+}
+
 /// When a [HotLocation] has failed to compile a valid trace, should the [HotLocation] be tried
 /// again or not?
 #[derive(Debug)]

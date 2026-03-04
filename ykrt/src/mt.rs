@@ -21,7 +21,7 @@ use crate::{
     aotsmp::{AOT_STACKMAPS, load_aot_stackmaps},
     compile::{CompilationError, CompiledTrace, Compiler, GuardId, default_compiler},
     job_queue::{Job, JobQueue},
-    location::{HotLocation, HotLocationKind, Location, TraceFailed},
+    location::{HotLocation, HotLocationKind, Location, SeenHotLocations, TraceFailed},
     log::{
         Log, Verbosity,
         stats::{Stats, TimingState},
@@ -616,13 +616,13 @@ impl MT {
             match Arc::clone(&tracer).start_recorder() {
                 Ok(tt) => {
                     mtt.push_tstate(MTThreadState::Tracing {
-                        hl,
+                        hl: Arc::clone(&hl),
                         trid,
                         thread_tracer: tt,
                         promotions: Vec::new(),
                         debug_strs: Vec::new(),
                         frameaddr,
-                        seen_hls: Vec::new(),
+                        seen_hls: SeenHotLocations::new(hl),
                         gtrace: None,
                     });
                 }
@@ -860,11 +860,11 @@ impl MT {
             }
         }
 
-        match loc.hot_location() {
+        match loc.hot_location_arc_clone() {
             Some(hl) => {
                 assert!(std::ptr::eq(frameaddr, *tracing_frameaddr));
 
-                if seen_hls.contains(&(hl as *const _)) {
+                if seen_hls.push_and_check_unrolling(Arc::clone(&hl)) {
                     // We have traced this location more than once.
                     self.stats.trace_recorded_err();
                     let mut lk = tracing_hl.lock();
@@ -889,7 +889,6 @@ impl MT {
 
                     return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
                 }
-                seen_hls.push(hl as *const _);
 
                 let mut lk = hl.lock();
 
@@ -921,7 +920,8 @@ impl MT {
                 }
             }
             None => {
-                let hl_ptr = match loc.inc_count() {
+                assert!(std::ptr::eq(frameaddr, *tracing_frameaddr));
+                let hl = match loc.inc_count() {
                     Some(count) => {
                         let hl = HotLocation {
                             kind: HotLocationKind::Counting(count),
@@ -929,16 +929,13 @@ impl MT {
                             debug_str: None,
                         };
                         loc.count_to_hot_location(count, hl)
-                            .map(|x| Arc::as_ptr(&x))
                     }
-                    None => loc.hot_location().map(|x| x as *const Mutex<HotLocation>),
+                    None => loc.hot_location_arc_clone(),
                 };
-                if let Some(hl_ptr) = hl_ptr {
-                    assert!(std::ptr::eq(frameaddr, *tracing_frameaddr));
-                    if seen_hls.contains(&hl_ptr) {
-                        return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
-                    }
-                    seen_hls.push(hl_ptr);
+                if let Some(hl) = hl
+                    && seen_hls.push_and_check_unrolling(hl)
+                {
+                    return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
                 }
                 TransitionControlPoint::NoAction
             }
@@ -1040,7 +1037,13 @@ impl MT {
                 }
             }
             None => {
-                let hl_ptr = match loc.inc_count() {
+                if !std::ptr::eq(frameaddr, *tracing_frameaddr) {
+                    // We're tracing but no longer in the frame we started in, so we
+                    // need to stop tracing and report the original [HotLocation] as
+                    // having failed to trace properly.
+                    return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
+                }
+                let hl = match loc.inc_count() {
                     Some(count) => {
                         let hl = HotLocation {
                             kind: HotLocationKind::Counting(count),
@@ -1048,21 +1051,13 @@ impl MT {
                             debug_str: None,
                         };
                         loc.count_to_hot_location(count, hl)
-                            .map(|x| Arc::as_ptr(&x))
                     }
-                    None => loc.hot_location().map(|x| x as *const Mutex<HotLocation>),
+                    None => loc.hot_location_arc_clone(),
                 };
-                if let Some(hl_ptr) = hl_ptr {
-                    if !std::ptr::eq(frameaddr, *tracing_frameaddr) {
-                        // We're tracing but no longer in the frame we started in, so we
-                        // need to stop tracing and report the original [HotLocation] as
-                        // having failed to trace properly.
-                        return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
-                    }
-                    if seen_hls.contains(&hl_ptr) {
-                        return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
-                    }
-                    seen_hls.push(hl_ptr);
+                if let Some(hl) = hl
+                    && seen_hls.push_and_check_unrolling(hl)
+                {
+                    return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
                 }
                 TransitionControlPoint::NoAction
             }
@@ -1186,12 +1181,12 @@ impl MT {
                 MTThread::with_borrow_mut(|mtt| match Arc::clone(&tracer).start_recorder() {
                     Ok(tt) => mtt.push_tstate(MTThreadState::Tracing {
                         trid,
-                        hl,
+                        hl: Arc::clone(&hl),
                         thread_tracer: tt,
                         promotions: Vec::new(),
                         debug_strs: Vec::new(),
                         frameaddr,
-                        seen_hls: Vec::new(),
+                        seen_hls: SeenHotLocations::new(hl),
                         gtrace: Some((parent, gid)),
                     }),
                     Err(e) => {
@@ -1238,7 +1233,7 @@ enum MTThreadState {
         /// the time being we force every `Location` that we encounter in a trace to become a
         /// [HotLocation] (with kind [HotLocationKind::Counting]) if it is not already. We can then
         /// use the (unmoving) pointer to a [HotLocation]'s inner [Mutex] as an ID.
-        seen_hls: Vec<*const Mutex<HotLocation>>,
+        seen_hls: SeenHotLocations,
         /// The [HotLocation] the trace will end at. For a top-level trace, this will be the same
         /// [HotLocation] the trace started at; for a side-trace, tracing started elsewhere.
         hl: Arc<Mutex<HotLocation>>,
@@ -1634,12 +1629,12 @@ mod tests {
         MTThread::with_borrow_mut(|mtt| {
             mtt.push_tstate(MTThreadState::Tracing {
                 trid,
-                hl,
+                hl: Arc::clone(&hl),
                 thread_tracer: Box::new(DummyTraceRecorder),
                 promotions: Vec::new(),
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
-                seen_hls: Vec::new(),
+                seen_hls: SeenHotLocations::new(hl),
                 gtrace: None,
             });
         });
@@ -1668,12 +1663,12 @@ mod tests {
         MTThread::with_borrow_mut(|mtt| {
             mtt.push_tstate(MTThreadState::Tracing {
                 trid,
-                hl,
+                hl: Arc::clone(&hl),
                 thread_tracer: Box::new(DummyTraceRecorder),
                 promotions: Vec::new(),
                 debug_strs: Vec::new(),
                 frameaddr: ptr::null_mut(),
-                seen_hls: Vec::new(),
+                seen_hls: SeenHotLocations::new(hl),
                 gtrace: Some((ctr, GuardId::from(0))),
             });
         });
@@ -1797,12 +1792,12 @@ mod tests {
                     MTThread::with_borrow_mut(|mtt| {
                         mtt.push_tstate(MTThreadState::Tracing {
                             trid,
-                            hl,
+                            hl: Arc::clone(&hl),
                             thread_tracer: Box::new(DummyTraceRecorder),
                             promotions: Vec::new(),
                             debug_strs: Vec::new(),
                             frameaddr: ptr::null_mut(),
-                            seen_hls: Vec::new(),
+                            seen_hls: SeenHotLocations::new(hl),
                             gtrace: None,
                         });
                     });
@@ -2036,12 +2031,12 @@ mod tests {
                             MTThread::with_borrow_mut(|mtt| {
                                 mtt.push_tstate(MTThreadState::Tracing {
                                     trid,
-                                    hl,
+                                    hl: Arc::clone(&hl),
                                     thread_tracer: Box::new(DummyTraceRecorder),
                                     promotions: Vec::new(),
                                     debug_strs: Vec::new(),
                                     frameaddr: ptr::null_mut(),
-                                    seen_hls: Vec::new(),
+                                    seen_hls: SeenHotLocations::new(hl),
                                     gtrace: None,
                                 });
                             });
