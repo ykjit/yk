@@ -273,9 +273,6 @@ pub(crate) enum TimingState {
     /// This thread is executing code outside yk (roughly "in the interpreter").
     #[strum(to_string = "duration_outside_yk")]
     OutsideYk,
-    /// This thread is mapping a trace into IR.
-    #[strum(to_string = "duration_trace_mapping")]
-    TraceMapping,
 }
 
 thread_local! {
