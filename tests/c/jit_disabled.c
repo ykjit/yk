@@ -1,6 +1,7 @@
 // Run-time:
 //   env-var: YK_JITC=none
 //   env-var: YKD_LOG=4
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     4
 //     3

@@ -18,25 +18,25 @@ use std::{
 pub(crate) struct Job {
     /// The function we expect to run for this job when it is ready.
     main: Box<dyn FnOnce() + Send>,
-    /// If `Some`, wait until [TraceID] has compiled before running this job.
-    connector_tid: Option<TraceId>,
-    /// If `connector_tid` failed to compile, this function will be run.
-    connector_failed: Box<dyn FnOnce() + Send>,
+    /// If `Some`, wait until [TraceId] has compiled before running this job.
+    coupler_tid: Option<TraceId>,
+    /// If [Self::coupler_tid] failed to compile, this function will be run.
+    coupler_failed: Box<dyn FnOnce() + Send>,
 }
 
 impl Job {
-    /// Create a new job with a `main` method. If `connector_tid` is `Some`, `main` will only be
-    /// run when `connector_tid` has compiled. If `connector_tid` fails to compile, then
-    /// `connector_failed` will be run (and `main` will not be run).
+    /// Create a new job with a `main` method. If `coupler_tid` is `Some`, `main` will only be
+    /// run when `coupler_tid` has compiled. If `coupler_tid` fails to compile, then
+    /// `coupler_failed` will be run (and `main` will not be run).
     pub(crate) fn new(
         main: Box<dyn FnOnce() + Send>,
-        connector_tid: Option<TraceId>,
-        connector_failed: Box<dyn FnOnce() + Send>,
+        coupler_tid: Option<TraceId>,
+        coupler_failed: Box<dyn FnOnce() + Send>,
     ) -> Self {
         Self {
             main,
-            connector_tid,
-            connector_failed,
+            coupler_tid,
+            coupler_failed,
         }
     }
 }
@@ -51,8 +51,8 @@ pub(crate) struct JobQueue {
     /// percolate the error upwards, making it more likely that the main thread exits with an
     /// error. In other words, this [Vec] makes it harder for errors to be missed.
     worker_threads: Mutex<Vec<JoinHandle<()>>>,
-    /// The ordered queue of compilation worker functions, each a pair `(Option<connector_tid>,
-    /// job)`. Before `job` is run, `connector_tid`, if it is `Some`, must be present in
+    /// The ordered queue of compilation worker functions, each a pair `(Option<coupler_tid>,
+    /// job)`. Before `job` is run, `coupler_tid`, if it is `Some`, must be present in
     /// [MT::compiled_traces].
     queue: Arc<(Condvar, Mutex<VecDeque<Job>>)>,
 }
@@ -120,7 +120,7 @@ impl JobQueue {
             // spin up a new thread for each compilation. This is only acceptable because a)
             // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
             // checking correctness, not performance.
-            if let Some(tid) = job.connector_tid
+            if let Some(tid) = job.coupler_tid
                 && !mt.compiled_traces.lock().contains_key(&tid)
             {
                 self.queue.1.lock().push_back(job);
@@ -131,7 +131,7 @@ impl JobQueue {
                 let mut lk = self.queue.1.lock();
                 let cnd = {
                     let ct_lk = mt.compiled_traces.lock();
-                    lk.iter().position(|x| match &x.connector_tid {
+                    lk.iter().position(|x| match &x.coupler_tid {
                         Some(x) => ct_lk.contains_key(x),
                         None => true,
                     })
@@ -171,12 +171,12 @@ impl JobQueue {
                     // point trying to do further work, even if there is work in the queue.
                     while let Some(mt_st) = mt_wk.upgrade() {
                         // Search through the queue looking for the first job we can compile (i.e.
-                        // there is no connector trace ID, or the connector trade ID has been
+                        // there is no coupler trace ID, or the coupler trade ID has been
                         // compiled).
                         self_cl.idle_worker_threads.fetch_sub(1, Ordering::Relaxed);
                         let cnd = {
                             let ct_lk = mt_st.compiled_traces.lock();
-                            lk.iter().position(|x| match &x.connector_tid {
+                            lk.iter().position(|x| match &x.coupler_tid {
                                 Some(x) => ct_lk.contains_key(x),
                                 None => true,
                             })
@@ -212,7 +212,7 @@ impl JobQueue {
         let cnt = {
             let lk = self.queue.1.lock();
             lk.iter()
-                .filter(|job| match &job.connector_tid {
+                .filter(|job| match &job.coupler_tid {
                     Some(x) => *x == trid,
                     None => false,
                 })
@@ -232,7 +232,7 @@ impl JobQueue {
         let mut i = 0;
         let mut lk = self.queue.1.lock();
         while i < lk.len() {
-            if lk[i].connector_tid == Some(trid) {
+            if lk[i].coupler_tid == Some(trid) {
                 removed.push(lk.remove(i).unwrap());
             } else {
                 i += 1;
@@ -240,7 +240,7 @@ impl JobQueue {
         }
         drop(lk);
         for x in removed {
-            (x.connector_failed)();
+            (x.coupler_failed)();
         }
     }
 }
