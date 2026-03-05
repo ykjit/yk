@@ -275,26 +275,25 @@ impl MT {
     /// Add a compilation job for a root trace where:
     ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
     ///   * `ctrid` is the trace ID to be given to the new compiled trace.
-    ///   * `connector_tid` is the optional trace ID of the trace the new compiled trace will
+    ///   * `coupler_tid` is the optional trace ID of the trace the new compiled trace will
     ///     connect to.
     fn queue_root_compile_job(
         self: &Arc<Self>,
         trace_iter: (Box<dyn AOTTraceIterator>, Box<[u8]>, Vec<String>),
         hl_arc: Arc<Mutex<HotLocation>>,
         trid: TraceId,
-        connector_tid: Option<TraceId>,
+        coupler_tid: Option<TraceId>,
     ) {
         self.stats.trace_recorded_ok();
-
-        let hl_arc_cl = Arc::clone(&hl_arc);
         let mt = Arc::clone(self);
+        let hl_arc_cl = Arc::clone(&hl_arc);
         let main = move || {
             let compiler = {
                 let lk = mt.compiler.lock();
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            let connector_ctr = connector_tid.map(|x| Arc::clone(&mt.compiled_traces.lock()[&x]));
+            let coupler_ctr = coupler_tid.map(|x| Arc::clone(&mt.compiled_traces.lock()[&x]));
             match compiler.root_compile(
                 Arc::clone(&mt),
                 trace_iter.0,
@@ -302,7 +301,7 @@ impl MT {
                 Arc::clone(&hl_arc),
                 trace_iter.1,
                 trace_iter.2,
-                connector_ctr,
+                coupler_ctr,
             ) {
                 Ok(ctr) => {
                     assert_eq!(ctr.ctrid(), trid);
@@ -368,7 +367,7 @@ impl MT {
 
         self.job_queue.push(
             self,
-            Job::new(Box::new(main), connector_tid, Box::new(failure)),
+            Job::new(Box::new(main), coupler_tid, Box::new(failure)),
         );
     }
 
@@ -379,7 +378,7 @@ impl MT {
     ///     compiled. Because side-traces can nest, this may or may not be the same [CompiledTrace]
     ///     as `root_ctr`.
     ///   * `guardid` is the ID of the guard in `parent_ctr` which failed.
-    ///   * `connector_tid` is the optional trace ID of the trace the new compiled trace will
+    ///   * `coupler_tid` is the optional trace ID of the trace the new compiled trace will
     ///     connect to.
     fn queue_sidetrace_compile_job(
         self: &Arc<Self>,
@@ -388,7 +387,7 @@ impl MT {
         trid: TraceId,
         parent_ctr: Arc<dyn CompiledTrace>,
         gid: GuardId,
-        connector_tid: TraceId,
+        coupler_tid: TraceId,
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
@@ -399,7 +398,7 @@ impl MT {
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            let target_ctr = Arc::clone(&mt.compiled_traces.lock()[&connector_tid]);
+            let target_ctr = Arc::clone(&mt.compiled_traces.lock()[&coupler_tid]);
             // FIXME: Can we pass in the root trace address, root trace entry variable locations,
             // and the base stack-size from here, rather than spreading them out via
             // DeoptInfo/SideTraceInfo, and CompiledTrace?
@@ -462,7 +461,7 @@ impl MT {
         };
         self.job_queue.push(
             self,
-            Job::new(Box::new(main), Some(connector_tid), Box::new(failure)),
+            Job::new(Box::new(main), Some(coupler_tid), Box::new(failure)),
         );
     }
 
@@ -515,14 +514,14 @@ impl MT {
             TransitionControlPoint::StartTracing(hl, trid) => {
                 self.start_tracing(frameaddr, loc, hl, trid);
             }
-            TransitionControlPoint::StopTracing(trid, connector_tid) => {
-                self.stop_tracing(frameaddr, loc, trid, connector_tid);
+            TransitionControlPoint::StopTracing(trid, coupler_tid) => {
+                self.stop_tracing(frameaddr, loc, trid, coupler_tid);
             }
             TransitionControlPoint::StopSideTracing {
                 trid,
                 gid,
                 parent_ctr,
-                connector_tid,
+                coupler_tid,
                 start,
             } => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because
@@ -560,14 +559,14 @@ impl MT {
                             trid,
                             parent_ctr,
                             gid,
-                            connector_tid,
+                            coupler_tid,
                         );
                         if start {
                             self.start_tracing(
                                 frameaddr,
                                 loc,
                                 loc.hot_location_arc_clone().unwrap(),
-                                connector_tid,
+                                coupler_tid,
                             );
                         }
                     }
@@ -636,14 +635,14 @@ impl MT {
         });
     }
 
-    /// Stop tracing of the trace with id `trid` at `loc`. If `connector_tid` is `Some`, the
-    /// resulting trace will be a connector trace.
+    /// Stop tracing of the trace with id `trid` at `loc`. If `coupler_tid` is `Some`, the
+    /// resulting trace will be a coupler trace.
     fn stop_tracing(
         self: &Arc<Self>,
         _frameaddr: *mut c_void,
         _loc: &Location,
         trid: TraceId,
-        connector_tid: Option<TraceId>,
+        coupler_tid: Option<TraceId>,
     ) {
         // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
         // will have put a `Some` in the `Rc`.
@@ -679,7 +678,7 @@ impl MT {
                     (utrace, promotions.into_boxed_slice(), debug_strs),
                     hl,
                     trid,
-                    connector_tid,
+                    coupler_tid,
                 );
             }
             Err(e) => {
@@ -996,7 +995,7 @@ impl MT {
                     HotLocationKind::Compiled(_)
                     | HotLocationKind::Compiling(_)
                     | HotLocationKind::Tracing(_) => {
-                        let connector_tid = match lk.kind {
+                        let coupler_tid = match lk.kind {
                             HotLocationKind::Compiled(ref ctr) => ctr.ctrid(),
                             HotLocationKind::Compiling(ref ctrid) => *ctrid,
                             HotLocationKind::Tracing(tid) => tid,
@@ -1012,7 +1011,7 @@ impl MT {
                             trid: *tracing_trid,
                             gid,
                             parent_ctr,
-                            connector_tid,
+                            coupler_tid,
                             start: false,
                         }
                     }
@@ -1029,7 +1028,7 @@ impl MT {
                             trid: *tracing_trid,
                             gid,
                             parent_ctr,
-                            connector_tid: next_tid,
+                            coupler_tid: next_tid,
                             start: true,
                         }
                     }
@@ -1510,14 +1509,14 @@ enum TransitionControlPoint {
     /// use the `Arc` to detect tracing issues in other threads, and we need to keep it alive for
     /// the duration of the transition calls for that to work properly.
     StartTracing(Arc<Mutex<HotLocation>>, TraceId),
-    /// Stop tracing. If `Option<TraceId>` is not-`None`, we have a connector trace.
+    /// Stop tracing. If `Option<TraceId>` is not-`None`, we have a coupler trace.
     StopTracing(TraceId, Option<TraceId>),
     /// Stop side tracing.
     StopSideTracing {
         trid: TraceId,
         gid: GuardId,
         parent_ctr: Arc<dyn CompiledTrace>,
-        connector_tid: TraceId,
+        coupler_tid: TraceId,
         // Should a new trace be immediately started after the guard trace?
         start: bool,
     },
