@@ -897,7 +897,7 @@ impl MT {
             trid: tracing_trid,
             frameaddr: tracing_frameaddr,
             hl: tracing_hl,
-            seen_hls,
+            seen_hls: _,
             gtrace,
             ..
         } = mtt.peek_mut_tstate()
@@ -905,7 +905,7 @@ impl MT {
             panic!()
         };
 
-        match loc.hot_location() {
+        match loc.hot_location_arc_clone() {
             Some(hl) => {
                 if !std::ptr::eq(frameaddr, *tracing_frameaddr) {
                     // We're tracing but no longer in the frame we started in, so we
@@ -987,22 +987,30 @@ impl MT {
                     // having failed to trace properly.
                     return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
                 }
-                let hl = match loc.inc_count() {
-                    Some(count) => {
-                        let hl = HotLocation {
-                            kind: HotLocationKind::Counting(count),
-                            tracecompilation_errors: 0,
-                            debug_str: None,
+                if let Some(x) = loc.count() {
+                    let next_trid = self.next_trace_id();
+                    let hl = HotLocation {
+                        kind: HotLocationKind::Tracing(next_trid),
+                        tracecompilation_errors: 0,
+                        debug_str: None,
+                    };
+                    if let Some(hl) = loc.count_to_hot_location(x, hl) {
+                        let Some((parent_ctr, gid)) = gtrace else {
+                            panic!()
                         };
-                        loc.count_to_hot_location(count, hl)
+                        let gid = *gid;
+                        let parent_ctr = Arc::clone(parent_ctr);
+                        return TransitionControlPoint::StopSideTracing {
+                            trid: *tracing_trid,
+                            gid,
+                            parent_ctr,
+                            coupler_tid: next_trid,
+                            start: true,
+                        };
                     }
-                    None => loc.hot_location_arc_clone(),
-                };
-                if let Some(hl) = hl
-                    && seen_hls.push_and_check_unrolling(hl)
-                {
-                    return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
                 }
+                // We raced with another thread which has started tracing this
+                // location. We leave it to do the tracing.
                 TransitionControlPoint::NoAction
             }
         }
