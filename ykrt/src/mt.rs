@@ -1356,6 +1356,24 @@ impl MTThread {
     ///
     /// If the stack is empty. There should always be at least one element on the stack, so a panic
     /// here means that something has gone wrong elsewhere.
+    pub(crate) fn promote_i8(&mut self, val: i8) -> bool {
+        if let MTThreadState::Tracing { promotions, .. } = self.peek_mut_tstate() {
+            promotions.push(val.cast_unsigned());
+        }
+        true
+    }
+
+    /// Records `val` as a value to be promoted. Returns `true` if either: no trace is being
+    /// recorded; or recording the promotion succeeded.
+    ///
+    /// If `false` is returned, the current trace is unable to record the promotion successfully
+    /// and further calls are probably pointless, though they will not cause the tracer to enter
+    /// undefined behaviour territory.
+    ///
+    /// # Panics
+    ///
+    /// If the stack is empty. There should always be at least one element on the stack, so a panic
+    /// here means that something has gone wrong elsewhere.
     pub(crate) fn promote_u32(&mut self, val: u32) -> bool {
         if let MTThreadState::Tracing { promotions, .. } = self.peek_mut_tstate() {
             promotions.extend_from_slice(&val.to_ne_bytes());

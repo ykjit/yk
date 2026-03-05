@@ -92,3 +92,15 @@ pub extern "C" fn __yk_idempotent_promote_i32(val: i32) -> i32 {
     }
     val
 }
+
+/// Records an 8-bit return value of an idempotent function during trace recording.
+#[unsafe(no_mangle)]
+pub extern "C" fn __yk_idempotent_promote_i8(val: i8) -> i8 {
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_i8(val);
+        });
+    }
+    val
+}
