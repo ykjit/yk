@@ -25,13 +25,11 @@ mod x64;
 
 use crate::{
     compile::{
-        CompilationError, CompiledTrace, Compiler, GuardId, j2::codebuf::CodeBufInProgress,
-        jitc_yk::AOT_MOD,
+        CompilationError, CompiledTrace, Compiler, Trace, TraceEnd, TraceStart,
+        j2::codebuf::CodeBufInProgress, jitc_yk::AOT_MOD,
     },
-    location::HotLocation,
     log::{IRPhase, should_log_ir},
-    mt::{MT, TraceId},
-    trace::AOTTraceIterator,
+    mt::MT,
 };
 use libc::{MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_READ, PROT_WRITE, mmap, munmap};
 use parking_lot::Mutex;
@@ -225,19 +223,28 @@ impl J2 {
 }
 
 impl Compiler for J2 {
-    fn root_compile(
+    fn compile(
         self: Arc<Self>,
         mt: Arc<MT>,
-        ta_iter: Box<dyn AOTTraceIterator>,
-        trid: TraceId,
-        hl: Arc<Mutex<HotLocation>>,
-        promotions: Box<[u8]>,
-        debug_strs: Vec<String>,
-        coupler: Option<std::sync::Arc<dyn CompiledTrace>>,
+        trace: Trace,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        let kind = match coupler {
-            Some(tgt_ctr) => aot_to_hir::BuildKind::Coupler { tgt_ctr },
-            None => aot_to_hir::BuildKind::Loop,
+        let (hl, bkind) = match (trace.trace_start, &trace.trace_end) {
+            (TraceStart::ControlPoint { hl }, TraceEnd::Loop) => (hl, aot_to_hir::BuildKind::Loop),
+            (TraceStart::ControlPoint { hl }, TraceEnd::Coupler(coupler_tid)) => (
+                hl,
+                aot_to_hir::BuildKind::Coupler {
+                    tgt_ctr: mt.compiled_trace(*coupler_tid),
+                },
+            ),
+            (TraceStart::Guard { .. }, TraceEnd::Loop) => unreachable!(),
+            (TraceStart::Guard { parent_ctr, gid }, TraceEnd::Coupler(coupler_tid)) => (
+                parent_ctr.hl().upgrade().unwrap(),
+                aot_to_hir::BuildKind::Side {
+                    src_ctr: parent_ctr,
+                    src_gid: gid,
+                    tgt_ctr: mt.compiled_trace(*coupler_tid),
+                },
+            ),
         };
 
         #[cfg(target_arch = "x86_64")]
@@ -248,61 +255,11 @@ impl Compiler for J2 {
             &self,
             &AOT_MOD,
             Arc::clone(&hl),
-            ta_iter,
-            trid,
-            kind,
-            promotions,
-            debug_strs,
-        )
-        .build()?;
-
-        let log = should_log_ir(IRPhase::Asm);
-
-        #[cfg(target_arch = "x86_64")]
-        let minlen = x64::x64hir_to_asm::X64HirToAsm::codebuf_minlen(&hm);
-        let buf = self.mmap_codebufinprogress(minlen);
-        #[cfg(target_arch = "x86_64")]
-        let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf, log);
-
-        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be, log).build(mt.clone())?;
-
-        // Register JITted code (if required).
-        mt.trace_profiler().register_ctr(&ct).map_err(|e| {
-            CompilationError::General(format!("failed to register jitted code with profiler: {e}"))
-        })?;
-
-        Ok(ct)
-    }
-
-    fn sidetrace_compile(
-        self: Arc<Self>,
-        mt: Arc<MT>,
-        ta_iter: Box<dyn AOTTraceIterator>,
-        trid: TraceId,
-        src_ctr: Arc<dyn CompiledTrace>,
-        src_gid: GuardId,
-        tgt_ctr: Arc<dyn CompiledTrace>,
-        hl: Arc<Mutex<HotLocation>>,
-        promotions: Box<[u8]>,
-        debug_strs: Vec<String>,
-    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        #[cfg(target_arch = "x86_64")]
-        type AotToHir = aot_to_hir::AotToHir<x64::Reg>;
-
-        let hm = AotToHir::new(
-            &mt,
-            &self,
-            &AOT_MOD,
-            Arc::clone(&hl),
-            ta_iter,
-            trid,
-            aot_to_hir::BuildKind::Side {
-                src_ctr,
-                src_gid,
-                tgt_ctr,
-            },
-            promotions,
-            debug_strs,
+            trace.ta_iter,
+            trace.ctrid,
+            bkind,
+            trace.promotions,
+            trace.debug_strs,
         )
         .build()?;
 

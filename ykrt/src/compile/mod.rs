@@ -43,30 +43,11 @@ pub(crate) enum CompilationError {
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {
-    /// Compile a mapped root trace into machine code.
-    fn root_compile(
+    /// Compile the [Trace] `trace`.
+    fn compile(
         self: Arc<Self>,
         mt: Arc<MT>,
-        aottrace_iter: Box<dyn AOTTraceIterator>,
-        ctrid: TraceId,
-        hl: Arc<Mutex<HotLocation>>,
-        promotions: Box<[u8]>,
-        debug_strs: Vec<String>,
-        connector_ctr: Option<Arc<dyn CompiledTrace>>,
-    ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
-
-    /// Compile a guard trace into machine code.
-    fn sidetrace_compile(
-        self: Arc<Self>,
-        mt: Arc<MT>,
-        aottrace_iter: Box<dyn AOTTraceIterator>,
-        ctrid: TraceId,
-        parent_ctr: Arc<dyn CompiledTrace>,
-        gid: GuardId,
-        target_ctr: Arc<dyn CompiledTrace>,
-        hl: Arc<Mutex<HotLocation>>,
-        promotions: Box<[u8]>,
-        debug_strs: Vec<String>,
+        trace: Trace,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
@@ -77,6 +58,40 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
     {
         Err("No JIT compiler supported on this platform/configuration".into())
     }
+}
+
+/// A recorded (but not yet compiled) trace.
+pub(crate) struct Trace {
+    pub(crate) trace_start: TraceStart,
+    pub(crate) trace_end: TraceEnd,
+    /// The [TraceId] this trace should have when compiled.
+    pub(crate) ctrid: TraceId,
+    pub(crate) ta_iter: Box<dyn AOTTraceIterator>,
+    pub(crate) promotions: Box<[u8]>,
+    pub(crate) debug_strs: Vec<String>,
+}
+
+/// How a recorded trace started.
+#[derive(Clone)]
+pub(crate) enum TraceStart {
+    /// This trace started at a control point.
+    ControlPoint { hl: Arc<Mutex<HotLocation>> },
+    /// This trace started at guard [TraceStart::Guard::gid] in [TraceStart::Guard::parent_ctr].
+    Guard {
+        parent_ctr: Arc<dyn CompiledTrace>,
+        gid: GuardId,
+    },
+}
+
+/// How a recorded trace ended.
+#[derive(Clone)]
+pub(crate) enum TraceEnd {
+    /// A [TraceStart::ControlPoint] trace looped. Note: by definition a [TraceStart::Guard] can
+    /// not end in [TraceEnd::Loop].
+    Loop,
+    /// A trace ended at another (possibly compiled, possibly tracing, possibly compiling) trace
+    /// that has/will have the tid [TraceId].
+    Coupler(TraceId),
 }
 
 pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {

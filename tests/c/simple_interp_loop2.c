@@ -1,6 +1,7 @@
 // Run-time:
 //   env-var: YKD_LOG=4
 //   env-var: YKD_LOG_STATS=/dev/null
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     yk-tracing: start-tracing
 //     pc=0, mem=4
