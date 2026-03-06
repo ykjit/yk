@@ -1,5 +1,3 @@
-#![feature(exit_status_error)]
-
 use inner::main;
 
 #[cfg(cargo_profile = "debug")]
@@ -49,7 +47,7 @@ mod inner {
         // more than one copy.
         let mut rsync_cmd = Command::new("rsync");
         rsync_cmd.args(["-a", YKLUA_SUBMODULE_PATH, yklua_tgt_dir.to_str().unwrap()]);
-        rsync_cmd.status().unwrap().exit_ok().unwrap();
+        assert!(rsync_cmd.status().unwrap().success());
 
         // cargo can sometimes run multiple builds in parallel. At the moment that's probably only
         // build scripts, though that doesn't seem to be precisely specified and might change in the
