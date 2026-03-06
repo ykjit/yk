@@ -248,18 +248,21 @@ impl Compiler for J2 {
         };
 
         #[cfg(target_arch = "x86_64")]
-        type AotToHir = aot_to_hir::AotToHir<x64::Reg>;
+        type AotToHir<'a> = aot_to_hir::AotToHir<'a, x64::Reg>;
 
+        let mut ta_iter = trace.ta_iter.peekable();
+        let mut promotions_iter = trace.promotions.iter();
+        let mut debug_strs_iter = trace.debug_strs.iter().map(|x| x.as_str());
         let hm = AotToHir::new(
             &mt,
             &self,
             &AOT_MOD,
             Arc::clone(&hl),
-            trace.ta_iter.peekable(),
+            &mut ta_iter,
             trace.ctrid,
             bkind,
-            trace.promotions,
-            trace.debug_strs,
+            &mut promotions_iter,
+            &mut debug_strs_iter,
         )
         .build()?;
 

@@ -994,7 +994,7 @@ impl MT {
                         tracecompilation_errors: 0,
                         debug_str: None,
                     };
-                    if let Some(hl) = loc.count_to_hot_location(x, hl) {
+                    if let Some(_hl) = loc.count_to_hot_location(x, hl) {
                         let Some((parent_ctr, gid)) = gtrace else {
                             panic!()
                         };
