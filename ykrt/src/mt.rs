@@ -339,18 +339,19 @@ impl MT {
                     mt.compiled_traces
                         .lock()
                         .insert(ctr.ctrid(), Arc::clone(&ctr));
-                    mt.stats.trace_compiled_ok();
                     match trace_start {
                         TraceStart::ControlPoint { hl } => {
                             let mut lk = hl.lock();
                             assert_matches!(lk.kind, HotLocationKind::Compiling(_));
                             lk.kind = HotLocationKind::Compiled(ctr);
+                            drop(lk);
                             mt.job_queue.notify_success(ctrid);
                         }
                         TraceStart::Guard { parent_ctr, gid } => {
                             parent_ctr.guard(gid).set_ctr(ctr, &parent_ctr, gid);
                         }
                     }
+                    mt.stats.trace_compiled_ok();
                 }
                 Err(e) => {
                     mt.stats.trace_compiled_err();
