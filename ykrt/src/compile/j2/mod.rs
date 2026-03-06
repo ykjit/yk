@@ -255,7 +255,7 @@ impl Compiler for J2 {
             &self,
             &AOT_MOD,
             Arc::clone(&hl),
-            trace.ta_iter,
+            trace.ta_iter.peekable(),
             trace.ctrid,
             bkind,
             trace.promotions,

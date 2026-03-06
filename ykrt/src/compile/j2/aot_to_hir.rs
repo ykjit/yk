@@ -49,7 +49,7 @@ pub(super) struct AotToHir<Reg: RegT> {
     /// The AOT IR.
     am: &'static Module,
     hl: Arc<Mutex<HotLocation>>,
-    ta_iter: Peekable<TraceActionIterator>,
+    ta_iter: Peekable<Box<dyn crate::trace::AOTTraceIterator>>,
     /// What was the previous [BBlockId] fully processed by [TraceActionIterator]? Note: this is a
     /// bit more subtle than "the value before the most recent `next`". It really means "the last
     /// value before `p_block` or equivalent fully ran". As that suggests, this is rather fragile:
@@ -88,7 +88,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         j2: &Arc<J2>,
         am: &'static Module,
         hl: Arc<Mutex<HotLocation>>,
-        ta_iter: Box<dyn crate::trace::AOTTraceIterator>,
+        ta_iter: Peekable<Box<dyn crate::trace::AOTTraceIterator>>,
         trid: TraceId,
         bkind: BuildKind,
         promotions: Box<[u8]>,
@@ -111,7 +111,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             j2: Arc::clone(j2),
             am,
             hl,
-            ta_iter: TraceActionIterator::new(ta_iter).peekable(),
+            ta_iter,
             prev_bid: None,
             trid,
             bkind,
@@ -843,7 +843,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     let Some(ta) = self.ta_iter.next() else {
                         return Ok(None);
                     };
-                    let cnd_bid = self.ta_to_bid(&ta?).unwrap();
+                    let ta = ta.map_err(|e| CompilationError::General(format!("{e:?}")))?;
+                    let cnd_bid = self.ta_to_bid(&ta).unwrap();
                     blk = self.am.bblock(&cnd_bid);
                     let mut iidx = 0;
                     pc = InstId::new(cnd_bid.funcidx(), cnd_bid.bbidx(), BBlockInstIdx::new(iidx));
@@ -1129,7 +1130,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 pc_safepoint: None,
                 prev_pc: None,
             });
-            let next_ta = &self.ta_iter.next().unwrap()?;
+            let next_ta = &self
+                .ta_iter
+                .next()
+                .unwrap()
+                .map_err(|e| CompilationError::General(format!("{e:?}")))?;
             let next_bid = self.ta_to_bid(next_ta).unwrap();
             assert_eq!(next_bid.funcidx(), *callee);
             assert_eq!(next_bid.bbidx(), BBlockIdx::new(0));
@@ -2013,27 +2018,5 @@ impl Frame {
     /// bindings (which occur due to unrolling).
     fn set_local(&mut self, iid: InstId, iidx: hir::InstIdx) {
         self.locals.insert(iid, iidx);
-    }
-}
-
-struct TraceActionIterator {
-    ta_iter: Peekable<Box<dyn crate::trace::AOTTraceIterator>>,
-}
-
-impl TraceActionIterator {
-    fn new(ta_iter: Box<dyn crate::trace::AOTTraceIterator>) -> Self {
-        Self {
-            ta_iter: ta_iter.peekable(),
-        }
-    }
-}
-
-impl Iterator for TraceActionIterator {
-    type Item = Result<TraceAction, CompilationError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.ta_iter
-            .next()
-            .map(|x| x.map_err(|e| CompilationError::General(e.to_string())))
     }
 }
