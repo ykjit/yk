@@ -452,8 +452,17 @@ impl MT {
             TransitionControlPoint::StartTracing(hl, trid) => {
                 self.start_tracing(frameaddr, loc, hl, trid);
             }
-            TransitionControlPoint::StopTracing(trid, coupler_tid) => {
-                self.stop_tracing(frameaddr, loc, trid, coupler_tid);
+            TransitionControlPoint::StopCouplerTracing {
+                start_tid,
+                coupler_tid,
+            } => {
+                self.stop_tracing(frameaddr, loc, start_tid, Some(coupler_tid));
+            }
+            TransitionControlPoint::StopLoopTracing(trid) => {
+                self.stop_tracing(frameaddr, loc, trid, None);
+            }
+            TransitionControlPoint::StopReturnTracing(trid) => {
+                self.stop_tracing(frameaddr, loc, trid, None);
             }
             TransitionControlPoint::StopSideTracing {
                 trid,
@@ -792,16 +801,8 @@ impl MT {
         if frameaddr != *tracing_frameaddr {
             // We traced into or out of a recursive interpreter call.
             let mut lk = tracing_hl.lock();
-            match lk.kind {
-                HotLocationKind::Compiled(_)
-                | HotLocationKind::Compiling(_)
-                | HotLocationKind::Counting(_)
-                | HotLocationKind::DontTrace => (),
-                HotLocationKind::Tracing(trid) => {
-                    lk.kind = HotLocationKind::Compiling(trid);
-                    return TransitionControlPoint::StopTracing(trid, None);
-                }
-            }
+            lk.kind = HotLocationKind::Compiling(*tracing_trid);
+            return TransitionControlPoint::StopReturnTracing(*tracing_trid);
         }
 
         match loc.hot_location_arc_clone() {
@@ -838,7 +839,7 @@ impl MT {
 
                 match lk.kind {
                     HotLocationKind::Compiled(_) | HotLocationKind::Compiling(_) => {
-                        let compiled_trid = match lk.kind {
+                        let coupler_tid = match lk.kind {
                             HotLocationKind::Compiled(ref ctr) => ctr.ctrid(),
                             HotLocationKind::Compiling(ref ctrid) => *ctrid,
                             _ => unreachable!(),
@@ -846,7 +847,10 @@ impl MT {
                         drop(lk);
                         let mut lk = tracing_hl.lock();
                         lk.kind = HotLocationKind::Compiling(*tracing_trid);
-                        TransitionControlPoint::StopTracing(*tracing_trid, Some(compiled_trid))
+                        TransitionControlPoint::StopCouplerTracing {
+                            start_tid: *tracing_trid,
+                            coupler_tid,
+                        }
                     }
                     HotLocationKind::Counting(_) => TransitionControlPoint::NoAction,
                     HotLocationKind::Tracing(hl_trid) => {
@@ -857,7 +861,7 @@ impl MT {
                         } else {
                             // ...and it's this location...
                             lk.kind = HotLocationKind::Compiling(hl_trid);
-                            TransitionControlPoint::StopTracing(hl_trid, None)
+                            TransitionControlPoint::StopLoopTracing(hl_trid)
                         }
                     }
                     HotLocationKind::DontTrace => TransitionControlPoint::NoAction,
@@ -1480,9 +1484,16 @@ enum TransitionControlPoint {
     /// use the `Arc` to detect tracing issues in other threads, and we need to keep it alive for
     /// the duration of the transition calls for that to work properly.
     StartTracing(Arc<Mutex<HotLocation>>, TraceId),
-    /// Stop tracing. If `Option<TraceId>` is not-`None`, we have a coupler trace.
-    StopTracing(TraceId, Option<TraceId>),
-    /// Stop side tracing.
+    /// A (ControlPoint, Coupler) trace has completed.
+    StopCouplerTracing {
+        start_tid: TraceId,
+        coupler_tid: TraceId,
+    },
+    /// A (ControlPoint, Loop) trace has completed.
+    StopLoopTracing(TraceId),
+    /// A (ControlPoint, Return) trace has completed.
+    StopReturnTracing(TraceId),
+    /// A (Guard, Coupler | Return) trace has completed.
     StopSideTracing {
         trid: TraceId,
         gid: GuardId,
@@ -1610,12 +1621,11 @@ mod tests {
         });
     }
 
-    fn expect_stop_tracing(mt: &Arc<MT>, loc: &Location) {
-        let TransitionControlPoint::StopTracing(_, _) =
-            mt.transition_control_point(loc, ptr::null_mut())
-        else {
-            panic!()
-        };
+    fn expect_stop_loop_tracing(mt: &Arc<MT>, loc: &Location) {
+        match mt.transition_control_point(loc, ptr::null_mut()) {
+            TransitionControlPoint::StopLoopTracing(_) => (),
+            x => panic!("{x:?}"),
+        }
         MTThread::set_tracing(IsTracing::None);
         MTThread::with_borrow_mut(|mtt| {
             mtt.pop_tstate();
@@ -1663,7 +1673,7 @@ mod tests {
             loc.hot_location().unwrap().lock().kind,
             HotLocationKind::Tracing(_)
         ));
-        expect_stop_tracing(&mt, &loc);
+        expect_stop_loop_tracing(&mt, &loc);
         assert!(matches!(
             loc.hot_location().unwrap().lock().kind,
             HotLocationKind::Compiling(_)
@@ -1776,7 +1786,7 @@ mod tests {
                 _ => unreachable!(),
             }
         }
-        expect_stop_tracing(&mt, &loc);
+        expect_stop_loop_tracing(&mt, &loc);
         // At this point, we have nothing to meaningfully test over the `basic_transitions` test.
     }
 
@@ -1882,7 +1892,7 @@ mod tests {
             HotLocationKind::Tracing(_)
         ));
         // ...and this time let tracing succeed.
-        expect_stop_tracing(&mt, &loc);
+        expect_stop_loop_tracing(&mt, &loc);
         // If tracing succeeded, we'll now be in the Compiling state.
         assert!(matches!(
             loc.hot_location().unwrap().lock().kind,
@@ -1906,7 +1916,7 @@ mod tests {
             assert_eq!(loc.count(), Some(i + 1));
         }
         expect_start_tracing(&mt, &loc);
-        expect_stop_tracing(&mt, &loc);
+        expect_stop_loop_tracing(&mt, &loc);
 
         for _ in 0..mt.trace_failure_threshold() {
             assert_matches!(
@@ -1962,13 +1972,13 @@ mod tests {
             loc2.hot_location().unwrap().lock().kind,
             HotLocationKind::Counting(6)
         );
-        expect_stop_tracing(&mt, &loc1);
+        expect_stop_loop_tracing(&mt, &loc1);
         assert!(matches!(
             loc1.hot_location().unwrap().lock().kind,
             HotLocationKind::Compiling(_)
         ));
         expect_start_tracing(&mt, &loc2);
-        expect_stop_tracing(&mt, &loc2);
+        expect_stop_loop_tracing(&mt, &loc2);
     }
 
     #[test]
@@ -2014,7 +2024,7 @@ mod tests {
                                 loc.hot_location().unwrap().lock().kind,
                                 HotLocationKind::Tracing(_)
                             ));
-                            expect_stop_tracing(&mt, &loc);
+                            expect_stop_loop_tracing(&mt, &loc);
                             assert!(matches!(
                                 loc.hot_location().unwrap().lock().kind,
                                 HotLocationKind::Compiling(_)
@@ -2039,7 +2049,9 @@ mod tests {
                             }
                             break;
                         }
-                        TransitionControlPoint::StopTracing(_, _)
+                        TransitionControlPoint::StopCouplerTracing { .. }
+                        | TransitionControlPoint::StopLoopTracing(_)
+                        | TransitionControlPoint::StopReturnTracing(_)
                         | TransitionControlPoint::StopSideTracing { .. } => unreachable!(),
                     }
                 }
@@ -2089,7 +2101,7 @@ mod tests {
             mt.transition_control_point(&loc1, ptr::null_mut()),
             TransitionControlPoint::NoAction
         );
-        expect_stop_tracing(&mt, &loc2);
+        expect_stop_loop_tracing(&mt, &loc2);
     }
 
     #[bench]
@@ -2125,7 +2137,9 @@ mod tests {
     }
 
     #[test]
-    fn traces_can_be_executed_during_tracing() {
+    fn coupler_trace() {
+        // Check that a trace that encounters a compiled Location turns into a Coupler trace.
+
         let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(0);
         let loc1 = Location::new();
@@ -2133,21 +2147,54 @@ mod tests {
 
         // Get `loc1` to the point where there's a compiled trace for it.
         expect_start_tracing(&mt, &loc1);
-        expect_stop_tracing(&mt, &loc1);
+        expect_stop_loop_tracing(&mt, &loc1);
         loc1.hot_location().unwrap().lock().kind =
             HotLocationKind::Compiled(Arc::new(CompiledTraceTestingMinimal::new()));
 
         expect_start_tracing(&mt, &loc2);
         assert_matches!(
             mt.transition_control_point(&loc1, ptr::null_mut()),
-            TransitionControlPoint::StopTracing(_, _)
+            TransitionControlPoint::StopCouplerTracing { .. }
         );
+    }
 
-        expect_stop_tracing(&mt, &loc2);
-        assert_matches!(
-            mt.transition_control_point(&loc1, ptr::null_mut()),
-            TransitionControlPoint::Execute(_)
-        );
+    #[test]
+    fn return_trace() {
+        // Check that a trace that starts in a frame and then returns creates a ReturnTrace.
+
+        let mt = Arc::new(MT::new().unwrap());
+        mt.set_hot_threshold(0);
+        let loc = Location::new();
+
+        let inner = || {
+            let x: u8 = 0;
+            let fp = &x as *const _ as *mut _;
+            let TransitionControlPoint::StartTracing(hl, trid) =
+                mt.transition_control_point(loc, fp)
+            else {
+                panic!()
+            };
+            MTThread::set_tracing(IsTracing::Loop);
+            MTThread::with_borrow_mut(|mtt| {
+                mtt.push_tstate(MTThreadState::Tracing {
+                    trid,
+                    hl: Arc::clone(&hl),
+                    thread_tracer: Box::new(DummyTraceRecorder),
+                    promotions: Vec::new(),
+                    debug_strs: Vec::new(),
+                    frameaddr: fp,
+                    seen_hls: SeenHotLocations::new(hl),
+                    gtrace: None,
+                });
+            });
+        };
+
+        inner();
+        mt.transition_control_point(&loc, &loc as *const _ as *mut _);
+        match mt.transition_control_point(&loc, ptr::null_mut()) {
+            TransitionControlPoint::StopReturnTracing(_) => (),
+            x => panic!("{x:?}"),
+        }
     }
 
     #[test]
