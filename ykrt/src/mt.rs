@@ -24,6 +24,7 @@ use crate::{
         CompilationError, CompiledTrace, Compiler, GuardId, Trace, TraceEnd, TraceStart,
         default_compiler,
     },
+    frame::is_caller_frame,
     job_queue::{Job, JobQueue},
     location::{HotLocation, HotLocationKind, Location, SeenHotLocations, TraceFailed},
     log::{
@@ -481,11 +482,10 @@ impl MT {
                             thread_tracer,
                             promotions,
                             debug_strs,
-                            frameaddr: tracing_frameaddr,
+                            frameaddr: _,
                             seen_hls: _,
                             gtrace: _,
                         } => {
-                            assert_eq!(frameaddr, tracing_frameaddr);
                             assert!(Arc::ptr_eq(&hl, &parent_ctr.hl().upgrade().unwrap()));
                             (thread_tracer, promotions, debug_strs)
                         }
@@ -798,8 +798,10 @@ impl MT {
         else {
             panic!()
         };
-        if frameaddr != *tracing_frameaddr {
-            // We traced into or out of a recursive interpreter call.
+        if is_caller_frame(frameaddr, *tracing_frameaddr) {
+            // We traced out of the frame we started tracing in. This is not necessarily a
+            // correctness issue, but for now such traces will always become (*, Return) traces, so
+            // there's no point tracing further.
             let mut lk = tracing_hl.lock();
             lk.kind = HotLocationKind::Compiling(*tracing_trid);
             return TransitionControlPoint::StopReturnTracing(*tracing_trid);
@@ -807,8 +809,6 @@ impl MT {
 
         match loc.hot_location_arc_clone() {
             Some(hl) => {
-                assert!(std::ptr::eq(frameaddr, *tracing_frameaddr));
-
                 if seen_hls.push_and_check_unrolling(Arc::clone(&hl)) {
                     // We have traced this location more than once.
                     self.stats.trace_recorded_err();
@@ -868,7 +868,6 @@ impl MT {
                 }
             }
             None => {
-                assert!(std::ptr::eq(frameaddr, *tracing_frameaddr));
                 let hl = match loc.inc_count() {
                     Some(count) => {
                         let hl = HotLocation {
@@ -900,7 +899,7 @@ impl MT {
         let MTThreadState::Tracing {
             trid: tracing_trid,
             frameaddr: tracing_frameaddr,
-            hl: tracing_hl,
+            hl: _,
             seen_hls: _,
             gtrace,
             ..
@@ -909,36 +908,21 @@ impl MT {
             panic!()
         };
 
+        if is_caller_frame(frameaddr, *tracing_frameaddr) {
+            // We traced out of the frame we started tracing in. This is not necessarily a
+            // correctness issue, but for now such traces will always end up with "trace
+            // succesor pending", so we might as well give up now.
+            self.stats.trace_recorded_err();
+            let Some((parent_ctr, gid)) = gtrace else {
+                panic!()
+            };
+            parent_ctr.guard(*gid).trace_or_compile_failed(self);
+
+            return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
+        }
+
         match loc.hot_location_arc_clone() {
             Some(hl) => {
-                if !std::ptr::eq(frameaddr, *tracing_frameaddr) {
-                    // We're tracing but no longer in the frame we started in, so we
-                    // need to stop tracing and report the original [HotLocation] as
-                    // having failed to trace properly.
-                    self.stats.trace_recorded_err();
-                    let mut lk = tracing_hl.lock();
-                    match &lk.kind {
-                        HotLocationKind::Compiled(_)
-                        | HotLocationKind::Compiling(_)
-                        | HotLocationKind::Counting(_)
-                        | HotLocationKind::DontTrace => (),
-                        HotLocationKind::Tracing(trid) => {
-                            let trid = *trid;
-                            match lk.tracecompilation_error(self) {
-                                TraceFailed::KeepTrying => {
-                                    lk.kind = HotLocationKind::Counting(0);
-                                }
-                                TraceFailed::DontTrace => {
-                                    lk.kind = HotLocationKind::DontTrace;
-                                }
-                            }
-                            self.job_queue.notify_failure(self, trid);
-                        }
-                    }
-
-                    return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
-                }
-
                 let mut lk = hl.lock();
                 match lk.kind {
                     HotLocationKind::Compiled(_)
@@ -985,12 +969,6 @@ impl MT {
                 }
             }
             None => {
-                if !std::ptr::eq(frameaddr, *tracing_frameaddr) {
-                    // We're tracing but no longer in the frame we started in, so we
-                    // need to stop tracing and report the original [HotLocation] as
-                    // having failed to trace properly.
-                    return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
-                }
                 if let Some(x) = loc.count() {
                     let next_trid = self.next_trace_id();
                     let hl = HotLocation {
@@ -2166,7 +2144,14 @@ mod tests {
         mt.set_hot_threshold(0);
         let loc = Location::new();
 
-        let inner = || {
+        // This is intrinsically fragile: for this test to work, we have to look at addresses in
+        // different frames. The only way that can work is if `inner` isn't inlined. However, there
+        // are no absolute guarantees that the compiler won't inline this function: we can add
+        // `inline(never)` here and `blackbox` a little lower, but we may encounter situations
+        // where that's not enough. If so, we might find that this test is too fragile for us to
+        // keep.
+        #[inline(never)]
+        fn inner(mt: &Arc<MT>, loc: &Location) {
             let x: u8 = 0;
             let fp = &x as *const _ as *mut _;
             let TransitionControlPoint::StartTracing(hl, trid) =
@@ -2187,11 +2172,13 @@ mod tests {
                     gtrace: None,
                 });
             });
-        };
+        }
 
-        inner();
-        mt.transition_control_point(&loc, &loc as *const _ as *mut _);
-        match mt.transition_control_point(&loc, ptr::null_mut()) {
+        let x: u8 = 0;
+        let fp = &x as *const _ as *mut _;
+        black_box(|| inner(&mt, &loc))();
+        mt.transition_control_point(&loc, fp);
+        match mt.transition_control_point(&loc, fp) {
             TransitionControlPoint::StopReturnTracing(_) => (),
             x => panic!("{x:?}"),
         }
