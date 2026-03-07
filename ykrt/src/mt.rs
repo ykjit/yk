@@ -287,7 +287,7 @@ impl MT {
     }
 
     /// Add `trace` to the compile queue.
-    fn queue_compile_job(self: &Arc<Self>, trace: Trace) {
+    fn queue_compile_job(self: &Arc<Self>, mut trace: Trace) {
         self.stats.trace_recorded_ok();
 
         let (coupler_tid, failure): (_, Box<dyn FnOnce() + Send>) = {
@@ -334,7 +334,7 @@ impl MT {
             let ctrid = trace.ctrid;
             let trace_start = trace.trace_start.clone();
 
-            match compiler.compile(Arc::clone(&mt), trace) {
+            match compiler.compile(Arc::clone(&mt), &mut trace) {
                 Ok(ctr) => {
                     assert_eq!(ctr.ctrid(), ctrid);
                     mt.compiled_traces
@@ -505,7 +505,7 @@ impl MT {
                             trace_start: TraceStart::Guard { parent_ctr, gid },
                             trace_end: TraceEnd::Coupler(coupler_tid),
                             ctrid: trid,
-                            ta_iter,
+                            ta_iter: ta_iter.peekable(),
                             promotions: promotions.into_boxed_slice(),
                             debug_strs,
                         });
@@ -630,7 +630,7 @@ impl MT {
                     trace_start: TraceStart::ControlPoint { hl },
                     trace_end,
                     ctrid,
-                    ta_iter,
+                    ta_iter: ta_iter.peekable(),
                     promotions: promotions.into_boxed_slice(),
                     debug_strs,
                 });

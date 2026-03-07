@@ -36,6 +36,7 @@ use parking_lot::Mutex;
 use std::{
     error::Error,
     fmt,
+    iter::Peekable,
     sync::{Arc, Weak},
 };
 use thiserror::Error;
@@ -74,7 +75,7 @@ pub(crate) trait Compiler: Send + Sync {
     fn compile(
         self: Arc<Self>,
         mt: Arc<MT>,
-        trace: Trace,
+        trace: &mut Trace,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
@@ -93,7 +94,7 @@ pub(crate) struct Trace {
     pub(crate) trace_end: TraceEnd,
     /// The [TraceId] this trace should have when compiled.
     pub(crate) ctrid: TraceId,
-    pub(crate) ta_iter: Box<dyn AOTTraceIterator>,
+    pub(crate) ta_iter: Peekable<Box<dyn AOTTraceIterator>>,
     pub(crate) promotions: Box<[u8]>,
     pub(crate) debug_strs: Vec<String>,
 }
