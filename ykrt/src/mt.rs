@@ -465,6 +465,28 @@ impl MT {
             TransitionControlPoint::StopReturnTracing(trid) => {
                 self.stop_tracing(frameaddr, loc, trid, None);
             }
+            TransitionControlPoint::StopUnrollTracing { unroll_tid } => {
+                yklog!(
+                    self.log,
+                    Verbosity::Warning,
+                    "tracing-aborted: unrolled inner loop",
+                    loc.hot_location()
+                );
+                let thread_tracer = MTThread::with_borrow_mut(|mtt| {
+                    if let MTThreadState::Tracing { thread_tracer, .. } = mtt.pop_tstate() {
+                        thread_tracer
+                    } else {
+                        panic!()
+                    }
+                });
+                let _ = thread_tracer.stop();
+                self.start_tracing(
+                    frameaddr,
+                    loc,
+                    loc.hot_location_arc_clone().unwrap(),
+                    unroll_tid,
+                );
+            }
             TransitionControlPoint::StopSideTracing {
                 trid,
                 gid,
@@ -605,11 +627,7 @@ impl MT {
                     frameaddr: _,
                     seen_hls: _,
                     gtrace: _,
-                } => {
-                    // If this assert fails then the code in `transition_control_point`,
-                    // which rejects traces that end in another frame, didn't work.
-                    (hl, thread_tracer, promotions, debug_strs)
-                }
+                } => (hl, thread_tracer, promotions, debug_strs),
                 _ => unreachable!(),
             });
         match thread_tracer.stop() {
@@ -809,34 +827,31 @@ impl MT {
 
         match loc.hot_location_arc_clone() {
             Some(hl) => {
-                if seen_hls.push_and_check_unrolling(Arc::clone(&hl)) {
-                    // We have traced this location more than once.
-                    self.stats.trace_recorded_err();
-                    let mut lk = tracing_hl.lock();
-                    match &lk.kind {
-                        HotLocationKind::Compiled(_)
-                        | HotLocationKind::Compiling(_)
-                        | HotLocationKind::Counting(_)
-                        | HotLocationKind::DontTrace => (),
-                        HotLocationKind::Tracing(trid) => {
-                            let trid = *trid;
-                            match lk.tracecompilation_error(self) {
-                                TraceFailed::KeepTrying => {
-                                    lk.kind = HotLocationKind::Counting(0);
-                                }
-                                TraceFailed::DontTrace => {
-                                    lk.kind = HotLocationKind::DontTrace;
-                                }
-                            }
-                            self.job_queue.notify_failure(self, trid);
-                        }
-                    }
+                if seen_hls.push_and_check_any_loop_closed(Arc::clone(&hl)) {
+                    // We have traced this location more than once...
+                    if seen_hls.is_loop() {
+                        // ...and the entire trace is a single loop.
+                        let mut lk = hl.lock();
+                        lk.kind = HotLocationKind::Compiling(*tracing_trid);
+                        return TransitionControlPoint::StopLoopTracing(*tracing_trid);
+                    } else {
+                        // ...and we have unrolled an inner loop.
 
-                    return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
+                        // We could be much more clever here, but for now we throw away the
+                        // recorded trace, start tracing the inner loop again, and mark the outer
+                        // loop as ready for tracing as soon as it's next encountered.
+                        assert!(!Arc::ptr_eq(&hl, tracing_hl));
+                        let mut lk = hl.lock();
+                        let unroll_tid = self.next_trace_id();
+                        lk.kind = HotLocationKind::Tracing(unroll_tid);
+                        drop(lk);
+                        let mut lk = tracing_hl.lock();
+                        lk.kind = HotLocationKind::Counting(self.hot_threshold());
+                        return TransitionControlPoint::StopUnrollTracing { unroll_tid };
+                    }
                 }
 
-                let mut lk = hl.lock();
-
+                let lk = hl.lock();
                 match lk.kind {
                     HotLocationKind::Compiled(_) | HotLocationKind::Compiling(_) => {
                         let coupler_tid = match lk.kind {
@@ -853,17 +868,7 @@ impl MT {
                         }
                     }
                     HotLocationKind::Counting(_) => TransitionControlPoint::NoAction,
-                    HotLocationKind::Tracing(hl_trid) => {
-                        // This thread is tracing something...
-                        if hl_trid != *tracing_trid {
-                            // ...but it's not this Location.
-                            TransitionControlPoint::NoAction
-                        } else {
-                            // ...and it's this location...
-                            lk.kind = HotLocationKind::Compiling(hl_trid);
-                            TransitionControlPoint::StopLoopTracing(hl_trid)
-                        }
-                    }
+                    HotLocationKind::Tracing(_) => TransitionControlPoint::NoAction,
                     HotLocationKind::DontTrace => TransitionControlPoint::NoAction,
                 }
             }
@@ -880,9 +885,9 @@ impl MT {
                     None => loc.hot_location_arc_clone(),
                 };
                 if let Some(hl) = hl
-                    && seen_hls.push_and_check_unrolling(hl)
+                    && seen_hls.push_and_check_any_loop_closed(hl)
                 {
-                    return TransitionControlPoint::AbortTracing(AbortKind::Unrolled);
+                    todo!();
                 }
                 TransitionControlPoint::NoAction
             }
@@ -1471,6 +1476,10 @@ enum TransitionControlPoint {
     StopLoopTracing(TraceId),
     /// A (ControlPoint, Return) trace has completed.
     StopReturnTracing(TraceId),
+    /// A trace has completed but it is unrolled one iteration of an inner loop.
+    StopUnrollTracing {
+        unroll_tid: TraceId,
+    },
     /// A (Guard, Coupler | Return) trace has completed.
     StopSideTracing {
         trid: TraceId,
@@ -1489,8 +1498,6 @@ enum AbortKind {
     BackIntoExecution,
     /// Tracing continued while the interpreter frame address changed.
     OutOfFrame,
-    /// We unrolled a loop (i.e. we traced a [Location] more than once).
-    Unrolled,
 }
 
 impl std::fmt::Display for AbortKind {
@@ -1498,7 +1505,6 @@ impl std::fmt::Display for AbortKind {
         match *self {
             AbortKind::BackIntoExecution => write!(f, "tracing continued into a JIT frame"),
             AbortKind::OutOfFrame => write!(f, "tracing went outside of starting frame"),
-            AbortKind::Unrolled => write!(f, "tracing unrolled a loop"),
         }
     }
 }
@@ -2030,7 +2036,8 @@ mod tests {
                         TransitionControlPoint::StopCouplerTracing { .. }
                         | TransitionControlPoint::StopLoopTracing(_)
                         | TransitionControlPoint::StopReturnTracing(_)
-                        | TransitionControlPoint::StopSideTracing { .. } => unreachable!(),
+                        | TransitionControlPoint::StopSideTracing { .. }
+                        | TransitionControlPoint::StopUnrollTracing { .. } => unreachable!(),
                     }
                 }
             }));
@@ -2182,6 +2189,34 @@ mod tests {
             TransitionControlPoint::StopReturnTracing(_) => (),
             x => panic!("{x:?}"),
         }
+    }
+
+    #[test]
+    fn unroll_trace() {
+        // Check that a trace that unrolls in an inner loop creates an appropriate set of traces.
+
+        let mt = Arc::new(MT::new().unwrap());
+        mt.set_hot_threshold(0);
+        let loc1 = Location::new();
+        let loc2 = Location::new();
+
+        expect_start_tracing(&mt, &loc1);
+        match mt.transition_control_point(&loc2, std::ptr::null_mut()) {
+            TransitionControlPoint::NoAction => (),
+            x => panic!("{x:?}"),
+        }
+        match mt.transition_control_point(&loc2, std::ptr::null_mut()) {
+            TransitionControlPoint::StopUnrollTracing { .. } => (),
+            x => panic!("{x:?}"),
+        }
+        assert_matches!(
+            loc1.hot_location().unwrap().lock().kind,
+            HotLocationKind::Counting(_)
+        );
+        assert_matches!(
+            loc2.hot_location().unwrap().lock().kind,
+            HotLocationKind::Tracing(_)
+        );
     }
 
     #[test]
