@@ -20,10 +20,10 @@ const STATE_TAG_MASK: usize = 0b11; // All of the tag data must fit in this.
 const STATE_NUM_BITS: usize = 2;
 
 const STATE_NULL: usize = 0b00;
-/// The tag value for a not-yet-hot [Location]. Because null [Location]s have an inner value of 0,
+/// The tag value for a counting [Location]. Because null [Location]s have an inner value of 0,
 /// this value *must* be non-zero. To derive the count of a not-yet-hot [Location], we have to do
 /// `(inner & !1) >> STATE_NUM_BITS` to derive the count.
-const STATE_NOT_HOT: usize = 0b01;
+const STATE_COUNTING: usize = 0b01;
 /// The tag value for a hot [Location]; its [HotLocation] address will be contained in the non-tag
 /// bits.
 const STATE_HOT: usize = 0b10;
@@ -115,9 +115,9 @@ impl Location {
     /// Create a new location.
     pub fn new() -> Self {
         // Locations start in the counting state with a count of 0.
-        debug_assert_ne!(STATE_NOT_HOT, 0);
+        debug_assert_ne!(STATE_COUNTING, 0);
         Self {
-            inner: AtomicUsize::new(STATE_NOT_HOT),
+            inner: AtomicUsize::new(STATE_COUNTING),
         }
     }
 
@@ -141,7 +141,7 @@ impl Location {
     /// then increment and return its count, or `None` otherwise.
     pub(crate) fn inc_count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);
-        if x & STATE_TAG_MASK == STATE_NOT_HOT {
+        if x & STATE_TAG_MASK == STATE_COUNTING {
             // `HotThreshold` must be unsigned
             debug_assert_eq!(HotThreshold::MIN, 0);
             // For the `as` to be safe, `HotThreshold` can't be bigger than `usize`
@@ -157,8 +157,8 @@ impl Location {
 
             self.inner
                 .compare_exchange_weak(
-                    ((old as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
-                    ((new as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
+                    ((old as usize) << STATE_NUM_BITS) | STATE_COUNTING,
+                    ((new as usize) << STATE_NUM_BITS) | STATE_COUNTING,
                     Ordering::Relaxed,
                     Ordering::Relaxed,
                 )
@@ -176,7 +176,7 @@ impl Location {
     /// return its count, or `None` otherwise
     pub(crate) fn count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);
-        if x & STATE_TAG_MASK == STATE_NOT_HOT {
+        if x & STATE_TAG_MASK == STATE_COUNTING {
             // `HotThreshold` must be unsigned
             debug_assert_eq!(HotThreshold::MIN, 0);
             Some((x >> STATE_NUM_BITS) as HotThreshold)
@@ -197,7 +197,7 @@ impl Location {
         let cl: *const Mutex<HotLocation> = Arc::into_raw(Arc::clone(&hl));
         debug_assert_eq!((cl as usize) & !STATE_TAG_MASK, cl as usize);
         match self.inner.compare_exchange(
-            ((old as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
+            ((old as usize) << STATE_NUM_BITS) | STATE_COUNTING,
             (cl as usize) | STATE_HOT,
             Ordering::Relaxed,
             Ordering::Relaxed,
