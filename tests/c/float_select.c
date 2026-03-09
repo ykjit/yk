@@ -1,6 +1,6 @@
 // Compiler:
 //   env-var: YKB_EXTRA_LD_FLAGS=-lm
-//   env-var: YKB_EXTRA_CC_FLAGS=-O1
+//   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
 //   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1

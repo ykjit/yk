@@ -50,6 +50,8 @@ handle_arg() {
             # doesn't interfere with control points that will be added at
             # link-time (the functionalities are guarded by the same flag).
             OUTPUT="${OUTPUT} -mllvm -yk-patch-control-point"
+            # Disable vectorization, as yk can't handle this yet.
+            OUTPUT="${OUTPUT} -mllvm -yk-no-vectorize"
             ;;
         --cppflags)
             # Path to yk.h
@@ -113,6 +115,9 @@ handle_arg() {
             # Find a better way of handling unexported globals inside a trace.
             OUTPUT="${OUTPUT} -Wl,--export-dynamic"
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-linkage"
+
+            # Disable vectorization, as yk can't handle this yet.
+            OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-no-vectorize"
 
             # Linkage to yk as a library.
             OUTPUT="${OUTPUT} -L${DIR}/../target/${profile}/deps"
