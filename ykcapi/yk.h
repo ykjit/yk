@@ -63,11 +63,20 @@ void yk_mt_sidetrace_threshold_set(YkMT *, YkHotThreshold);
 bool yk_is_interpreting();
 
 // Create a new `YkLocation`.
-//
+
 // Note that a `YkLocation` created by this call must not simply be discarded:
 // if no longer wanted, it must be passed to `yk_location_drop` to allow
 // appropriate clean-up.
 YkLocation yk_location_new(void);
+
+// Create a new NULL-equivalent `Location`. Such a `YkLocation` denotes a point
+// in a program which can never contribute to a trace.
+YkLocation yk_location_null(void);
+
+// Determine if the location is a "null" location.
+inline bool yk_location_is_null(YkLocation l) {
+  return l.state == 0;
+}
 
 // Force the location to have a HotLocation and assign it a debug string.
 //
@@ -78,15 +87,6 @@ YkLocation yk_location_new(void);
 //
 // This function is only avaliable if yk was built with the "ykd" feature.
 YkLocation yk_location_set_debug_str(YkLocation *, char *);
-
-// Create a new NULL-equivalent `Location`. Such a `YkLocation` denotes a point
-// in a program which can never contribute to a trace.
-YkLocation yk_location_null(void);
-
-// Determine if the location is a "null" location.
-inline bool yk_location_is_null(YkLocation l) {
-  return l.state == 0;
-}
 
 // Clean-up a `Location` previously created by `yk_new_location`. The
 // `Location` must not be further used after this call or undefined behaviour
