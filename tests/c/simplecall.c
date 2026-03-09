@@ -31,8 +31,8 @@
 //     2
 //     foo
 //     1
-//     bar
 //     yk-execution: deoptimise ...
+//     bar
 //     0
 //     exit
 
