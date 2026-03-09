@@ -60,6 +60,10 @@ pub enum TraceRecorderError {
     #[error("{0}")]
     #[allow(dead_code)]
     TraceBufferOverflow(String),
+    /// A trace buffer-related overflow occurred.
+    #[error("Trace too long")]
+    #[allow(dead_code)]
+    TraceTooLong,
 }
 
 /// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s. The iterator must

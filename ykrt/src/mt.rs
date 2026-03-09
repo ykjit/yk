@@ -414,6 +414,7 @@ impl MT {
                     _ => unreachable!(),
                 });
                 thread_tracer.stop().ok();
+                self.stats.trace_recorded_err();
                 MTThread::set_tracing(IsTracing::None);
                 yklog!(
                     self.log,
@@ -480,6 +481,7 @@ impl MT {
                     }
                 });
                 let _ = thread_tracer.stop();
+                self.stats.trace_recorded_err();
                 self.start_tracing(
                     frameaddr,
                     loc,

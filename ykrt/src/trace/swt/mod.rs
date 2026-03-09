@@ -6,6 +6,9 @@ use super::{
 use crate::mt::MTThread;
 use std::{cell::RefCell, error::Error, sync::Arc};
 
+/// Traces with more than this many items will be turned into [TraceRecorderError::TraceTooLong].
+static TRACE_TOO_LONG: usize = 15000;
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBBlock {
     function_index: u16,
@@ -62,7 +65,11 @@ impl TraceRecorder for SWTTraceRecorder {
             // FIXME: who should handle an empty trace?
             panic!();
         } else {
-            Ok(Box::new(SWTraceIterator::new(bbs)))
+            if bbs.len() > TRACE_TOO_LONG {
+                Err(TraceRecorderError::TraceTooLong)
+            } else {
+                Ok(Box::new(SWTraceIterator::new(bbs)))
+            }
         }
     }
 }
