@@ -36,7 +36,7 @@ __attribute__((noinline, yk_outline)) static int call_me(int x) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   int x = 999, i = 4;
   NOOPT_VAL(i);

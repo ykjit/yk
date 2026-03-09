@@ -24,10 +24,10 @@ int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
 
-  YkLocation loc1 = yk_location_new();
+  YkLocation loc1 = yk_location_loop();
   yk_location_set_debug_str(&loc1, "somefile.lua:1234: for i = 0, 10 do");
 
-  YkLocation loc2 = yk_location_new();
+  YkLocation loc2 = yk_location_loop();
   yk_location_set_debug_str(&loc2, "someotherfile.lua:5678: while j < 1000");
 
   int i = 4;

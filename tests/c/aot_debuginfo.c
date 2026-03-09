@@ -13,9 +13,9 @@
 //     ...
 //     call yk_mt_hot_threshold_set(%{{_}}, 0i32)
 //     ...
-//     # aot_debuginfo.c:{{_}}: YkLocation loc = yk_location_new();
+//     # aot_debuginfo.c:{{_}}: YkLocation loc = yk_location_loop();
 //     ...
-//     %{{_}}: i64 = call yk_location_new()
+//     %{{_}}: i64 = call yk_location_loop()
 //     ...
 //     # aot_debuginfo.c:{{_}}: int i = 4;
 //     ...
@@ -55,7 +55,7 @@
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   int i = 4;
   NOOPT_VAL(i);

@@ -76,7 +76,7 @@ uint64_t add_uint64_t(uint64_t x, uint64_t y) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   size_t li = 4;
   uint32_t k = 38;

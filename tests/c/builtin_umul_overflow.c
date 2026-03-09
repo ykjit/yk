@@ -36,7 +36,7 @@ const int a[5] = {10, 11, 12, 13, 14};
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   int res = 9998;
   int i = 4;

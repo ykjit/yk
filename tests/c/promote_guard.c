@@ -39,7 +39,7 @@ size_t inner(size_t x, size_t y) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   // We will trace 100 baked into the trace, and every iteration where there's
   // a 200 we should guard fail.

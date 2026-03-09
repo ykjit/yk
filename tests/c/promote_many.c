@@ -65,7 +65,7 @@ uint64_t inner(uint64_t a, uint64_t b, uint64_t x, uint64_t y, uint64_t z) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   uint64_t a = 100, b = 99, x = 88, y = 0, z = 2;
   NOOPT_VAL(a);

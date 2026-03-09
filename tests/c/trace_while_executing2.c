@@ -65,8 +65,8 @@ void indirect(YkMT *mt, YkLocation *loc1, YkLocation *loc2, int i, int depth) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc1 = yk_location_new();
-  YkLocation loc2 = yk_location_new();
+  YkLocation loc1 = yk_location_loop();
+  YkLocation loc2 = yk_location_loop();
 
   loop(mt, &loc1, &loc2, 5, 0);
   yk_location_drop(loc1);

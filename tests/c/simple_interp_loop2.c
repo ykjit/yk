@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
   assert(locs != NULL);
   for (int i = 0; i < prog_len; i++)
     if (i == 0)
-      locs[i] = yk_location_new();
+      locs[i] = yk_location_loop();
     else
       locs[i] = yk_location_null();
 

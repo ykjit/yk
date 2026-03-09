@@ -62,12 +62,12 @@ void yk_mt_sidetrace_threshold_set(YkMT *, YkHotThreshold);
 // optimisation, calls to this function will be fully optimised away.
 bool yk_is_interpreting();
 
-// Create a new `YkLocation`.
-
-// Note that a `YkLocation` created by this call must not simply be discarded:
-// if no longer wanted, it must be passed to `yk_location_drop` to allow
+// Create new `YkLocation`s. Note: these should not simply be discarded: if
+// no longer needed, they should be passed to `yk_location_drop` to allow
 // appropriate clean-up.
-YkLocation yk_location_new(void);
+
+// Create a new `Location` representing a loop.
+YkLocation yk_location_loop(void);
 
 // Create a new NULL-equivalent `Location`. Such a `YkLocation` denotes a point
 // in a program which can never contribute to a trace.

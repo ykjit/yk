@@ -141,7 +141,7 @@ pub unsafe extern "C" fn yk_mt_sidetrace_threshold_set(mt: *const MT, hot_thresh
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn yk_location_new() -> Location {
+pub extern "C" fn yk_location_loop() -> Location {
     Location::new()
 }
 

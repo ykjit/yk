@@ -49,8 +49,8 @@ int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 1);
   yk_mt_sidetrace_threshold_set(mt, 3);
-  YkLocation loc1 = yk_location_new();
-  YkLocation loc2 = yk_location_new();
+  YkLocation loc1 = yk_location_loop();
+  YkLocation loc2 = yk_location_loop();
 
   // Make sure location 1 is compiled first.
   loop(mt, NULL, &loc1, 3, "inner");

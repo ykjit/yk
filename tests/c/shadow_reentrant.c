@@ -28,7 +28,7 @@ __attribute((noinline)) int callback(int x, int y) { return (x + y) / 2; }
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 100);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   int x = 0;
   int i = 4;

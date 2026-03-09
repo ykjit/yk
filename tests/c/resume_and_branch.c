@@ -23,7 +23,7 @@ __attribute__((noinline)) void f(int x) { fprintf(stderr, "x=%d\n", x); }
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   int x = 0;
   int i = 4;

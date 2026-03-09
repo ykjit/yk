@@ -42,7 +42,7 @@
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 1);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
 
   int i = 5;

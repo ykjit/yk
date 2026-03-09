@@ -41,7 +41,7 @@ __attribute__((__noinline__)) size_t inner(size_t x) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   size_t x = 25;
   size_t y = 0;

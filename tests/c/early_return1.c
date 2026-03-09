@@ -49,7 +49,7 @@ void loop(YkMT *mt, YkLocation *loc, int i) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 1);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   NOOPT_VAL(loc);
   loop(mt, &loc, 7);

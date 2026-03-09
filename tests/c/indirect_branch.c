@@ -19,7 +19,7 @@
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
   int i = 5;
   int idx = 1;
   void *dispatch[] = {&&label1, &&label3, &&label2};

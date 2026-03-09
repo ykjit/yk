@@ -24,7 +24,7 @@
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   for (uint64_t i = 0; i < 2; i += 1) {
     yk_mt_control_point(mt, &loc);

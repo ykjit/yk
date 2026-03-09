@@ -48,7 +48,7 @@ int main() {
   struct thread_data tds[NUM_THREADS];
   YkLocation locs[NUM_THREADS];
   for (int i = 0; i < NUM_THREADS; i++) {
-    locs[i] = yk_location_new();
+    locs[i] = yk_location_loop();
     tds[i].tnum = i;
     tds[i].loc = &locs[i];
     tds[i].mt = mt;

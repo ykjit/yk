@@ -26,7 +26,7 @@
 int f(int x) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   int i = 3;
   NOOPT_VAL(i);

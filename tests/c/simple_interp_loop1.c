@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
   YkLocation *locs = calloc(prog_len, sizeof(&prog[0]));
   for (int i = 0; i < prog_len; i++)
     if (i == 0)
-      locs[i] = yk_location_new();
+      locs[i] = yk_location_loop();
     else
       locs[i] = yk_location_null();
 

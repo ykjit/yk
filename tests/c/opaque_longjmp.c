@@ -72,7 +72,7 @@ __attribute__((noinline, yk_outline))
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   int r = setjmp(buf);
   if (r == 0) {

@@ -48,7 +48,7 @@ void *main_loop(void *arg) {
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
-  YkLocation loc = yk_location_new();
+  YkLocation loc = yk_location_loop();
 
   // Thread t1 will try tracing the loop and return before a full loop has
   // occurred...
