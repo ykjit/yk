@@ -345,12 +345,24 @@ impl SeenHotLocations {
         }
     }
 
-    /// Record that `hl` has been encountered during tracing. Return `true` if this indicates that
-    /// unrolling has occurred or `false` otherwise.
-    pub(super) fn push_and_check_unrolling(&mut self, hl: Arc<Mutex<HotLocation>>) -> bool {
-        let seen = self.seen.iter().skip(1).any(|x| Arc::ptr_eq(x, &hl));
+    /// Record that `hl` has been encountered during tracing. Return `true` if a loop has been
+    /// formed in the trace. Note: "a loop has been formed" includes both "the entire trace is a
+    /// loop" and "an inner loop has been unrolled".
+    pub(super) fn push_and_check_any_loop_closed(&mut self, hl: Arc<Mutex<HotLocation>>) -> bool {
+        let seen = self.seen.iter().any(|x| Arc::ptr_eq(x, &hl));
         self.seen.push(hl);
         seen
+    }
+
+    /// Return true if [Self] forms a "pure" loop: that is, that the first and last [HotLocation]s
+    /// are equivalent.
+    ///
+    /// # Panics
+    ///
+    /// If there are not at least two [HotLocation]s in `Self`.
+    pub(super) fn is_loop(&self) -> bool {
+        assert!(self.seen.len() > 1);
+        Arc::ptr_eq(self.seen.first().unwrap(), self.seen.last().unwrap())
     }
 }
 

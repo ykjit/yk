@@ -69,25 +69,6 @@
 //!
 //! A HIR [Module] is a complete, high-level, representation of our intuitive notion of a "trace".
 //!
-//! Traces come in different flavours, which we represent as a pair ([TraceStart], [TraceEnd]).
-//! This allows us to subsume the traditional notion of a "loop trace" and so on. 5 of the 6
-//! possibilities are valid ([TraceStart]s in rows, [TraceEnd]s in columns):
-//!
-//! |              | Coupler | Loop | Return |
-//! |--------------|---------|------|--------|
-//! | ControlPoint | ✓       | ✓    | ✓      |
-//! | Guard        | ✓       | ✗    | ✓      |
-//!
-//! Note: this doesn't mean that a guard trace can't end up back at the start of the loop the guard
-//! was in. It does mean that we don't need to treat this as a special option: it is a guard
-//! coupler that happens to end up back at the same trace.
-//!
-//! Depending on the kind of trace (loop etc.), the [TraceEnd] will contain one or more [Block]s
-//! (where a block is a sequence of instructions). Blocks can (or, more accurately, "will")
-//! represent two subtly different things: "body" blocks (including peeled blocks) represent the
-//! core of a trace; "guard" blocks represent side-exits (note: we currently don't do this!). Only
-//! body blocks can contain guards and thus reference guard blocks.
-//!
 //! All blocks have an entry and exit point, with corresponding [VarLocs], though the details
 //! differ between body and guard blocks. Body blocks start with 0 or more [Arg] / [Const]
 //! instructions and end with a [Term] instruction. Guard blocks' entry is defined by the

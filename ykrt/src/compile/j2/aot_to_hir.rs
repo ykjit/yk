@@ -43,13 +43,13 @@ use std::{assert_matches, collections::HashMap, iter::Peekable, marker::PhantomD
 /// The symbol name of the global variable pointers array.
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
-pub(super) struct AotToHir<Reg: RegT> {
+pub(super) struct AotToHir<'a, Reg: RegT> {
     mt: Arc<MT>,
     j2: Arc<J2>,
     /// The AOT IR.
     am: &'static Module,
     hl: Arc<Mutex<HotLocation>>,
-    ta_iter: Peekable<TraceActionIterator>,
+    ta_iter: &'a mut Peekable<Box<dyn crate::trace::AOTTraceIterator>>,
     /// What was the previous [BBlockId] fully processed by [TraceActionIterator]? Note: this is a
     /// bit more subtle than "the value before the most recent `next`". It really means "the last
     /// value before `p_block` or equivalent fully ran". As that suggests, this is rather fragile:
@@ -59,9 +59,12 @@ pub(super) struct AotToHir<Reg: RegT> {
     bkind: BuildKind,
     /// The data passed to successive calls to `yk_promote`. Note: some of this may have been
     /// passed in outlined code and must be ignored in such parts of a trace.
-    promotions: Box<[u8]>,
-    /// How much of [Self::promotions] have we consumed so far?
-    promotions_off: usize,
+    promotions_iter: &'a mut dyn Iterator<Item = &'a u8>,
+    /// The strings used by yk_debug_str
+    debug_strs_iter: &'a mut dyn Iterator<Item = &'a str>,
+    /// Iff debugstrs output is requested, we have to create part of this in [AotToHir::new],
+    /// storing it here with `Some(...)`. Otherwise this will be `None`.
+    debug_strs_joined: Option<String>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array added to the LLVM AOT module by ykllvm containing a pointer to each global
@@ -76,24 +79,23 @@ pub(super) struct AotToHir<Reg: RegT> {
     addr_name_map: Option<HashMap<usize, Option<String>>>,
     /// The JIT IR this struct builds.
     phantom: PhantomData<Reg>,
-    /// The strings used by yk_debug_str
-    debug_strs: Vec<String>,
-    /// The next debug string to process, as an index into [Self::debug_strs].
-    debug_strs_seen: usize,
 }
 
-impl<Reg: RegT + 'static> AotToHir<Reg> {
-    pub(super) fn new(
+impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
+    pub(super) fn new<I>(
         mt: &Arc<MT>,
         j2: &Arc<J2>,
         am: &'static Module,
         hl: Arc<Mutex<HotLocation>>,
-        ta_iter: Box<dyn crate::trace::AOTTraceIterator>,
+        ta_iter: &'a mut Peekable<Box<dyn crate::trace::AOTTraceIterator>>,
         trid: TraceId,
         bkind: BuildKind,
-        promotions: Box<[u8]>,
-        debug_strs: Vec<String>,
-    ) -> Self {
+        promotions_iter: &'a mut dyn Iterator<Item = &'a u8>,
+        debug_strs_iter: &'a mut I,
+    ) -> Self
+    where
+        I: Iterator<Item = &'a str> + Clone,
+    {
         let globals = {
             let ptr = j2.dlsym(GLOBAL_PTR_ARRAY_SYM, false).unwrap().0 as *const *const ();
             assert!(!ptr.is_null());
@@ -106,24 +108,29 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             Box::new(FullOpt::new())
         };
 
+        let debug_strs_joined = if should_log_ir(IRPhase::DebugStrs) {
+            Some(debug_strs_iter.clone().collect::<Vec<_>>().join("\n"))
+        } else {
+            None
+        };
+
         Self {
             mt: Arc::clone(mt),
             j2: Arc::clone(j2),
             am,
             hl,
-            ta_iter: TraceActionIterator::new(ta_iter).peekable(),
+            ta_iter,
             prev_bid: None,
             trid,
             bkind,
-            promotions,
-            promotions_off: 0,
+            promotions_iter,
+            debug_strs_iter,
+            debug_strs_joined,
             globals,
             opt,
             frames: Vec::new(),
             addr_name_map: should_log_any_ir().then_some(HashMap::new()),
             phantom: PhantomData,
-            debug_strs,
-            debug_strs_seen: 0,
         }
     }
 
@@ -222,7 +229,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
         // further processing of the trace should occur.
         let return_safepoint = self.p_blocks()?;
         if return_safepoint.is_none() {
-            assert_eq!(self.promotions_off, self.promotions.len());
+            assert!(self.promotions_iter.next().is_none());
             assert_eq!(self.frames.len(), 1);
             let exit_safepoint = match &bmk {
                 BuildModKind::Loop { entry_safepoint } => entry_safepoint,
@@ -337,7 +344,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
             log_ir(&format!(
                 "--- Begin debugstrs{ds} ---\n; {}\n{}\n--- End debugstrs ---\n",
                 m.json_info().split("\n").collect::<Vec<_>>().join("\n; "),
-                self.debug_strs.join("\n")
+                &self.debug_strs_joined.unwrap()
             ));
         }
 
@@ -510,70 +517,34 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     /// Process the current point of promotion data to a constant of type `ty`. This will update
     /// [Self::promotions_off].
     fn promotion_data_to_const(&mut self, ty: &Ty) -> Result<hir::InstIdx, CompilationError> {
-        let (bitw, iidx) = match ty {
+        match ty {
             Ty::Integer(x) => {
                 let bitw = x.bitw();
                 let v = match bitw {
-                    1..=8 => u64::from(self.promotions[self.promotions_off]),
-                    9..=16 => u64::from(u16::from_ne_bytes([
-                        self.promotions[self.promotions_off],
-                        self.promotions[self.promotions_off + 1],
-                    ])),
-                    17..=32 => u64::from(u32::from_ne_bytes([
-                        self.promotions[self.promotions_off],
-                        self.promotions[self.promotions_off + 1],
-                        self.promotions[self.promotions_off + 2],
-                        self.promotions[self.promotions_off + 3],
-                    ])),
-                    33..=64 => u64::from_ne_bytes([
-                        self.promotions[self.promotions_off],
-                        self.promotions[self.promotions_off + 1],
-                        self.promotions[self.promotions_off + 2],
-                        self.promotions[self.promotions_off + 3],
-                        self.promotions[self.promotions_off + 4],
-                        self.promotions[self.promotions_off + 5],
-                        self.promotions[self.promotions_off + 6],
-                        self.promotions[self.promotions_off + 7],
-                    ]),
+                    1..=8 => u64::from(u8::from_ne_bytes(iter_to_array(self.promotions_iter))),
+                    9..=16 => u64::from(u16::from_ne_bytes(iter_to_array(self.promotions_iter))),
+                    17..=32 => u64::from(u32::from_ne_bytes(iter_to_array(self.promotions_iter))),
+                    33..=64 => u64::from_ne_bytes(iter_to_array(self.promotions_iter)),
                     _ => todo!("{}", x.bitw()),
                 };
                 assert_eq!(ty.bitw(), x.bitw());
                 let tyidx = self.opt.push_ty(hir::Ty::Int(bitw))?;
-                (
-                    bitw,
-                    self.const_to_iidx(
-                        tyidx,
-                        hir::ConstKind::Int(ArbBitInt::from_u64(x.bitw(), v)),
-                    )?,
-                )
+                self.const_to_iidx(tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(x.bitw(), v)))
             }
             Ty::Void => todo!(),
             Ty::Ptr => {
                 let v = match size_of::<usize>() {
-                    8 => usize::from_ne_bytes([
-                        self.promotions[self.promotions_off],
-                        self.promotions[self.promotions_off + 1],
-                        self.promotions[self.promotions_off + 2],
-                        self.promotions[self.promotions_off + 3],
-                        self.promotions[self.promotions_off + 4],
-                        self.promotions[self.promotions_off + 5],
-                        self.promotions[self.promotions_off + 6],
-                        self.promotions[self.promotions_off + 7],
-                    ]),
+                    8 => usize::from_ne_bytes(iter_to_array(self.promotions_iter)),
                     x => todo!("{x}"),
                 };
-                let ty = hir::Ty::Ptr(0);
-                let bitw = ty.bitw();
-                let tyidx = self.opt.push_ty(ty)?;
-                (bitw, self.const_to_iidx(tyidx, hir::ConstKind::Ptr(v))?)
+                let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
+                self.const_to_iidx(tyidx, hir::ConstKind::Ptr(v))
             }
             Ty::Func(_func_ty) => todo!(),
             Ty::Struct(_struct_ty) => todo!(),
             Ty::Float(_float_ty) => todo!(),
             Ty::Unimplemented(_) => todo!(),
-        };
-        self.promotions_off += usize::try_from(bitw.div_ceil(8)).unwrap();
-        Ok(iidx)
+        }
     }
 
     fn vloc_arg_to_const(&mut self, vloc: &VarLoc<Reg>) -> Result<hir::InstIdx, CompilationError> {
@@ -843,7 +814,8 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                     let Some(ta) = self.ta_iter.next() else {
                         return Ok(None);
                     };
-                    let cnd_bid = self.ta_to_bid(&ta?).unwrap();
+                    let ta = ta.map_err(|e| CompilationError::General(format!("{e:?}")))?;
+                    let cnd_bid = self.ta_to_bid(&ta).unwrap();
                     blk = self.am.bblock(&cnd_bid);
                     let mut iidx = 0;
                     pc = InstId::new(cnd_bid.funcidx(), cnd_bid.bbidx(), BBlockInstIdx::new(iidx));
@@ -1104,7 +1076,9 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 self.outline_until(bid)?;
                 return Ok(false);
             }
-            self.promotions_off += usize::try_from(self.am.type_(fty.ret_ty()).bytew()).unwrap();
+            for _ in 0..self.am.type_(fty.ret_ty()).bytew() {
+                let _ = self.promotions_iter.next().unwrap();
+            }
         }
 
         if !func.is_declaration()
@@ -1129,7 +1103,11 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                 pc_safepoint: None,
                 prev_pc: None,
             });
-            let next_ta = &self.ta_iter.next().unwrap()?;
+            let next_ta = &self
+                .ta_iter
+                .next()
+                .unwrap()
+                .map_err(|e| CompilationError::General(format!("{e:?}")))?;
             let next_bid = self.ta_to_bid(next_ta).unwrap();
             assert_eq!(next_bid.funcidx(), *callee);
             assert_eq!(next_bid.bbidx(), BBlockIdx::new(0));
@@ -1289,16 +1267,18 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
                             let Ty::Func(fty) = self.am.type_(func.tyidx()) else {
                                 panic!()
                             };
-                            self.promotions_off +=
-                                usize::try_from(self.am.type_(fty.ret_ty()).bytew()).unwrap();
+                            for _ in 0..self.am.type_(fty.ret_ty()).bytew() {
+                                let _ = self.promotions_iter.next().unwrap();
+                            }
                         }
                     }
                     Inst::Promote { tyidx, .. } => {
-                        self.promotions_off +=
-                            usize::try_from(self.am.type_(*tyidx).bytew()).unwrap();
+                        for _ in 0..self.am.type_(*tyidx).bytew() {
+                            let _ = self.promotions_iter.next().unwrap();
+                        }
                     }
                     Inst::DebugStr { .. } => {
-                        self.debug_strs_seen += 1;
+                        let _ = self.debug_strs_iter.next().unwrap();
                     }
                     _ => (),
                 }
@@ -1517,9 +1497,7 @@ impl<Reg: RegT + 'static> AotToHir<Reg> {
     }
 
     fn p_debugstr(&mut self, iid: InstId) -> Result<(), CompilationError> {
-        assert!(self.debug_strs_seen < self.debug_strs.len());
-        let msg = self.debug_strs[self.debug_strs_seen].clone();
-        self.debug_strs_seen += 1;
+        let msg = self.debug_strs_iter.next().unwrap().to_owned();
         self.push_void_inst_and_link_local(iid, hir::DebugStr(msg))?
             .unwrap();
         Ok(())
@@ -2016,24 +1994,11 @@ impl Frame {
     }
 }
 
-struct TraceActionIterator {
-    ta_iter: Peekable<Box<dyn crate::trace::AOTTraceIterator>>,
-}
-
-impl TraceActionIterator {
-    fn new(ta_iter: Box<dyn crate::trace::AOTTraceIterator>) -> Self {
-        Self {
-            ta_iter: ta_iter.peekable(),
-        }
+/// Consume `N` bytes from `iter` and return an array of those bytes (in order).
+fn iter_to_array<const N: usize>(iter: &mut dyn Iterator<Item = &u8>) -> [u8; N] {
+    let mut out = [0; N];
+    for x in out.iter_mut() {
+        *x = *iter.next().unwrap();
     }
-}
-
-impl Iterator for TraceActionIterator {
-    type Item = Result<TraceAction, CompilationError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.ta_iter
-            .next()
-            .map(|x| x.map_err(|e| CompilationError::General(e.to_string())))
-    }
+    out
 }

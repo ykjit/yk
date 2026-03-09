@@ -20,15 +20,9 @@ io.stderr:write("exit\n")
 --     i 2
 --     yk-tracing: start-tracing: unrolling.lua:2: GTI
 --     j 0
---     yk-warning: tracing-aborted: tracing unrolled a loop: unrolling.lua:4: GETTABUP
---     j 1
---     j 2
---     i 3
---     j 0
---     j 1
+--     yk-warning: tracing-aborted: unrolled inner loop: unrolling.lua:4: GETTABUP
 --     yk-tracing: start-tracing: unrolling.lua:4: GETTABUP
---     j 2
---     i 4
+--     j 1
 --     yk-tracing: stop-tracing: unrolling.lua:4: GETTABUP
 --     --- Begin debugstrs: unrolling.lua:4: GETTABUP ---
 --     ; {
@@ -50,16 +44,22 @@ io.stderr:write("exit\n")
 --     unrolling.lua:4: LOADK
 --     unrolling.lua:4: CALL
 --     unrolling.lua:3: FORLOOP
---     unrolling.lua:7: GETTABUP
---     unrolling.lua:7: GETFIELD
---     unrolling.lua:7: SELF
---     unrolling.lua:7: LOADK
---     unrolling.lua:7: GETTABUP
---     unrolling.lua:7: MOVE
---     unrolling.lua:7: CALL
---     unrolling.lua:7: LOADK
---     unrolling.lua:7: CALL
---     unrolling.lua:1: FORLOOP
+--     --- End debugstrs ---
+--     j 2
+--     i 3
+--     yk-tracing: start-tracing: unrolling.lua:2: GTI
+--     yk-tracing: stop-tracing: unrolling.lua:4: GETTABUP
+--     --- Begin debugstrs: unrolling.lua:2: GTI ---
+--     ; {
+--     ;   "trid": "2",
+--     ;   "start": {
+--     ;     "kind": "ControlPoint"
+--     ;   },
+--     ;   "end": {
+--     ;     "kind": "Coupler",
+--     ;     "tgt_trid": "1"
+--     ;   }
+--     ; }
 --     unrolling.lua:2: GTI
 --     unrolling.lua:3: LOADI
 --     unrolling.lua:3: LOADI
@@ -69,9 +69,14 @@ io.stderr:write("exit\n")
 --     j 0
 --     yk-execution: enter-jit-code: unrolling.lua:4: GETTABUP
 --     j 1
---     yk-execution: deoptimise ...
---     yk-execution: enter-jit-code: unrolling.lua:4: GETTABUP
 --     j 2
+--     yk-execution: deoptimise TraceId(1) GuardId(0)
+--     i 4
+--     yk-execution: enter-jit-code: unrolling.lua:2: GTI
+--     j 0
+--     j 1
+--     j 2
+--     yk-execution: deoptimise TraceId(1) GuardId(0)
+--     yk-tracing: start-side-tracing: unrolling.lua:4: GETTABUP
 --     i 5
---     yk-execution: deoptimise ...
 --     exit

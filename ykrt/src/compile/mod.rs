@@ -1,3 +1,30 @@
+//! JIT compiler interfaces.
+//!
+//! This module contains the various traits and structs that different compilers in yk need to
+//! implement.
+//!
+//!
+//! ## Trace kinds
+//!
+//! Traces come in different flavours, which we represent as a pair ([TraceStart], [TraceEnd]).
+//! This allows us to subsume the traditional notion of a "loop trace" and so on. 5 of the 6
+//! possibilities are valid ([TraceStart]s in rows, [TraceEnd]s in columns):
+//!
+//! |              | Coupler | Loop | Return |
+//! |--------------|---------|------|--------|
+//! | ControlPoint | ✓       | ✓    | ✓      |
+//! | Guard        | ✓       | ✗    | ✓      |
+//!
+//! Note: this doesn't mean that a guard trace can't end up back at the start of the loop the guard
+//! was in. It does mean that we don't need to treat this as a special option: it is a guard
+//! coupler that happens to end up back at the same trace.
+//!
+//! Depending on the kind of trace (loop etc.), the [TraceEnd] will contain one or more [Block]s
+//! (where a block is a sequence of instructions). Blocks can (or, more accurately, "will")
+//! represent two subtly different things: "body" blocks (including peeled blocks) represent the
+//! core of a trace; "guard" blocks represent side-exits (note: we currently don't do this!). Only
+//! body blocks can contain guards and thus reference guard blocks.
+
 use crate::{
     compile::jitc_yk::aot_ir::DeoptSafepoint,
     location::HotLocation,
@@ -9,6 +36,7 @@ use parking_lot::Mutex;
 use std::{
     error::Error,
     fmt,
+    iter::Peekable,
     sync::{Arc, Weak},
 };
 use thiserror::Error;
@@ -47,7 +75,7 @@ pub(crate) trait Compiler: Send + Sync {
     fn compile(
         self: Arc<Self>,
         mt: Arc<MT>,
-        trace: Trace,
+        trace: &mut Trace,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
@@ -66,7 +94,7 @@ pub(crate) struct Trace {
     pub(crate) trace_end: TraceEnd,
     /// The [TraceId] this trace should have when compiled.
     pub(crate) ctrid: TraceId,
-    pub(crate) ta_iter: Box<dyn AOTTraceIterator>,
+    pub(crate) ta_iter: Peekable<Box<dyn AOTTraceIterator>>,
     pub(crate) promotions: Box<[u8]>,
     pub(crate) debug_strs: Vec<String>,
 }

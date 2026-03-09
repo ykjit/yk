@@ -226,12 +226,14 @@ impl Compiler for J2 {
     fn compile(
         self: Arc<Self>,
         mt: Arc<MT>,
-        trace: Trace,
+        trace: &mut Trace,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        let (hl, bkind) = match (trace.trace_start, &trace.trace_end) {
-            (TraceStart::ControlPoint { hl }, TraceEnd::Loop) => (hl, aot_to_hir::BuildKind::Loop),
+        let (hl, bkind) = match (&trace.trace_start, &trace.trace_end) {
+            (TraceStart::ControlPoint { hl }, TraceEnd::Loop) => {
+                (Arc::clone(hl), aot_to_hir::BuildKind::Loop)
+            }
             (TraceStart::ControlPoint { hl }, TraceEnd::Coupler(coupler_tid)) => (
-                hl,
+                Arc::clone(hl),
                 aot_to_hir::BuildKind::Coupler {
                     tgt_ctr: mt.compiled_trace(*coupler_tid),
                 },
@@ -240,26 +242,28 @@ impl Compiler for J2 {
             (TraceStart::Guard { parent_ctr, gid }, TraceEnd::Coupler(coupler_tid)) => (
                 parent_ctr.hl().upgrade().unwrap(),
                 aot_to_hir::BuildKind::Side {
-                    src_ctr: parent_ctr,
-                    src_gid: gid,
+                    src_ctr: Arc::clone(parent_ctr),
+                    src_gid: *gid,
                     tgt_ctr: mt.compiled_trace(*coupler_tid),
                 },
             ),
         };
 
         #[cfg(target_arch = "x86_64")]
-        type AotToHir = aot_to_hir::AotToHir<x64::Reg>;
+        type AotToHir<'a> = aot_to_hir::AotToHir<'a, x64::Reg>;
 
+        let mut promotions_iter = trace.promotions.iter();
+        let mut debug_strs_iter = trace.debug_strs.iter().map(|x| x.as_str());
         let hm = AotToHir::new(
             &mt,
             &self,
             &AOT_MOD,
             Arc::clone(&hl),
-            trace.ta_iter,
+            &mut trace.ta_iter,
             trace.ctrid,
             bkind,
-            trace.promotions,
-            trace.debug_strs,
+            &mut promotions_iter,
+            &mut debug_strs_iter,
         )
         .build()?;
 
