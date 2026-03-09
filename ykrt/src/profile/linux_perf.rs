@@ -8,8 +8,8 @@
 //!
 //!  - The process is run under `perf record`.
 //!
-//!  - The code in this module creates a `jitdump-<pid>.dump` file is created for the process. The
-//!    filename must be of this form, or perf won't find it.
+//!  - The code in this module creates a `jit-<pid>.dump` file for the process. The filename must
+//!    be of this form, or perf won't find it.
 //!
 //!  - The file is mmap(2)'d into the address space with PROT_EXEC permissions and held mapped
 //!    until the process exits. This is how perf is notified of jitdump files that it should look
