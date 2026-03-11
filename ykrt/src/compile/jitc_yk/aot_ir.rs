@@ -33,7 +33,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     error::Error,
-    ffi::{CStr, CString, OsStr},
+    ffi::{CStr, CString, OsStr, c_void},
     fmt::{self, Display},
     fs,
     io::{BufRead, BufReader, Seek, SeekFrom},
@@ -125,6 +125,28 @@ impl Module {
         for (fidx, f) in self.funcs.iter().enumerate() {
             self.func_cache
                 .insert(CString::new(f.name()).unwrap(), FuncIdx(fidx));
+        }
+    }
+
+    pub(crate) fn eval_constexprs(&mut self) {
+        // This assumes that the consts stored are in topological order: i.e. that by the time we
+        // come to evaluate a constant, any constants it depends upon have already been evaluated.
+        // We also assume that `GlobalDecl`s have already been evaluated (since they may be
+        // dependencies too).
+        let oldconsts = self.consts.clone();
+        for (i, c) in oldconsts.iter_enumerated() {
+            match c {
+                Const::Val(_) => (),
+                Const::Unimplemented { .. } => (),
+                Const::Global { .. } => (),
+                Const::ConstExpr(ce) => self.consts[i] = Const::ConstExpr(ce.eval(self)),
+            }
+        }
+    }
+
+    pub(crate) fn eval_globaldecls(&mut self) {
+        for g in &mut self.global_decls {
+            g.eval();
         }
     }
 
@@ -266,6 +288,23 @@ impl std::fmt::Display for Module {
 pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
     let ((_, _), mut modu) = Module::from_bytes((data, 0))?;
     modu.create_func_cache();
+    // Evaluate constants that couldn't be resolved during serialisation:
+    //
+    // - Addresses of global variables aren't known until the process has been loaded.
+    // - Constant expressions can depend on the addresses of global variables.
+    //
+    // We currently eagerly evaluate them all at AOT load time. In theory we could do this lazily,
+    // as the trace compiler uses them. However, this would require synchronisation, as multiple
+    // trace compilers running in threads could request the same constant simultaneously.
+    //
+    // In the future it may be worth investigating if we can have the yk bytecode section loaded by
+    // the loader (instead of reading it out of the on-disk ELF binary, as we do now). I *think*
+    // this would mean that the addresses of globals could be expressed by a symbol resolved by the
+    // loader. As for constant expressions, can a symbol be expressed as an offset of another?
+    //
+    // Note also that this mechanism assumes that symbols are not unloaded/replaced with dl_*().
+    modu.eval_globaldecls();
+    modu.eval_constexprs();
     Ok(modu)
 }
 
@@ -743,7 +782,7 @@ impl Operand {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_inst(m).def_type(m).unwrap()
             }
-            Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx()),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)),
             Self::Global(_) => {
                 // As is the case for LLVM IR, globals are always pointer-typed in Yk AOT IR.
                 &Ty::Ptr
@@ -2005,16 +2044,106 @@ impl fmt::Display for DisplayableTy<'_> {
     }
 }
 
+/// An unevaluated constant expression.
+///
+/// This contains all of the information required to evaluate the expression into a constant value.
+#[deku_derive(DekuRead)]
+#[derive(Clone, Debug)]
+#[deku(id_type = "u8")]
+pub(crate) enum UnevalConstExpr {
+    #[deku(id = "0")]
+    GEP {
+        /// The constant value to perform pointer arithmetic upon.
+        ptr: ConstIdx,
+        /// The offset.
+        off: isize,
+    },
+}
+
+/// A constant expression.
+///
+/// These correspond with sub-classes of LLVM `ConstantExpr`s, e.g. `GetElementPtrConstantExpr`,
+/// `CastConstantExpr`, ...
+#[deku_derive(DekuRead)]
+#[derive(Clone, Debug)]
+pub(crate) struct ConstExpr {
+    // The type index of the expression.
+    tyidx: TyIdx,
+    // The unevaluated expression.
+    uneval: UnevalConstExpr,
+    // The potentially evaluated expression.
+    //
+    // Starts `None` and is evaluated into a `Some`.
+    #[deku(skip)]
+    eval: Option<ConstVal>,
+}
+
+impl ConstExpr {
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConstExpr<'a> {
+        DisplayableConstExpr { constexpr: self, m }
+    }
+
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
+    }
+
+    // Evaluate the constant expression, returning a new `ConstExpr` with its `eval` field
+    // populated.
+    pub(crate) fn eval(&self, m: &Module) -> ConstExpr {
+        let UnevalConstExpr::GEP { ptr, off, .. } = self.uneval;
+        let ptrc = m.const_(ptr);
+
+        let mut constval = ptrc.constval(m).clone();
+        let slice: [u8; _] = constval.bytes.as_slice().try_into().unwrap();
+        assert_eq!(slice.len(), std::mem::size_of::<isize>());
+        let vaddr = isize::from_be_bytes(slice) + off;
+        constval.bytes = Vec::from(vaddr.to_ne_bytes());
+
+        Self {
+            tyidx: self.tyidx,
+            uneval: self.uneval.clone(),
+            eval: Some(constval),
+        }
+    }
+
+    // Returns the constant value of the expression.
+    pub(crate) fn constval(&self) -> &ConstVal {
+        // Can't fail, as we eagerly evaluate all constexprs right after deserialisation.
+        self.eval.as_ref().unwrap()
+    }
+}
+
+pub(crate) struct DisplayableConstExpr<'a> {
+    constexpr: &'a ConstExpr,
+    m: &'a Module,
+}
+
+impl Display for DisplayableConstExpr<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let UnevalConstExpr::GEP { ptr, off, .. } = self.constexpr.uneval;
+        write!(
+            f,
+            "constgep({}+{})",
+            self.m.const_(ptr).display(self.m),
+            off
+        )
+    }
+}
+
 /// A (potentially implemented) constant.
 ///
 /// Constants not handled by the ykllvm serialiser become `Const::Unimplemented`.
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[deku(id_type = "u8")]
 pub(crate) enum Const {
     #[deku(id = "0")]
     Val(ConstVal),
     #[deku(id = "1")]
+    ConstExpr(ConstExpr),
+    #[deku(id = "2")]
+    Global(GlobalDeclIdx),
+    #[deku(id = "3")]
     Unimplemented {
         tyidx: TyIdx,
         #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
@@ -2027,24 +2156,28 @@ impl Const {
         DisplayableConst { constant: self, m }
     }
 
-    /// Returns a `ConstVal` iff `self` is `Cosnt::Val`.
+    /// Returns the `ConstVal` for `Self`.
     ///
     /// # Panics
     ///
-    /// Panics if `self` is `Cosnt::Unimplemented`. The panic message indicates the problematic
+    /// Panics if `self` is `Const::Unimplemented`. The panic message indicates the problematic
     /// constant that requires implementation in the ykllvm serialiser.
-    pub(crate) fn unwrap_val(&self) -> &ConstVal {
+    pub(crate) fn constval<'a>(&'a self, m: &'a Module) -> &'a ConstVal {
         match self {
             Const::Val(v) => v,
+            Const::ConstExpr(e) => e.constval(),
+            Const::Global(gidx) => m.global_decl(*gidx).constval(),
             Const::Unimplemented { llvm_const_str, .. } => {
                 panic!("unimplemented const: {llvm_const_str}")
             }
         }
     }
 
-    pub(crate) fn tyidx(&self) -> TyIdx {
+    pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
             Self::Val(cv) => cv.tyidx(),
+            Self::Global(gidx) => m.global_decl(*gidx).tyidx(),
+            Self::ConstExpr(ce) => ce.tyidx(),
             Self::Unimplemented { tyidx, .. } => *tyidx,
         }
     }
@@ -2059,6 +2192,8 @@ impl Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.constant {
             Const::Val(cv) => write!(f, "{}", cv.display(self.m)),
+            Const::ConstExpr(ce) => write!(f, "{}", ce.display(self.m)),
+            Const::Global(gidx) => write!(f, "@{}", self.m.global_decl(*gidx).name()),
             Const::Unimplemented { llvm_const_str, .. } => {
                 write!(f, "unimplemented <<{llvm_const_str}>>")
             }
@@ -2068,7 +2203,7 @@ impl Display for DisplayableConst<'_> {
 
 /// A constant value.
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ConstVal {
     tyidx: TyIdx,
     #[deku(temp)]
@@ -2116,8 +2251,13 @@ impl Display for DisplayableConstVal<'_> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GlobalDecl {
     is_threadlocal: bool,
+    // FIXME: All LLVM globals are pointer-typed, so this field could be removed if the AOT module
+    // could provide a way of obtaining the type index of a pointer type.
+    tyidx: TyIdx,
     #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
+    #[deku(skip)]
+    eval: Option<ConstVal>,
 }
 
 impl Display for GlobalDecl {
@@ -2134,6 +2274,37 @@ impl GlobalDecl {
 
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
+    }
+
+    // Resolves a `GlobalDecl`'s address and updates it in-place.
+    pub(crate) fn eval(&mut self) {
+        // FIXME: this duplicates J2's dlsym() machinery. Should J2 consult the AOT IR instead of
+        // maintaining its own dlsym() cache?
+        let cn = CString::new(&*self.name).unwrap();
+        let ptr =
+            unsafe { libc::dlsym(std::ptr::null_mut(), cn.as_c_str().as_ptr()) } as *const c_void;
+        if ptr.is_null() {
+            // Failed to find an address for this. Leave it unevaluated. This can happen for
+            // certain special globals.
+            return;
+        }
+        self.eval = Some(ConstVal {
+            tyidx: self.tyidx,
+            bytes: Vec::from((ptr as usize).to_ne_bytes()),
+        });
+    }
+
+    // Returns the constant value of the global.
+    //
+    // Note: globals variables in LLVM are modelled as constant pointers to their storage. Such a
+    // pointer is constant, because globals don't move around. The storage pointed to isn't
+    // necessarily constant though (global variables can be mutable).
+    pub(crate) fn constval(&self) -> &ConstVal {
+        self.eval.as_ref().unwrap()
     }
 }
 
