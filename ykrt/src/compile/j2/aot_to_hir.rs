@@ -260,11 +260,21 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 tgt_ctr,
             } => {
                 let (entry, tys) = self.opt.build()?;
-                (
-                    hir::TraceStart::ControlPoint { entry_safepoint },
-                    hir::TraceEnd::Coupler { entry, tgt_ctr },
-                    tys,
-                )
+                match return_safepoint {
+                    Some(exit_safepoint) => (
+                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceEnd::Return {
+                            entry,
+                            exit_safepoint,
+                        },
+                        tys,
+                    ),
+                    None => (
+                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceEnd::Coupler { entry, tgt_ctr },
+                        tys,
+                    ),
+                }
             }
             BuildModKind::Loop { entry_safepoint } => match return_safepoint {
                 None => {
