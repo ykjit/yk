@@ -714,7 +714,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     fn p_operand(&mut self, op: &Operand) -> Result<hir::InstIdx, CompilationError> {
         match op {
             Operand::Const(cidx) => {
-                let c = self.am.const_(*cidx).unwrap_val();
+                let c = self.am.const_(*cidx).constval(self.am);
                 let bytes = c.bytes();
                 match self.am.type_(c.tyidx()) {
                     Ty::Integer(x) => {
