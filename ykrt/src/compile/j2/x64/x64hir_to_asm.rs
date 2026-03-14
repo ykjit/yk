@@ -320,7 +320,7 @@ impl<'a> X64HirToAsm<'a> {
                     [
                         RegCnstr::Input {
                             in_iidx: load_iidx,
-                            in_fill,
+                            in_fill: RegCnstrFill::Undefined,
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
@@ -359,7 +359,7 @@ impl<'a> X64HirToAsm<'a> {
                         [
                             RegCnstr::Input {
                                 in_iidx: load_iidx,
-                                in_fill: in_fill.clone(),
+                                in_fill: RegCnstrFill::Undefined,
                                 regs: &NORMAL_GP_REGS,
                                 clobber: false,
                             },
@@ -6440,6 +6440,30 @@ mod test {
               cmp qword [r.64.x], 7
               jbe l{{l}}
               ; term [%0]
+            "#],
+        );
+
+        // ICmp optimisation with loads, constants, and zero / sign fills
+        codegen_and_test(
+            "
+              %0: ptr = 0x1234
+              %1: i8 = load %0
+              %2: i8 = 7
+              %3: i1 = icmp sgt %1, %2
+              guard true, %3, []
+              term []
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = 0x1234
+              mov r15, 0x1234
+              ; %1: i8 = load %0
+              ; %2: i8 = 7
+              ; %3: i1 = icmp sgt %1, %2
+              ; guard true, %3, []
+              cmp byte [r15], 7
+              jle l1
+              ; term []
             "#],
         );
     }
