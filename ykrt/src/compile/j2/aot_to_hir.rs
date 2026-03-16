@@ -537,7 +537,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     33..=64 => u64::from_ne_bytes(iter_to_array(self.promotions_iter)),
                     _ => todo!("{}", x.bitw()),
                 };
-                assert_eq!(ty.bitw(), x.bitw());
+                assert_eq!(ty.bitw(self.am), x.bitw());
                 let tyidx = self.opt.push_ty(hir::Ty::Int(bitw))?;
                 self.const_to_iidx(tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(x.bitw(), v)))
             }
