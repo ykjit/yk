@@ -2096,7 +2096,7 @@ impl ConstExpr {
         let mut constval = ptrc.constval(m).clone();
         let slice: [u8; _] = constval.bytes.as_slice().try_into().unwrap();
         assert_eq!(slice.len(), std::mem::size_of::<isize>());
-        let vaddr = isize::from_be_bytes(slice) + off;
+        let vaddr = isize::from_ne_bytes(slice) + off;
         constval.bytes = Vec::from(vaddr.to_ne_bytes());
 
         Self {
