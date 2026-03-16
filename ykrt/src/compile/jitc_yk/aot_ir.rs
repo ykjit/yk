@@ -83,6 +83,8 @@ pub(crate) struct Module {
     magic: u32,
     #[deku(assert = "*version == FORMAT_VERSION")]
     version: u32,
+    /// The bit-size of a pointer.
+    ptr_bitsize: u8,
     /// The bit-size of what LLVM calls "the pointer indexing type", for address space zero.
     ///
     /// This is the signed integer LLVM uses for computing GEP offsets in the default pointer
@@ -2007,10 +2009,10 @@ impl Ty {
         DisplayableTy { type_: self, m }
     }
 
-    pub(crate) fn bitw(&self) -> u32 {
+    pub(crate) fn bitw(&self, m: &Module) -> u32 {
         match self {
             Self::Integer(it) => it.bitw(),
-            Self::Ptr => todo!(),
+            Self::Ptr => u32::from(m.ptr_bitsize),
             _ => todo!(),
         }
     }
@@ -2051,12 +2053,21 @@ impl fmt::Display for DisplayableTy<'_> {
 #[derive(Clone, Debug)]
 #[deku(id_type = "u8")]
 pub(crate) enum UnevalConstExpr {
+    /// A constant GEP.
     #[deku(id = "0")]
     GEP {
         /// The constant value to perform pointer arithmetic upon.
         ptr: ConstIdx,
         /// The offset.
         off: isize,
+    },
+    /// A constant cast.
+    #[deku(id = "1")]
+    Cast {
+        /// The kind of cast.
+        kind: CastKind,
+        /// The constant value to perform pointer arithmetic upon.
+        val: ConstIdx,
     },
 }
 
@@ -2090,14 +2101,29 @@ impl ConstExpr {
     // Evaluate the constant expression, returning a new `ConstExpr` with its `eval` field
     // populated.
     pub(crate) fn eval(&self, m: &Module) -> ConstExpr {
-        let UnevalConstExpr::GEP { ptr, off, .. } = self.uneval;
-        let ptrc = m.const_(ptr);
-
-        let mut constval = ptrc.constval(m).clone();
-        let slice: [u8; _] = constval.bytes.as_slice().try_into().unwrap();
-        assert_eq!(slice.len(), std::mem::size_of::<isize>());
-        let vaddr = isize::from_ne_bytes(slice) + off;
-        constval.bytes = Vec::from(vaddr.to_ne_bytes());
+        let constval = match self.uneval {
+            UnevalConstExpr::GEP { ptr, off, .. } => {
+                let ptrc = m.const_(ptr);
+                let mut constval = ptrc.constval(m).clone();
+                let slice: [u8; _] = constval.bytes.as_slice().try_into().unwrap();
+                assert_eq!(slice.len(), std::mem::size_of::<isize>());
+                let vaddr = isize::from_ne_bytes(slice) + off;
+                constval.bytes = Vec::from(vaddr.to_ne_bytes());
+                constval
+            }
+            UnevalConstExpr::Cast {
+                val,
+                kind: CastKind::IntToPtr,
+                ..
+            } => {
+                let intc = m.const_(val);
+                if m.type_(intc.tyidx(m)).bitw(m) != m.type_(self.tyidx).bitw(m) {
+                    todo!();
+                }
+                intc.constval(m).clone()
+            }
+            _ => todo!(),
+        };
 
         Self {
             tyidx: self.tyidx,
@@ -2120,13 +2146,23 @@ pub(crate) struct DisplayableConstExpr<'a> {
 
 impl Display for DisplayableConstExpr<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let UnevalConstExpr::GEP { ptr, off, .. } = self.constexpr.uneval;
-        write!(
-            f,
-            "constgep({}+{})",
-            self.m.const_(ptr).display(self.m),
-            off
-        )
+        match self.constexpr.uneval {
+            UnevalConstExpr::GEP { ptr, off, .. } => {
+                write!(
+                    f,
+                    "const_gep({}+{})",
+                    self.m.const_(ptr).display(self.m),
+                    off
+                )
+            }
+            UnevalConstExpr::Cast {
+                kind: CastKind::IntToPtr,
+                val,
+            } => {
+                write!(f, "const_inttoptr({})", self.m.const_(val).display(self.m))
+            }
+            _ => todo!(),
+        }
     }
 }
 
