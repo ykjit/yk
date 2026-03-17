@@ -1,10 +1,9 @@
 //! The main end-user interface to the meta-tracing system.
 
 use std::{
-    assert_matches,
     cell::RefCell,
     collections::HashMap,
-    debug_assert_matches, env,
+    env,
     error::Error,
     ffi::c_void,
     marker::PhantomData,
@@ -57,6 +56,16 @@ macro_rules! yklog {
 pub type HotThreshold = u32;
 #[cfg(target_pointer_width = "64")]
 type AtomicHotThreshold = AtomicU32;
+
+/// Maximum number of distinct [HotLocation]s we may have seen on the current trace and still
+/// defer creating a coupler when we hit a compiled location (i.e. continue tracing in the hope of
+/// closing a loop). E.g. 1 = defer only when we have seen one location so far (our start); 2 =
+/// defer when we have seen one or two distinct locations; etc.
+pub type CouplerDeferLimit = u32;
+
+/// Maximum number of distinct hot locations we may have seen and still defer creating a coupler
+/// (continue tracing in the hope of closing a loop). Compile-time constant only.
+pub const COUPLER_DEFER_LIMIT: CouplerDeferLimit = 10;
 
 /// How often can a [HotLocation] or [Guard] lead to an error in tracing or compilation before we
 /// give up trying to trace (or compile...) it?
@@ -201,6 +210,7 @@ impl MT {
         if !self.shutdown.swap(true, Ordering::Relaxed) {
             self.stats.timing_state(TimingState::None);
             self.stats.output();
+            self.trace_profiler.flush();
             self.job_queue.shutdown();
         }
     }
@@ -298,11 +308,16 @@ impl MT {
                     let ctrid = trace.ctrid;
                     let failure = move || {
                         let mut lk = hl.lock();
-                        debug_assert_matches!(lk.kind, HotLocationKind::Compiling(_));
-                        if let TraceFailed::DontTrace = lk.tracecompilation_error(&mt) {
-                            lk.kind = HotLocationKind::DontTrace;
-                        } else {
-                            lk.kind = HotLocationKind::Counting(0);
+                        if let HotLocationKind::Compiling(tid) = lk.kind {
+                            if tid == ctrid {
+                                if let TraceFailed::DontTrace =
+                                    lk.tracecompilation_error(&mt)
+                                {
+                                    lk.kind = HotLocationKind::DontTrace;
+                                } else {
+                                    lk.kind = HotLocationKind::Counting(0);
+                                }
+                            }
                         }
                         mt.job_queue.notify_failure(&mt, ctrid);
                     };
@@ -343,8 +358,14 @@ impl MT {
                     match trace_start {
                         TraceStart::ControlPoint { hl } => {
                             let mut lk = hl.lock();
-                            assert_matches!(lk.kind, HotLocationKind::Compiling(_));
-                            lk.kind = HotLocationKind::Compiled(ctr);
+                            // Only update if this location is still waiting for our trace; with
+                            // COUPLER_DEFER_LIMIT > 1 the same location can start another trace
+                            // before we run, so it may already be Tracing(_) or Compiled(_).
+                            if let HotLocationKind::Compiling(tid) = lk.kind {
+                                if tid == ctrid {
+                                    lk.kind = HotLocationKind::Compiled(ctr);
+                                }
+                            }
                             drop(lk);
                             mt.job_queue.notify_success(ctrid);
                         }
@@ -382,11 +403,18 @@ impl MT {
                     match trace_start {
                         TraceStart::ControlPoint { hl } => {
                             let mut lk = hl.lock();
-                            assert_matches!(lk.kind, HotLocationKind::Compiling(_));
-                            if let TraceFailed::DontTrace = lk.tracecompilation_error(&mt) {
-                                lk.kind = HotLocationKind::DontTrace;
-                            } else {
-                                lk.kind = HotLocationKind::Counting(0);
+                            // Only update if this location is still waiting for our trace (see
+                            // success path).
+                            if let HotLocationKind::Compiling(tid) = lk.kind {
+                                if tid == ctrid {
+                                    if let TraceFailed::DontTrace =
+                                        lk.tracecompilation_error(&mt)
+                                    {
+                                        lk.kind = HotLocationKind::DontTrace;
+                                    } else {
+                                        lk.kind = HotLocationKind::Counting(0);
+                                    }
+                                }
                             }
                             mt.job_queue.notify_failure(&mt, ctrid);
                         }
@@ -837,25 +865,63 @@ impl MT {
                         lk.kind = HotLocationKind::Compiling(*tracing_trid);
                         return TransitionControlPoint::StopLoopTracing(*tracing_trid);
                     } else {
-                        // ...and we have unrolled an inner loop.
-
-                        // We could be much more clever here, but for now we throw away the
-                        // recorded trace, start tracing the inner loop again, and mark the outer
-                        // loop as ready for tracing as soon as it's next encountered.
+                        // ...and we have unrolled an inner loop (we closed a loop at `hl`, not at
+                        // our start). We can either continue tracing (hoping to hit our start and
+                        // get a loop), create a coupler, or abort and restart. Prefer continuing
+                        // when we have few distinct locations so far, so higher COUPLER_DEFER_LIMIT
+                        // yields more loops rather than more couplers.
                         assert!(!Arc::ptr_eq(&hl, tracing_hl));
                         let mut lk = hl.lock();
-                        let unroll_tid = self.next_trace_id();
-                        lk.kind = HotLocationKind::Tracing(unroll_tid);
-                        drop(lk);
-                        let mut lk = tracing_hl.lock();
-                        lk.kind = HotLocationKind::Counting(self.hot_threshold());
-                        return TransitionControlPoint::StopUnrollTracing { unroll_tid };
+                        match lk.kind {
+                            HotLocationKind::Compiled(_) | HotLocationKind::Compiling(_) => {
+                                // We have a coupler target. Only create a coupler if we've already
+                                // seen too many distinct locations; otherwise continue tracing so we
+                                // may yet hit our start and close a loop. (seen_hls.len() is visits;
+                                // distinct count is at most len - 1 here since we just saw a repeat.)
+                                if seen_hls.len() <= COUPLER_DEFER_LIMIT as usize + 1 {
+                                    drop(lk);
+                                    return TransitionControlPoint::NoAction;
+                                }
+                                let coupler_tid = match lk.kind {
+                                    HotLocationKind::Compiled(ref ctr) => ctr.ctrid(),
+                                    HotLocationKind::Compiling(tid) => tid,
+                                    _ => unreachable!(),
+                                };
+                                drop(lk);
+                                let mut lk = tracing_hl.lock();
+                                lk.kind = HotLocationKind::Compiling(*tracing_trid);
+                                return TransitionControlPoint::StopCouplerTracing {
+                                    start_tid: *tracing_trid,
+                                    coupler_tid,
+                                };
+                            }
+                            HotLocationKind::Counting(_)
+                            | HotLocationKind::Tracing(_)
+                            | HotLocationKind::DontTrace => {
+                                // No coupler target; throw away the trace and restart from inner.
+                                let unroll_tid = self.next_trace_id();
+                                lk.kind = HotLocationKind::Tracing(unroll_tid);
+                                drop(lk);
+                                let mut lk = tracing_hl.lock();
+                                lk.kind = HotLocationKind::Counting(self.hot_threshold());
+                                return TransitionControlPoint::StopUnrollTracing { unroll_tid };
+                            }
+                        }
                     }
                 }
 
                 let lk = hl.lock();
                 match lk.kind {
                     HotLocationKind::Compiled(_) | HotLocationKind::Compiling(_) => {
+                        // Coupler-to-loop optimisation: if we have seen at most
+                        // COUPLER_DEFER_LIMIT distinct locations so far, continue tracing past this
+                        // compiled location in the hope of closing the loop when we return to our
+                        // start (e.g. A <-> B with two locations).
+                        if seen_hls.len() <= COUPLER_DEFER_LIMIT as usize {
+                            drop(lk);
+                            seen_hls.push_and_check_any_loop_closed(Arc::clone(&hl));
+                            return TransitionControlPoint::NoAction;
+                        }
                         let coupler_tid = match lk.kind {
                             HotLocationKind::Compiled(ref ctr) => ctr.ctrid(),
                             HotLocationKind::Compiling(ref ctrid) => *ctrid,
@@ -2125,7 +2191,10 @@ mod tests {
 
     #[test]
     fn coupler_trace() {
-        // Check that a trace that encounters a compiled Location turns into a Coupler trace.
+        // With the coupler-to-loop optimisation: when tracing from loc2 we hit loc1 (compiled).
+        // We continue tracing (NoAction). When we then hit loc2 again we close the loop
+        // (StopLoopTracing). If we had already seen more than one location we would get
+        // StopCouplerTracing as before.
 
         let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(0);
@@ -2139,9 +2208,15 @@ mod tests {
             HotLocationKind::Compiled(Arc::new(CompiledTraceTestingMinimal::new()));
 
         expect_start_tracing(&mt, &loc2);
+        // Hit loc1 (compiled): we have only seen loc2 so far, so continue tracing (NoAction).
         assert_matches!(
             mt.transition_control_point(&loc1, ptr::null_mut()),
-            TransitionControlPoint::StopCouplerTracing { .. }
+            TransitionControlPoint::NoAction
+        );
+        // Hit loc2 again: loop closed, so we get a loop trace instead of a coupler.
+        assert_matches!(
+            mt.transition_control_point(&loc2, ptr::null_mut()),
+            TransitionControlPoint::StopLoopTracing(_)
         );
     }
 

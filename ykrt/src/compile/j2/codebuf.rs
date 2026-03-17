@@ -114,6 +114,12 @@ impl ExeCodeBuf {
         self.entry.0
     }
 
+    /// Get a raw pointer to the first byte of the code region (used for slicing the whole buffer;
+    /// may be before [Self::entry_ptr] if the entry point is not at the start of the region).
+    pub fn code_start_ptr(&self) -> *const u8 {
+        unsafe { self.buf.0.byte_add(self.start_off) }
+    }
+
     /// Get a raw pointer to the start of the executable code buffer.
     pub fn sidetrace_entry(&self, sidetrace_off: usize) -> *const u8 {
         unsafe { self.buf.0.byte_add(self.start_off + sidetrace_off) }
@@ -123,6 +129,11 @@ impl ExeCodeBuf {
     #[allow(unused)]
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    /// Return the length in bytes of the executable code (from entry to end of buffer).
+    pub fn code_len(&self) -> usize {
+        self.len - self.start_off
     }
 
     /// Patch part of the executable code. The address `patch_off...patch_off + len` bytes from the

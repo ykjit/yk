@@ -293,7 +293,17 @@ impl Asm {
                         && bufs[off + 1] == 0x0F
                         && bufs[off + 2] == 0x10
                     {
-                        off + 4 // MOVSD / MOVSS
+                        off + 4 // MOVSD / MOVSS (no REX)
+                    } else if (bufs[off] == 0xF2 || bufs[off] == 0xF3)
+                        && bufs[off + 1] >= 0x40
+                        && bufs[off + 1] <= 0x4F
+                        && bufs[off + 2] == 0x0F
+                        && bufs[off + 3] == 0x10
+                    {
+                        // MOVSD / MOVSS with REX (e.g. XMM8–XMM15): F2/F3 [REX] 0F 10.
+                        // LLVM can emit this for high SSE registers; without handling it we
+                        // hit the todo! when patching relocs (e.g. mandelbrot).
+                        off + 5
                     } else {
                         todo!("{:X?}", &bufs[off..off + 3])
                     };

@@ -11,6 +11,10 @@ mod linux_perf;
 pub(crate) trait PlatformTraceProfiler: Send + Sync {
     /// Register newly JITted trace with the platform's profiler.
     fn register_ctr(&self, ctr: &Arc<dyn CompiledTrace>) -> Result<(), Box<dyn Error>>;
+
+    /// Flush any buffered profiler data (e.g. jitdump file). Called during shutdown so the
+    /// profiler is synced before process teardown.
+    fn flush(&self) {}
 }
 
 /// Profiler support that does nothing.

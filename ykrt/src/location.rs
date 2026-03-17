@@ -345,6 +345,11 @@ impl SeenHotLocations {
         }
     }
 
+    /// Number of [HotLocation]s seen so far on this trace.
+    pub(super) fn len(&self) -> usize {
+        self.seen.len()
+    }
+
     /// Record that `hl` has been encountered during tracing. Return `true` if a loop has been
     /// formed in the trace. Note: "a loop has been formed" includes both "the entire trace is a
     /// loop" and "an inner loop has been unrolled".

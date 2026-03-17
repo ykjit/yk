@@ -26,7 +26,8 @@ pub use thread_intercept::yk_foreach_shadowstack;
 pub use thread_intercept::yk_init;
 
 pub use self::location::Location;
-pub use self::mt::{HotThreshold, MT, MTThread};
+pub use self::mt::{CouplerDeferLimit, HotThreshold, MT, MTThread};
+pub use self::mt::COUPLER_DEFER_LIMIT;
 use std::ffi::{CStr, c_char};
 
 #[allow(clippy::missing_safety_doc)]

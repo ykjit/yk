@@ -169,8 +169,11 @@ impl JitDump {
         // char[n]: function name (including the null terminator)
         self.jitdump.write_all(ctr.name().as_bytes())?;
         self.jitdump.write_u8(0)?;
-        // native code.
-        self.jitdump.write_all(ctr.code())?;
+        // native code. Copy to a buffer so the kernel's write() reads from normal
+        // memory; some setups (e.g. execute-only JIT pages) can cause EFAULT when
+        // the write syscall reads from executable mappings.
+        let code = ctr.code().to_vec();
+        self.jitdump.write_all(&code)?;
 
         // patch in the record size.
         let rh_size = self.jitdump.stream_position()? - pos_before;
@@ -195,5 +198,11 @@ impl LinuxPerf {
 impl PlatformTraceProfiler for LinuxPerf {
     fn register_ctr(&self, ctr: &Arc<dyn CompiledTrace>) -> Result<(), Box<dyn Error>> {
         JIT_DUMP.lock().emit_code_load_record(ctr)
+    }
+
+    fn flush(&self) {
+        if let Some(mut dump) = JIT_DUMP.try_lock() {
+            let _ = dump.jitdump.flush();
+        }
     }
 }
