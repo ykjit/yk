@@ -4019,6 +4019,50 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_urem(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        URem { tyidx: _, lhs, rhs }: &URem,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, *lhs);
+        let [_lhsr, rhsr, _] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &[Reg::RAX],
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Signed,
+                    regs: &[Reg::RDX],
+                    can_be_same_as_input: false,
+                },
+            ],
+        )?;
+        assert_ne!(rhsr, Reg::RAX);
+        assert_ne!(rhsr, Reg::RDX);
+        assert!(bitw > 0 && bitw <= 64);
+        self.asm
+            .push_inst(IcedInst::with1(Code::Div_rm64, rhsr.to_reg64()));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Xor_rm32_r32,
+            IcedReg::EDX,
+            IcedReg::EDX,
+        ));
+        Ok(())
+    }
+
     fn i_xor(
         &mut self,
         ra: &mut RegAlloc<Self>,
