@@ -1022,7 +1022,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 exact: false,
             }
             .into(),
-            BinOp::URem => todo!(),
+            BinOp::URem => hir::URem {
+                tyidx: self.p_ty(inst.def_type(self.am).unwrap())?,
+                lhs,
+                rhs,
+            }
+            .into(),
             BinOp::Xor => hir::Xor {
                 tyidx: self.p_ty(inst.def_type(self.am).unwrap())?,
                 lhs,
