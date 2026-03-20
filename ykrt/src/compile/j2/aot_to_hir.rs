@@ -38,7 +38,10 @@ use crate::{
 use index_vec::IndexVec;
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
-use std::{assert_matches, collections::HashMap, iter::Peekable, marker::PhantomData, sync::Arc};
+use std::{
+    assert_matches, collections::HashMap, ffi::CString, iter::Peekable, marker::PhantomData,
+    sync::Arc,
+};
 
 /// The symbol name of the global variable pointers array.
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
@@ -1057,8 +1060,19 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         if inst.is_control_point(self.am) || inst.is_debug_call(self.am) {
             return Ok(false);
         }
+        self.p_static_call(iid, bid, *callee, args, safepoint.as_ref())
+    }
 
-        let func = self.am.func(*callee);
+    /// Handles a call to a statically known callee, maybe inlining it.
+    fn p_static_call(
+        &mut self,
+        iid: InstId,
+        bid: BBlockId,
+        callee: FuncIdx,
+        args: &[Operand],
+        safepoint: Option<&'static DeoptSafepoint>,
+    ) -> Result<bool, CompilationError> {
+        let func = self.am.func(callee);
         // Ignore calls the software tracer makes to record blocks.
         #[cfg(tracer_swt)]
         if func.name() == "__yk_trace_basicblock" {
@@ -1103,7 +1117,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             // `yk_outline` (at least until we can inline calls to that intrinsic).
             && !func.contains_call_to(self.am, "llvm.va_start.p0")
             // Is this a recursive call?
-            && !self.frames.iter().any(|f| f.pc.as_ref().unwrap().funcidx() == *callee)
+            && !self.frames.iter().any(|f| f.pc.as_ref().unwrap().funcidx() == callee)
         {
             // Inlinable call.
             self.frames.last_mut().unwrap().pc_safepoint = Some(safepoint.as_ref().unwrap());
@@ -1111,7 +1125,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 args: jargs,
                 locals: HashMap::new(),
                 pc: Some(InstId::new(
-                    *callee,
+                    callee,
                     BBlockIdx::new(0),
                     BBlockInstIdx::new(0),
                 )),
@@ -1124,7 +1138,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 .unwrap()
                 .map_err(|e| CompilationError::General(format!("{e:?}")))?;
             let next_bid = self.ta_to_bid(next_ta).unwrap();
-            assert_eq!(next_bid.funcidx(), *callee);
+            assert_eq!(next_bid.funcidx(), callee);
             assert_eq!(next_bid.bbidx(), BBlockIdx::new(0));
             Ok(true)
         } else {
@@ -1195,18 +1209,35 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             ftyidx,
             callop,
             args,
-            safepoint: _,
+            safepoint,
         } = inst
         else {
             panic!()
         };
 
-        let ftyidx = self.p_ty(self.am.type_(*ftyidx))?;
         let tgt_iidx = self.p_operand(callop)?;
         let mut jargs = SmallVec::with_capacity(args.len());
         for x in args {
             jargs.push(self.p_operand(x)?);
         }
+
+        // If we have a constant callee pointer, we may be able to inline the call.
+        if let hir::Inst::Const(c) = self.opt.inst(tgt_iidx) {
+            let hir::Const {
+                kind: hir::ConstKind::Ptr(vaddr),
+                ..
+            } = c
+            else {
+                // what are you calling, if not a pointer?
+                panic!()
+            };
+            if let Some(fname) = self.j2.dladdr(*vaddr) {
+                let callee = self.am.funcidx(&CString::new(fname).unwrap());
+                return self.p_static_call(iid.clone(), bid, callee, args, Some(safepoint));
+            }
+        }
+
+        let ftyidx = self.p_ty(self.am.type_(*ftyidx))?;
         let inst = hir::Call {
             tgt: tgt_iidx,
             func_tyidx: ftyidx,
