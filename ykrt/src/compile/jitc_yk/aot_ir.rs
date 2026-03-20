@@ -138,9 +138,10 @@ impl Module {
         let oldconsts = self.consts.clone();
         for (i, c) in oldconsts.iter_enumerated() {
             match c {
-                Const::Val(_) => (),
-                Const::Unimplemented { .. } => (),
-                Const::Global { .. } => (),
+                Const::Global { .. }
+                | Const::Val(_)
+                | Const::Poison(_)
+                | Const::Unimplemented { .. } => (),
                 Const::ConstExpr(ce) => self.consts[i] = Const::ConstExpr(ce.eval(self)),
             }
         }
@@ -2180,6 +2181,8 @@ pub(crate) enum Const {
     #[deku(id = "2")]
     Global(GlobalDeclIdx),
     #[deku(id = "3")]
+    Poison(TyIdx),
+    #[deku(id = "4")]
     Unimplemented {
         tyidx: TyIdx,
         #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
@@ -2203,6 +2206,7 @@ impl Const {
             Const::Val(v) => v,
             Const::ConstExpr(e) => e.constval(),
             Const::Global(gidx) => m.global_decl(*gidx).constval(),
+            Const::Poison(_) => todo!(),
             Const::Unimplemented { llvm_const_str, .. } => {
                 panic!("unimplemented const: {llvm_const_str}")
             }
@@ -2214,6 +2218,7 @@ impl Const {
             Self::Val(cv) => cv.tyidx(),
             Self::Global(gidx) => m.global_decl(*gidx).tyidx(),
             Self::ConstExpr(ce) => ce.tyidx(),
+            Const::Poison(tyidx) => *tyidx,
             Self::Unimplemented { tyidx, .. } => *tyidx,
         }
     }
@@ -2230,6 +2235,7 @@ impl Display for DisplayableConst<'_> {
             Const::Val(cv) => write!(f, "{}", cv.display(self.m)),
             Const::ConstExpr(ce) => write!(f, "{}", ce.display(self.m)),
             Const::Global(gidx) => write!(f, "@{}", self.m.global_decl(*gidx).name()),
+            Const::Poison(tyidx) => write!(f, "poison<{}>", self.m.type_(*tyidx).display(self.m)),
             Const::Unimplemented { llvm_const_str, .. } => {
                 write!(f, "unimplemented <<{llvm_const_str}>>")
             }
