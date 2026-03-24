@@ -171,6 +171,10 @@ pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
 }
 
+/// Call a function for each shadow stack.
+///
+/// For each shadow stack (i.e. for the current and other thread's shadow stacks), the function `f`
+/// is called passing a pointer to the start and end of the shadow stack memory region.
 #[unsafe(no_mangle)]
 pub extern "C" fn yk_foreach_shadowstack(f: extern "C" fn(*mut c_void, *mut c_void)) {
     ykrt::yk_foreach_shadowstack(f)

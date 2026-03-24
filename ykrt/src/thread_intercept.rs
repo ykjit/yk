@@ -35,6 +35,7 @@ struct Target {
     pub arg: *mut c_void,
 }
 
+/// Call a function for each shadow stack.
 pub fn yk_foreach_shadowstack(f: extern "C" fn(*mut c_void, *mut c_void)) {
     for ptr in SHADOW_STACKS.lock().borrow().stacks.iter() {
         let end = ptr.0.wrapping_byte_add(SHADOW_STACK_SIZE);
