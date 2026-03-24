@@ -1,9 +1,14 @@
 use std::os::raw::{c_int, c_void};
 
-use libc::{dlsym, free, malloc, pthread_create};
+use libc::{free, malloc, pthread_create};
 use parking_lot::Mutex;
-use std::{cell::RefCell, ffi::CString, ptr::null_mut};
+use std::cell::{OnceCell, RefCell};
 use ykaddr::addr::symbol_to_ptr;
+
+thread_local! {
+    /// The start of the current thread's shadow stack
+    static THREAD_SHADOW_START: OnceCell<*mut c_void> = const { OnceCell::new() };
+}
 
 // The size of the shadow stack. This is the same size as the default shadow stack in ykllvm.
 const SHADOW_STACK_SIZE: usize = 1000000;
@@ -24,8 +29,7 @@ impl ShadowStacks {
     }
 
     fn register_current_thread(&mut self) {
-        let head_ptr = symbol_to_ptr("shadowstack_0").unwrap();
-        self.stacks.push(ShadowStackPtr(head_ptr as *mut c_void))
+        self.stacks.push(ShadowStackPtr(thread_shadow_start()));
     }
 }
 
@@ -43,6 +47,22 @@ pub fn yk_foreach_shadowstack(f: extern "C" fn(*mut c_void, *mut c_void)) {
     }
 }
 
+/// Return the start of the current thread's shadow stack.
+fn thread_shadow_start() -> *mut c_void {
+    symbol_to_ptr("shadowstack_0").expect("Unable to find shadowstack address") as *mut c_void
+}
+
+/// Return the start and end of the current thread's shadow stack.
+pub fn yk_thread_shadowstack_bounds() -> (*mut c_void, *mut c_void) {
+    let start = THREAD_SHADOW_START.with(|oc| {
+        // For "non-main" threads, `THREAD_SHADOW_START` is guaranteed to be initialised by now.
+        // For the main thread it may not be, so we have to use `get_or_init()`.
+        *oc.get_or_init(thread_shadow_start)
+    });
+    let end = start.wrapping_byte_add(SHADOW_STACK_SIZE);
+    (start, end)
+}
+
 // Called at program startup to register the shadowstack of the main thread.
 pub fn yk_init() {
     SHADOW_STACKS.lock().borrow_mut().register_current_thread();
@@ -50,13 +70,9 @@ pub fn yk_init() {
 
 /// Create a new shadowstack for each new pthread.
 extern "C" fn wrap_thread_routine(tgt: *mut c_void) -> *mut c_void {
-    let str = CString::new("shadowstack_0").unwrap();
     let tgt = unsafe { Box::from_raw(tgt as *mut Target) };
     // Obtain address of a shadowstack_0 symbol
-    let shadowstack_symbol_addr = unsafe { dlsym(null_mut(), str.as_ptr()) };
-    if shadowstack_symbol_addr.is_null() {
-        panic!("Unable to find shadowstack address")
-    }
+    let shadowstack_symbol_addr = thread_shadow_start();
     let newsstack = unsafe { malloc(SHADOW_STACK_SIZE) };
     if newsstack.is_null() {
         panic!("Unable to allocate stack")
@@ -66,6 +82,7 @@ extern "C" fn wrap_thread_routine(tgt: *mut c_void) -> *mut c_void {
         *(shadowstack_symbol_addr as *mut *mut c_void) = newsstack;
         SHADOW_STACKS.lock().borrow_mut().register_current_thread();
     }
+    THREAD_SHADOW_START.with(|oc| oc.set(newsstack).unwrap());
     let ret = (tgt.func)(tgt.arg);
     unsafe { free(newsstack) };
     ret
