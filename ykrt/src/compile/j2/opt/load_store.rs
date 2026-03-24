@@ -271,7 +271,6 @@ impl Address {
             ptr = opt.equiv_iidx(*child_ptr);
         }
         if let Inst::Const(c) = opt.inst(ptr) {
-            assert_eq!(cum_off, 0);
             let Const {
                 tyidx: _,
                 kind: ConstKind::Ptr(addr),
@@ -279,7 +278,7 @@ impl Address {
             else {
                 panic!()
             };
-            Address::Const(*addr)
+            Address::Const(*addr + usize::try_from(cum_off).unwrap())
         } else {
             Address::PtrOff(ptr, cum_off)
         }
@@ -530,6 +529,28 @@ mod test {
           %3: ptr = ptradd %0, 4
           %4: ptr = ptradd %3, -4
           blackbox %1
+        ",
+        );
+    }
+
+    #[test]
+    fn ptradd_const() {
+        // Check that we identify `ptradd ..., <const>` correctly.
+        test_ls(
+            "
+          %0: ptr = 0x1234
+          %1: ptr = ptradd %0, 8
+          %2: i8 = load %1
+          %3: i8 = load %1
+          blackbox %2
+          blackbox %3
+        ",
+            "
+          %0: ptr = 0x1234
+          %1: ptr = ptradd %0, 8
+          %2: i8 = load %1
+          blackbox %2
+          blackbox %2
         ",
         );
     }
