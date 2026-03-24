@@ -1738,6 +1738,11 @@ impl InstT for FAdd {
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
     }
 
     fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
@@ -2056,6 +2061,11 @@ impl InstT for FMul {
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
     }
 
     fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
