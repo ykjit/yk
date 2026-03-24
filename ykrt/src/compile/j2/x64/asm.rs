@@ -305,9 +305,6 @@ impl Asm {
                         _ => unreachable!(),
                     };
                     let diff = i32::try_from(addr.checked_signed_diff(next_ip).unwrap()).unwrap();
-                    if bufs[off] == 0x66 {
-                        println!("{patch_off} {diff}");
-                    }
                     bufs[patch_off..patch_off + 4].copy_from_slice(&diff.to_le_bytes());
                 }
                 RelocKind::NearCallWithAddr(addr) => {
