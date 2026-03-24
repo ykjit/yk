@@ -124,6 +124,8 @@ int yk_pthread_create(
 
 void yk_foreach_shadowstack(void (*closure)(void* shadow_start, void* shadow_end));
 
+void yk_thread_shadowstack_bounds(void **start, void **end);
+
 void yk_init(void);
 
 #endif

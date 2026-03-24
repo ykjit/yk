@@ -22,8 +22,8 @@ pub(crate) mod stack;
 pub(crate) mod thread_intercept;
 pub mod trace;
 
-pub use thread_intercept::yk_foreach_shadowstack;
 pub use thread_intercept::yk_init;
+pub use thread_intercept::{yk_foreach_shadowstack, yk_thread_shadowstack_bounds};
 
 pub use self::location::Location;
 pub use self::mt::{HotThreshold, MT, MTThread};
