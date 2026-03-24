@@ -30,6 +30,7 @@ impl PassT for StrengthFold {
             Inst::AShr(x) => opt_ashr(opt, x),
             Inst::Add(x) => opt_add(opt, x),
             Inst::And(x) => opt_and(opt, x),
+            Inst::BitCast(x) => opt_bitcast(opt, x),
             Inst::CtPop(x) => opt_ctpop(opt, x),
             Inst::DynPtrAdd(x) => opt_dynptradd(opt, x),
             Inst::FAdd(x) => opt_fadd(opt, x),
@@ -253,6 +254,23 @@ where
     }
 
     OptOutcome::Rewritten(inst)
+}
+
+fn opt_bitcast(opt: &mut PassOpt, mut inst: BitCast) -> OptOutcome {
+    inst.canonicalise(opt);
+    let BitCast { tyidx, val } = inst;
+    match (opt.as_constkind(val), opt.ty(tyidx)) {
+        (Some(ConstKind::Int(x)), Ty::Double) => OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Double(f64::from_bits(x.to_zero_ext_u64().unwrap())),
+        })),
+        (Some(ConstKind::Int(x)), Ty::Float) => OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Float(f32::from_bits(x.to_zero_ext_u32().unwrap())),
+        })),
+        (Some(x), y) => todo!("{x:?} {y:?}"),
+        _ => OptOutcome::Rewritten(inst.into()),
+    }
 }
 
 fn opt_ctpop(opt: &mut PassOpt, mut inst: CtPop) -> OptOutcome {
@@ -1245,6 +1263,37 @@ mod test {
             "
           %0: i8 = arg
           %1: i8 = 0
+          blackbox %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_bitcast() {
+        // double
+        test_sf(
+            "
+          %0: i64 = 4609434218613702656
+          %1: double = bitcast %0
+          blackbox %1
+        ",
+            "
+          %0: i64 = 4609434218613702656
+          %1: double = 1.5
+          blackbox %1
+        ",
+        );
+
+        // float
+        test_sf(
+            "
+          %0: i32 = 1069547520
+          %1: float = bitcast %0
+          blackbox %1
+        ",
+            "
+          %0: i32 = 1069547520
+          %1: float = 1.5
           blackbox %1
         ",
         );
