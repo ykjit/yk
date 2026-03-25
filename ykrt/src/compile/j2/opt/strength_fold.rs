@@ -468,6 +468,15 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         }
         inst.canonicalise(opt);
         opt.push_equiv(lhs, rhs);
+    } else if let Inst::Xor(Xor { tyidx: _, lhs, rhs }) = opt.inst(cond)
+        && let Some(ConstKind::Int(x)) = opt.as_constkind(opt.equiv_iidx(*rhs))
+        && x.to_zero_ext_u8() == Some(1)
+    {
+        // If a guard references `xor x, 1` we can invert the guard condition and reference `x`
+        // directly.
+        inst.expect = !expect;
+        inst.cond = *lhs;
+        inst.canonicalise(opt);
     } else {
         inst.canonicalise(opt);
     }
@@ -1828,6 +1837,22 @@ mod test {
           blackbox %2
           blackbox %2
           term [%2, %2]
+        ",
+        );
+
+        // Guards referencing `xor ..., 1`
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = 1
+          %2: i1 = xor %0, %1
+          guard true, %2, []
+          term [%0]
+        ",
+            "
+          %0: i1 = arg
+          guard false, %0, []
+          term [%0]
         ",
         );
     }
