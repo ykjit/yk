@@ -84,7 +84,7 @@ YkLocation yk_location_set_debug_str(YkLocation *, char *);
 YkLocation yk_location_null(void);
 
 // Determine if the location is a "null" location.
-inline bool yk_location_is_null(YkLocation l) {
+static inline bool yk_location_is_null(YkLocation l) {
   return l.state == 0;
 }
 
