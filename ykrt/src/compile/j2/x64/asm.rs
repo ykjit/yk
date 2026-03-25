@@ -289,11 +289,8 @@ impl Asm {
                         && (bufs[off + 2] >= 0x5C && bufs[off + 2] <= 0x62)
                     {
                         off + 4 // PUNPCKLDQ / SUBPD
-                    } else if (bufs[off] == 0xF2 || bufs[off] == 0xF3)
-                        && bufs[off + 1] == 0x0F
-                        && bufs[off + 2] == 0x10
-                    {
-                        off + 4 // MOVSD / MOVSS
+                    } else if (bufs[off] == 0xF2 || bufs[off] == 0xF3) && bufs[off + 1] == 0x0F {
+                        off + 4 // MOVSD / MOVSS / SUBSD / SUBSS
                     } else {
                         todo!("{:X?}", &bufs[off..off + 3])
                     };

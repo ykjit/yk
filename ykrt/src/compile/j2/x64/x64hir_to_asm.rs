@@ -249,6 +249,84 @@ impl<'a> X64HirToAsm<'a> {
         Some((ptr, i64::from(off)))
     }
 
+    /// Generate code for fadd/fdiv/fmul/fsub: `double_code` is the instruction to generate for
+    /// `Ty::Double` and `float_code` for `Ty::Float`.
+    fn i_fop(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        tyidx: TyIdx,
+        lhs: InstIdx,
+        rhs: InstIdx,
+        double_code: Code,
+        float_code: Code,
+    ) -> Result<(), CompilationError> {
+        if let Inst::Const(Const { tyidx: _, kind }) = b.inst(rhs) {
+            let [lhsr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::InputOutput {
+                    in_iidx: lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                }],
+            )?;
+            match kind {
+                ConstKind::Double(x) => {
+                    let lidx = self.push_data(8, &x.to_le_bytes());
+                    self.asm.push_reloc(
+                        IcedInst::with2(
+                            double_code,
+                            lhsr.to_xmm(),
+                            MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                        ),
+                        RelocKind::NearWithLabel(lidx),
+                    );
+                }
+                ConstKind::Float(x) => {
+                    let lidx = self.push_data(8, &x.to_le_bytes());
+                    self.asm.push_reloc(
+                        IcedInst::with2(
+                            float_code,
+                            lhsr.to_xmm(),
+                            MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                        ),
+                        RelocKind::NearWithLabel(lidx),
+                    );
+                }
+                ConstKind::Int(_) | ConstKind::Ptr(_) => unreachable!(),
+            }
+        } else {
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &ALL_XMM_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &ALL_XMM_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match self.m.ty(tyidx) {
+                Ty::Double => IcedInst::with2(double_code, lhsr.to_xmm(), rhsr.to_xmm()),
+                Ty::Float => IcedInst::with2(float_code, lhsr.to_xmm(), rhsr.to_xmm()),
+                _ => panic!(),
+            });
+        }
+
+        Ok(())
+    }
+
     /// Generate code for a guard whose `cond` directly refers to an [ICmp].
     ///
     /// # Panics
@@ -2256,35 +2334,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_fadd(
         &mut self,
         ra: &mut RegAlloc<Self>,
-        _b: &Block,
+        b: &Block,
         iidx: InstIdx,
         FAdd { tyidx, lhs, rhs }: &FAdd,
     ) -> Result<(), CompilationError> {
-        let [lhsr, rhsr] = ra.alloc(
-            self,
+        self.i_fop(
+            ra,
+            b,
             iidx,
-            [
-                RegCnstr::InputOutput {
-                    in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    out_fill: RegCnstrFill::Undefined,
-                    regs: &ALL_XMM_REGS,
-                },
-                RegCnstr::Input {
-                    in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &ALL_XMM_REGS,
-                    clobber: false,
-                },
-            ],
-        )?;
-        self.asm.push_inst(match self.m.ty(*tyidx) {
-            Ty::Double => IcedInst::with2(Code::Addsd_xmm_xmmm64, lhsr.to_xmm(), rhsr.to_xmm()),
-            Ty::Float => IcedInst::with2(Code::Addss_xmm_xmmm32, lhsr.to_xmm(), rhsr.to_xmm()),
-            _ => panic!(),
-        });
-
-        Ok(())
+            *tyidx,
+            *lhs,
+            *rhs,
+            Code::Addsd_xmm_xmmm64,
+            Code::Addss_xmm_xmmm32,
+        )
     }
 
     fn i_fcmp(
@@ -2412,35 +2475,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_fdiv(
         &mut self,
         ra: &mut RegAlloc<Self>,
-        _b: &Block,
+        b: &Block,
         iidx: InstIdx,
         FDiv { tyidx, lhs, rhs }: &FDiv,
     ) -> Result<(), CompilationError> {
-        let [lhsr, rhsr] = ra.alloc(
-            self,
+        self.i_fop(
+            ra,
+            b,
             iidx,
-            [
-                RegCnstr::InputOutput {
-                    in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    out_fill: RegCnstrFill::Undefined,
-                    regs: &ALL_XMM_REGS,
-                },
-                RegCnstr::Input {
-                    in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &ALL_XMM_REGS,
-                    clobber: false,
-                },
-            ],
-        )?;
-        self.asm.push_inst(match self.m.ty(*tyidx) {
-            Ty::Double => IcedInst::with2(Code::Divsd_xmm_xmmm64, lhsr.to_xmm(), rhsr.to_xmm()),
-            Ty::Float => IcedInst::with2(Code::Divss_xmm_xmmm32, lhsr.to_xmm(), rhsr.to_xmm()),
-            _ => panic!(),
-        });
-
-        Ok(())
+            *tyidx,
+            *lhs,
+            *rhs,
+            Code::Divsd_xmm_xmmm64,
+            Code::Divss_xmm_xmmm32,
+        )
     }
 
     fn i_floor(
@@ -2484,35 +2532,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_fmul(
         &mut self,
         ra: &mut RegAlloc<Self>,
-        _b: &Block,
+        b: &Block,
         iidx: InstIdx,
         FMul { tyidx, lhs, rhs }: &FMul,
     ) -> Result<(), CompilationError> {
-        let [lhsr, rhsr] = ra.alloc(
-            self,
+        self.i_fop(
+            ra,
+            b,
             iidx,
-            [
-                RegCnstr::InputOutput {
-                    in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    out_fill: RegCnstrFill::Undefined,
-                    regs: &ALL_XMM_REGS,
-                },
-                RegCnstr::Input {
-                    in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &ALL_XMM_REGS,
-                    clobber: false,
-                },
-            ],
-        )?;
-        self.asm.push_inst(match self.m.ty(*tyidx) {
-            Ty::Double => IcedInst::with2(Code::Mulsd_xmm_xmmm64, lhsr.to_xmm(), rhsr.to_xmm()),
-            Ty::Float => IcedInst::with2(Code::Mulss_xmm_xmmm32, lhsr.to_xmm(), rhsr.to_xmm()),
-            _ => panic!(),
-        });
-
-        Ok(())
+            *tyidx,
+            *lhs,
+            *rhs,
+            Code::Mulsd_xmm_xmmm64,
+            Code::Mulss_xmm_xmmm32,
+        )
     }
 
     fn i_fneg(
@@ -2579,35 +2612,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_fsub(
         &mut self,
         ra: &mut RegAlloc<Self>,
-        _b: &Block,
+        b: &Block,
         iidx: InstIdx,
         FSub { tyidx, lhs, rhs }: &FSub,
     ) -> Result<(), CompilationError> {
-        let [lhsr, rhsr] = ra.alloc(
-            self,
+        self.i_fop(
+            ra,
+            b,
             iidx,
-            [
-                RegCnstr::InputOutput {
-                    in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    out_fill: RegCnstrFill::Undefined,
-                    regs: &ALL_XMM_REGS,
-                },
-                RegCnstr::Input {
-                    in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &ALL_XMM_REGS,
-                    clobber: false,
-                },
-            ],
-        )?;
-        self.asm.push_inst(match self.m.ty(*tyidx) {
-            Ty::Double => IcedInst::with2(Code::Subsd_xmm_xmmm64, lhsr.to_xmm(), rhsr.to_xmm()),
-            Ty::Float => IcedInst::with2(Code::Subss_xmm_xmmm32, lhsr.to_xmm(), rhsr.to_xmm()),
-            _ => panic!(),
-        });
-
-        Ok(())
+            *tyidx,
+            *lhs,
+            *rhs,
+            Code::Subsd_xmm_xmmm64,
+            Code::Subss_xmm_xmmm32,
+        )
     }
 
     fn i_fpext(
@@ -5553,9 +5571,8 @@ mod test {
               ; %0: double = 1.1
               movsd fp.128.x, l{{2}}
               ; %1: double = 2.1
-              movsd fp.128.y, l{{1}}
               ; %2: double = fadd %0, %1
-              addsd fp.128.x, fp.128.y
+              addsd fp.128.x, l{{1}}
               ; blackbox %2
               ; term []
              ",
@@ -5568,9 +5585,8 @@ mod test {
               ; %0: double = 1.1
               movsd fp.128.x, l{{2}}
               ; %1: double = 2.1
-              movsd fp.128.y, l{{1}}
               ; %2: double = fadd %0, %1
-              addsd fp.128.x, fp.128.y
+              addsd fp.128.x, l{{1}}
               ; blackbox %2
               ; term []
              ",
@@ -5596,9 +5612,8 @@ mod test {
               ; %0: float = 1.1
               movss fp.128.x, l{{2}}
               ; %1: float = 2.1
-              movss fp.128.y, l{{1}}
               ; %2: float = fadd %0, %1
-              addss fp.128.x, fp.128.y
+              addss fp.128.x, l{{1}}
               ; blackbox %2
               ; term []
             ",
@@ -5611,9 +5626,8 @@ mod test {
               ; %0: float = 1.1
               movss fp.128.x, l{{2}}
               ; %1: float = 2.1
-              movss fp.128.y, l{{1}}
               ; %2: float = fadd %0, %1
-              addss fp.128.x, fp.128.y
+              addss fp.128.x, l{{1}}
               ; blackbox %2
               ; term []
             ",
@@ -5761,6 +5775,42 @@ mod test {
 
     #[test]
     fn cg_fadd() {
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: double = 1.5double
+              %2: double = fadd %0, %1
+              term [%2]
+            ",
+            &["
+              ; l1
+              db 0, 0, 0, 0, 0, 0, 0xF8, 0x3F
+              ...
+              ; %1: double = 1.5
+              ; %2: double = fadd %0, %1
+              addsd fp.128._, l1
+              ; term [%2]
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: float = arg [reg]
+              %1: float = 1.5float
+              %2: float = fadd %0, %1
+              term [%2]
+            ",
+            &["
+              ; l1
+              db 0, 0, 0xC0, 0x3F
+              ...
+              ; %1: float = 1.5
+              ; %2: float = fadd %0, %1
+              addss fp.128._, l1
+              ; term [%2]
+            "],
+        );
+
         codegen_and_test(
             "
               %0: float = arg [reg]
@@ -5957,6 +6007,42 @@ mod test {
     fn cg_fdiv() {
         codegen_and_test(
             "
+              %0: double = arg [reg]
+              %1: double = 1.5double
+              %2: double = fdiv %0, %1
+              term [%2]
+            ",
+            &["
+              ; l1
+              db 0, 0, 0, 0, 0, 0, 0xF8, 0x3F
+              ...
+              ; %1: double = 1.5
+              ; %2: double = fdiv %0, %1
+              divsd fp.128._, l1
+              ; term [%2]
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: float = arg [reg]
+              %1: float = 1.5float
+              %2: float = fdiv %0, %1
+              term [%2]
+            ",
+            &["
+              ; l1
+              db 0, 0, 0xC0, 0x3F
+              ...
+              ; %1: float = 1.5
+              ; %2: float = fdiv %0, %1
+              divss fp.128._, l1
+              ; term [%2]
+            "],
+        );
+
+        codegen_and_test(
+            "
               %0: float = arg [reg]
               %1: float = arg [reg]
               %2: float = fdiv %0, %1
@@ -6006,6 +6092,42 @@ mod test {
 
     #[test]
     fn cg_fmul() {
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: double = 1.5double
+              %2: double = fmul %0, %1
+              term [%2]
+            ",
+            &["
+              ; l1
+              db 0, 0, 0, 0, 0, 0, 0xF8, 0x3F
+              ...
+              ; %1: double = 1.5
+              ; %2: double = fmul %0, %1
+              mulsd fp.128._, l1
+              ; term [%2]
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: float = arg [reg]
+              %1: float = 1.5float
+              %2: float = fmul %0, %1
+              term [%2]
+            ",
+            &["
+              ; l1
+              db 0, 0, 0xC0, 0x3F
+              ...
+              ; %1: float = 1.5
+              ; %2: float = fmul %0, %1
+              mulss fp.128._, l1
+              ; term [%2]
+            "],
+        );
+
         codegen_and_test(
             "
               %0: float = arg [reg]
@@ -6078,6 +6200,42 @@ mod test {
 
     #[test]
     fn cg_fsub() {
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: double = 1.5double
+              %2: double = fsub %0, %1
+              term [%2]
+            ",
+            &["
+              ; l1
+              db 0, 0, 0, 0, 0, 0, 0xF8, 0x3F
+              ...
+              ; %1: double = 1.5
+              ; %2: double = fsub %0, %1
+              subsd fp.128._, l1
+              ; term [%2]
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: float = arg [reg]
+              %1: float = 1.5float
+              %2: float = fsub %0, %1
+              term [%2]
+            ",
+            &["
+              ; l1
+              db 0, 0, 0xC0, 0x3F
+              ...
+              ; %1: float = 1.5
+              ; %2: float = fsub %0, %1
+              subss fp.128._, l1
+              ; term [%2]
+            "],
+        );
+
         codegen_and_test(
             "
               %0: float = arg [reg]
