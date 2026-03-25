@@ -298,6 +298,25 @@ impl<'a> X64HirToAsm<'a> {
                 }
                 ConstKind::Int(_) | ConstKind::Ptr(_) => unreachable!(),
             }
+        } else if lhs == rhs {
+            // If the LHS and RHS reference the same variable, we don't need to request two
+            // separate registers. If and when the register allocator merges registers, we can
+            // remove this clause entirely.
+            let [lhsr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::InputOutput {
+                    in_iidx: lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                }],
+            )?;
+            self.asm.push_inst(match self.m.ty(tyidx) {
+                Ty::Double => IcedInst::with2(double_code, lhsr.to_xmm(), lhsr.to_xmm()),
+                Ty::Float => IcedInst::with2(float_code, lhsr.to_xmm(), lhsr.to_xmm()),
+                _ => panic!(),
+            });
         } else {
             let [lhsr, rhsr] = ra.alloc(
                 self,
