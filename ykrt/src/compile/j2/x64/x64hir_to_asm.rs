@@ -943,8 +943,14 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 | Inst::ZExt(ZExt { val, .. }) => *val,
 
                 // Calls need to update `last_call`.
-                Inst::Call(_) => {
-                    self.reg_hints.push(Reg::RAX);
+                Inst::Call(Call { func_tyidx, .. }) => {
+                    let fty = self.m.func_ty(*func_tyidx);
+                    self.reg_hints.push(match self.m.ty(fty.rtn_tyidx) {
+                        Ty::Double | Ty::Float => Reg::XMM0,
+                        Ty::Func(_) => todo!(),
+                        Ty::Int(_) | Ty::Ptr(_) => Reg::RAX,
+                        Ty::Void => Reg::Undefined,
+                    });
                     last_call = iidx;
                     continue;
                 }
@@ -4526,7 +4532,7 @@ mod test {
     }
 
     #[test]
-    fn reg_hints() {
+    fn reg_hint_ptradds() {
         // Check ptradd/dynptradd instructions forward hints onwards.
         let m = str_to_mod::<Reg>(
             r#"
@@ -4567,7 +4573,51 @@ mod test {
             x64be.reg_hint(b, args_vlocs, InstIdx::new(6), InstIdx::new(1)),
             Some(Reg::R9)
         );
+    }
 
+    #[test]
+    fn reg_hint_call_return_types() {
+        // Check call return types
+        let m = str_to_mod::<Reg>(
+            r#"
+          extern f()
+          extern g() -> i8
+          extern h() -> double
+
+          %0: ptr = 0
+          %1: ptr = 0
+          %2: ptr = 0
+          call f %0()
+          %4: i8 = call g %1()
+          %5: double = call h %2()
+          term []
+        "#,
+        );
+        let TraceEnd::Test {
+            block: b,
+            args_vlocs,
+        } = &m.trace_end
+        else {
+            panic!()
+        };
+        let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
+        x64be.about_to_process_block(b, args_vlocs);
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(4), InstIdx::new(3)),
+            None
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(4)),
+            Some(Reg::RAX)
+        );
+        assert_eq!(
+            x64be.reg_hint(b, args_vlocs, InstIdx::new(6), InstIdx::new(5)),
+            Some(Reg::XMM0)
+        );
+    }
+
+    #[test]
+    fn reg_hint_clobbers() {
         // Check clobbers either side of calls
         let m = str_to_mod::<Reg>(
             r#"
