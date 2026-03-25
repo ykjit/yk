@@ -468,6 +468,15 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         }
         inst.canonicalise(opt);
         opt.push_equiv(lhs, rhs);
+    } else if let Inst::Xor(Xor { tyidx: _, lhs, rhs }) = opt.inst(cond)
+        && let Some(ConstKind::Int(x)) = opt.as_constkind(opt.equiv_iidx(*rhs))
+        && x.to_zero_ext_u8() == Some(1)
+    {
+        // If a guard references `xor x, 1` we can invert the guard condition and reference `x`
+        // directly.
+        inst.expect = !expect;
+        inst.cond = *lhs;
+        inst.canonicalise(opt);
     } else {
         inst.canonicalise(opt);
     }
@@ -983,9 +992,44 @@ fn opt_xor(opt: &mut PassOpt, mut inst: Xor) -> OptOutcome {
                 kind: ConstKind::Int(lhs_c.bitxor(&rhs_c)),
             }));
         }
-        (_, Some(ConstKind::Int(rhs_c))) if rhs_c.to_zero_ext_u8() == Some(0) => {
-            // Reduce `x ^ 0` to `x`.
-            return OptOutcome::Equiv(lhs);
+        (_, Some(ConstKind::Int(rhs_c))) => {
+            if rhs_c.to_zero_ext_u8() == Some(0) {
+                // Reduce `x ^ 0` to `x`.
+                return OptOutcome::Equiv(lhs);
+            } else if bitw == 1
+                && let Inst::ICmp(ICmp {
+                    pred,
+                    lhs,
+                    rhs,
+                    samesign,
+                }) = opt.inst(lhs)
+            {
+                // Optimise negation expressed as `xor` and `icmp` i.e. optimise:
+                //   %2: i1 = 1
+                //   %3: i1 = icmp <pred>, ...
+                //   %4: i1 = xor %3, %2
+                // to:
+                //   %3: i1 = icmp <!pred>, ...
+                // i.e. instead of emitted `xor`, emit an inverted `icmp`.
+                let pred = match pred {
+                    IPred::Eq => IPred::Ne,
+                    IPred::Ne => IPred::Eq,
+                    IPred::Ugt => IPred::Ule,
+                    IPred::Uge => IPred::Ult,
+                    IPred::Ult => IPred::Uge,
+                    IPred::Ule => IPred::Ugt,
+                    IPred::Sgt => IPred::Sle,
+                    IPred::Sge => IPred::Slt,
+                    IPred::Slt => IPred::Sge,
+                    IPred::Sle => IPred::Sgt,
+                };
+                return OptOutcome::Rewritten(Inst::ICmp(ICmp {
+                    pred,
+                    lhs: *lhs,
+                    rhs: *rhs,
+                    samesign: *samesign,
+                }));
+            }
         }
         _ => (),
     }
@@ -1793,6 +1837,22 @@ mod test {
           blackbox %2
           blackbox %2
           term [%2, %2]
+        ",
+        );
+
+        // Guards referencing `xor ..., 1`
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = 1
+          %2: i1 = xor %0, %1
+          guard true, %2, []
+          term [%0]
+        ",
+            "
+          %0: i1 = arg
+          guard false, %0, []
+          term [%0]
         ",
         );
     }
@@ -3248,6 +3308,71 @@ mod test {
             "
           %0: i8 = arg
           term [%0]
+        ",
+        );
+
+        // icmp inversion with `xor ..., 1`
+        test_sf(
+            "
+          %0: i8 = arg [ reg ]
+          %1: i8 = arg [ reg ]
+          %2: i1 = 1
+          %3: i1 = icmp eq %0, %1
+          %4: i1 = xor %3, %2
+          blackbox %4
+          %6: i1 = icmp ne %0, %1
+          %7: i1 = xor %6, %2
+          blackbox %7
+          %9: i1 = icmp ugt %0, %1
+          %10: i1 = xor %9, %2
+          blackbox %10
+          %12: i1 = icmp uge %0, %1
+          %13: i1 = xor %12, %2
+          blackbox %13
+          %15: i1 = icmp ult %0, %1
+          %16: i1 = xor %15, %2
+          blackbox %16
+          %18: i1 = icmp ule %0, %1
+          %19: i1 = xor %18, %2
+          blackbox %19
+          %21: i1 = icmp sgt %0, %1
+          %22: i1 = xor %21, %2
+          blackbox %22
+          %24: i1 = icmp sge %0, %1
+          %25: i1 = xor %24, %2
+          blackbox %25
+          %27: i1 = icmp slt %0, %1
+          %28: i1 = xor %27, %2
+          blackbox %28
+          %30: i1 = icmp sle %0, %1
+          %31: i1 = xor %30, %2
+          blackbox %31
+          term [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %4: i1 = icmp ne %0, %1
+          blackbox %4
+          %7: i1 = icmp eq %0, %1
+          blackbox %7
+          %10: i1 = icmp ule %0, %1
+          blackbox %10
+          %13: i1 = icmp ult %0, %1
+          blackbox %13
+          %16: i1 = icmp uge %0, %1
+          blackbox %16
+          %19: i1 = icmp ugt %0, %1
+          blackbox %19
+          %22: i1 = icmp sle %0, %1
+          blackbox %22
+          %25: i1 = icmp slt %0, %1
+          blackbox %25
+          %28: i1 = icmp sge %0, %1
+          blackbox %28
+          %31: i1 = icmp sgt %0, %1
+          blackbox %31
+          term [%0, %1]
         ",
         );
     }
