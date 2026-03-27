@@ -4068,7 +4068,10 @@ impl InstT for Sub {
     }
 }
 
-/// A block terminator.
+/// A block terminator. The interpretation of `Term` and its `Vec<InstIdx>` depends on the style of
+/// [Mod] it is present in. For example, in a `Return` trace, there will be zero or 1 `InstIdx`s in
+/// the `Vec`: if there is 1 `InstIdx`, it means a return value is expected to be percolated to the
+/// caller.
 #[derive(Clone, Debug)]
 pub(super) struct Term(pub(super) Vec<InstIdx>);
 

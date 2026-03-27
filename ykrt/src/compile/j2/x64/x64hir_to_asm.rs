@@ -1473,7 +1473,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn star_return_end(
         &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
         exit_safepoint: &'static DeoptSafepoint,
+        ret_val: Option<InstIdx>,
     ) -> Result<(), CompilationError> {
         #[cfg(not(test))]
         let csrs = {
@@ -1507,6 +1511,29 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RSP,
             IcedReg::RBP,
         ));
+
+        if let Some(ret_val) = ret_val {
+            match b.inst_ty(self.m, ret_val) {
+                Ty::Double => todo!(),
+                Ty::Float => todo!(),
+                Ty::Func(_) => todo!(),
+                Ty::Int(_) | Ty::Ptr(_) => {
+                    let bitw = b.inst_bitw(self.m, ret_val);
+                    assert!(bitw <= 64);
+                    let [_] = ra.alloc(
+                        self,
+                        iidx,
+                        [RegCnstr::Input {
+                            in_iidx: ret_val,
+                            in_fill: RegCnstrFill::Zeroed,
+                            regs: &[Reg::RAX],
+                            clobber: false,
+                        }],
+                    )?;
+                }
+                Ty::Void => unreachable!(),
+            }
+        }
 
         Ok(())
     }
