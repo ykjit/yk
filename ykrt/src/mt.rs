@@ -458,13 +458,13 @@ impl MT {
                 start_tid,
                 coupler_tid,
             } => {
-                self.stop_tracing(frameaddr, loc, start_tid, Some(coupler_tid));
+                self.stop_tracing(frameaddr, loc, start_tid, TraceEnd::Coupler(coupler_tid));
             }
             TransitionControlPoint::StopLoopTracing(trid) => {
-                self.stop_tracing(frameaddr, loc, trid, None);
+                self.stop_tracing(frameaddr, loc, trid, TraceEnd::Loop);
             }
             TransitionControlPoint::StopReturnTracing(trid) => {
-                self.stop_tracing(frameaddr, loc, trid, None);
+                self.stop_tracing(frameaddr, loc, trid, TraceEnd::Loop);
             }
             TransitionControlPoint::StopUnrollTracing { unroll_tid } => {
                 yklog!(
@@ -607,14 +607,13 @@ impl MT {
         });
     }
 
-    /// Stop tracing of the trace with id `trid` at `loc`. If `coupler_tid` is `Some`, the
-    /// resulting trace will be a coupler trace.
+    /// Stop tracing of the trace with id `trid` at `loc`.
     fn stop_tracing(
         self: &Arc<Self>,
         _frameaddr: *mut c_void,
         _loc: &Location,
         ctrid: TraceId,
-        coupler_tid: Option<TraceId>,
+        trace_end: TraceEnd,
     ) {
         // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
         // will have put a `Some` in the `Rc`.
@@ -642,10 +641,6 @@ impl MT {
                     "stop-tracing",
                     _loc.hot_location()
                 );
-                let trace_end = match coupler_tid {
-                    Some(x) => TraceEnd::Coupler(x),
-                    None => TraceEnd::Loop,
-                };
                 self.queue_compile_job(Trace {
                     trace_start: TraceStart::ControlPoint { hl },
                     trace_end,
