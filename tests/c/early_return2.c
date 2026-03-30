@@ -18,7 +18,22 @@
 //     b1
 //     ret1
 //     9
-//     yk-warning: tracing-aborted: tracing went outside of starting frame
+//     yk-tracing: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ; {
+//     ;   "trid": "{{_}}",
+//     ;   "start": {
+//     ;     "kind": "Guard",
+//     ;     "src_trid": "{{_}}",
+//     ;     "gidx": "{{_}}"
+//     ;   },
+//     ;   "end": {
+//     ;     "kind": "Return"
+//     ;   }
+//     ; }
+//     ...
+//     term []
+//     --- End jit-pre-opt ---
 //     b3
 //     8
 //     yk-execution: enter-jit-code

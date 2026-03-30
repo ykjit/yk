@@ -2121,11 +2121,15 @@ impl ConstExpr {
                 if m.type_(intc.tyidx(m)).bitw(m) != m.type_(self.tyidx).bitw(m) {
                     todo!();
                 }
-                intc.constval(m).clone()
+                ConstVal {
+                    tyidx: self.tyidx,
+                    bytes: intc.constval(m).bytes().to_vec(),
+                }
             }
             _ => todo!(),
         };
 
+        assert_eq!(self.tyidx, constval.tyidx);
         Self {
             tyidx: self.tyidx,
             uneval: self.uneval.clone(),
