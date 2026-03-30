@@ -1802,9 +1802,13 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             // remaining blocks and emit a return instruction that naturally returns from a
             // compiled trace into the interpreter.
             let safepoint = frame.pc_safepoint.unwrap();
-            // We currently don't support passing values back during early returns.
-            assert!(val.is_none());
-            self.opt.feed_void(hir::Term(Vec::new()).into())?;
+            self.opt.feed_void(
+                hir::Term(match val {
+                    Some(x) => vec![x],
+                    None => vec![],
+                })
+                .into(),
+            )?;
             Ok(Some(safepoint))
         }
     }

@@ -249,8 +249,18 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     } => {
                         let mut ra =
                             RegAlloc::<AB>::new(self.m, entry, &args_vlocs, base_stack_off);
-                        assert!(entry.term_vars().is_empty());
-                        self.be.star_return_end(exit_safepoint)?;
+                        let rtn_val = match entry.term_vars() {
+                            [x] => Some(*x),
+                            [] => None,
+                            _ => unreachable!(),
+                        };
+                        self.be.star_return_end(
+                            &mut ra,
+                            entry,
+                            InstIdx::from(entry.insts_len() - 1),
+                            exit_safepoint,
+                            rtn_val,
+                        )?;
                         ra.set_term_vlocs(&mut self.be, entry, false, &args_vlocs, &[])?;
                         let entry_stack_off = self.p_block(entry, Some(entry), ra, &args_vlocs)?;
                         let post_stack_label = self.be.controlpoint_coupler_or_return_start(
@@ -306,7 +316,18 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         exit_safepoint,
                     } => {
                         let mut ra = RegAlloc::<AB>::new(self.m, entry, args_vlocs, src_stack_off);
-                        self.be.star_return_end(exit_safepoint)?;
+                        let rtn_val = match entry.term_vars() {
+                            [x] => Some(*x),
+                            [] => None,
+                            _ => unreachable!(),
+                        };
+                        self.be.star_return_end(
+                            &mut ra,
+                            entry,
+                            InstIdx::from(entry.insts_len() - 1),
+                            exit_safepoint,
+                            rtn_val,
+                        )?;
                         ra.set_term_vlocs(&mut self.be, entry, false, args_vlocs, &[])?;
                         self.p_block(entry, Some(entry), ra, args_vlocs)?
                     }
@@ -1349,10 +1370,15 @@ pub(super) trait HirToAsmBackend {
     fn guard_coupler_start(&mut self, stack_off: u32);
 
     /// Produce code for the end of a (*, Return) trace. The safepoint of the `return` is
-    /// `exit_safepoint`.
+    /// `exit_safepoint`. If a value should be returned to the caller, the relevant [InstIdx] is
+    /// passed in `ret_val`.
     fn star_return_end(
         &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
         exit_safepoint: &'static DeoptSafepoint,
+        ret_val: Option<InstIdx>,
     ) -> Result<(), CompilationError>;
 
     // Functions for guards.
