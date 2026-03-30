@@ -307,7 +307,7 @@ impl MT {
                         mt.job_queue.notify_failure(&mt, ctrid);
                     };
                     let coupler_tid = match &trace.trace_end {
-                        TraceEnd::Loop => None,
+                        TraceEnd::Loop | TraceEnd::Return => None,
                         TraceEnd::Coupler(coupler_tid) => Some(*coupler_tid),
                     };
                     (coupler_tid, Box::new(failure))
@@ -316,10 +316,12 @@ impl MT {
                     let parent_ctr = Arc::clone(parent_ctr);
                     let gid = *gid;
                     let failure = move || parent_ctr.guard(gid).trace_or_compile_failed(&mt);
-                    let TraceEnd::Coupler(coupler_tid) = &trace.trace_end else {
-                        panic!()
+                    let coupler_tid = match &trace.trace_end {
+                        TraceEnd::Loop => unreachable!(),
+                        TraceEnd::Return => None,
+                        TraceEnd::Coupler(coupler_tid) => Some(*coupler_tid),
                     };
-                    (Some(*coupler_tid), Box::new(failure))
+                    (coupler_tid, Box::new(failure))
                 }
             }
         };
@@ -408,22 +410,6 @@ impl MT {
     pub fn control_point(self: &Arc<Self>, loc: &Location, frameaddr: *mut c_void, smid: u64) {
         match self.transition_control_point(loc, frameaddr) {
             TransitionControlPoint::NoAction => (),
-            TransitionControlPoint::AbortTracing(ak) => {
-                let thread_tracer = MTThread::with_borrow_mut(|mtt| match mtt.pop_tstate() {
-                    MTThreadState::Tracing { thread_tracer, .. } => thread_tracer,
-                    _ => unreachable!(),
-                });
-                thread_tracer.stop().ok();
-                self.stats.trace_recorded_err();
-                MTThread::set_tracing(IsTracing::None);
-                yklog!(
-                    self.log,
-                    Verbosity::Warning,
-                    &format!("tracing-aborted: {ak}"),
-                    loc.hot_location()
-                );
-                self.stats.timing_state(TimingState::OutsideYk);
-            }
             TransitionControlPoint::Execute(ctr) => {
                 yklog!(
                     self.log,
@@ -525,9 +511,13 @@ impl MT {
                             "stop-tracing",
                             loc.hot_location()
                         );
+                        let trace_end = match coupler_tid {
+                            Some(x) => TraceEnd::Coupler(x),
+                            None => TraceEnd::Return,
+                        };
                         self.queue_compile_job(Trace {
                             trace_start: TraceStart::Guard { parent_ctr, gid },
-                            trace_end: TraceEnd::Coupler(coupler_tid),
+                            trace_end,
                             ctrid: trid,
                             ta_iter: ta_iter.peekable(),
                             promotions: promotions.into_boxed_slice(),
@@ -538,7 +528,7 @@ impl MT {
                                 frameaddr,
                                 loc,
                                 loc.hot_location_arc_clone().unwrap(),
-                                coupler_tid,
+                                coupler_tid.unwrap(),
                             );
                         }
                     }
@@ -911,16 +901,18 @@ impl MT {
         };
 
         if is_caller_frame(frameaddr, *tracing_frameaddr) {
-            // We traced out of the frame we started tracing in. This is not necessarily a
-            // correctness issue, but for now such traces will always end up with "trace
-            // succesor pending", so we might as well give up now.
-            self.stats.trace_recorded_err();
             let Some((parent_ctr, gid)) = gtrace else {
                 panic!()
             };
-            parent_ctr.guard(*gid).trace_or_compile_failed(self);
-
-            return TransitionControlPoint::AbortTracing(AbortKind::OutOfFrame);
+            let gid = *gid;
+            let parent_ctr = Arc::clone(parent_ctr);
+            return TransitionControlPoint::StopSideTracing {
+                trid: *tracing_trid,
+                gid,
+                parent_ctr,
+                coupler_tid: None,
+                start: false,
+            };
         }
 
         match loc.hot_location_arc_clone() {
@@ -946,7 +938,7 @@ impl MT {
                             trid: *tracing_trid,
                             gid,
                             parent_ctr,
-                            coupler_tid,
+                            coupler_tid: Some(coupler_tid),
                             start: false,
                         }
                     }
@@ -963,7 +955,7 @@ impl MT {
                             trid: *tracing_trid,
                             gid,
                             parent_ctr,
-                            coupler_tid: next_tid,
+                            coupler_tid: Some(next_tid),
                             start: true,
                         }
                     }
@@ -988,7 +980,7 @@ impl MT {
                             trid: *tracing_trid,
                             gid,
                             parent_ctr,
-                            coupler_tid: next_trid,
+                            coupler_tid: Some(next_trid),
                             start: true,
                         };
                     }
@@ -1457,7 +1449,6 @@ impl From<u8> for IsTracing {
 #[derive(Debug)]
 enum TransitionControlPoint {
     NoAction,
-    AbortTracing(AbortKind),
     Execute(Arc<dyn CompiledTrace>),
     /// Start tracing: in a sense the `Arc<Mutex<HotLocation>>` could be seen as an optimisation
     /// because it can always be derived from the [Location] that was encountered. However, we also
@@ -1482,7 +1473,8 @@ enum TransitionControlPoint {
         trid: TraceId,
         gid: GuardId,
         parent_ctr: Arc<dyn CompiledTrace>,
-        coupler_tid: TraceId,
+        /// Is `Some` for a `Coupler` trace end.
+        coupler_tid: Option<TraceId>,
         // Should a new trace be immediately started after the guard trace?
         start: bool,
     },
@@ -1493,15 +1485,12 @@ enum TransitionControlPoint {
 enum AbortKind {
     /// While tracing we fell back from an interpreter to a JIT frame.
     BackIntoExecution,
-    /// Tracing continued while the interpreter frame address changed.
-    OutOfFrame,
 }
 
 impl std::fmt::Display for AbortKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             AbortKind::BackIntoExecution => write!(f, "tracing continued into a JIT frame"),
-            AbortKind::OutOfFrame => write!(f, "tracing went outside of starting frame"),
         }
     }
 }
@@ -1984,7 +1973,6 @@ mod tests {
                 for _ in 0..THRESHOLD {
                     match mt.transition_control_point(&loc, ptr::null_mut()) {
                         TransitionControlPoint::NoAction => (),
-                        TransitionControlPoint::AbortTracing(_) => panic!(),
                         TransitionControlPoint::Execute(_) => (),
                         TransitionControlPoint::StartTracing(hl, trid) => {
                             num_starts.fetch_add(1, Ordering::Relaxed);

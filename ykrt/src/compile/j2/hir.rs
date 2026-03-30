@@ -447,8 +447,8 @@ pub(super) enum TraceEnd<Reg: RegT> {
     /// This trace ended at the same [crate::location::Location] that it started from, thus forming
     /// a loop.
     Loop { entry: Block, peel: Option<Block> },
-    /// This trace ended up early when a `return` statement in the control point loop was
-    /// encountered.
+    /// This trace ended early when a `return` statement in the function containing the control
+    /// point function was encountered.
     Return {
         entry: Block,
         exit_safepoint: &'static DeoptSafepoint,

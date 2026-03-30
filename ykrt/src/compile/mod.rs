@@ -120,6 +120,9 @@ pub(crate) enum TraceEnd {
     /// A trace ended at another (possibly compiled, possibly tracing, possibly compiling) trace
     /// that has/will have the tid [TraceId].
     Coupler(TraceId),
+    /// This trace ended early when a `return` statement in the function containing the control
+    /// point function was encountered.
+    Return,
 }
 
 pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {

@@ -195,11 +195,13 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let src_gidx = CompiledGuardIdx::from(usize::from(*src_gid));
                 let prev_bid = src_ctr.bid(src_gidx);
                 self.prev_bid = Some(prev_bid);
-                let tgt_ctr = Arc::clone(tgt_ctr)
-                    .as_any()
-                    .downcast::<J2CompiledTrace<Reg>>()
-                    .unwrap();
-                let args_vlocs = self.p_start_side(&src_ctr, src_gidx, &tgt_ctr)?;
+                let tgt_ctr = tgt_ctr.as_ref().map(|x| {
+                    Arc::clone(x)
+                        .as_any()
+                        .downcast::<J2CompiledTrace<Reg>>()
+                        .unwrap()
+                });
+                let args_vlocs = self.p_start_side(&src_ctr, src_gidx)?;
                 if let Some(hir::Switch {
                     iid,
                     seen_bbidxs: seen_blocks,
@@ -236,14 +238,18 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             assert_eq!(self.frames.len(), 1);
             let exit_safepoint = match &bmk {
                 BuildModKind::Loop { entry_safepoint } => entry_safepoint,
-                BuildModKind::Coupler { tgt_ctr, .. } | BuildModKind::Side { tgt_ctr, .. } => {
-                    match &tgt_ctr.trace_start {
-                        J2TraceStart::ControlPoint {
-                            entry_safepoint, ..
-                        } => entry_safepoint,
-                        J2TraceStart::Guard { .. } => todo!(),
-                    }
-                }
+                BuildModKind::Coupler { tgt_ctr, .. } => match &tgt_ctr.trace_start {
+                    J2TraceStart::ControlPoint {
+                        entry_safepoint, ..
+                    } => entry_safepoint,
+                    J2TraceStart::Guard { .. } => todo!(),
+                },
+                BuildModKind::Side { tgt_ctr, .. } => match tgt_ctr.as_ref().unwrap().trace_start {
+                    J2TraceStart::ControlPoint {
+                        entry_safepoint, ..
+                    } => entry_safepoint,
+                    J2TraceStart::Guard { .. } => todo!(),
+                },
             };
             let term_vars = exit_safepoint
                 .lives
@@ -315,7 +321,10 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                             src_ctr,
                             src_gidx,
                         },
-                        hir::TraceEnd::Coupler { entry, tgt_ctr },
+                        hir::TraceEnd::Coupler {
+                            entry,
+                            tgt_ctr: tgt_ctr.unwrap(),
+                        },
                         tys,
                     ),
                     Some(exit_safepoint) => (
@@ -641,7 +650,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         &mut self,
         src_ctr: &Arc<J2CompiledTrace<Reg>>,
         src_gidx: CompiledGuardIdx,
-        _tgt_ctr: &Arc<J2CompiledTrace<Reg>>,
     ) -> Result<Vec<VarLocs<Reg>>, CompilationError> {
         assert!(self.frames.is_empty());
         let guard = src_ctr.guard(src_gidx);
@@ -1990,7 +1998,8 @@ pub(super) enum BuildKind {
     Side {
         src_ctr: Arc<dyn CompiledTrace>,
         src_gid: GuardId,
-        tgt_ctr: Arc<dyn CompiledTrace>,
+        /// `Some` for a coupler-side-trace, or `None` for a `return` side trace.
+        tgt_ctr: Option<Arc<dyn CompiledTrace>>,
     },
 }
 
@@ -2010,7 +2019,8 @@ enum BuildModKind<Reg: RegT> {
         args_vlocs: Vec<VarLocs<Reg>>,
         src_ctr: Arc<J2CompiledTrace<Reg>>,
         src_gidx: CompiledGuardIdx,
-        tgt_ctr: Arc<J2CompiledTrace<Reg>>,
+        /// `Some` for a coupler-side-trace, or `None` for a `return` side trace.
+        tgt_ctr: Option<Arc<J2CompiledTrace<Reg>>>,
     },
 }
 
