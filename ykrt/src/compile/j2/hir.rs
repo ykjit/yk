@@ -859,6 +859,7 @@ pub(super) enum Inst {
     Trunc,
     UDiv,
     UIToFP,
+    UMax,
     URem,
     Xor,
     ZExt,
@@ -4395,6 +4396,81 @@ impl InstT for UIToFP {
     }
 }
 
+/// Return the unsigned maximum of two values, with the same semantics as LLVM's `llvm.umax`.
+#[derive(Clone, Debug)]
+pub(super) struct UMax {
+    pub tyidx: TyIdx,
+    /// What LLVM calls `a`.
+    pub lhs: InstIdx,
+    /// What LLVM calls `b`.
+    pub rhs: InstIdx,
+}
+
+impl InstT for UMax {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert!(
+            b.inst(self.lhs).tyidx(m) == b.inst(self.rhs).tyidx(m)
+                && b.inst(self.rhs).tyidx(m) == self.tyidx,
+            "%{iidx:?}: inconsistent return / lhs / rhs types"
+        );
+    }
+
+    /// Canonicalise to favour references to constants on the RHS.
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            std::mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::UMax(UMax { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "umax %{}, %{}",
+            usize::from(self.lhs),
+            usize::from(self.rhs)
+        )
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
 /// Return the remainder from signed division with the same semantics as LLVM's `srem`.
 #[derive(Clone, Debug)]
 pub(super) struct URem {
@@ -5913,6 +5989,30 @@ mod test {
             "
           %0: ptr = arg [reg]
           %1: double = uitofp %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn umax_type_consistency1() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i16 = umax %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn umax_type_consistency2() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i16 = umax %0, %1
         ",
         );
     }
