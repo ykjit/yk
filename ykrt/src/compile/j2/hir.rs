@@ -6019,6 +6019,30 @@ mod test {
 
     #[test]
     #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn urem_type_consistency1() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i16 = urem %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
+    fn urem_type_consistency2() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i16 = urem %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return / lhs / rhs types")]
     fn xor_type_consistency1() {
         str_to_mod::<DummyReg>(
             "

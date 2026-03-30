@@ -200,6 +200,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "UMAX" "LOCAL" "," "LOCAL" {
        Ok(AstInst::UMax { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
+  | "LOCAL" ":" Ty "=" "UREM" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::URem { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
   | "LOCAL" ":" Ty "=" "XOR" "LOCAL" "," "LOCAL" {
        Ok(AstInst::Xor { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
