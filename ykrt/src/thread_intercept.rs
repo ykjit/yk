@@ -6,7 +6,7 @@ use std::cell::{OnceCell, RefCell};
 use ykaddr::addr::symbol_to_ptr;
 
 thread_local! {
-    /// The start of the current thread's shadow stack
+    /// The start of the current thread's shadow stack.
     static THREAD_SHADOW_START: OnceCell<*mut c_void> = const { OnceCell::new() };
 }
 
@@ -15,21 +15,23 @@ const SHADOW_STACK_SIZE: usize = 1000000;
 
 static SHADOW_STACKS: Mutex<RefCell<ShadowStacks>> = Mutex::new(RefCell::new(ShadowStacks::new()));
 
-struct ShadowStackPtr(*mut c_void);
-unsafe impl Sync for ShadowStackPtr {}
-unsafe impl Send for ShadowStackPtr {}
+struct ShadowStackStartPtr(*mut c_void);
+unsafe impl Sync for ShadowStackStartPtr {}
+unsafe impl Send for ShadowStackStartPtr {}
 
 struct ShadowStacks {
-    stacks: Vec<ShadowStackPtr>,
+    sstack_starts: Vec<ShadowStackStartPtr>,
 }
 
 impl ShadowStacks {
     const fn new() -> Self {
-        ShadowStacks { stacks: Vec::new() }
+        ShadowStacks {
+            sstack_starts: Vec::new(),
+        }
     }
 
-    fn register_current_thread(&mut self) {
-        self.stacks.push(ShadowStackPtr(thread_shadow_start()));
+    fn register_current_thread(&mut self, addr: *mut c_void) {
+        self.sstack_starts.push(ShadowStackStartPtr(addr));
     }
 }
 
@@ -41,31 +43,33 @@ struct Target {
 
 /// Call a function for each shadow stack.
 pub fn yk_foreach_shadowstack(f: extern "C" fn(*mut c_void, *mut c_void)) {
-    for ptr in SHADOW_STACKS.lock().borrow().stacks.iter() {
+    for ptr in SHADOW_STACKS.lock().borrow().sstack_starts.iter() {
         let end = ptr.0.wrapping_byte_add(SHADOW_STACK_SIZE);
         f(ptr.0.cast() as *mut c_void, end as *mut c_void);
     }
 }
 
-/// Return the start of the current thread's shadow stack.
-fn thread_shadow_start() -> *mut c_void {
-    symbol_to_ptr("shadowstack_0").expect("Unable to find shadowstack address") as *mut c_void
-}
-
-/// Return the start and end of the current thread's shadow stack.
+/// Return the start and current end (i.e. only the used portion) of the current thread's shadow
+/// stack.
 pub fn yk_thread_shadowstack_bounds() -> (*mut c_void, *mut c_void) {
     let start = THREAD_SHADOW_START.with(|oc| {
         // For "non-main" threads, `THREAD_SHADOW_START` is guaranteed to be initialised by now.
         // For the main thread it may not be, so we have to use `get_or_init()`.
-        *oc.get_or_init(thread_shadow_start)
+        *oc.get().unwrap()
     });
-    let end = start.wrapping_byte_add(SHADOW_STACK_SIZE);
+    let end = unsafe { *(symbol_to_ptr("shadowstack_0").unwrap() as *mut *mut c_void) };
+    assert!(start <= end);
     (start, end)
 }
 
 // Called at program startup to register the shadowstack of the main thread.
 pub fn yk_init() {
-    SHADOW_STACKS.lock().borrow_mut().register_current_thread();
+    let addr = unsafe { *(symbol_to_ptr("shadowstack_head").unwrap() as *mut *mut c_void) };
+    THREAD_SHADOW_START.with(|oc| oc.set(addr).unwrap());
+    SHADOW_STACKS
+        .lock()
+        .borrow_mut()
+        .register_current_thread(addr);
 }
 
 /// The function is called just after a new thread has been created by `pthread_create`. We use it
@@ -73,15 +77,18 @@ pub fn yk_init() {
 extern "C" fn wrap_thread_start(tgt: *mut c_void) -> *mut c_void {
     let tgt = unsafe { Box::from_raw(tgt as *mut Target) };
     // Obtain address of a shadowstack_0 symbol
-    let shadowstack_symbol_addr = thread_shadow_start();
+    let shadowstack_0 = symbol_to_ptr("shadowstack_0").unwrap() as *mut *mut c_void;
     let newsstack = unsafe { malloc(SHADOW_STACK_SIZE) };
     if newsstack.is_null() {
         panic!("Unable to allocate stack")
     }
     unsafe {
         // Set shadowstack symbol with new allocated stack
-        *(shadowstack_symbol_addr as *mut *mut c_void) = newsstack;
-        SHADOW_STACKS.lock().borrow_mut().register_current_thread();
+        *shadowstack_0 = newsstack;
+        SHADOW_STACKS
+            .lock()
+            .borrow_mut()
+            .register_current_thread(newsstack);
     }
     THREAD_SHADOW_START.with(|oc| oc.set(newsstack).unwrap());
     // Call the `routine` passed to `pthread_create`.
