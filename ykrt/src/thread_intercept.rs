@@ -68,8 +68,9 @@ pub fn yk_init() {
     SHADOW_STACKS.lock().borrow_mut().register_current_thread();
 }
 
-/// Create a new shadowstack for each new pthread.
-extern "C" fn wrap_thread_routine(tgt: *mut c_void) -> *mut c_void {
+/// The function is called just after a new thread has been created by `pthread_create`. We use it
+/// to create a new shadow stack, and then call the "real" `routine` passed to `pthread_create`.
+extern "C" fn wrap_thread_start(tgt: *mut c_void) -> *mut c_void {
     let tgt = unsafe { Box::from_raw(tgt as *mut Target) };
     // Obtain address of a shadowstack_0 symbol
     let shadowstack_symbol_addr = thread_shadow_start();
@@ -83,6 +84,7 @@ extern "C" fn wrap_thread_routine(tgt: *mut c_void) -> *mut c_void {
         SHADOW_STACKS.lock().borrow_mut().register_current_thread();
     }
     THREAD_SHADOW_START.with(|oc| oc.set(newsstack).unwrap());
+    // Call the `routine` passed to `pthread_create`.
     let ret = (tgt.func)(tgt.arg);
     unsafe { free(newsstack) };
     ret
@@ -104,7 +106,7 @@ pub extern "C" fn __wrap_pthread_create(
         pthread_create(
             thread,
             attr,
-            wrap_thread_routine,
+            wrap_thread_start,
             Box::into_raw(tgt) as *mut c_void,
         )
     }
