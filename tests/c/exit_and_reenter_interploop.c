@@ -1,6 +1,7 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
+//   env-var: YKD_LOG_IR=jit-pre-opt
 //   stderr:
 //     enter
 //     yk-tracing: start-tracing
@@ -8,6 +9,18 @@
 //     exit
 //     enter
 //     yk-tracing: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ; {
+//     ;   "trid": "0",
+//     ;   "start": {
+//     ;     "kind": "ControlPoint"
+//     ;   },
+//     ;   "end": {
+//     ;     "kind": "Return"
+//     ;   }
+//     ; }
+//     ...
+//     --- End jit-pre-opt ---
 //     1
 //     exit
 
