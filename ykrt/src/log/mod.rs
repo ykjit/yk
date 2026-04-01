@@ -126,9 +126,6 @@ pub(crate) enum IRPhase {
     Hir,
     /// The assembler code of the compiled trace.
     Asm,
-    /// The assembler code of the compiled trace, including instruction offsets and virtual
-    /// addresses.
-    AsmFull,
 }
 
 #[cfg(not(feature = "ykd"))]
@@ -179,7 +176,6 @@ mod internals {
                 "debugstrs" => Ok(Self::DebugStrs),
                 "hir" => Ok(Self::Hir),
                 "jit-asm" => Ok(Self::Asm),
-                "jit-asm-full" => Ok(Self::AsmFull),
                 _ => Err(format!("Invalid YKD_LOG_IR value: {s}").into()),
             }
         }

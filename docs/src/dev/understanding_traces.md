@@ -21,5 +21,3 @@ The following `ir_stage`s are supported:
     that interpreter (e.g. showing the opcodes executed).
  - `hir`: high-level JIT IR.
  - `jit-asm`: the assembler code of the compiled JIT IR trace.
- - `jit-asm-full`: the assembler code of the compiled JIT IR trace with
-   instruction offsets and virtual addresses annotated.
