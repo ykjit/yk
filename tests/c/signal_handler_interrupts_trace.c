@@ -3,7 +3,7 @@
 // ## is INLINED into trace!
 // ignore-if: true
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt,aot
+//   env-var: YKD_LOG_IR=hir,aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
 //   stderr:

@@ -1,13 +1,13 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   stderr:
 //     ...
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{12}}: i32 = call %{{_}}(%{{6}}) ; @call_me
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 
 // Check that functions containing no loops get inlined into the trace.
 //

@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -20,11 +20,11 @@
 //     ...
 //     --- End aot ---
 //     ...
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %10: i32 = call %9(%8) ; @__yk_opt_bar
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     foo 6
 //     yk-execution: enter-jit-code
 //     foo 5

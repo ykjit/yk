@@ -1,13 +1,13 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   stderr:
 //     5 6
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //       ...
 //       %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}) ; @__yk_opt_f
 //       ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     4 5
 //     3 4
 //     2 3

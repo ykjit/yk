@@ -1,20 +1,20 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
 //     foo 3
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{6}}: i32 = 3
 //     ...
 //     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{6}}) ; @fprintf
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     foo 3
 //     yk-execution: enter-jit-code
 //     foo 3

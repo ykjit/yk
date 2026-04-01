@@ -1,12 +1,12 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_LOG=3
 //   stderr:
 //     ...
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     ...
 
 // Test that indirect calls are only copied to the JITModule after we have seen

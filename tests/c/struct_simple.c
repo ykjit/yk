@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -7,9 +7,9 @@
 //     yk-tracing: start-tracing
 //     3:1
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     2:1
 //     yk-execution: enter-jit-code
 //     1:1

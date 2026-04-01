@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -14,7 +14,7 @@
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{11}}: i32 = 1
 //     %{{12}}: i1 = icmp sgt %{{_}}, %{{11}}
@@ -24,7 +24,7 @@
 //     ......
 //     %{{21}}: i64 = call %{{_}}(%{{_}}, %{{18}}, %{{19}}, %{{_}}) ; @fwrite
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     3
 //     foo
 //     yk-execution: enter-jit-code

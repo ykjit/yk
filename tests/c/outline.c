@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -12,11 +12,11 @@
 //     func foo(%arg0: i32) -> i32;
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{3}}: i32 = call %{{_}}(%{{4}}) ; @__yk_opt_foo
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     i=3, r=6
 //     yk-execution: enter-jit-code
 //     i=2, r=3

@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YK_LOG=4
 //   stderr:
@@ -22,13 +22,13 @@
 //     %{{_}}: i32 = icall %{{dec_ptr}}(%{{i}})...
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{11}}: ptr = load %4
 //     %{{12}}: i32 = load %{{_}}
 //     %{{13}}: i32 = call %11(%{{12}})
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     3
 //     2
 //     1

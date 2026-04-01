@@ -1,7 +1,7 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   stderr:
 //     yk-tracing: start-tracing
 //     99528
@@ -17,7 +17,7 @@
 //     %{{_}}: i64 = promote %{{_}} [safepoint: ...
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{30}}: i64 = 100
 //     %{{31}}: i1 = icmp eq %{{_}}, %{{30}}
@@ -35,7 +35,7 @@
 //     %{{46}}: i1 = icmp eq %{{_}}, %{{45}}
 //     guard true, %{{46}}, ...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     199056
 //     yk-execution: enter-jit-code
 //     298584

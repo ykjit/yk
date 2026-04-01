@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -11,7 +11,7 @@
 //     udiv3 1431655764
 //     udiv4 42
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{8}}: i16 = 3
 //     %{{_}}: i16 = udiv %{{_}}, %{{8}}
@@ -25,7 +25,7 @@
 //     %{{17}}: i8 = 3
 //     %{{_}}: i8 = udiv %{{_}}, %{{17}}
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     udiv 21845
 //     udiv2 715827882
 //     udiv3 1431655764

@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -11,11 +11,11 @@
 //     call llvm.va_start.p0(%{{_}})
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{_}}, %{{_}}) ; @__yk_opt_f
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     3: 36
 //     yk-execution: enter-jit-code
 //     2: 23

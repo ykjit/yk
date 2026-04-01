@@ -2,18 +2,18 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
 //     1 0
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{19}}: {0: i32, 32: i1} = call @llvm.umul.with.overflow.i32...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     1 0
 //     yk-execution: enter-jit-code
 //     1 0

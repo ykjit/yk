@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt,jit-post-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -9,11 +9,11 @@
 //     call call_me()...
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     call %{{_}}() ; @__yk_opt_call_me
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     Can't JIT this!
 //     yk-execution: enter-jit-code
 //     Can't JIT this!

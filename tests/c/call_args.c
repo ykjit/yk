@@ -1,16 +1,16 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
 //     3: 5
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{20}}: i32 = add %{{13}}, %{{14}}
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     2: 5
 //     yk-execution: enter-jit-code
 //     1: 5

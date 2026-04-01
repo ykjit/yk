@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_LD_FLAGS=-lm
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -9,13 +9,13 @@
 //     4: 4.840000 -> -4.840000
 //     4: 4.370000 -> -4.370000
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{15}}: double = fneg %{{14}}
 //     ...
 //     %{{32}}: float = fneg %{{31}}
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     3: 3.840000 -> -3.840000
 //     3: 3.370000 -> -3.370000
 //     yk-execution: enter-jit-code

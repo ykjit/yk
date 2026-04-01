@@ -1,6 +1,6 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   stderr:
 //     ...
 //     --- Begin aot ---
@@ -9,11 +9,11 @@
 //     func never_inline_into_trace(...
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     call %{{_}}(%{{_}}) ; @__yk_opt_never_inline_into_trace
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 
 // Check that `yk_outline` wins over `yk_unroll_safe`.
 //

@@ -1,7 +1,7 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   stdout:
 //     jihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcba
 

@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -11,11 +11,11 @@
 //     %{{14_2}}: ptr = ptr_add %{{14_1}}, -4
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{14}}: ptr = ptradd %{{13}}, -4
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     i=9
 //     yk-execution: enter-jit-code
 //     i=9

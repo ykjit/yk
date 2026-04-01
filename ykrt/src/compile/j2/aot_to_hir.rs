@@ -370,11 +370,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             ));
         }
 
-        if should_log_ir(IRPhase::PreOpt) {
-            log_ir(&format!(
-                "--- Begin jit-pre-opt{ds} ---\n{}\n--- End jit-pre-opt ---\n",
-                m
-            ));
+        if should_log_ir(IRPhase::Hir) {
+            log_ir(&format!("--- Begin hir{ds} ---\n{}\n--- End hir ---\n", m));
         }
 
         #[cfg(test)]
