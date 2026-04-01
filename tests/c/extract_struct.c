@@ -2,7 +2,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -19,9 +19,9 @@
 //     %{{11_5}}: i64 = extractvalue %{{10_1}}, [1]
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     2
 //     999
 //     yk-execution: enter-jit-code

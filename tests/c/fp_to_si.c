@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -17,13 +17,13 @@
 //     %{{_}}: i32 = fp_to_si %{{_}}, i32
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{_}}: i32 = fptosi %{{_}}
 //     ...
 //     %{{_}}: i32 = fptosi %{{_}}
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     i=3
 //     f32->int: 5, 4, -1
 //     f64->int: 2, 3, -1

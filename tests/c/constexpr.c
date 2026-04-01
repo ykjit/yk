@@ -1,12 +1,12 @@
 // ## -O0 doesn't make a constant expression.
 // ignore-if: true
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_LOG=4
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     @.str = ...
 //     ...
@@ -14,7 +14,7 @@
 //       ...
 //       ...store i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.str, i64 0, i64 0)...
 //       ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     2:97
 //     yk-execution: enter-jit-code
 //     1:97

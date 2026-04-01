@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -9,7 +9,7 @@
 //     srem3 2
 //     srem4 3
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{_}}: i32 = srem %{{_}}, %{{_}}
 //     ...
@@ -19,7 +19,7 @@
 //     ...
 //     %{{_}}: i32 = srem %{{_}}, %{{_}}
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     srem 1
 //     srem2 1
 //     srem3 2

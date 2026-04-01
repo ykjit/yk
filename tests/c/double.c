@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -17,13 +17,13 @@
 //     %{{9_7}}: i32 = call fprintf(%{{_}}, @{{_}}, %{{9_2}}, %{{9_3}})
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{6}}: double = sitofp %{{_}}
 //     ...
 //     %{{_}}: i32 = call %{{_W}}(%{{_}}, %{{_}}, %{{_}}, %{{6}}) ; @fprintf
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     3 -> 3.000000
 //     yk-execution: enter-jit-code
 //     2 -> 2.000000

@@ -1,13 +1,13 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   stderr:
 //     ...
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{12}}: i32 = call %{{_}}(%{{_}}) ; @call_me
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 
 // Check that a loopy function annotated `yk_unroll_safe` always gets inlined
 // into the trace.

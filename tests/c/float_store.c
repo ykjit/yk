@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -10,14 +10,14 @@
 //     4 -> 3.252033
 //     4 -> 3.252033
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{38}}: float = load %{{_}}
 //     ...
 //     %{{46}}: double = fdiv %{{_}}, %{{_}}
 //     store %{{46}}, %{{_}}
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     3 -> 2.439024
 //     3 -> 2.439024
 //     3 -> 2.439024

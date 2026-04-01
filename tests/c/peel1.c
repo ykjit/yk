@@ -4,10 +4,10 @@
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   stderr:
 //     0 1
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{4}}: i32 = 1
 //     ...
@@ -17,7 +17,7 @@
 //     %1: {{_}} = arg
 //     ...
 //     term [%0, ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     1 1
 //     2 1
 //     3 1

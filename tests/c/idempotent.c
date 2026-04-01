@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -23,7 +23,7 @@
 //     %{{_}}: i64 = call idempotent add_uint64_t(...
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{6}}: i32 = 3
 //     ...
@@ -43,7 +43,7 @@
 //     ...
 //     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{12}}, %{{23}}) ; @fprintf
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     3: 41 41
 //     3: 43 43
 //     yk-execution: enter-jit-code

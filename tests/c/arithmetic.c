@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt,jit-post-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -10,13 +10,13 @@
 //     sub 3
 //     mul 12
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{1}}: i32 = add %{{2}}, %{{argc}}
 //     ...
 //     %{{3}}: i32 = sub %{{4}}, %{{argc}}
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     ...
 //     add 4
 //     sub 2

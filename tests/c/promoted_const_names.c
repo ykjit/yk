@@ -1,16 +1,16 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     hello 0 4
 //     ...
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{16}}: ptr = 0x{{_}} ; @my_print0
 //     ...
 //     call %{{16}}(%{{_}}) ; @my_print0
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     hello 0 3
 //     hello 0 2
 //     hello 0 1

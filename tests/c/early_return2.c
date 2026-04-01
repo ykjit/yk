@@ -1,15 +1,15 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
 //     b3
 //     8
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     b1
 //     7
 //     yk-execution: enter-jit-code
@@ -19,7 +19,7 @@
 //     ret1
 //     9
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ; {
 //     ;   "trid": "{{_}}",
 //     ;   "start": {
@@ -33,7 +33,7 @@
 //     ; }
 //     ...
 //     term []
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     b3
 //     8
 //     yk-execution: enter-jit-code
@@ -42,9 +42,9 @@
 //     b3
 //     7
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     b3
 //     6
 //     yk-execution: enter-jit-code
@@ -53,9 +53,9 @@
 //     b2
 //     5
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     b2
 //     4
 //     yk-execution: enter-jit-code

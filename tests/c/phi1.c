@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0 -Xclang -disable-O0-optnone -Xlinker --lto-newpm-passes=instcombine<max-iterations=1;no-verify-fixpoint>
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_LOG=4
 //   env-var: YKD_LOG_STATS=/dev/null
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -14,14 +14,14 @@
 //     %{{_}}: i32 = phi bb{{_}} -> 2i32, bb{{_}} -> 1i32
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     guard true, ...
 //     %{{16}}: i32 = 1
 //     ...
 //     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{16}}) ; @fprintf
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     i=3, val=1
 //     yk-execution: enter-jit-code
 //     i=2, val=1

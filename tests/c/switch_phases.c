@@ -1,19 +1,19 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 //   stderr:
 //     yk-tracing: start-tracing
 //     0 0: zero
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{9}}: i32 = 0
 //     %{{10}}: i1 = icmp eq %{{_}}, %{{9}}
 //     guard true, %{{10}}, ...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     1 0: zero
 //     2 0: zero
 //     3 0: zero
@@ -30,13 +30,13 @@
 //     yk-tracing: start-side-tracing
 //     14 1: one
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{5}}: i32 = 1
 //     %{{6}}: i1 = icmp eq %{{_}}, %{{5}}
 //     guard true, %{{6}}, ...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     15 1: one
 //     16 1: one
 //     17 1: one
@@ -49,13 +49,13 @@
 //     yk-tracing: start-side-tracing
 //     24 2: two
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{5}}: i32 = 2
 //     %{{6}}: i1 = icmp eq %{{_}}, %{{5}}
 //     guard true, %{{6}}, ...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     25 2: two
 //     26 2: two
 //     27 2: two
@@ -68,12 +68,12 @@
 //     yk-tracing: start-side-tracing
 //     34 99: default
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{4}}: i32 = arg
 //     %{{5}}: ...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     35 99: default
 //     36 99: default
 //     37 99: default

@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -11,13 +11,13 @@
 //     switch %{{10_1}}, bb{{bb14}}, [300 -> bb{{bb11}}, 299 -> bb{{bb12}}]...
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{11}}: i32 = 300
 //     %{{12}}: i1 = icmp eq %{{10}}, %{{11}}
 //     guard true, %{{12}}, ...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     i=2
 //     yk-execution: enter-jit-code
 //     i=1

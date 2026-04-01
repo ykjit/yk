@@ -2,20 +2,20 @@
 //   env-var: YKB_EXTRA_LD_FLAGS=-lm
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
 //     10: 10.840000
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{12}}: double = sitofp %{{_}}
 //     %{{13}}: double = fneg %{{_}}
 //     %{{14}}: double = select %{{_}}, %{{12}}, %{{13}}
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     9: -8.160000
 //     yk-execution: enter-jit-code
 //     8: 8.840000

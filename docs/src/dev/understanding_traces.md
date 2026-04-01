@@ -17,8 +17,9 @@ to indicate stderr.
 The following `ir_stage`s are supported:
 
  - `aot`: the entire AOT IR for the interpreter.
- - `jit-pre-opt`: the JIT IR trace before optimisation.
- - `jit-post-opt`: the JIT IR trace after optimisation.
+ - `debugstrs`: if compiled into the interpreter, "debug strings" specific to
+    that interpreter (e.g. showing the opcodes executed).
+ - `hir`: high-level JIT IR.
  - `jit-asm`: the assembler code of the compiled JIT IR trace.
  - `jit-asm-full`: the assembler code of the compiled JIT IR trace with
    instruction offsets and virtual addresses annotated.

@@ -1,18 +1,18 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=hir
 //   stderr:
 //     yk-tracing: start-tracing
 //     y=50
 //     yk-tracing: stop-tracing
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{17}}: i64 = 50
 //     %{{18}}: i1 = icmp eq %{{_}}, %{{17}}
 //     guard true, %{{18}}, ...
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     y=100
 //     yk-execution: enter-jit-code
 //     y=150

@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -15,11 +15,11 @@
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     call %{{_}}(%{{4}}) ; @__yk_opt_foo
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     0
 //     1
 //     2

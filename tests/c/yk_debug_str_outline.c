@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=3
 //   stderr:
@@ -14,7 +14,7 @@
 //     ...
 //     --- End aot ---
 //     ...
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     ; before fprintf: 4
 //     ...
@@ -22,7 +22,7 @@
 //     ...
 //     ; after fprintf: 5
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     ...
 
 // Check that yk_debug_str() works and is not optimised out.

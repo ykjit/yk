@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -13,13 +13,13 @@
 //     %8_0: i1 = call yk_is_interpreting()
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     guard ...
 //     term ...
 //     ; peel
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     in interpreter
 //     3
 //     yk-execution: enter-jit-code
@@ -28,7 +28,7 @@
 //     yk-execution: deoptimise ...
 
 // Check that yk_is_interpreting executes code in the interpreter but not
-// during tracing or in traced code. The jit-pre-opt above checks that the call
+// during tracing or in traced code. The hir above checks that the call
 // has been entirely optimised away from the trace: there is only one guard in
 // the body of the trace, which is the loop condition.
 

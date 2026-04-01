@@ -1,7 +1,7 @@
 // ## Hits a todo!
 // ignore-if: true
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_LOG=3
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stdout:

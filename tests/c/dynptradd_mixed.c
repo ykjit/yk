@@ -1,7 +1,7 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O1
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   env-var: YKD_OPT=0
@@ -15,12 +15,12 @@
 //     %{{9_5}}: ptr = ptr_add %{{9_4}}, 4
 //     ...
 //     --- End aot ---
-//     --- Begin jit-pre-opt ---
+//     --- Begin hir ---
 //     ...
 //     %{{14}}: ptr = dynptradd %{{_}}, %{{_}}, 8
 //     %{{_}}: ptr = ptradd %{{14}}, 4
 //     ...
-//     --- End jit-pre-opt ---
+//     --- End hir ---
 //     i=3, y=1
 //     yk-execution: enter-jit-code
 //     i=2, y=3
