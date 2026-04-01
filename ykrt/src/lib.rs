@@ -18,7 +18,6 @@ mod log;
 pub(crate) mod mt;
 pub(crate) mod profile;
 pub mod promote;
-pub(crate) mod stack;
 pub(crate) mod thread_intercept;
 pub mod trace;
 
