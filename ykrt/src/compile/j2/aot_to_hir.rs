@@ -46,6 +46,10 @@ use std::{
 /// The symbol name of the global variable pointers array.
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
+/// When tracing, how many times can a given function appear in the frame stack before we stop
+/// inlining it?
+const RECURSE_THRESHOLD: usize = 5;
+
 pub(super) struct AotToHir<'a, Reg: RegT> {
     mt: Arc<MT>,
     j2: Arc<J2>,
@@ -1121,6 +1125,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             // It would be better if ykllvm marked functions containing `llvm.va_start.p*` with
             // `yk_outline` (at least until we can inline calls to that intrinsic).
             && !func.contains_call_to(self.am, "llvm.va_start.p0")
+            // Is this a recursive call?
+            && self.frames.iter().filter(|f| f.pc.as_ref().unwrap().funcidx() == callee).count() < RECURSE_THRESHOLD
         {
             // Inlinable call.
             self.frames.last_mut().unwrap().pc_safepoint = Some(safepoint.as_ref().unwrap());
