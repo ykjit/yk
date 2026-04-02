@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot,hir
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
@@ -10,14 +10,7 @@
 //     3
 //     4
 //     yk-tracing: stop-tracing
-//     --- Begin aot ---
-//     ...
-//     func main(%arg0: i32, %arg1: ptr) -> i32 {
-//     ...
-//     --- End aot ---
 //     --- Begin hir ---
-//     ...
-//     call %{{_}}(%{{4}}) ; @__yk_opt_foo
 //     ...
 //     --- End hir ---
 //     0
@@ -25,16 +18,18 @@
 //     2
 //     3
 //     yk-execution: enter-jit-code
+//     yk-execution: deoptimise ...
 //     0
 //     1
 //     2
+//     yk-execution: enter-jit-code
+//     yk-execution: deoptimise ...
 //     0
 //     1
-//     yk-execution: deoptimise ...
 //     0
 //     exit
 
-// Test outlining of recursive calls.
+// Test inlining of recursive calls.
 
 #include <assert.h>
 #include <stdio.h>
@@ -43,19 +38,15 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void bar(int i);
-
 __attribute__((noinline)) void foo(int i) {
   if (i > 0) {
-    bar(i - 1);
+    foo(i - 1);
     fprintf(stderr, "%d\n", i);
     return;
   }
   fprintf(stderr, "%d\n", i);
   return;
 }
-
-__attribute__((noinline)) void bar(int i) { foo(i); }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
