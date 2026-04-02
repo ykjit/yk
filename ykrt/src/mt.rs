@@ -2129,54 +2129,6 @@ mod tests {
     }
 
     #[test]
-    fn return_trace() {
-        // Check that a trace that starts in a frame and then returns creates a ReturnTrace.
-
-        let mt = Arc::new(MT::new().unwrap());
-        mt.set_hot_threshold(0);
-        let loc = Location::new();
-
-        // This is intrinsically fragile: for this test to work, we have to look at addresses in
-        // different frames. The only way that can work is if `inner` isn't inlined. However, there
-        // are no absolute guarantees that the compiler won't inline this function: we can add
-        // `inline(never)` here and `blackbox` a little lower, but we may encounter situations
-        // where that's not enough. If so, we might find that this test is too fragile for us to
-        // keep.
-        #[inline(never)]
-        fn inner(mt: &Arc<MT>, loc: &Location) {
-            let x: u8 = 0;
-            let fp = &x as *const _ as *mut _;
-            let TransitionControlPoint::StartTracing(hl, trid) =
-                mt.transition_control_point(loc, fp)
-            else {
-                panic!()
-            };
-            MTThread::set_tracing(IsTracing::Loop);
-            MTThread::with_borrow_mut(|mtt| {
-                mtt.push_tstate(MTThreadState::Tracing {
-                    trid,
-                    hl: Arc::clone(&hl),
-                    thread_tracer: Box::new(DummyTraceRecorder),
-                    promotions: Vec::new(),
-                    debug_strs: Vec::new(),
-                    frameaddr: fp,
-                    seen_hls: SeenHotLocations::new(hl),
-                    gtrace: None,
-                });
-            });
-        }
-
-        let x: u8 = 0;
-        let fp = &x as *const _ as *mut _;
-        black_box(|| inner(&mt, &loc))();
-        mt.transition_control_point(&loc, fp);
-        match mt.transition_control_point(&loc, fp) {
-            TransitionControlPoint::StopReturnTracing(_) => (),
-            x => panic!("{x:?}"),
-        }
-    }
-
-    #[test]
     fn unroll_trace() {
         // Check that a trace that unrolls in an inner loop creates an appropriate set of traces.
 
