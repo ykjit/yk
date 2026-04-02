@@ -7,7 +7,7 @@
 //! Currently only up to 64 bits are supported, though the API is flexible enough to transparently
 //! support greater bit widths in the future.
 
-use super::int_signs::{SignExtend, Truncate};
+use super::int_signs::{SignExtend, TruncateTo};
 use std::{
     fmt,
     hash::Hash,
@@ -96,7 +96,7 @@ impl ArbBitInt {
         debug_assert!(to_bitw >= self.bitw && to_bitw <= 64);
         Self {
             bitw: to_bitw,
-            val: self.val.truncate(self.bitw),
+            val: self.val.truncate_to(self.bitw),
         }
     }
 
@@ -147,33 +147,33 @@ impl ArbBitInt {
 
     /// zero extend the underlying value and, if it is representable as an `u8`, return it.
     pub(crate) fn to_zero_ext_u8(&self) -> Option<u8> {
-        u8::try_from(self.val.truncate(self.bitw)).ok()
+        u8::try_from(self.val.truncate_to(self.bitw)).ok()
     }
 
     /// zero extend the underlying value and, if it is representable as an `u16`, return it.
     pub(crate) fn to_zero_ext_u16(&self) -> Option<u16> {
-        u16::try_from(self.val.truncate(self.bitw)).ok()
+        u16::try_from(self.val.truncate_to(self.bitw)).ok()
     }
 
     /// zero extend the underlying value and, if it is representable as an `u32`, return it.
     pub(crate) fn to_zero_ext_u32(&self) -> Option<u32> {
-        u32::try_from(self.val.truncate(self.bitw)).ok()
+        u32::try_from(self.val.truncate_to(self.bitw)).ok()
     }
 
     /// zero extend the underlying value and, if it is representable as an `u64`, return it.
     pub(crate) fn to_zero_ext_u64(&self) -> Option<u64> {
-        Some(self.val.truncate(self.bitw))
+        Some(self.val.truncate_to(self.bitw))
     }
 
     /// zero extend the underlying value and, if it is representable as an `u64`, return it.
     #[cfg(target_arch = "x86_64")]
     pub(crate) fn to_zero_ext_usize(&self) -> Option<usize> {
-        Some(self.val.truncate(self.bitw) as usize)
+        Some(self.val.truncate_to(self.bitw) as usize)
     }
 
     /// Count the number of set bits in `self`.
     pub(crate) fn count_ones(&self) -> u32 {
-        self.val.truncate(self.bitw).count_ones()
+        self.val.truncate_to(self.bitw).count_ones()
     }
 
     /// Return a new [ArbBitInt] that performs two's complement wrapping addition on `self` and
@@ -229,7 +229,7 @@ impl ArbBitInt {
                 bitw: self.bitw,
                 val: self
                     .val
-                    .truncate(self.bitw)
+                    .truncate_to(self.bitw)
                     .checked_div(other.to_zero_ext_u64().unwrap())
                     .unwrap(), // unwrap cannot fail
             })
@@ -272,7 +272,7 @@ impl ArbBitInt {
         if bits < self.bitw {
             Some(Self {
                 bitw: self.bitw,
-                val: self.val.truncate(self.bitw).checked_shr(bits).unwrap(), // unwrap cannot fail
+                val: self.val.truncate_to(self.bitw).checked_shr(bits).unwrap(), // unwrap cannot fail
             })
         } else {
             None
@@ -315,7 +315,7 @@ impl ArbBitInt {
     pub(crate) fn bitneg(&self) -> Self {
         Self {
             bitw: self.bitw,
-            val: (!self.val).truncate(self.bitw),
+            val: (!self.val).truncate_to(self.bitw),
         }
     }
 
@@ -348,20 +348,21 @@ impl ArbBitInt {
 
 impl fmt::Display for ArbBitInt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.val.truncate(self.bitw))
+        write!(f, "{}", self.val.truncate_to(self.bitw))
     }
 }
 
 impl Hash for ArbBitInt {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.bitw.hash(state);
-        self.val.truncate(self.bitw).hash(state);
+        self.val.truncate_to(self.bitw).hash(state);
     }
 }
 
 impl PartialEq for ArbBitInt {
     fn eq(&self, other: &Self) -> bool {
-        self.bitw == other.bitw && self.val.truncate(self.bitw) == other.val.truncate(self.bitw)
+        self.bitw == other.bitw
+            && self.val.truncate_to(self.bitw) == other.val.truncate_to(self.bitw)
     }
 }
 
