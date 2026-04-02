@@ -316,11 +316,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             continue;
                         }
 
-                        let tmp_stack_off = be.align_spill(self.stack_off, bitw);
-                        self.stack_off = tmp_stack_off;
-                        assert_eq!(self.istates[*iidx], IState::None);
-                        self.istates[*iidx] = IState::Stack(tmp_stack_off);
-                        moves.push((bitw, tmp_stack_off, *to_stack_off));
+                        if self.istates[*iidx] == IState::None {
+                            let tmp_stack_off = be.align_spill(self.stack_off, bitw);
+                            self.stack_off = tmp_stack_off;
+                            assert_eq!(self.istates[*iidx], IState::None);
+                            self.istates[*iidx] = IState::Stack(tmp_stack_off);
+                            moves.push((bitw, tmp_stack_off, *to_stack_off));
+                        }
                     }
                     VarLoc::StackOff(stack_off) => {
                         if is_loop {

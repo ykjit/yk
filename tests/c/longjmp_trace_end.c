@@ -7,8 +7,7 @@
 //     yk-tracing: start-tracing
 //     enter
 //     in loop: i=4
-//     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: irregular control flow detected (trace ended with outline successor pending)
+//     yk-warning: abort-tracing
 //     jumped
 //     in loop: i=3
 //     yk-tracing: start-tracing
@@ -22,8 +21,7 @@
 //     jumped
 //     exit
 
-// Check that we protect against longjmps that cause the trace builder to
-// remain in outlining mode when the trace ends.
+// Check that we protect against longjmps.
 
 #include <assert.h>
 #include <setjmp.h>

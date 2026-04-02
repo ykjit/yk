@@ -1121,8 +1121,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             // It would be better if ykllvm marked functions containing `llvm.va_start.p*` with
             // `yk_outline` (at least until we can inline calls to that intrinsic).
             && !func.contains_call_to(self.am, "llvm.va_start.p0")
-            // Is this a recursive call?
-            && !self.frames.iter().any(|f| f.pc.as_ref().unwrap().funcidx() == callee)
         {
             // Inlinable call.
             self.frames.last_mut().unwrap().pc_safepoint = Some(safepoint.as_ref().unwrap());
