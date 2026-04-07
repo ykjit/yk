@@ -14,72 +14,71 @@ io.stderr:write("exit\n")
 --   env-var: YKD_LOG_IR=debugstrs
 --   env-var: YKD_SERIALISE_COMPILATION=1
 --   stderr:
---     <0
---     <1
---     <2
---     yk-tracing: start-tracing: sidetrace.lua:2: LTI
---     <3
---     yk-tracing: stop-tracing: sidetrace.lua:2: LTI
---     --- Begin debugstrs: sidetrace.lua:2: LTI ---
---     ; {
---     ;   "trid": "0",
---     ;   "start": {
---     ;     "kind": "ControlPoint"
---     ;   },
---     ;   "end": {
---     ;     "kind": "Loop"
---     ;   }
---     ; }
---     sidetrace.lua:2: LTI
---     sidetrace.lua:3: GETTABUP
---     sidetrace.lua:3: GETFIELD
---     sidetrace.lua:3: SELF
---     sidetrace.lua:3: LOADK
---     sidetrace.lua:3: GETTABUP
---     sidetrace.lua:3: MOVE
---     sidetrace.lua:3: CALL
---     sidetrace.lua:3: LOADK
---     sidetrace.lua:3: CALL
---     sidetrace.lua:3: JMP
---     sidetrace.lua:1: FORLOOP
---     --- End debugstrs ---
---     <4
---     yk-execution: enter-jit-code: sidetrace.lua:2: LTI
---     yk-execution: deoptimise ...
---     >=5
---     yk-execution: enter-jit-code: sidetrace.lua:2: LTI
---     yk-execution: deoptimise ...
---     yk-tracing: start-side-tracing: sidetrace.lua:2: LTI
---     >=6
---     yk-tracing: stop-tracing: sidetrace.lua:2: LTI
---     --- Begin debugstrs: sidetrace.lua:2: LTI ---
---     ; {
---     ;   "trid": "1",
---     ;   "start": {
---     ;     "kind": "Guard",
---     ;     "src_trid": "0",
---     ;     "gidx": "${{_}}"
---     ;   },
---     ;   "end": {
---     ;     "kind": "Coupler",
---     ;     "tgt_trid": "0"
---     ;   }
---     ; }
---     sidetrace.lua:5: GETTABUP
---     sidetrace.lua:5: GETFIELD
---     sidetrace.lua:5: SELF
---     sidetrace.lua:5: LOADK
---     sidetrace.lua:5: GETTABUP
---     sidetrace.lua:5: MOVE
---     sidetrace.lua:5: CALL
---     sidetrace.lua:5: LOADK
---     sidetrace.lua:5: CALL
---     sidetrace.lua:1: FORLOOP
---     --- End debugstrs ---
---     >=7
---     yk-execution: enter-jit-code: sidetrace.lua:2: LTI
---     >=8
---     >=9
---     >=10
---     yk-execution: deoptimise ...
---     exit
+--    <0
+--    <1
+--    <2
+--    <3
+--    yk-tracing: start-tracing: sidetrace.lua:1: FORLOOP
+--    <4
+--    yk-tracing: stop-tracing: sidetrace.lua:1: FORLOOP
+--    --- Begin debugstrs: sidetrace.lua:1: FORLOOP ---
+--    ; {
+--    ;   "trid": "0",
+--    ;   "start": {
+--    ;     "kind": "ControlPoint"
+--    ;   },
+--    ;   "end": {
+--    ;     "kind": "Loop"
+--    ;   }
+--    ; }
+--    sidetrace.lua:1: FORLOOP
+--    sidetrace.lua:2: LTI
+--    sidetrace.lua:3: GETTABUP
+--    sidetrace.lua:3: GETFIELD
+--    sidetrace.lua:3: SELF
+--    sidetrace.lua:3: LOADK
+--    sidetrace.lua:3: GETTABUP
+--    sidetrace.lua:3: MOVE
+--    sidetrace.lua:3: CALL
+--    sidetrace.lua:3: LOADK
+--    sidetrace.lua:3: CALL
+--    sidetrace.lua:3: JMP
+--    --- End debugstrs ---
+--    >=5
+--    yk-execution: enter-jit-code: sidetrace.lua:1: FORLOOP
+--    yk-execution: deoptimise TraceId(0) ...
+--    >=6
+--    yk-execution: enter-jit-code: sidetrace.lua:1: FORLOOP
+--    yk-execution: deoptimise TraceId(0) ...
+--    yk-tracing: start-side-tracing: sidetrace.lua:1: FORLOOP
+--    >=7
+--    yk-tracing: stop-tracing: sidetrace.lua:1: FORLOOP
+--    --- Begin debugstrs: sidetrace.lua:1: FORLOOP ---
+--    ; {
+--    ;   "trid": "1",
+--    ;   "start": {
+--    ;     "kind": "Guard",
+--    ;     "src_trid": "0",
+--    ;     "gidx": "76"
+--    ;   },
+--    ;   "end": {
+--    ;     "kind": "Coupler",
+--    ;     "tgt_trid": "0"
+--    ;   }
+--    ; }
+--    sidetrace.lua:5: GETTABUP
+--    sidetrace.lua:5: GETFIELD
+--    sidetrace.lua:5: SELF
+--    sidetrace.lua:5: LOADK
+--    sidetrace.lua:5: GETTABUP
+--    sidetrace.lua:5: MOVE
+--    sidetrace.lua:5: CALL
+--    sidetrace.lua:5: LOADK
+--    sidetrace.lua:5: CALL
+--    --- End debugstrs ---
+--    >=8
+--    yk-execution: enter-jit-code: sidetrace.lua:1: FORLOOP
+--    >=9
+--    >=10
+--    yk-execution: deoptimise TraceId(0) ...
+--    exit
