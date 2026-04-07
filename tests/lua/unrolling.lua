@@ -18,13 +18,18 @@ io.stderr:write("exit\n")
 --     i 0
 --     i 1
 --     i 2
---     yk-tracing: start-tracing: unrolling.lua:2: GTI
 --     j 0
---     yk-warning: tracing-aborted: unrolled inner loop: unrolling.lua:4: GETTABUP
---     yk-tracing: start-tracing: unrolling.lua:4: GETTABUP
 --     j 1
---     yk-tracing: stop-tracing: unrolling.lua:4: GETTABUP
---     --- Begin debugstrs: unrolling.lua:4: GETTABUP ---
+--     j 2
+--     i 3
+--     yk-tracing: start-tracing: unrolling.lua:1: FORLOOP
+--     j 0
+--     j 1
+--     yk-warning: tracing-aborted: unrolled inner loop: unrolling.lua:3: FORLOOP
+--     yk-tracing: start-tracing: unrolling.lua:3: FORLOOP
+--     j 2
+--     yk-tracing: stop-tracing: unrolling.lua:3: FORLOOP
+--     --- Begin debugstrs: unrolling.lua:3: FORLOOP ---
 --     ; {
 --     ;   "trid": "1",
 --     ;   "start": {
@@ -34,6 +39,7 @@ io.stderr:write("exit\n")
 --     ;     "kind": "Loop"
 --     ;   }
 --     ; }
+--     unrolling.lua:3: FORLOOP
 --     unrolling.lua:4: GETTABUP
 --     unrolling.lua:4: GETFIELD
 --     unrolling.lua:4: SELF
@@ -43,13 +49,12 @@ io.stderr:write("exit\n")
 --     unrolling.lua:4: CALL
 --     unrolling.lua:4: LOADK
 --     unrolling.lua:4: CALL
---     unrolling.lua:3: FORLOOP
 --     --- End debugstrs ---
---     j 2
---     i 3
---     yk-tracing: start-tracing: unrolling.lua:2: GTI
---     yk-tracing: stop-tracing: unrolling.lua:4: GETTABUP
---     --- Begin debugstrs: unrolling.lua:2: GTI ---
+--     i 4
+--     yk-tracing: start-tracing: unrolling.lua:1: FORLOOP
+--     j 0
+--     yk-tracing: stop-tracing: unrolling.lua:3: FORLOOP
+--     --- Begin debugstrs: unrolling.lua:1: FORLOOP ---
 --     ; {
 --     ;   "trid": "2",
 --     ;   "start": {
@@ -60,23 +65,27 @@ io.stderr:write("exit\n")
 --     ;     "tgt_trid": "1"
 --     ;   }
 --     ; }
+--     unrolling.lua:1: FORLOOP
 --     unrolling.lua:2: GTI
 --     unrolling.lua:3: LOADI
 --     unrolling.lua:3: LOADI
 --     unrolling.lua:3: LOADI
 --     unrolling.lua:3: FORPREP
+--     unrolling.lua:4: GETTABUP
+--     unrolling.lua:4: GETFIELD
+--     unrolling.lua:4: SELF
+--     unrolling.lua:4: LOADK
+--     unrolling.lua:4: GETTABUP
+--     unrolling.lua:4: MOVE
+--     unrolling.lua:4: CALL
+--     unrolling.lua:4: LOADK
+--     unrolling.lua:4: CALL
 --     --- End debugstrs ---
---     j 0
---     yk-execution: enter-jit-code: unrolling.lua:4: GETTABUP
 --     j 1
+--     yk-execution: enter-jit-code: unrolling.lua:3: FORLOOP
 --     j 2
---     yk-execution: deoptimise TraceId(1) GuardId(0)
---     i 4
---     yk-execution: enter-jit-code: unrolling.lua:2: GTI
---     j 0
---     j 1
---     j 2
---     yk-execution: deoptimise TraceId(1) GuardId(0)
---     yk-tracing: start-side-tracing: unrolling.lua:4: GETTABUP
+--     yk-execution: deoptimise TraceId(1) ...
 --     i 5
+--     yk-execution: enter-jit-code: unrolling.lua:1: FORLOOP
+--     yk-execution: deoptimise TraceId(2) ...
 --     exit

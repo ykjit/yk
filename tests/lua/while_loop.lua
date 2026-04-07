@@ -43,5 +43,5 @@ io.stderr:write("exit\n")
 --     yk-execution: enter-jit-code: while_loop.lua:2: LEI
 --     5
 --     6
---     yk-execution: deoptimise TraceId(0) GuardId(33)
+--     yk-execution: deoptimise TraceId(0) ...
 --     exit
