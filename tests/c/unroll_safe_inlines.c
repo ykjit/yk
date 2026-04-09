@@ -9,7 +9,7 @@
 //     ...
 //     --- End hir ---
 
-// Check that a loopy function annotated `yk_unroll_safe` always gets inlined
+// Check that a loopy function annotated `yk_unroll` always gets inlined
 // into the trace.
 //
 // We can only see a call to `call_me()` in the trace if `inline_into_trace()`
@@ -25,11 +25,11 @@
 
 int call_me(int x); // from extra_linkage/call_me.c
 
-// A function containing a loop and marked `yk_unroll_safe`.
+// A function containing a loop and marked `yk_unroll`.
 //
 // We mark is `noinline` as well because we want to test that it gets inlined
 // during tracing, not during AOT compilation.
-__attribute__((yk_unroll_safe, noinline)) void inline_into_trace(int x) {
+__attribute__((yk_unroll, noinline)) void inline_into_trace(int x) {
   while (x--)
     call_me(x);
 }

@@ -15,7 +15,7 @@
 //     ...
 //     --- End hir ---
 
-// Check that `yk_outline` wins over `yk_unroll_safe`.
+// Check that `yk_outline` wins over `yk_unroll`.
 //
 // Although it is tempting to have clang emit an error when these conflicting attributes are used
 // together, the idiomatic "clang way" is to have one attribute win out over the other.
@@ -30,8 +30,8 @@
 
 int call_me(int x); // from extra_linkage/call_me.c
 
-// Both `yk_outline` and `yk_unroll_safe`!
-__attribute__((yk_outline, yk_unroll_safe)) void
+// Both `yk_outline` and `yk_unroll`!
+__attribute__((yk_outline, yk_unroll)) void
 never_inline_into_trace(int x) {
   while (x--)
     call_me(x);

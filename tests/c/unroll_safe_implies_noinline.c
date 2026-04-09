@@ -10,7 +10,7 @@
 //     --- End aot ---
 //     ...
 
-// Check that `yk_unroll_safe` implies `noinline` (thus blocking AOT inlining).
+// Check that `yk_unroll` implies `noinline` (thus blocking AOT inlining).
 
 #include <assert.h>
 #include <stdio.h>
@@ -22,8 +22,8 @@
 
 int call_me(int x); // from extra_linkage/call_me.c
 
-// A function containing a loop and marked `yk_unroll_safe`.
-__attribute__((yk_unroll_safe)) void never_aot_inline(int x) {
+// A function containing a loop and marked `yk_unroll`.
+__attribute__((yk_unroll)) void never_aot_inline(int x) {
   while (x--)
     call_me(x);
 }

@@ -18,7 +18,7 @@
 //     ...
 //     --- End hir ---
 
-// Check a loopy function that is NOT annotated `yk_unroll_safe`:
+// Check a loopy function that is NOT annotated `yk_unroll`:
 //   - never gets linlined during AOT compilation.
 //   - never gets inlined into the trace.
 
@@ -32,7 +32,7 @@
 
 int call_me(int x); // from extra_linkage/call_me.c
 
-// A function containing a loop, not marked `yk_unroll_safe`.
+// A function containing a loop, not marked `yk_unroll`.
 void never_inline_into_trace(int x) {
   while (x--)
     call_me(x);

@@ -39,7 +39,7 @@ int lua_geti(void *L, int x, int y) {
   return a;
 }
 
-__attribute__((yk_unroll_safe)) int tunpack(void *L, int argc) {
+__attribute__((yk_unroll)) int tunpack(void *L, int argc) {
   unsigned n = 0;
   int a = 1;
   int b = 2;
