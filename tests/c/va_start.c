@@ -43,7 +43,7 @@
 #include <yk_testing.h>
 
 // Sums the `n` vararg integers.
-__attribute__((noinline,yk_unroll_safe))
+__attribute__((noinline,yk_unroll))
 int f(int n, ...) {
   va_list ap;
   va_start(ap, n);

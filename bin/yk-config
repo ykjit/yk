@@ -42,7 +42,7 @@ handle_arg() {
             # Enable LTO.
             OUTPUT="${OUTPUT} -flto"
             # Outline functions containing loops during AOT compilation. Needed
-            # for `yk_unroll_safe`.
+            # for `yk_unroll`.
             OUTPUT="${OUTPUT} -fyk-noinline-funcs-with-loops"
             # Don't optimise functions by changing their calling convention.
             OUTPUT="${OUTPUT} -mllvm -yk-dont-opt-func-abi"

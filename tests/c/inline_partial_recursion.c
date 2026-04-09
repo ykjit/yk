@@ -58,7 +58,7 @@
 
 void loop(YkMT *, YkLocation *, YkLocation *, int, bool);
 
-__attribute__((yk_unroll_safe))
+__attribute__((yk_unroll))
 void loop(YkMT *mt, YkLocation *loc1, YkLocation *loc2, int i, bool is_inner) {
   NOOPT_VAL(i);
   while (i > 0) {

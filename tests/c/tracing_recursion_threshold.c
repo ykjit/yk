@@ -77,7 +77,7 @@
 
 void loop(YkMT *, YkLocation *, int, bool);
 
-__attribute__((yk_unroll_safe))
+__attribute__((yk_unroll))
 void loop(YkMT *mt, YkLocation *loc, int i, bool is_inner) {
   if (is_inner && i > 0) {
     fprintf(stderr, "inner %d\n", i);
