@@ -14,11 +14,10 @@ io.stderr:write("exit\n")
 --     0
 --     1
 --     2
+--     yk-tracing: start-tracing: for_loop.lua:3: GETTABUP
 --     3
---     yk-tracing: start-tracing: for_loop.lua:2: FORLOOP
---     4
---     yk-tracing: stop-tracing: for_loop.lua:2: FORLOOP
---     --- Begin debugstrs: for_loop.lua:2: FORLOOP ---
+--     yk-tracing: stop-tracing: for_loop.lua:3: GETTABUP
+--     --- Begin debugstrs: for_loop.lua:3: GETTABUP ---
 --     ; {
 --     ;   "trid": "0",
 --     ;   "start": {
@@ -28,7 +27,6 @@ io.stderr:write("exit\n")
 --     ;     "kind": "Loop"
 --     ;   }
 --     ; }
---     for_loop.lua:2: FORLOOP
 --     for_loop.lua:3: GETTABUP
 --     for_loop.lua:3: GETFIELD
 --     for_loop.lua:3: SELF
@@ -38,10 +36,12 @@ io.stderr:write("exit\n")
 --     for_loop.lua:3: LOADK
 --     for_loop.lua:3: CALL
 --     for_loop.lua:4: ADDI
+--     for_loop.lua:2: FORLOOP
 --     --- End debugstrs ---
+--     4
+--     yk-execution: enter-jit-code: for_loop.lua:3: GETTABUP
 --     5
---     yk-execution: enter-jit-code: for_loop.lua:2: FORLOOP
 --     6
 --     7
---     yk-execution: deoptimise TraceId(0) GuardId(38)
+--     yk-execution: deoptimise TraceId(0) ...
 --     exit
