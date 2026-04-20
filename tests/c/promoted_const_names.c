@@ -6,9 +6,8 @@
 //     ...
 //     --- Begin hir ---
 //     ...
-//     %{{16}}: ptr = 0x{{_}} ; @my_print0
-//     ...
-//     call %{{16}}(%{{_}}) ; @my_print0
+//     %{{66}}: ptr = 0x{{_}} ; @__yk_opt_my_print0
+//     call %{{66}}(%{{_}}) ; @__yk_opt_my_print0
 //     ...
 //     --- End hir ---
 //     hello 0 3
@@ -16,7 +15,9 @@
 //     hello 0 1
 //     exit
 
-// Check that constant promoted values have their symbols attached.
+// Check that constant promoted values have their symbols attached, and that
+// when a promoted function pointer resolves to a function that has an opt
+// clone, the JIT calls the opt clone in the compiled trace.
 
 #include <assert.h>
 #include <stdio.h>
