@@ -838,11 +838,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         for (reg, cnstr) in allocs.iter().zip(cnstrs.iter()) {
             match cnstr {
                 RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } => (),
-                RegCnstr::Input {
-                    in_iidx,
-                    in_fill: _,
-                    ..
-                } => {
+                RegCnstr::Input { in_iidx, .. } => {
                     self.is_used.set(usize::from(*in_iidx), true);
                 }
                 RegCnstr::InputOutput {
