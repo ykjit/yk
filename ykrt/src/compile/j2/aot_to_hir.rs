@@ -145,7 +145,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         if should_log_ir(IRPhase::AOT) {
             log_ir(&format!(
                 "--- Begin aot ---\n{}\n--- End aot ---\n",
-                &*AOT_MOD
+                *AOT_MOD
             ));
         }
 
@@ -370,7 +370,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             log_ir(&format!(
                 "--- Begin debugstrs{ds} ---\n; {}\n{}\n--- End debugstrs ---\n",
                 m.json_info().split("\n").collect::<Vec<_>>().join("\n; "),
-                &self.debug_strs_joined.unwrap()
+                self.debug_strs_joined.unwrap()
             ));
         }
 
