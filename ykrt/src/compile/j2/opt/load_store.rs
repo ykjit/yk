@@ -198,7 +198,7 @@ impl PassT for LoadStore {
     fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
         // FIXME: This is of a hack until `prepare_for_peel` can properly determine equivalences.
         // At that point, there's no need for this method to do anything.
-        for (_hv_addr, hv_val) in self.hv.iter_mut() {
+        for hv_val in self.hv.values_mut() {
             if *hv_val == equiv1 {
                 *hv_val = equiv2;
             }
