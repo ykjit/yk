@@ -1550,6 +1550,25 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         );
         assert!(next_bid.bbidx() == *true_bb || next_bid.bbidx() == *false_bb);
 
+        // yk_indirect_inline functions have a tracing-state check prepended at
+        // BBIdx 0 by ModuleClone. During tracing the state is always non-zero,
+        // but at JIT-execution time it is 0 (IsTracing::None), so a guard would
+        // always deoptimise. We skip guard generation for this block; the trace
+        // continues directly into the observed (not-taken) path.
+        //
+        // BBIdx 0 looks like (in AOT IR):
+        //   bb0:
+        //     %0: i8 = load @__yk_thread_tracing_state
+        //     %1: i1 = eq %0, 0i8        ; true when NOT tracing
+        //     condbr %1, bb1, bb2 ...    ; tracing: always takes bb2 (orig_body)
+        //
+        // YKFIXME: This can be done cleaner by skipping this block in the IRWriter.
+        if self.am.func(bid.funcidx()).is_indirect_inline()
+            && bid.bbidx() == BBlockIdx::new(0)
+        {
+            return Ok(());
+        }
+
         let cond_iidx = self.p_operand(cond)?;
         self.push_guard(
             bid,
