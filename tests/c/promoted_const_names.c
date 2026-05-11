@@ -15,9 +15,7 @@
 //     hello 0 1
 //     exit
 
-// Check that constant promoted values have their symbols attached, and that
-// when a promoted function pointer resolves to a function that has an opt
-// clone, the JIT calls the opt clone in the compiled trace.
+// Check that constant promoted values have their symbols attached.
 
 #include <assert.h>
 #include <stdio.h>
