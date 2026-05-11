@@ -1550,6 +1550,15 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         );
         assert!(next_bid.bbidx() == *true_bb || next_bid.bbidx() == *false_bb);
 
+        // YKFIXME: This can be done cleaner by skipping this block in the IRWriter.
+        // yk_indirect_inline functions have a tracing-state check prepended at
+        // first basic block. During tracing the state is always non-zero,
+        // but at JIT-execution time it is 0 so a guard would always fail.
+        // We skip guard generation for this block.
+        if self.am.func(bid.funcidx()).is_indirect_inline() && bid.bbidx() == BBlockIdx::new(0) {
+            return Ok(());
+        }
+
         let cond_iidx = self.p_operand(cond)?;
         self.push_guard(
             bid,
