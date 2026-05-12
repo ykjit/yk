@@ -860,11 +860,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 break;
             }
             let Some((iidx, hinst)) = insts_iter.next() else {
-                // By definition there must be no `Arg` instructions in this trace, which is only
-                // plausible in testing mode.
-                #[cfg(not(test))]
-                panic!();
-                #[cfg(test)]
+                // No Arg instructions: Can happen when all live values at this control point are globals.
+                // Their addresses are baked into the IR, so nothing needs to be passed in
+                // via registers or stack at trace entry.
                 break;
             };
             match hinst {
