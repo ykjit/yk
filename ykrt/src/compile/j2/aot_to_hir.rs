@@ -1055,6 +1055,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         self.push_inst_and_link_local(iid, inst).map(|_| ())
     }
 
+    /// Returns `Ok(true)` if the call has been inlined.
     fn p_call(
         &mut self,
         iid: InstId,
@@ -1077,7 +1078,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         self.p_static_call(iid, bid, *callee, args, safepoint.as_ref())
     }
 
-    /// Handles a call to a statically known callee, maybe inlining it.
+    /// Returns `Ok(true)` if the call has been inlined.
     fn p_static_call(
         &mut self,
         iid: InstId,
@@ -1213,6 +1214,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         }
     }
 
+    /// Returns `Ok(true)` if the call has been inlined.
     fn p_icall(
         &mut self,
         iid: InstId,
