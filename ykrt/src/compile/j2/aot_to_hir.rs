@@ -236,31 +236,36 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
         // If we encounter a return in a side-trace, [return_safepoint] will be `Some`, and no
         // further processing of the trace should occur.
-        let return_safepoint = self.p_blocks()?;
-        if return_safepoint.is_none() {
-            assert!(self.promotions_iter.next().is_none());
-            assert_eq!(self.frames.len(), 1);
-            let exit_safepoint = match &bmk {
-                BuildModKind::Loop { entry_safepoint } => entry_safepoint,
-                BuildModKind::Coupler { tgt_ctr, .. } => match &tgt_ctr.trace_start {
-                    J2TraceStart::ControlPoint {
-                        entry_safepoint, ..
-                    } => entry_safepoint,
-                    J2TraceStart::Guard { .. } => todo!(),
-                },
-                BuildModKind::Side { tgt_ctr, .. } => match tgt_ctr.as_ref().unwrap().trace_start {
-                    J2TraceStart::ControlPoint {
-                        entry_safepoint, ..
-                    } => entry_safepoint,
-                    J2TraceStart::Guard { .. } => todo!(),
-                },
-            };
-            let term_vars = exit_safepoint
-                .lives
-                .iter()
-                .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
-                .collect::<Vec<_>>();
-            self.opt.feed_void(hir::Inst::Term(hir::Term(term_vars)))?;
+        let termendk = self.p_blocks()?;
+        match &termendk {
+            TraceEndKind::Return(_) => (),
+            TraceEndKind::Term => {
+                assert!(self.promotions_iter.next().is_none());
+                assert_eq!(self.frames.len(), 1);
+                let exit_safepoint = match &bmk {
+                    BuildModKind::Loop { entry_safepoint } => entry_safepoint,
+                    BuildModKind::Coupler { tgt_ctr, .. } => match &tgt_ctr.trace_start {
+                        J2TraceStart::ControlPoint {
+                            entry_safepoint, ..
+                        } => entry_safepoint,
+                        J2TraceStart::Guard { .. } => todo!(),
+                    },
+                    BuildModKind::Side { tgt_ctr, .. } => {
+                        match tgt_ctr.as_ref().unwrap().trace_start {
+                            J2TraceStart::ControlPoint {
+                                entry_safepoint, ..
+                            } => entry_safepoint,
+                            J2TraceStart::Guard { .. } => todo!(),
+                        }
+                    }
+                };
+                let term_vars = exit_safepoint
+                    .lives
+                    .iter()
+                    .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
+                    .collect::<Vec<_>>();
+                self.opt.feed_void(hir::Inst::Term(hir::Term(term_vars)))?;
+            }
         }
 
         let tyidx_int1 = self.opt.tyidx_int1();
@@ -273,8 +278,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 tgt_ctr,
             } => {
                 let (entry, tys) = self.opt.build()?;
-                match return_safepoint {
-                    Some(exit_safepoint) => (
+                match termendk {
+                    TraceEndKind::Return(exit_safepoint) => (
                         hir::TraceStart::ControlPoint { entry_safepoint },
                         hir::TraceEnd::Return {
                             entry,
@@ -282,23 +287,15 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         },
                         tys,
                     ),
-                    None => (
+                    TraceEndKind::Term => (
                         hir::TraceStart::ControlPoint { entry_safepoint },
                         hir::TraceEnd::Coupler { entry, tgt_ctr },
                         tys,
                     ),
                 }
             }
-            BuildModKind::Loop { entry_safepoint } => match return_safepoint {
-                None => {
-                    let (entry, peel, tys) = self.opt.build_with_peel()?;
-                    (
-                        hir::TraceStart::ControlPoint { entry_safepoint },
-                        hir::TraceEnd::Loop { entry, peel },
-                        tys,
-                    )
-                }
-                Some(exit_safepoint) => {
+            BuildModKind::Loop { entry_safepoint } => match termendk {
+                TraceEndKind::Return(exit_safepoint) => {
                     let (entry, tys) = self.opt.build()?;
                     (
                         hir::TraceStart::ControlPoint { entry_safepoint },
@@ -306,6 +303,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                             entry,
                             exit_safepoint,
                         },
+                        tys,
+                    )
+                }
+                TraceEndKind::Term => {
+                    let (entry, peel, tys) = self.opt.build_with_peel()?;
+                    (
+                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceEnd::Loop { entry, peel },
                         tys,
                     )
                 }
@@ -318,20 +323,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 ..
             } => {
                 let (entry, tys) = self.opt.build()?;
-                match return_safepoint {
-                    None => (
-                        hir::TraceStart::Guard {
-                            args_vlocs,
-                            src_ctr,
-                            src_gidx,
-                        },
-                        hir::TraceEnd::Coupler {
-                            entry,
-                            tgt_ctr: tgt_ctr.unwrap(),
-                        },
-                        tys,
-                    ),
-                    Some(exit_safepoint) => (
+                match termendk {
+                    TraceEndKind::Return(exit_safepoint) => (
                         hir::TraceStart::Guard {
                             args_vlocs,
                             src_ctr,
@@ -340,6 +333,18 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         hir::TraceEnd::Return {
                             entry,
                             exit_safepoint,
+                        },
+                        tys,
+                    ),
+                    TraceEndKind::Term => (
+                        hir::TraceStart::Guard {
+                            args_vlocs,
+                            src_ctr,
+                            src_gidx,
+                        },
+                        hir::TraceEnd::Coupler {
+                            entry,
+                            tgt_ctr: tgt_ctr.unwrap(),
                         },
                         tys,
                     ),
@@ -826,7 +831,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
     /// Returns `Some(safepoint)` if an early return was encountered: parent code should stop
     /// examining the trace at this point.
-    fn p_blocks(&mut self) -> Result<Option<&'static DeoptSafepoint>, CompilationError> {
+    fn p_blocks(&mut self) -> Result<TraceEndKind, CompilationError> {
         loop {
             let (pc, bid, blk) = {
                 let mut pc = self.frames.last().unwrap().pc.clone().unwrap();
@@ -834,7 +839,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let mut blk = self.am.bblock(&bid);
                 if usize::from(pc.iidx()) == blk.insts.len() {
                     let Some(ta) = self.ta_iter.next() else {
-                        return Ok(None);
+                        return Ok(TraceEndKind::Term);
                     };
                     let ta = ta.map_err(|e| CompilationError::General(format!("{e:?}")))?;
                     let cnd_bid = self.ta_to_bid(&ta).unwrap();
@@ -895,7 +900,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::Ret { .. } => {
                     if let Some(x) = self.p_return(pc.clone(), inst)? {
                         // We encountered an early return.
-                        return Ok(Some(x));
+                        return Ok(TraceEndKind::Return(x));
                     }
                 }
                 Inst::Select { .. } => self.p_select(pc.clone(), inst)?,
@@ -2085,4 +2090,12 @@ fn iter_to_array<const N: usize>(iter: &mut dyn Iterator<Item = &u8>) -> [u8; N]
         *x = *iter.next().unwrap();
     }
     out
+}
+
+/// How did the trace end?
+enum TraceEndKind {
+    /// It looped or coupled to another trace.
+    Term,
+    /// It returned to an outer caller.
+    Return(&'static DeoptSafepoint),
 }
