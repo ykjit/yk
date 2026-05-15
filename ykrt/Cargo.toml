@@ -10,7 +10,6 @@ array-concat = "0.5.5"
 byteorder = "1.4.3"
 enum_dispatch = "0.3.13"
 deku = { version = "0.18.1", features = ["std"] }
-dynasmrt = "3.0.0"
 iced-x86 = { version = "1.21.0", features = ["encoder"] }
 indexmap = "2.2.6"
 index_vec = "0.1.4"
