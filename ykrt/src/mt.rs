@@ -835,7 +835,6 @@ impl MT {
                 let mut lk = hl.lock();
                 if seen_hls.push_and_check_any_loop_closed(Arc::clone(&hl)) {
                     // We have traced this location more than once...
-                    //
                     if is_callee_frame(frameaddr, *tracing_frameaddr) {
                         lk.kind = match lk.tracecompilation_error(self) {
                             TraceFailed::KeepTrying => HotLocationKind::Counting(0),
