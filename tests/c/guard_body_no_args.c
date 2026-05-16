@@ -11,10 +11,12 @@
 //     ...
 //     --- Begin hir ---
 //     ...
-//     term []
-//     ; peel
+//     %0: ptr = 0x{{_}} ; @global_var
+//     %1: {{_}} = load %0
 //     ...
-//     term []
+//     %0: ptr = 0x{{_}} ; @global_var
+//     %1: {{_}} = load %0
+//     ...
 //     --- End hir ---
 //     ...
 //     yk-execution: enter-jit-code
@@ -26,9 +28,7 @@
 // The AOT patchpoint passes `@location` and `@global_var` as global address
 // constants (not live locals). The empty safepoint `()` confirms this: live
 // locals would appear there if interpreter state were in local variables.
-//
-// The HIR `term []` assert the absence of Arg instructions: the term
-// list has a 1:1 correspondence with the Arg/Const instructions.
+
 
 
 #include <stdlib.h>
