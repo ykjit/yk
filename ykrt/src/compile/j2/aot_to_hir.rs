@@ -1665,6 +1665,19 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         else {
             panic!()
         };
+        // YKFIXME: This can be done cleaner by skipping this block in the IRWriter.
+        // During tracing the tracing-state TLS variable is always non-zero.
+        // Substitute any load from it with constant 1 instead.
+        if let Operand::Global(gidx) = ptr
+            && self.am.global_decl(*gidx).name() == "__yk_thread_tracing_state"
+        {
+            // The tracing state is always i8 (8-bit); value 1 = tracing.
+            let tyidx = self.p_ty(self.am.type_(*tyidx))?;
+            let iidx = self.const_to_iidx(tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(8, 1)))?;
+            self.frames.last_mut().unwrap().set_local(iid, iidx);
+            return Ok(());
+        }
+
         let tyidx = self.p_ty(self.am.type_(*tyidx))?;
         let ptr = self.p_operand(ptr)?;
         self.push_inst_and_link_local(
