@@ -1376,7 +1376,8 @@ pub(super) trait HirToAsmBackend {
 
     /// Produce code for the end of a (*, Return) trace. The safepoint of the `return` is
     /// `exit_safepoint`. If a value should be returned to the caller, the relevant [InstIdx] is
-    /// passed in `ret_val`.
+    /// passed in `ret_val`. This function _must_ ensure that [MTThread::trace_returned] is
+    /// called as part of the generated code.
     fn star_return_end(
         &mut self,
         ra: &mut RegAlloc<Self>,

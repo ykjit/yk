@@ -34,6 +34,7 @@
 #[cfg(not(test))]
 use crate::aotsmp::AOT_STACKMAPS;
 use crate::{
+    MTThread,
     compile::{
         CompilationError, DeoptSafepoint,
         j2::{
@@ -1512,7 +1513,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RBP,
         ));
 
-        if let Some(ret_val) = ret_val {
+        let callr = if let Some(ret_val) = ret_val {
             match b.inst_ty(self.m, ret_val) {
                 Ty::Double => todo!(),
                 Ty::Float => todo!(),
@@ -1520,20 +1521,42 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 Ty::Int(_) | Ty::Ptr(_) => {
                     let bitw = b.inst_bitw(self.m, ret_val);
                     assert!(bitw <= 64);
-                    let [_] = ra.alloc(
+                    let [callr, _] = ra.alloc(
                         self,
                         iidx,
-                        [RegCnstr::Input {
-                            in_iidx: ret_val,
-                            in_fill: RegCnstrFill::Zeroed,
-                            regs: &[Reg::RAX],
-                            clobber: false,
-                        }],
+                        [
+                            RegCnstr::Temp {
+                                regs: &NORMAL_GP_REGS,
+                            },
+                            RegCnstr::Input {
+                                in_iidx: ret_val,
+                                in_fill: RegCnstrFill::Zeroed,
+                                regs: &[Reg::RAX],
+                                clobber: false,
+                            },
+                        ],
                     )?;
+                    callr
                 }
                 Ty::Void => unreachable!(),
             }
-        }
+        } else {
+            ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::Temp {
+                    regs: &NORMAL_GP_REGS,
+                }],
+            )?[0]
+        };
+        self.asm
+            .push_inst(IcedInst::with1(Code::Call_rm64, callr.to_reg64()));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_imm64,
+            callr.to_reg64(),
+            // This cast is fine on x64, and this module will only be compiled on that platform.
+            MTThread::trace_returned as *const () as i64,
+        ));
 
         Ok(())
     }
