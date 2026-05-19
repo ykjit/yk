@@ -1317,6 +1317,15 @@ impl MTThread {
         THREAD_MTTHREAD.with_borrow_mut(|mtt| f(mtt))
     }
 
+    #[unsafe(no_mangle)]
+    pub(crate) fn trace_returned() {
+        THREAD_MTTHREAD.with_borrow_mut(|mtt| {
+            let MTThreadState::Executing { .. } = mtt.pop_tstate() else {
+                panic!()
+            };
+        });
+    }
+
     /// Return a reference to the [CompiledTrace] with ID `ctrid`.
     ///
     /// # Panics
