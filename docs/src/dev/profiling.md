@@ -19,16 +19,16 @@ otherwise bizarre).
 Output from `YKD_LOG_STATS` looks as follows:
 
 ```
-{                                       
-    "duration_compiling": 5.5219,                                               
+{
+    "duration_compiling": 5.5219,
     "duration_deopting": 2.2638,
     "duration_jit_executing": 0.2,
     "duration_outside_yk": 0.142,
     "duration_tracing": 1.2345,
-    "traces_collected_err": 0,                                                  
-    "traces_collected_ok": 11,                                                  
+    "traces_collected_err": 0,
+    "traces_collected_ok": 11,
     "traces_compiled_err": 1,
-    "traces_compiled_ok": 10                                                    
+    "traces_compiled_ok": 10
 }
 ```
 

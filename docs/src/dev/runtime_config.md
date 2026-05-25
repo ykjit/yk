@@ -49,7 +49,7 @@ The following environment variables are available (some only in certain configur
   and level 4 shows trace execution and deoptimisation. Note that some
   information, at all levels, may or may not be displayed based on compile-time
   options. Defaults to 1.
-* [`YKD_LOG_IR`](understanding_traces.html#ykd_log_ir) [with the `ykd` feature]
-* [`YKD_LOG_STATS`](profiling.html#jit-statistics)
-* `YKD_TPROF`: When "1" turns on [trace profiling support](profiling.html) (if
+* [`YKD_LOG_IR`](understanding_traces.md#ykd_log_ir) [with the `ykd` feature]
+* [`YKD_LOG_STATS`](profiling.md#jit-statistics)
+* `YKD_TPROF`: When "1" turns on [trace profiling support](profiling.md) (if
   implemented for the current platform).
