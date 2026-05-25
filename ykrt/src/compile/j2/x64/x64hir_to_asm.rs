@@ -567,7 +567,7 @@ impl<'a> X64HirToAsm<'a> {
             RegOrMemOp::MemOp(lhsr, disp) => match bitw {
                 32 => IcedInst::with2(
                     Code::Cmp_rm32_r32,
-                    MemoryOperand::with_base_displ(lhsr.to_reg32(), disp),
+                    MemoryOperand::with_base_displ(lhsr.to_reg64(), disp),
                     rhsr.to_reg32(),
                 ),
                 64 => IcedInst::with2(
@@ -6686,7 +6686,7 @@ mod test {
               ; %2: i32 = load %0
               ; %3: i1 = icmp ugt %2, %1
               ; guard true, %3, []
-              cmp [r.32.x], r.32.y
+              cmp [r.64.x], r.32.y
               jbe l{{1}}
               ; term [%0, %1]
             "#],
