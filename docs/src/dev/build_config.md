@@ -1,7 +1,7 @@
 # Configuring the build
 
 Start by following the [general installation
-instructions](../user/install.html#building).
+instructions](../user/install.md#building).
 
 The `yk` repo is a Rust workspace (i.e. a collection of crates). You can build
 and test in the usual ways using `cargo`. For example, to build and test the
