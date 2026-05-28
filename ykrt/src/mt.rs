@@ -1319,10 +1319,16 @@ impl MTThread {
 
     #[unsafe(no_mangle)]
     pub(crate) fn trace_returned() {
-        THREAD_MTTHREAD.with_borrow_mut(|mtt| {
-            let MTThreadState::Executing { .. } = mtt.pop_tstate() else {
-                panic!()
-            };
+        THREAD_MTTHREAD.with_borrow_mut(|mtt| match mtt.peek_mut_tstate() {
+            MTThreadState::Executing { .. } => {
+                mtt.pop_tstate();
+            }
+            MTThreadState::Tracing { .. } => {
+                // We could consider stopping tracing at this point, as we've got an "early return"
+                // trace. It's mildly awkward to do that, so we just keep the state set to tracing
+                // and allow a normal control point call to deal with it.
+            }
+            _ => panic!(),
         });
     }
 
