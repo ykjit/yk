@@ -668,7 +668,7 @@ impl<'a> X64HirToAsm<'a> {
 
         self.asm.push_inst(match self.m.ty(*tyidx) {
             Ty::Int(bitw) => match bitw {
-                8 => {
+                1 | 8 => {
                     if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
                         IcedInst::with2(Code::Movzx_r32_rm8, outr.to_reg32(), memop)
                     } else {
@@ -800,7 +800,7 @@ impl<'a> X64HirToAsm<'a> {
                 )?;
                 let memop = MemoryOperand::with_base_displ(ptrr.to_reg64(), off);
                 self.asm.push_inst(match val_bitw {
-                    8 => {
+                    1 | 8 => {
                         assert_eq!(i32::from(i8::try_from(imm).unwrap()), imm);
                         IcedInst::with2(Code::Add_rm8_imm8, memop, imm)
                     }
@@ -834,7 +834,7 @@ impl<'a> X64HirToAsm<'a> {
             };
 
             self.asm.push_inst(match val_bitw {
-                8 => IcedInst::with2(Code::Mov_rm8_imm8, memop, imm),
+                1 | 8 => IcedInst::with2(Code::Mov_rm8_imm8, memop, imm),
                 16 => IcedInst::with2(Code::Mov_rm16_imm16, memop, imm),
                 32 => IcedInst::with2(Code::Mov_rm32_imm32, memop, imm),
                 64 => IcedInst::with2(Code::Mov_rm64_imm32, memop, imm),
@@ -866,7 +866,7 @@ impl<'a> X64HirToAsm<'a> {
             };
 
             self.asm.push_inst(match val_bitw {
-                8 => IcedInst::with2(Code::Mov_rm8_r8, memop, valr.to_reg8()),
+                1 | 8 => IcedInst::with2(Code::Mov_rm8_r8, memop, valr.to_reg8()),
                 16 => IcedInst::with2(Code::Mov_rm16_r16, memop, valr.to_reg16()),
                 32 => IcedInst::with2(Code::Mov_rm32_r32, memop, valr.to_reg32()),
                 64 => IcedInst::with2(Code::Mov_rm64_r64, memop, valr.to_reg64()),
@@ -6949,6 +6949,22 @@ mod test {
 
     #[test]
     fn cg_load_int() {
+        // i1
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i1 = load %0
+              blackbox %1
+              term [%0]
+            ",
+            &["
+              ...
+              ; %1: i1 = load %0
+              movzx r.32._, byte [r.64._]
+              ...
+            "],
+        );
+
         // i8
         codegen_and_test(
             "
