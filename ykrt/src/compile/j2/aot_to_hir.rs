@@ -236,31 +236,36 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
         // If we encounter a return in a side-trace, [return_safepoint] will be `Some`, and no
         // further processing of the trace should occur.
-        let return_safepoint = self.p_blocks()?;
-        if return_safepoint.is_none() {
-            assert!(self.promotions_iter.next().is_none());
-            assert_eq!(self.frames.len(), 1);
-            let exit_safepoint = match &bmk {
-                BuildModKind::Loop { entry_safepoint } => entry_safepoint,
-                BuildModKind::Coupler { tgt_ctr, .. } => match &tgt_ctr.trace_start {
-                    J2TraceStart::ControlPoint {
-                        entry_safepoint, ..
-                    } => entry_safepoint,
-                    J2TraceStart::Guard { .. } => todo!(),
-                },
-                BuildModKind::Side { tgt_ctr, .. } => match tgt_ctr.as_ref().unwrap().trace_start {
-                    J2TraceStart::ControlPoint {
-                        entry_safepoint, ..
-                    } => entry_safepoint,
-                    J2TraceStart::Guard { .. } => todo!(),
-                },
-            };
-            let term_vars = exit_safepoint
-                .lives
-                .iter()
-                .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
-                .collect::<Vec<_>>();
-            self.opt.feed_void(hir::Inst::Term(hir::Term(term_vars)))?;
+        let termendk = self.p_blocks()?;
+        match &termendk {
+            TraceEndKind::Return(_) => (),
+            TraceEndKind::Term => {
+                assert!(self.promotions_iter.next().is_none());
+                assert_eq!(self.frames.len(), 1);
+                let exit_safepoint = match &bmk {
+                    BuildModKind::Loop { entry_safepoint } => entry_safepoint,
+                    BuildModKind::Coupler { tgt_ctr, .. } => match &tgt_ctr.trace_start {
+                        J2TraceStart::ControlPoint {
+                            entry_safepoint, ..
+                        } => entry_safepoint,
+                        J2TraceStart::Guard { .. } => todo!(),
+                    },
+                    BuildModKind::Side { tgt_ctr, .. } => {
+                        match tgt_ctr.as_ref().unwrap().trace_start {
+                            J2TraceStart::ControlPoint {
+                                entry_safepoint, ..
+                            } => entry_safepoint,
+                            J2TraceStart::Guard { .. } => todo!(),
+                        }
+                    }
+                };
+                let term_vars = exit_safepoint
+                    .lives
+                    .iter()
+                    .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
+                    .collect::<Vec<_>>();
+                self.opt.feed_void(hir::Inst::Term(hir::Term(term_vars)))?;
+            }
         }
 
         let tyidx_int1 = self.opt.tyidx_int1();
@@ -273,8 +278,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 tgt_ctr,
             } => {
                 let (entry, tys) = self.opt.build()?;
-                match return_safepoint {
-                    Some(exit_safepoint) => (
+                match termendk {
+                    TraceEndKind::Return(exit_safepoint) => (
                         hir::TraceStart::ControlPoint { entry_safepoint },
                         hir::TraceEnd::Return {
                             entry,
@@ -282,23 +287,15 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         },
                         tys,
                     ),
-                    None => (
+                    TraceEndKind::Term => (
                         hir::TraceStart::ControlPoint { entry_safepoint },
                         hir::TraceEnd::Coupler { entry, tgt_ctr },
                         tys,
                     ),
                 }
             }
-            BuildModKind::Loop { entry_safepoint } => match return_safepoint {
-                None => {
-                    let (entry, peel, tys) = self.opt.build_with_peel()?;
-                    (
-                        hir::TraceStart::ControlPoint { entry_safepoint },
-                        hir::TraceEnd::Loop { entry, peel },
-                        tys,
-                    )
-                }
-                Some(exit_safepoint) => {
+            BuildModKind::Loop { entry_safepoint } => match termendk {
+                TraceEndKind::Return(exit_safepoint) => {
                     let (entry, tys) = self.opt.build()?;
                     (
                         hir::TraceStart::ControlPoint { entry_safepoint },
@@ -306,6 +303,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                             entry,
                             exit_safepoint,
                         },
+                        tys,
+                    )
+                }
+                TraceEndKind::Term => {
+                    let (entry, peel, tys) = self.opt.build_with_peel()?;
+                    (
+                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceEnd::Loop { entry, peel },
                         tys,
                     )
                 }
@@ -318,20 +323,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 ..
             } => {
                 let (entry, tys) = self.opt.build()?;
-                match return_safepoint {
-                    None => (
-                        hir::TraceStart::Guard {
-                            args_vlocs,
-                            src_ctr,
-                            src_gidx,
-                        },
-                        hir::TraceEnd::Coupler {
-                            entry,
-                            tgt_ctr: tgt_ctr.unwrap(),
-                        },
-                        tys,
-                    ),
-                    Some(exit_safepoint) => (
+                match termendk {
+                    TraceEndKind::Return(exit_safepoint) => (
                         hir::TraceStart::Guard {
                             args_vlocs,
                             src_ctr,
@@ -340,6 +333,18 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         hir::TraceEnd::Return {
                             entry,
                             exit_safepoint,
+                        },
+                        tys,
+                    ),
+                    TraceEndKind::Term => (
+                        hir::TraceStart::Guard {
+                            args_vlocs,
+                            src_ctr,
+                            src_gidx,
+                        },
+                        hir::TraceEnd::Coupler {
+                            entry,
+                            tgt_ctr: tgt_ctr.unwrap(),
                         },
                         tys,
                     ),
@@ -826,7 +831,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
     /// Returns `Some(safepoint)` if an early return was encountered: parent code should stop
     /// examining the trace at this point.
-    fn p_blocks(&mut self) -> Result<Option<&'static DeoptSafepoint>, CompilationError> {
+    fn p_blocks(&mut self) -> Result<TraceEndKind, CompilationError> {
         loop {
             let (pc, bid, blk) = {
                 let mut pc = self.frames.last().unwrap().pc.clone().unwrap();
@@ -834,7 +839,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let mut blk = self.am.bblock(&bid);
                 if usize::from(pc.iidx()) == blk.insts.len() {
                     let Some(ta) = self.ta_iter.next() else {
-                        return Ok(None);
+                        return Ok(TraceEndKind::Term);
                     };
                     let ta = ta.map_err(|e| CompilationError::General(format!("{e:?}")))?;
                     let cnd_bid = self.ta_to_bid(&ta).unwrap();
@@ -868,11 +873,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::Alloca { .. } => todo!(),
                 Inst::BinaryOp { .. } => self.p_binop(pc.clone(), inst)?,
                 Inst::Br { .. } => (),
-                Inst::Call { .. } => {
-                    if self.p_call(pc.clone(), bid, inst)? {
-                        continue;
-                    }
-                }
+                Inst::Call { .. } => match self.p_call(pc.clone(), bid, inst)? {
+                    CallProcessedKind::Ignored => (),
+                    CallProcessedKind::Inlined => continue,
+                    CallProcessedKind::Outlined => (),
+                },
                 Inst::Cast { .. } => self.p_cast(pc.clone(), inst)?,
                 Inst::CondBr { .. } => self.p_condbr(pc.clone(), bid, inst)?,
                 Inst::DebugStr { .. } => self.p_debugstr(pc.clone())?,
@@ -881,11 +886,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::FNeg { .. } => self.p_fneg(pc.clone(), inst)?,
                 Inst::Freeze { .. } => self.p_freeze(pc.clone(), inst)?,
                 Inst::ICmp { .. } => self.p_icmp(pc.clone(), inst)?,
-                Inst::IndirectCall { .. } => {
-                    if self.p_icall(pc.clone(), bid, inst)? {
-                        continue;
-                    }
-                }
+                Inst::IndirectCall { .. } => match self.p_icall(pc.clone(), bid, inst)? {
+                    CallProcessedKind::Ignored => (),
+                    CallProcessedKind::Inlined => continue,
+                    CallProcessedKind::Outlined => (),
+                },
                 Inst::InsertValue { .. } => todo!(),
                 Inst::Load { .. } => self.p_load(pc.clone(), inst)?,
                 Inst::LoadArg { .. } => self.p_loadarg(pc.clone(), inst)?,
@@ -895,7 +900,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::Ret { .. } => {
                     if let Some(x) = self.p_return(pc.clone(), inst)? {
                         // We encountered an early return.
-                        return Ok(Some(x));
+                        return Ok(TraceEndKind::Return(x));
                     }
                 }
                 Inst::Select { .. } => self.p_select(pc.clone(), inst)?,
@@ -1055,7 +1060,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         iid: InstId,
         bid: BBlockId,
         inst: &'static Inst,
-    ) -> Result<bool, CompilationError> {
+    ) -> Result<CallProcessedKind, CompilationError> {
         let Inst::Call {
             callee,
             args,
@@ -1067,12 +1072,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
         // Ignore control point, or LLVM debug, calls.
         if inst.is_control_point(self.am) || inst.is_debug_call(self.am) {
-            return Ok(false);
+            return Ok(CallProcessedKind::Ignored);
         }
         self.p_static_call(iid, bid, *callee, args, safepoint.as_ref())
     }
 
-    /// Handles a call to a statically known callee, maybe inlining it.
     fn p_static_call(
         &mut self,
         iid: InstId,
@@ -1080,12 +1084,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         callee: FuncIdx,
         args: &[Operand],
         safepoint: Option<&'static DeoptSafepoint>,
-    ) -> Result<bool, CompilationError> {
+    ) -> Result<CallProcessedKind, CompilationError> {
         let func = self.am.func(callee);
         // Ignore calls the software tracer makes to record blocks.
         #[cfg(tracer_swt)]
         if func.name() == "__yk_trace_basicblock" {
-            return Ok(false);
+            return Ok(CallProcessedKind::Ignored);
         }
 
         if func.name() == "yk_is_interpreting" {
@@ -1093,7 +1097,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             let ciidx =
                 self.const_to_iidx(i1_tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(1, 0)))?;
             self.frames.last_mut().unwrap().set_local(iid, ciidx);
-            return Ok(false);
+            return Ok(CallProcessedKind::Ignored);
         }
 
         let mut jargs = SmallVec::with_capacity(args.len());
@@ -1112,7 +1116,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let const_iidx = self.promotion_data_to_const(self.am.type_(fty.ret_ty()))?;
                 self.frames.last_mut().unwrap().set_local(iid, const_iidx);
                 self.outline_until(bid)?;
-                return Ok(false);
+                return Ok(CallProcessedKind::Outlined);
             }
             for _ in 0..self.am.type_(fty.ret_ty()).bytew() {
                 let _ = self.promotions_iter.next().unwrap();
@@ -1149,7 +1153,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             let next_bid = self.ta_to_bid(next_ta).unwrap();
             assert_eq!(next_bid.funcidx(), callee);
             assert_eq!(next_bid.bbidx(), BBlockIdx::new(0));
-            Ok(true)
+            Ok(CallProcessedKind::Inlined)
         } else {
             // Non-inlinable call. These come in two distinct flavours:
             //   1. LLVM intrinsics. We handle each of these individually.
@@ -1162,7 +1166,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             // Handle LLVM intrinsics.
             if func.name().starts_with("llvm.") {
                 self.p_llvm_intrinsic(iid, ftyidx, func.name(), jargs)?;
-                return Ok(false);
+                return Ok(CallProcessedKind::Outlined);
             }
 
             // Handle user-level functions.
@@ -1204,7 +1208,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 self.push_inst_and_link_local(iid, inst)?;
             }
             self.outline_until(bid)?;
-            Ok(false)
+            Ok(CallProcessedKind::Outlined)
         }
     }
 
@@ -1213,7 +1217,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         iid: InstId,
         bid: BBlockId,
         inst: &'static Inst,
-    ) -> Result<bool, CompilationError> {
+    ) -> Result<CallProcessedKind, CompilationError> {
         let Inst::IndirectCall {
             ftyidx,
             callop,
@@ -1262,7 +1266,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             self.push_inst_and_link_local(iid, inst)?;
         }
         self.outline_until(bid)?;
-        Ok(false)
+        Ok(CallProcessedKind::Outlined)
     }
 
     /// Outline until the successor block to `bid` is encountered. Returns `Err` if irregular
@@ -2085,4 +2089,22 @@ fn iter_to_array<const N: usize>(iter: &mut dyn Iterator<Item = &u8>) -> [u8; N]
         *x = *iter.next().unwrap();
     }
     out
+}
+
+/// What happened when we processed a call (static or indirect)?
+enum CallProcessedKind {
+    /// We ignored the call.
+    Ignored,
+    /// We started inlining the call.
+    Inlined,
+    /// We outlined the call.
+    Outlined,
+}
+
+/// How did the trace end?
+enum TraceEndKind {
+    /// It looped or coupled to another trace.
+    Term,
+    /// It returned to an outer caller.
+    Return(&'static DeoptSafepoint),
 }
