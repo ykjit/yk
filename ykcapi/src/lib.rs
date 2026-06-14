@@ -14,10 +14,11 @@
 
 #![allow(clippy::missing_safety_doc)]
 
+use setjmp::{jmp_buf, longjmp};
 #[cfg(feature = "ykd")]
 use std::ffi::CStr;
 use std::{
-    ffi::{CString, c_char},
+    ffi::{CString, c_char, c_int},
     mem::forget,
     os::raw::c_void,
     ptr,
@@ -169,6 +170,13 @@ pub extern "C" fn yk_location_null() -> Location {
 #[unsafe(no_mangle)]
 pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn yk_longjmp(env: *mut jmp_buf, val: c_int) {
+    unsafe {
+        longjmp(env, val);
+    }
 }
 
 /// Call a function for each shadow stack.

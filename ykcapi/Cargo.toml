@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 libc = "0.2.148"
+setjmp = "0.1.4"
 ykrt = { path = "../ykrt" }
 
 [build-dependencies]
