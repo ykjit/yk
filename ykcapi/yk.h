@@ -1,6 +1,7 @@
 #ifndef YK_H
 #define YK_H
 
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -121,6 +122,11 @@ int yk_pthread_create(
     void *(*start_routine)(void *),
     void *restrict arg
 );
+
+/// Interpreters must call this instead of `longjmp` to ensure that yk can,
+/// when tracing, deal properly with the effects of `longjmp`.
+__attribute__((noreturn))
+void yk_longjmp(jmp_buf env, int val);
 
 void yk_foreach_shadowstack(void (*closure)(void* shadow_start, void* shadow_end));
 
