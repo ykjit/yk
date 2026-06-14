@@ -505,6 +505,7 @@ impl MT {
                 let (thread_tracer, promotions, debug_strs) =
                     MTThread::with_borrow_mut(|mtt| match mtt.pop_tstate() {
                         MTThreadState::Tracing {
+                            mt: _,
                             trid: _,
                             hl,
                             thread_tracer,
@@ -595,6 +596,7 @@ impl MT {
             match Arc::clone(&tracer).start_recorder() {
                 Ok(tt) => {
                     mtt.push_tstate(MTThreadState::Tracing {
+                        mt: Arc::clone(self),
                         hl: Arc::clone(&hl),
                         trid,
                         thread_tracer: tt,
@@ -628,6 +630,7 @@ impl MT {
         let (hl, thread_tracer, promotions, debug_strs) =
             MTThread::with_borrow_mut(|mtt| match mtt.pop_tstate() {
                 MTThreadState::Tracing {
+                    mt: _,
                     trid: _,
                     hl,
                     thread_tracer,
@@ -1122,6 +1125,32 @@ impl MT {
         }
     }
 
+    /// Deal with `longjmp` while tracing. Note: the caller _must_ have checked that the current
+    /// thread is tracing before calling this function.
+    fn longjmp_encountered(self: &Arc<Self>) {
+        let MTThreadState::Tracing {
+            thread_tracer, hl, ..
+        } = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate())
+        else {
+            panic!()
+        };
+        thread_tracer.stop().ok();
+        let mut lk = hl.lock();
+        lk.kind = match lk.tracecompilation_error(self) {
+            TraceFailed::KeepTrying => HotLocationKind::Counting(0),
+            TraceFailed::DontTrace => HotLocationKind::DontTrace,
+        };
+        drop(lk);
+        MTThread::set_tracing(IsTracing::None);
+        yklog!(
+            self.log,
+            Verbosity::Warning,
+            &format!("tracing-aborted: {}", AbortKind::LongJmpEncountered),
+            Some(&*hl)
+        );
+        self.stats.trace_recorded_err();
+    }
+
     /// Inform this meta-tracer that guard `gid` has failed.
     ///
     // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
@@ -1154,6 +1183,7 @@ impl MT {
                 MTThread::set_tracing(IsTracing::Guard);
                 MTThread::with_borrow_mut(|mtt| match Arc::clone(&tracer).start_recorder() {
                     Ok(tt) => mtt.push_tstate(MTThreadState::Tracing {
+                        mt: Arc::clone(self),
                         trid,
                         hl: Arc::clone(&hl),
                         thread_tracer: tt,
@@ -1196,6 +1226,7 @@ enum MTThreadState {
     Interpreting,
     /// This thread is recording a trace.
     Tracing {
+        mt: Arc<MT>,
         /// The ID of this trace (and which will be -- if everything is successful! -- the ID of
         /// the subsequent [CompiledTrace]).
         trid: TraceId,
@@ -1290,6 +1321,18 @@ impl MTThread {
             TRACING_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
         } else if was_tracing && !now_tracing {
             TRACING_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    /// This function must only be called by ykcapi.
+    #[doc(hidden)]
+    pub fn longjmp_encountered() {
+        let mt = THREAD_MTTHREAD.with_borrow_mut(|mtt| match mtt.peek_mut_tstate() {
+            MTThreadState::Tracing { mt, .. } => Some(Arc::clone(mt)),
+            _ => None,
+        });
+        if let Some(mt) = mt {
+            mt.longjmp_encountered();
         }
     }
 
@@ -1547,12 +1590,14 @@ enum TransitionControlPoint {
 enum AbortKind {
     /// While tracing we fell back from an interpreter to a JIT frame.
     BackIntoExecution,
+    LongJmpEncountered,
 }
 
 impl std::fmt::Display for AbortKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             AbortKind::BackIntoExecution => write!(f, "tracing continued into a JIT frame"),
+            AbortKind::LongJmpEncountered => write!(f, "longjmp encountered"),
         }
     }
 }
@@ -1641,6 +1686,7 @@ mod tests {
         MTThread::set_tracing(IsTracing::Loop);
         MTThread::with_borrow_mut(|mtt| {
             mtt.push_tstate(MTThreadState::Tracing {
+                mt: Arc::clone(mt),
                 trid,
                 hl: Arc::clone(&hl),
                 thread_tracer: Box::new(DummyTraceRecorder),
@@ -1674,6 +1720,7 @@ mod tests {
         MTThread::set_tracing(IsTracing::Guard);
         MTThread::with_borrow_mut(|mtt| {
             mtt.push_tstate(MTThreadState::Tracing {
+                mt: Arc::clone(mt),
                 trid,
                 hl: Arc::clone(&hl),
                 thread_tracer: Box::new(DummyTraceRecorder),
@@ -1803,6 +1850,7 @@ mod tests {
                     MTThread::set_tracing(IsTracing::Loop);
                     MTThread::with_borrow_mut(|mtt| {
                         mtt.push_tstate(MTThreadState::Tracing {
+                            mt: Arc::clone(&mt),
                             trid,
                             hl: Arc::clone(&hl),
                             thread_tracer: Box::new(DummyTraceRecorder),
@@ -2042,6 +2090,7 @@ mod tests {
                             MTThread::set_tracing(IsTracing::Loop);
                             MTThread::with_borrow_mut(|mtt| {
                                 mtt.push_tstate(MTThreadState::Tracing {
+                                    mt: Arc::clone(&mt),
                                     trid,
                                     hl: Arc::clone(&hl),
                                     thread_tracer: Box::new(DummyTraceRecorder),

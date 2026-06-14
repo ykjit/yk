@@ -173,7 +173,10 @@ pub extern "C" fn yk_location_drop(loc: Location) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn yk_longjmp(env: *mut jmp_buf, val: c_int) {
+pub unsafe extern "C" fn yk_longjmp(env: *mut jmp_buf, val: c_int) {
+    if MTThread::is_tracing() {
+        MTThread::longjmp_encountered();
+    }
     unsafe {
         longjmp(env, val);
     }
