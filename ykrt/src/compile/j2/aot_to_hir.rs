@@ -39,8 +39,15 @@ use index_vec::IndexVec;
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
 use std::{
-    assert_matches, collections::HashMap, ffi::CString, iter::Peekable, marker::PhantomData,
-    sync::Arc,
+    assert_matches,
+    collections::HashMap,
+    ffi::CString,
+    iter::Peekable,
+    marker::PhantomData,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 /// The symbol name of the global variable pointers array.
@@ -49,6 +56,10 @@ const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 /// When tracing, how many times can a given function appear in the frame stack before we stop
 /// inlining it?
 const RECURSE_THRESHOLD: usize = 5;
+
+/// If 'log:aot` is specified, we only want to write that once: this bool will be set to `true`
+/// when it has been logged once.
+static AOT_HAS_BEEN_LOGGED: AtomicBool = AtomicBool::new(false);
 
 pub(super) struct AotToHir<'a, Reg: RegT> {
     mt: Arc<MT>,
@@ -142,7 +153,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     }
 
     pub(super) fn build(mut self) -> Result<hir::Mod<Reg>, CompilationError> {
-        if should_log_ir(IRPhase::AOT) {
+        if should_log_ir(IRPhase::AOT) && !AOT_HAS_BEEN_LOGGED.swap(true, Ordering::Relaxed) {
             log_ir(&format!(
                 "--- Begin aot ---\n{}\n--- End aot ---\n",
                 *AOT_MOD
