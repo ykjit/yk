@@ -24,7 +24,7 @@ use crate::{
         CompilationError, CompiledTrace, Compiler, GuardId, Trace, TraceEnd, TraceStart,
         default_compiler,
     },
-    frame::{is_callee_frame, is_caller_frame},
+    frame::{FrameRelationship, frame_relationship},
     job_queue::{Job, JobQueue},
     location::{HotLocation, HotLocationKind, Location, SeenHotLocations, TraceFailed},
     log::{
@@ -824,7 +824,9 @@ impl MT {
         else {
             panic!()
         };
-        if is_caller_frame(frameaddr, *tracing_frameaddr) {
+        if frame_relationship(frameaddr, *tracing_frameaddr)
+            == FrameRelationship::Frame1IsCallerOfFrame2
+        {
             // We traced out of the frame we started tracing in. This is not necessarily a
             // correctness issue, but for now such traces will always become (*, Return) traces, so
             // there's no point tracing further.
@@ -838,8 +840,9 @@ impl MT {
                 let mut lk = hl.lock();
                 if seen_hls.push_and_check_any_loop_closed(Arc::clone(&hl)) {
                     // We have traced this location more than once...
-                    //
-                    if is_callee_frame(frameaddr, *tracing_frameaddr) {
+                    if frame_relationship(frameaddr, *tracing_frameaddr)
+                        == FrameRelationship::Frame2IsCallerOfFrame1
+                    {
                         lk.kind = match lk.tracecompilation_error(self) {
                             TraceFailed::KeepTrying => HotLocationKind::Counting(0),
                             TraceFailed::DontTrace => HotLocationKind::DontTrace,
@@ -874,7 +877,9 @@ impl MT {
                         };
                         drop(lk);
                         let mut lk = tracing_hl.lock();
-                        if is_callee_frame(frameaddr, *tracing_frameaddr) {
+                        if frame_relationship(frameaddr, *tracing_frameaddr)
+                            == FrameRelationship::Frame2IsCallerOfFrame1
+                        {
                             lk.kind = match lk.tracecompilation_error(self) {
                                 TraceFailed::KeepTrying => HotLocationKind::Counting(0),
                                 TraceFailed::DontTrace => HotLocationKind::DontTrace,
@@ -934,7 +939,12 @@ impl MT {
             panic!()
         };
 
-        if is_caller_frame(frameaddr, *tracing_frameaddr) {
+        if frame_relationship(frameaddr, *tracing_frameaddr)
+            == FrameRelationship::Frame1IsCallerOfFrame2
+        {
+            // We traced out of the frame we started tracing in. This is not necessarily a
+            // correctness issue, but for now such traces will always become (*, Return) traces, so
+            // there's no point tracing further.
             let Some((parent_ctr, gid)) = gtrace else {
                 panic!()
             };
@@ -966,7 +976,9 @@ impl MT {
                         let Some((parent_ctr, gid)) = gtrace else {
                             panic!()
                         };
-                        if is_callee_frame(frameaddr, *tracing_frameaddr) {
+                        if frame_relationship(frameaddr, *tracing_frameaddr)
+                            == FrameRelationship::Frame2IsCallerOfFrame1
+                        {
                             parent_ctr.guard(*gid).trace_or_compile_failed(self);
                             TransitionControlPoint::AbortTracing
                         } else {
@@ -989,7 +1001,9 @@ impl MT {
                             panic!()
                         };
                         let gid = *gid;
-                        if is_callee_frame(frameaddr, *tracing_frameaddr) {
+                        if frame_relationship(frameaddr, *tracing_frameaddr)
+                            == FrameRelationship::Frame2IsCallerOfFrame1
+                        {
                             parent_ctr.guard(gid).trace_or_compile_failed(self);
                             TransitionControlPoint::AbortTracing
                         } else {
@@ -1020,7 +1034,9 @@ impl MT {
                         };
                         let gid = *gid;
                         let parent_ctr = Arc::clone(parent_ctr);
-                        if is_callee_frame(frameaddr, *tracing_frameaddr) {
+                        if frame_relationship(frameaddr, *tracing_frameaddr)
+                            == FrameRelationship::Frame2IsCallerOfFrame1
+                        {
                             parent_ctr.guard(gid).trace_or_compile_failed(self);
                             return TransitionControlPoint::AbortTracing;
                         } else {
