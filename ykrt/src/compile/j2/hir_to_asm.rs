@@ -1167,6 +1167,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_umax(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::UMin(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_umin(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::URem(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_urem(&mut ra, b, iidx, x)?;
@@ -1761,6 +1766,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &UMax,
+    ) -> Result<(), CompilationError>;
+
+    fn i_umin(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &UMin,
     ) -> Result<(), CompilationError>;
 
     fn i_urem(

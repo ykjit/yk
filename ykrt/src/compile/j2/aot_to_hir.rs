@@ -1499,6 +1499,16 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
+            "umin" => {
+                let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let fty = self.opt.func_ty(ftyidx);
+                let hinst = hir::UMin {
+                    tyidx: fty.rtn_tyidx,
+                    lhs,
+                    rhs,
+                };
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
+            }
             n => todo!("{name} ('{n}')"),
         }
     }

@@ -4157,6 +4157,47 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_umin(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        UMin { tyidx, lhs, rhs }: &UMin,
+    ) -> Result<(), CompilationError> {
+        let bitw = self.m.ty(*tyidx).bitw();
+        let [lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    out_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+
+        assert!(bitw <= 64);
+        self.asm.push_inst(IcedInst::with2(
+            Code::Cmova_r64_rm64,
+            lhsr.to_reg64(),
+            rhsr.to_reg64(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Cmp_rm64_r64,
+            lhsr.to_reg64(),
+            rhsr.to_reg64(),
+        ));
+        Ok(())
+    }
+
     fn i_urem(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -8900,6 +8941,43 @@ mod test {
               ; %2: i64 = umax %0, %1
               cmp r.64.x, r.64.y
               cmovb r.64.x, r.64.y
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_umin() {
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = umin %0, %1
+              term [%2, %2]
+            ",
+            &["
+              ...
+              ; %2: i32 = umin %0, %1
+              cmp r.64.y, r.64.x
+              cmova r.64.y, r.64.x
+              ...
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = umin %0, %1
+              term [%2, %2]
+            ",
+            &["
+              ...
+              ; %2: i64 = umin %0, %1
+              cmp r.64.x, r.64.y
+              cmova r.64.x, r.64.y
               ...
             "],
         );
