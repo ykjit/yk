@@ -4130,13 +4130,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             [
                 RegCnstr::InputOutput {
                     in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Signed,
-                    out_fill: RegCnstrFill::Signed,
+                    in_fill: RegCnstrFill::Zeroed,
+                    out_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Signed,
+                    in_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
@@ -8917,9 +8917,9 @@ mod test {
             ",
             &["
               ...
-              movsxd r.64.x, r.32._
+              mov r.32.x, r.32._
               ...
-              movsxd r.64.y, r.32._
+              mov r.32.y, r.32._
               ...
               ; %2: i32 = umax %0, %1
               cmp r.64.y, r.64.x
