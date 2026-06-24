@@ -19,7 +19,7 @@ use parking_lot::Mutex;
 use parking_lot_core::SpinWait;
 
 use crate::{
-    aotsmp::{AOT_STACKMAPS, load_aot_stackmaps},
+    aotsmp::{AOT_STACKMAPS, StackMapIdx, load_aot_stackmaps},
     compile::{
         CompilationError, CompiledTrace, Compiler, GuardId, Trace, TraceEnd, TraceStart,
         default_compiler,
@@ -407,7 +407,12 @@ impl MT {
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn control_point(self: &Arc<Self>, loc: &Location, frameaddr: *mut c_void, smid: u64) {
+    pub fn control_point(
+        self: &Arc<Self>,
+        loc: &Location,
+        frameaddr: *mut c_void,
+        smapidx: StackMapIdx,
+    ) {
         match self.transition_control_point(loc, frameaddr) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::AbortTracing => {
@@ -438,10 +443,7 @@ impl MT {
                 self.stats.trace_executed();
 
                 // Compute the rsp of the control_point frame.
-                let (rec, pinfo) = AOT_STACKMAPS
-                    .as_ref()
-                    .unwrap()
-                    .get(usize::try_from(smid).unwrap());
+                let (rec, pinfo) = AOT_STACKMAPS.as_ref().unwrap().get(smapidx);
                 let mut rsp = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
                 if pinfo.hasfp {
                     rsp = unsafe { rsp.byte_add(REG64_SIZE) };

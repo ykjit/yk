@@ -1483,13 +1483,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         #[cfg(not(test))]
         let csrs = {
             let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-            let (_, prologue) = aot_smaps.get(usize::try_from(exit_statepoint.id).unwrap());
+            let (_, prologue) = aot_smaps.get(exit_statepoint.smapidx);
             &prologue.csrs
         };
 
         #[cfg(test)]
         let csrs = {
-            assert_eq!(exit_statepoint.id, 0);
+            assert_eq!(exit_statepoint.smapidx, 0);
             [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
         };
 

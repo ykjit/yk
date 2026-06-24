@@ -26,6 +26,7 @@ pub use thread_intercept::{yk_foreach_shadowstack, yk_thread_shadowstack_bounds}
 
 pub use self::location::Location;
 pub use self::mt::{HotThreshold, MT, MTThread};
+pub use aotsmp::StackMapIdx;
 use std::ffi::{CStr, c_char};
 
 #[allow(clippy::missing_safety_doc)]

@@ -90,6 +90,7 @@
 
 use crate::{
     aotsmp::AOT_STACKMAPS,
+    aotsmp::StackMapIdx,
     compile::{
         CompilationError, CompiledTrace, Statepoint,
         j2::{
@@ -148,7 +149,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
                 // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
                 let base_stack_off = u32::try_from({
-                    let (smap, prologue) = aot_smaps.get(0);
+                    let (smap, prologue) = aot_smaps.get(StackMapIdx::from(0));
                     if prologue.hasfp {
                         // FIXME: This needs porting! https://github.com/ykjit/yk/issues/1936
                         #[cfg(not(target_arch = "x86_64"))]
@@ -162,7 +163,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 })
                 .unwrap();
 
-                let (rec, _) = aot_smaps.get(usize::try_from(entry_statepoint.id).unwrap());
+                let (rec, _) = aot_smaps.get(entry_statepoint.smapidx);
                 let mut args_vlocs = rec
                     .live_vals
                     .iter()
@@ -639,7 +640,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             for frame in gextra.deopt_frames.iter() {
                 #[cfg(not(test))]
                 let smap_lives_iter = aot_smaps
-                    .get(usize::try_from(frame.pc_statepoint.id).unwrap())
+                    .get(frame.pc_statepoint.smapidx)
                     .0
                     .live_vals
                     .iter();

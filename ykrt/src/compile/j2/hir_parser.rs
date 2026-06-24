@@ -22,6 +22,7 @@
 #[cfg(test)]
 use crate::compile::jitc_yk::aot_ir::{BBlockInstIdx, InstId};
 use crate::{
+    aotsmp::StackMapIdx,
     compile::{
         j2::{
             hir::*,
@@ -38,7 +39,7 @@ use index_vec::IndexVec;
 use lrlex::{DefaultLexerTypes, LRNonStreamingLexer, lrlex_mod};
 use lrpar::{NonStreamingLexer, Span, lrpar_mod};
 use smallvec::SmallVec;
-use std::{collections::HashMap, ffi::CString, marker::PhantomData};
+use std::{collections::HashMap, ffi::CString, marker::PhantomData, sync::LazyLock};
 
 lrlex_mod!("compile/j2/hir.l");
 lrpar_mod!("compile/j2/hir.y");
@@ -47,10 +48,10 @@ type StorageT = u16;
 /// In unit test mode, there are are no [DeoptStatepoint]s, since we're running as a normal Rust
 /// binary, not a ykllvm compiled C program. If we want to use a [DeoptStatepoint] in tests, we
 /// have to create a dummy.
-static TEST_DEOPT_STATEPOINT: Statepoint = Statepoint {
-    id: 0,
+static TEST_DEOPT_STATEPOINT: LazyLock<Statepoint> = LazyLock::new(|| Statepoint {
+    smapidx: StackMapIdx::from(0),
     lives: Vec::new(),
-};
+});
 
 struct HirParser<'lexer, 'input: 'lexer, Reg: RegT> {
     lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
