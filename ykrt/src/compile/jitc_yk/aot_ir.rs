@@ -27,6 +27,7 @@
 //! textual JIT IR. See the docstring for the [super::jit_ir] module.
 #![allow(dead_code)]
 
+use crate::aotsmp::StackMapIdx;
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
 use std::{
@@ -396,6 +397,16 @@ index!(PathIdx);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ArgIdx(usize);
 index!(ArgIdx);
+
+/// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
+/// avoid type inference errors, so it's easier to have a single helper function rather than inline
+/// this into each `map` attribute.
+fn map_to_stackmapidx(v: u64) -> Result<StackMapIdx, DekuError> {
+    match usize::try_from(v).map(StackMapIdx::try_from) {
+        Ok(Ok(x)) => Ok(x),
+        _ => Err(DekuError::Parse(Cow::Borrowed("Couldn't map StackMapIdx"))),
+    }
+}
 
 /// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
 /// avoid type inference errors, so it's easier to have a single helper function rather than inline
@@ -831,7 +842,8 @@ impl fmt::Display for DisplayableOperand<'_> {
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug)]
 pub(crate) struct Statepoint {
-    pub(crate) id: u64,
+    #[deku(map = "map_to_stackmapidx")]
+    pub(crate) smapidx: StackMapIdx,
     #[deku(temp)]
     num_lives: u32,
     #[deku(count = "num_lives")]
@@ -861,7 +873,11 @@ impl fmt::Display for DisplayableStatepoint<'_> {
             .map(|a| a.display(self.m).to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        write!(f, "[statepoint: {}i64, ({})]", self.statepoint.id, lives_s)
+        write!(
+            f,
+            "[statepoint: {}i64, ({})]",
+            self.statepoint.smapidx, lives_s
+        )
     }
 }
 

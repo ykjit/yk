@@ -15,6 +15,8 @@
 //! pushed instruction might be proven to be equivalent to a previous instruction; guards might be
 //! optimised away entirely; and so on.
 
+#[cfg(test)]
+use crate::aotsmp::StackMapIdx;
 use crate::{
     compile::{
         CompilationError, CompiledTrace, GuardId,
@@ -469,7 +471,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 pc,
                 pc_statepoint,
                 #[cfg(test)]
-                smapidx: hir::StackMapIdx::new(0),
+                smapidx: StackMapIdx::new(0),
             });
         }
 

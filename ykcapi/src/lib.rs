@@ -24,7 +24,7 @@ use std::{
     ptr,
     sync::Arc,
 };
-use ykrt::{HotThreshold, Location, MT, MTThread};
+use ykrt::{HotThreshold, Location, MT, MTThread, StackMapIdx};
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
@@ -67,7 +67,7 @@ pub extern "C" fn __ykrt_control_point(
     mt: *const MT,
     loc: *mut Location,
     // Stackmap id for the control point.
-    smid: u64,
+    smapidx: StackMapIdx,
 ) {
     // FIXME: We could get rid of this entire function if we pass the frame's base pointer into the
     // control point from the interpreter.
@@ -114,7 +114,7 @@ pub extern "C" fn __ykrt_control_point_real(
     mt: *const MT,
     loc: *mut Location,
     // Stackmap id for the control point.
-    smid: u64,
+    smapidx: StackMapIdx,
     // Frame address of caller.
     frameaddr: *mut c_void,
 ) {
@@ -122,7 +122,7 @@ pub extern "C" fn __ykrt_control_point_real(
     let loc = unsafe { &*loc };
     if !loc.is_null() {
         let arc = unsafe { Arc::from_raw(mt) };
-        arc.control_point(loc, frameaddr, smid);
+        arc.control_point(loc, frameaddr, smapidx);
         forget(arc);
     }
 }

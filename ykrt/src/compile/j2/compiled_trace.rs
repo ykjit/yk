@@ -328,11 +328,15 @@ index_vec::define_index_type! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::j2::{
-        hir::{Block, TraceEnd},
-        x64::Reg,
+    use crate::{
+        aotsmp::StackMapIdx,
+        compile::j2::{
+            hir::{Block, TraceEnd},
+            x64::Reg,
+        },
     };
     use index_vec::IndexVec;
+    use std::sync::LazyLock;
 
     fn empty_block() -> Block {
         Block {
@@ -342,10 +346,10 @@ mod tests {
     }
 
     // Dummy DeoptStatepoint for testing
-    static TEST_DEOPT_STATEPOINT: Statepoint = Statepoint {
-        id: 0,
+    static TEST_DEOPT_STATEPOINT: LazyLock<Statepoint> = LazyLock::new(|| Statepoint {
+        smapidx: StackMapIdx::new(0),
         lives: Vec::new(),
-    };
+    });
 
     #[test]
     fn test_get_trace_name_control_loop() {

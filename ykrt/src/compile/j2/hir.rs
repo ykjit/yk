@@ -162,6 +162,8 @@
 //! generate code for that instruction! For example, [PtrAdd] instructions are often inlined into
 //! other instructions.
 
+#[cfg(test)]
+use crate::aotsmp::StackMapIdx;
 use crate::{
     compile::{
         j2::{
@@ -4905,11 +4907,6 @@ impl PartialEq for Frame {
             && std::ptr::eq(self.pc_statepoint, other.pc_statepoint)
             && self.smapidx == other.smapidx
     }
-}
-
-#[cfg(test)]
-index_vec::define_index_type! {
-    pub(crate) struct StackMapIdx = usize;
 }
 
 #[cfg(test)]

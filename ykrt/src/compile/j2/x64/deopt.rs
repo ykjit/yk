@@ -192,7 +192,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     // already exists, rather than creating one from scratch.
     {
         let frame = &guard.deopt_frames[0];
-        let (smap, prologue) = aot_smaps.get(usize::try_from(frame.pc_statepoint.id).unwrap());
+        let (smap, prologue) = aot_smaps.get(frame.pc_statepoint.smapidx);
         if prologue.hasfp {
             // Update RBP to represent this frame's address.
             gp_regs[DeoptGpReg::RBP.idx()] = prev_faddr as u64;
@@ -215,7 +215,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
 
     // Deal with all the remaining frames: we create each of these from scratch.
     for frame in guard.deopt_frames.iter().skip(1) {
-        let (smap, prologue) = aot_smaps.get(usize::try_from(frame.pc_statepoint.id).unwrap());
+        let (smap, prologue) = aot_smaps.get(frame.pc_statepoint.smapidx);
 
         // How much room does this frame need?
         let flen = 8 + usize::try_from(smap.size).unwrap();
@@ -303,8 +303,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     }
 
     let fdst = {
-        let (smap, prologue) =
-            aot_smaps.get(usize::try_from(guard.deopt_frames[0].pc_statepoint.id).unwrap());
+        let (smap, prologue) = aot_smaps.get(guard.deopt_frames[0].pc_statepoint.smapidx);
         if prologue.hasfp {
             unsafe { faddr.byte_sub(usize::try_from(smap.size - 8).unwrap()) }
         } else {
