@@ -178,7 +178,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     bbidx: *bbidx - 1,
                 };
                 let cp_bid = self.ta_to_bid(ta).unwrap();
-                let entry_safepoint = self.p_start_loop(&cp_bid)?;
+                let entry_statepoint = self.p_start_loop(&cp_bid)?;
                 assert_matches!(
                     self.ta_iter.peek(),
                     Some(&Ok(TraceAction::MappedAOTBBlock { .. }))
@@ -190,11 +190,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                             .downcast::<J2CompiledTrace<Reg>>()
                             .unwrap();
                         BuildModKind::Coupler {
-                            entry_safepoint,
+                            entry_statepoint,
                             tgt_ctr,
                         }
                     }
-                    BuildKind::Loop => BuildModKind::Loop { entry_safepoint },
+                    BuildKind::Loop => BuildModKind::Loop { entry_statepoint },
                     _ => unreachable!(),
                 }
             }
@@ -245,7 +245,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             BuildModKind::Side { prev_bid, .. } => Some(*prev_bid),
         };
 
-        // If we encounter a return in a side-trace, [return_safepoint] will be `Some`, and no
+        // If we encounter a return in a side-trace, [return_statepoint] will be `Some`, and no
         // further processing of the trace should occur.
         let termendk = self.p_blocks()?;
         match &termendk {
@@ -253,24 +253,24 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             TraceEndKind::Term => {
                 assert!(self.promotions_iter.next().is_none());
                 assert_eq!(self.frames.len(), 1);
-                let exit_safepoint = match &bmk {
-                    BuildModKind::Loop { entry_safepoint } => entry_safepoint,
+                let exit_statepoint = match &bmk {
+                    BuildModKind::Loop { entry_statepoint } => entry_statepoint,
                     BuildModKind::Coupler { tgt_ctr, .. } => match &tgt_ctr.trace_start {
                         J2TraceStart::ControlPoint {
-                            entry_safepoint, ..
-                        } => entry_safepoint,
+                            entry_statepoint, ..
+                        } => entry_statepoint,
                         J2TraceStart::Guard { .. } => todo!(),
                     },
                     BuildModKind::Side { tgt_ctr, .. } => {
                         match tgt_ctr.as_ref().unwrap().trace_start {
                             J2TraceStart::ControlPoint {
-                                entry_safepoint, ..
-                            } => entry_safepoint,
+                                entry_statepoint, ..
+                            } => entry_statepoint,
                             J2TraceStart::Guard { .. } => todo!(),
                         }
                     }
                 };
-                let term_vars = exit_safepoint
+                let term_vars = exit_statepoint
                     .lives
                     .iter()
                     .map(|x| self.frames[0].get_local(&*self.opt, &x.to_inst_id()))
@@ -285,34 +285,34 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
         let (trace_start, trace_end, tys) = match bmk {
             BuildModKind::Coupler {
-                entry_safepoint,
+                entry_statepoint,
                 tgt_ctr,
             } => {
                 let (entry, tys) = self.opt.build()?;
                 match termendk {
-                    TraceEndKind::Return(exit_safepoint) => (
-                        hir::TraceStart::ControlPoint { entry_safepoint },
+                    TraceEndKind::Return(exit_statepoint) => (
+                        hir::TraceStart::ControlPoint { entry_statepoint },
                         hir::TraceEnd::Return {
                             entry,
-                            exit_safepoint,
+                            exit_statepoint,
                         },
                         tys,
                     ),
                     TraceEndKind::Term => (
-                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceStart::ControlPoint { entry_statepoint },
                         hir::TraceEnd::Coupler { entry, tgt_ctr },
                         tys,
                     ),
                 }
             }
-            BuildModKind::Loop { entry_safepoint } => match termendk {
-                TraceEndKind::Return(exit_safepoint) => {
+            BuildModKind::Loop { entry_statepoint } => match termendk {
+                TraceEndKind::Return(exit_statepoint) => {
                     let (entry, tys) = self.opt.build()?;
                     (
-                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceStart::ControlPoint { entry_statepoint },
                         hir::TraceEnd::Return {
                             entry,
-                            exit_safepoint,
+                            exit_statepoint,
                         },
                         tys,
                     )
@@ -320,7 +320,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 TraceEndKind::Term => {
                     let (entry, peel, tys) = self.opt.build_with_peel()?;
                     (
-                        hir::TraceStart::ControlPoint { entry_safepoint },
+                        hir::TraceStart::ControlPoint { entry_statepoint },
                         hir::TraceEnd::Loop { entry, peel },
                         tys,
                     )
@@ -335,7 +335,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             } => {
                 let (entry, tys) = self.opt.build()?;
                 match termendk {
-                    TraceEndKind::Return(exit_safepoint) => (
+                    TraceEndKind::Return(exit_statepoint) => (
                         hir::TraceStart::Guard {
                             args_vlocs,
                             src_ctr,
@@ -343,7 +343,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         },
                         hir::TraceEnd::Return {
                             entry,
-                            exit_safepoint,
+                            exit_statepoint,
                         },
                         tys,
                     ),
@@ -422,10 +422,10 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         iid: InstId,
         expect_true: bool,
         cond_iidx: hir::InstIdx,
-        guard_safepoint: &'static DeoptSafepoint,
+        guard_statepoint: &'static Statepoint,
         switch: Option<hir::Switch>,
     ) -> Result<(), CompilationError> {
-        self.frames.last_mut().unwrap().pc_safepoint = Some(guard_safepoint);
+        self.frames.last_mut().unwrap().pc_statepoint = Some(guard_statepoint);
 
         // If the condition variable is referenced in the guard's exit vars, we'll change it to
         // reference a const -- but we construct this as-needed.
@@ -435,20 +435,20 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let mut deopt_vars = Vec::with_capacity(
             self.frames
                 .iter()
-                .map(|x| x.pc_safepoint.unwrap().lives.len())
+                .map(|x| x.pc_statepoint.unwrap().lives.len())
                 .sum(),
         );
         for i in 0..self.frames.len() {
             let Frame {
-                pc, pc_safepoint, ..
+                pc, pc_statepoint, ..
             } = &self.frames[i];
-            let pc_safepoint = pc_safepoint.unwrap();
+            let pc_statepoint = pc_statepoint.unwrap();
             let pc = if i + 1 < self.frames.len() {
                 pc.clone().unwrap()
             } else {
                 iid.clone()
             };
-            for op in pc_safepoint.lives.iter() {
+            for op in pc_statepoint.lives.iter() {
                 let mut iidx = self.frames[i].get_local(&*self.opt, &op.to_inst_id());
                 if iidx == cond_iidx {
                     if cond_inverse_iidx.is_none() {
@@ -467,7 +467,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             deopt_frames.push(hir::Frame {
                 pc,
-                pc_safepoint,
+                pc_statepoint,
                 #[cfg(test)]
                 smapidx: hir::StackMapIdx::new(0),
             });
@@ -628,10 +628,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     }
 
     /// Process the start of a (ControlPoint, Coupler | Loop | Return) trace.
-    fn p_start_loop(
-        &mut self,
-        cp_bid: &BBlockId,
-    ) -> Result<&'static DeoptSafepoint, CompilationError> {
+    fn p_start_loop(&mut self, cp_bid: &BBlockId) -> Result<&'static Statepoint, CompilationError> {
         let cp_blk = self.am.bblock(cp_bid);
         let cp_iidx = BBlockInstIdx::new(
             cp_blk
@@ -640,17 +637,17 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 .position(|x| x.is_control_point(self.am))
                 .unwrap(),
         );
-        let safepoint = cp_blk.insts[cp_iidx].safepoint().unwrap();
+        let statepoint = cp_blk.insts[cp_iidx].statepoint().unwrap();
         assert!(self.frames.is_empty());
         self.frames.push(Frame {
             args: SmallVec::new(),
             locals: HashMap::new(),
             pc: Some(InstId::new(cp_bid.funcidx(), cp_bid.bbidx(), cp_iidx)),
-            pc_safepoint: None,
+            pc_statepoint: None,
             prev_pc: None,
         });
 
-        for op in safepoint.lives.iter() {
+        for op in statepoint.lives.iter() {
             let tyidx = self.p_ty(op.type_(self.am))?;
             let iidx = self.opt.feed_arg(hir::Arg { tyidx }.into())?;
             self.frames
@@ -659,7 +656,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 .set_local(op.to_inst_id(), iidx);
         }
 
-        Ok(safepoint)
+        Ok(statepoint)
     }
 
     /// Process the beginning of a (Guard, Coupler | Return) trace.
@@ -672,11 +669,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let guard = src_ctr.guard(src_gidx);
         let mut entry_vars = Vec::with_capacity(guard.deopt_vars.len());
         let mut deopt_vars_off = 0;
-        for DeoptFrame { pc, pc_safepoint } in &guard.deopt_frames {
-            let mut locals = HashMap::with_capacity(pc_safepoint.lives.len());
+        for DeoptFrame { pc, pc_statepoint } in &guard.deopt_frames {
+            let mut locals = HashMap::with_capacity(pc_statepoint.lives.len());
             for (iid, DeoptVar { fromvlocs, .. }) in
-                pc_safepoint.lives.iter().map(|x| x.to_inst_id()).zip(
-                    &guard.deopt_vars[deopt_vars_off..deopt_vars_off + pc_safepoint.lives.len()],
+                pc_statepoint.lives.iter().map(|x| x.to_inst_id()).zip(
+                    &guard.deopt_vars[deopt_vars_off..deopt_vars_off + pc_statepoint.lives.len()],
                 )
             {
                 let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
@@ -699,10 +696,10 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 args: smallvec![],
                 locals,
                 pc: Some(pc.clone()),
-                pc_safepoint: Some(pc_safepoint),
+                pc_statepoint: Some(pc_statepoint),
                 prev_pc: None,
             });
-            deopt_vars_off += pc_safepoint.lives.len();
+            deopt_vars_off += pc_statepoint.lives.len();
         }
         Ok(entry_vars)
     }
@@ -840,7 +837,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         }
     }
 
-    /// Returns `Some(safepoint)` if an early return was encountered: parent code should stop
+    /// Returns `Some(statepoint)` if an early return was encountered: parent code should stop
     /// examining the trace at this point.
     fn p_blocks(&mut self) -> Result<TraceEndKind, CompilationError> {
         loop {
@@ -1075,7 +1072,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let Inst::Call {
             callee,
             args,
-            safepoint,
+            statepoint,
         } = inst
         else {
             panic!()
@@ -1085,7 +1082,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         if inst.is_control_point(self.am) || inst.is_debug_call(self.am) {
             return Ok(CallProcessedKind::Ignored);
         }
-        self.p_static_call(iid, bid, *callee, args, safepoint.as_ref())
+        self.p_static_call(iid, bid, *callee, args, statepoint.as_ref())
     }
 
     fn p_static_call(
@@ -1094,7 +1091,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         bid: BBlockId,
         callee: FuncIdx,
         args: &[Operand],
-        safepoint: Option<&'static DeoptSafepoint>,
+        statepoint: Option<&'static Statepoint>,
     ) -> Result<CallProcessedKind, CompilationError> {
         let func = self.am.func(callee);
         // Ignore calls the software tracer makes to record blocks.
@@ -1144,7 +1141,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             && self.frames.iter().filter(|f| f.pc.as_ref().unwrap().funcidx() == callee).count() < RECURSE_THRESHOLD
         {
             // Inlinable call.
-            self.frames.last_mut().unwrap().pc_safepoint = Some(safepoint.as_ref().unwrap());
+            self.frames.last_mut().unwrap().pc_statepoint = Some(statepoint.as_ref().unwrap());
             self.frames.push(Frame {
                 args: jargs,
                 locals: HashMap::new(),
@@ -1153,7 +1150,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     BBlockIdx::new(0),
                     BBlockInstIdx::new(0),
                 )),
-                pc_safepoint: None,
+                pc_statepoint: None,
                 prev_pc: None,
             });
             let next_ta = &self
@@ -1233,7 +1230,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             ftyidx,
             callop,
             args,
-            safepoint,
+            statepoint,
         } = inst
         else {
             panic!()
@@ -1257,7 +1254,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             };
             if let Some(fname) = self.j2.dladdr(*vaddr) {
                 let callee = self.am.funcidx(&CString::new(fname).unwrap());
-                return self.p_static_call(iid.clone(), bid, callee, args, Some(safepoint));
+                return self.p_static_call(iid.clone(), bid, callee, args, Some(statepoint));
             }
         }
 
@@ -1561,7 +1558,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             cond,
             true_bb,
             false_bb,
-            safepoint,
+            statepoint,
         } = inst
         else {
             panic!()
@@ -1581,7 +1578,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             self.next_pc(iid),
             next_bid.bbidx() == *true_bb,
             cond_iidx,
-            safepoint,
+            statepoint,
             None,
         )
     }
@@ -1755,7 +1752,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let Inst::Promote {
             tyidx,
             val,
-            safepoint,
+            statepoint,
         } = inst
         else {
             panic!()
@@ -1778,7 +1775,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             .into(),
         )?;
-        self.push_guard(bid, self.next_pc(iid.clone()), true, icmp, safepoint, None)
+        self.push_guard(bid, self.next_pc(iid.clone()), true, icmp, statepoint, None)
     }
 
     fn p_ptradd(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
@@ -1833,13 +1830,13 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         Ok(())
     }
 
-    /// Return `Some(safepoint)` if this is an early return: this must stop further examination of
+    /// Return `Some(statepoint)` if this is an early return: this must stop further examination of
     /// the trace.
     fn p_return(
         &mut self,
         _iid: InstId,
         inst: &Inst,
-    ) -> Result<Option<&'static DeoptSafepoint>, CompilationError> {
+    ) -> Result<Option<&'static Statepoint>, CompilationError> {
         let Inst::Ret { val } = inst else { panic!() };
 
         let val = match val {
@@ -1858,7 +1855,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             // We've returned out of the function that started tracing. Stop processing any
             // remaining blocks and emit a return instruction that naturally returns from a
             // compiled trace into the interpreter.
-            let safepoint = frame.pc_safepoint.unwrap();
+            let statepoint = frame.pc_statepoint.unwrap();
             self.opt.feed_void(
                 hir::Term(match val {
                     Some(x) => vec![x],
@@ -1866,7 +1863,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 })
                 .into(),
             )?;
-            Ok(Some(safepoint))
+            Ok(Some(statepoint))
         }
     }
 
@@ -1925,7 +1922,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             default_dest: _,
             case_values,
             case_dests,
-            safepoint,
+            statepoint,
         } = inst
         else {
             panic!()
@@ -2033,7 +2030,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 iid.clone(),
                 expect,
                 icmp,
-                safepoint,
+                statepoint,
                 Some(hir::Switch { iid, seen_bbidxs }),
             )?;
         }
@@ -2061,11 +2058,11 @@ pub(super) enum BuildKind {
 /// [hir::ModKind], while keeping the latter enum simple.
 enum BuildModKind<Reg: RegT> {
     Coupler {
-        entry_safepoint: &'static DeoptSafepoint,
+        entry_statepoint: &'static Statepoint,
         tgt_ctr: Arc<J2CompiledTrace<Reg>>,
     },
     Loop {
-        entry_safepoint: &'static DeoptSafepoint,
+        entry_statepoint: &'static Statepoint,
     },
     Side {
         prev_bid: BBlockId,
@@ -2084,9 +2081,9 @@ struct Frame {
     args: SmallVec<[hir::InstIdx; 1]>,
     locals: HashMap<InstId, hir::InstIdx>,
     pc: Option<InstId>,
-    /// The current safepoint for this frame. This has no initial value at frame entry, and is
+    /// The current statepoint for this frame. This has no initial value at frame entry, and is
     /// updated at every call site.
-    pc_safepoint: Option<&'static DeoptSafepoint>,
+    pc_statepoint: Option<&'static Statepoint>,
     prev_pc: Option<InstId>,
 }
 
@@ -2127,5 +2124,5 @@ enum TraceEndKind {
     /// It looped or coupled to another trace.
     Term,
     /// It returned to an outer caller.
-    Return(&'static DeoptSafepoint),
+    Return(&'static Statepoint),
 }

@@ -72,7 +72,7 @@
 //! All blocks have an entry and exit point, with corresponding [VarLocs], though the details
 //! differ between body and guard blocks. Body blocks start with 0 or more [Arg] / [Const]
 //! instructions and end with a [Term] instruction. Guard blocks' entry is defined by the
-//! corresponding [Guard] instruction and their exit by the relevant AOT [DeoptSafepoint].
+//! corresponding [Guard] instruction and their exit by the relevant AOT [DeoptStatepoint].
 //!
 //! All blocks share [Ty]s: thus a [TyIdx] is relative to a module, not a block.
 //!
@@ -171,7 +171,7 @@ use crate::{
             regalloc::{RegT, VarLocs},
         },
         jitc_yk::{
-            aot_ir::{self, DeoptSafepoint},
+            aot_ir::{self, Statepoint},
             arbbitint::ArbBitInt,
         },
     },
@@ -423,7 +423,7 @@ impl<Reg: RegT> ModLikeT for Mod<Reg> {
 pub(super) enum TraceStart<Reg: RegT> {
     /// This trace started from a control point.
     ControlPoint {
-        entry_safepoint: &'static DeoptSafepoint,
+        entry_statepoint: &'static Statepoint,
     },
     /// This trace started from a guard failing.
     Guard {
@@ -451,7 +451,7 @@ pub(super) enum TraceEnd<Reg: RegT> {
     /// point function was encountered.
     Return {
         entry: Block,
-        exit_safepoint: &'static DeoptSafepoint,
+        exit_statepoint: &'static Statepoint,
     },
     /// This is a trace intended for unit testing.
     #[cfg(test)]
@@ -4888,7 +4888,7 @@ enum IterIidxsIteratorKind<'a> {
 #[derive(Clone, Debug)]
 pub(super) struct Frame {
     pub pc: aot_ir::InstId,
-    pub pc_safepoint: &'static DeoptSafepoint,
+    pub pc_statepoint: &'static Statepoint,
     #[cfg(test)]
     pub smapidx: StackMapIdx,
 }
@@ -4896,13 +4896,13 @@ pub(super) struct Frame {
 impl PartialEq for Frame {
     #[cfg(not(test))]
     fn eq(&self, other: &Self) -> bool {
-        self.pc == other.pc && std::ptr::eq(self.pc_safepoint, other.pc_safepoint)
+        self.pc == other.pc && std::ptr::eq(self.pc_statepoint, other.pc_statepoint)
     }
 
     #[cfg(test)]
     fn eq(&self, other: &Self) -> bool {
         self.pc == other.pc
-            && std::ptr::eq(self.pc_safepoint, other.pc_safepoint)
+            && std::ptr::eq(self.pc_statepoint, other.pc_statepoint)
             && self.smapidx == other.smapidx
     }
 }

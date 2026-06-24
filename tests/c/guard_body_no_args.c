@@ -7,7 +7,7 @@
 //     ...
 //     yk-tracing: stop-tracing
 //     ...
-//     call llvm.experimental.patchpoint.void(0i64, 13i32, __ykrt_control_point, 3i32, %7_0, @location, 0i64) [safepoint: 0i64, ()]
+//     call llvm.experimental.patchpoint.void(0i64, 13i32, __ykrt_control_point, 3i32, %7_0, @location, 0i64) [statepoint: 0i64, ()]
 //     ...
 //     --- Begin hir ---
 //     ; {
@@ -28,7 +28,7 @@
 // a trace block with no Arg instructions.
 //
 // The AOT patchpoint passes `@location` and `@global_var` as global address
-// constants (not live locals). The empty safepoint `()` confirms this: live
+// constants (not live locals). The empty statepoint `()` confirms this: live
 // locals would appear there if interpreter state were in local variables.
 
 

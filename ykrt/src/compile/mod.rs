@@ -26,7 +26,7 @@
 //! body blocks can contain guards and thus reference guard blocks.
 
 use crate::{
-    compile::jitc_yk::aot_ir::DeoptSafepoint,
+    compile::jitc_yk::aot_ir::Statepoint,
     location::HotLocation,
     mt::{MT, TraceId},
     trace::AOTTraceIterator,
