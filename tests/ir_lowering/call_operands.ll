@@ -3,7 +3,7 @@
 ;     ...
 ;     func main() -> i32 {
 ;       bb0:
-;         call f(1i32, 2i32, 3i32) [safepoint: 1i64, ()]
+;         call f(1i32, 2i32, 3i32) [statepoint: 1i64, ()]
 ;         ret 0i32
 ;     }
 ;     ...

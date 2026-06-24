@@ -7,7 +7,7 @@ use crate::{
             hir::{Mod, Switch, TraceEnd, TraceStart},
             regalloc::{RegT, VarLocs},
         },
-        jitc_yk::aot_ir::{self, DeoptSafepoint, InstId},
+        jitc_yk::aot_ir::{self, InstId, Statepoint},
     },
     location::HotLocation,
     mt::{MT, TraceId},
@@ -211,17 +211,17 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
 #[derive(Debug)]
 pub(super) enum J2TraceStart<Reg: RegT> {
     ControlPoint {
-        entry_safepoint: &'static DeoptSafepoint,
-        /// Every entry in `entry_safepoint.lives` will have an entry in `args_vlocs`, in order.
-        /// In other words, `entry_safepoint.lives.iter().zip(args_vlocs.iter())` is guaranteed to
+        entry_statepoint: &'static Statepoint,
+        /// Every entry in `entry_statepoint.lives` will have an entry in `args_vlocs`, in order.
+        /// In other words, `entry_statepoint.lives.iter().zip(args_vlocs.iter())` is guaranteed to
         /// work as expected.
         ///
         /// However, some variables will have empty `VarLocs`. In other words, while this coupler
         /// trace guarantees to accept variables being set in accordance with
-        /// `entry_safepoint.lives`, it is also happy with a non-strict subset of those. That means
+        /// `entry_statepoint.lives`, it is also happy with a non-strict subset of those. That means
         /// that other traces jumping to this coupler trace only need to deal with the subset
         /// recorded in `args_vlocs` (i.e. they can ignore the superset in
-        /// `entry_safepoint.lives`).
+        /// `entry_statepoint.lives`).
         args_vlocs: Vec<VarLocs<Reg>>,
         stack_off: u32,
         /// The offset into the compiled trace that sidetraces should jump to.
@@ -305,12 +305,12 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
 #[derive(Debug)]
 pub(super) struct DeoptFrame {
     pub pc: InstId,
-    pub pc_safepoint: &'static DeoptSafepoint,
+    pub pc_statepoint: &'static Statepoint,
 }
 
 impl PartialEq for DeoptFrame {
     fn eq(&self, other: &Self) -> bool {
-        self.pc == other.pc && std::ptr::eq(self.pc_safepoint, other.pc_safepoint)
+        self.pc == other.pc && std::ptr::eq(self.pc_statepoint, other.pc_statepoint)
     }
 }
 
@@ -341,8 +341,8 @@ mod tests {
         }
     }
 
-    // Dummy DeoptSafepoint for testing
-    static TEST_DEOPT_SAFEPOINT: DeoptSafepoint = DeoptSafepoint {
+    // Dummy DeoptStatepoint for testing
+    static TEST_DEOPT_STATEPOINT: Statepoint = Statepoint {
         id: 0,
         lives: Vec::new(),
     };
@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn test_get_trace_name_control_loop() {
         let start = J2TraceStart::ControlPoint::<Reg> {
-            entry_safepoint: &TEST_DEOPT_SAFEPOINT,
+            entry_statepoint: &TEST_DEOPT_STATEPOINT,
             args_vlocs: vec![],
             stack_off: 0,
             sidetrace_off: 0,
@@ -369,14 +369,14 @@ mod tests {
     fn test_format_trace_name_control_return() {
         let trid = TraceId::from_u64(42);
         let start = J2TraceStart::ControlPoint::<Reg> {
-            entry_safepoint: &TEST_DEOPT_SAFEPOINT,
+            entry_statepoint: &TEST_DEOPT_STATEPOINT,
             args_vlocs: vec![],
             stack_off: 0,
             sidetrace_off: 0,
         };
         let end = TraceEnd::Return::<Reg> {
             entry: empty_block(),
-            exit_safepoint: &TEST_DEOPT_SAFEPOINT,
+            exit_statepoint: &TEST_DEOPT_STATEPOINT,
         };
         assert_eq!(
             J2CompiledTrace::<Reg>::get_trace_name(trid, &start, &end, None, None),
@@ -410,7 +410,7 @@ mod tests {
         let start = J2TraceStart::Guard::<Reg> { stack_off: 0 };
         let end = TraceEnd::Return::<Reg> {
             entry: empty_block(),
-            exit_safepoint: &TEST_DEOPT_SAFEPOINT,
+            exit_statepoint: &TEST_DEOPT_STATEPOINT,
         };
         assert_eq!(
             J2CompiledTrace::<Reg>::get_trace_name(

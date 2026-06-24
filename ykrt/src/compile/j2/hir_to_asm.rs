@@ -91,7 +91,7 @@
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{
-        CompilationError, CompiledTrace, DeoptSafepoint,
+        CompilationError, CompiledTrace, Statepoint,
         j2::{
             codebuf::ExeCodeBuf,
             compiled_trace::{
@@ -144,7 +144,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // `labels_off` are the offsets required by `gbodies`: note that some guard bodies have
         // multiple labels, so this is an M:N (where N>=M) relationship.
         let (buf, gbodies, labels_off, log, trace_start) = match &self.m.trace_start {
-            TraceStart::ControlPoint { entry_safepoint } => {
+            TraceStart::ControlPoint { entry_statepoint } => {
                 let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
                 // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
                 let base_stack_off = u32::try_from({
@@ -162,7 +162,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 })
                 .unwrap();
 
-                let (rec, _) = aot_smaps.get(usize::try_from(entry_safepoint.id).unwrap());
+                let (rec, _) = aot_smaps.get(usize::try_from(entry_statepoint.id).unwrap());
                 let mut args_vlocs = rec
                     .live_vals
                     .iter()
@@ -245,7 +245,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     },
                     TraceEnd::Return {
                         entry,
-                        exit_safepoint,
+                        exit_statepoint,
                     } => {
                         let mut ra =
                             RegAlloc::<AB>::new(self.m, entry, &args_vlocs, base_stack_off);
@@ -258,7 +258,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             &mut ra,
                             entry,
                             InstIdx::from(entry.insts_len() - 1),
-                            exit_safepoint,
+                            exit_statepoint,
                             rtn_val,
                         )?;
                         ra.set_term_vlocs(&mut self.be, entry, false, &args_vlocs, &[])?;
@@ -285,7 +285,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let sidetrace_off = labels_off.pop().unwrap();
                 let trace_start = J2TraceStart::ControlPoint {
                     args_vlocs,
-                    entry_safepoint,
+                    entry_statepoint,
                     stack_off: entry_stack_off,
                     sidetrace_off,
                 };
@@ -313,7 +313,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     TraceEnd::Loop { .. } => unreachable!(),
                     TraceEnd::Return {
                         entry,
-                        exit_safepoint,
+                        exit_statepoint,
                     } => {
                         let mut ra = RegAlloc::<AB>::new(self.m, entry, args_vlocs, src_stack_off);
                         let rtn_val = match entry.term_vars() {
@@ -325,7 +325,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             &mut ra,
                             entry,
                             InstIdx::from(entry.insts_len() - 1),
-                            exit_safepoint,
+                            exit_statepoint,
                             rtn_val,
                         )?;
                         ra.set_term_vlocs(&mut self.be, entry, false, args_vlocs, &[])?;
@@ -639,7 +639,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             for frame in gextra.deopt_frames.iter() {
                 #[cfg(not(test))]
                 let smap_lives_iter = aot_smaps
-                    .get(usize::try_from(frame.pc_safepoint.id).unwrap())
+                    .get(usize::try_from(frame.pc_statepoint.id).unwrap())
                     .0
                     .live_vals
                     .iter();
@@ -699,7 +699,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
                 deopt_frames.push(DeoptFrame {
                     pc: frame.pc.clone(),
-                    pc_safepoint: frame.pc_safepoint,
+                    pc_statepoint: frame.pc_statepoint,
                 });
             }
             assert!(deopt_term_iter.next().is_none());
@@ -1377,8 +1377,8 @@ pub(super) trait HirToAsmBackend {
     /// `stack_off` additional bytes of stack space.
     fn guard_coupler_start(&mut self, stack_off: u32);
 
-    /// Produce code for the end of a (*, Return) trace. The safepoint of the `return` is
-    /// `exit_safepoint`. If a value should be returned to the caller, the relevant [InstIdx] is
+    /// Produce code for the end of a (*, Return) trace. The statepoint of the `return` is
+    /// `exit_statepoint`. If a value should be returned to the caller, the relevant [InstIdx] is
     /// passed in `ret_val`. This function _must_ ensure that [MTThread::trace_returned] is
     /// called as part of the generated code.
     fn star_return_end(
@@ -1386,7 +1386,7 @@ pub(super) trait HirToAsmBackend {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        exit_safepoint: &'static DeoptSafepoint,
+        exit_statepoint: &'static Statepoint,
         ret_val: Option<InstIdx>,
     ) -> Result<(), CompilationError>;
 

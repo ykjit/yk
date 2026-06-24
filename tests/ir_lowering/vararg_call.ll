@@ -7,7 +7,7 @@
 ;     bb0:
 ;       %0_0: i32 = arg(0)
 ;       ...
-;       %0_2: i32 = call f(%0_0) [safepoint: 1i64, ()]
+;       %0_2: i32 = call f(%0_0) [statepoint: 1i64, ()]
 ;     ...
 
 

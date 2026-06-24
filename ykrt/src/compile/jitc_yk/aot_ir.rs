@@ -826,9 +826,11 @@ impl fmt::Display for DisplayableOperand<'_> {
     }
 }
 
+/// A point in AOT IR where we have full knowledge of the layout of the stack and the live
+/// variables.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug)]
-pub(crate) struct DeoptSafepoint {
+pub(crate) struct Statepoint {
     pub(crate) id: u64,
     #[deku(temp)]
     num_lives: u32,
@@ -836,27 +838,30 @@ pub(crate) struct DeoptSafepoint {
     pub(crate) lives: Vec<Operand>,
 }
 
-impl DeoptSafepoint {
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableDeoptSafepoint<'a> {
-        DisplayableDeoptSafepoint { safepoint: self, m }
+impl Statepoint {
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableStatepoint<'a> {
+        DisplayableStatepoint {
+            statepoint: self,
+            m,
+        }
     }
 }
 
-pub(crate) struct DisplayableDeoptSafepoint<'a> {
-    safepoint: &'a DeoptSafepoint,
+pub(crate) struct DisplayableStatepoint<'a> {
+    statepoint: &'a Statepoint,
     m: &'a Module,
 }
 
-impl fmt::Display for DisplayableDeoptSafepoint<'_> {
+impl fmt::Display for DisplayableStatepoint<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lives_s = self
-            .safepoint
+            .statepoint
             .lives
             .iter()
             .map(|a| a.display(self.m).to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        write!(f, "[safepoint: {}i64, ({})]", self.safepoint.id, lives_s)
+        write!(f, "[statepoint: {}i64, ({})]", self.statepoint.id, lives_s)
     }
 }
 
@@ -907,9 +912,9 @@ pub(crate) enum Inst {
         #[deku(count = "num_args")]
         args: Vec<Operand>,
         #[deku(temp)]
-        has_safepoint: u8,
-        #[deku(cond = "*has_safepoint != 0", default = "None")]
-        safepoint: Option<DeoptSafepoint>,
+        has_statepoint: u8,
+        #[deku(cond = "*has_statepoint != 0", default = "None")]
+        statepoint: Option<Statepoint>,
     },
     #[deku(id = "5")]
     Br {
@@ -921,7 +926,7 @@ pub(crate) enum Inst {
         cond: Operand,
         true_bb: BBlockIdx,
         false_bb: BBlockIdx,
-        safepoint: DeoptSafepoint,
+        statepoint: Statepoint,
     },
     #[deku(id = "7")]
     ICmp {
@@ -1009,7 +1014,7 @@ pub(crate) enum Inst {
         case_values: Vec<u64>,
         #[deku(count = "num_cases")]
         case_dests: Vec<BBlockIdx>,
-        safepoint: DeoptSafepoint,
+        statepoint: Statepoint,
     },
     #[deku(id = "14")]
     Phi {
@@ -1029,7 +1034,7 @@ pub(crate) enum Inst {
         num_args: u32,
         #[deku(count = "num_args")]
         args: Vec<Operand>,
-        safepoint: DeoptSafepoint,
+        statepoint: Statepoint,
     },
     #[deku(id = "16")]
     Select {
@@ -1050,7 +1055,7 @@ pub(crate) enum Inst {
     Promote {
         tyidx: TyIdx,
         val: Operand,
-        safepoint: DeoptSafepoint,
+        statepoint: Statepoint,
     },
     #[deku(id = "20")]
     FNeg { val: Operand },
@@ -1171,10 +1176,10 @@ impl Inst {
         }
     }
 
-    pub(crate) fn safepoint(&'static self) -> Option<&'static DeoptSafepoint> {
+    pub(crate) fn statepoint(&'static self) -> Option<&'static Statepoint> {
         match self {
-            Self::Call { safepoint, .. } => safepoint.as_ref(),
-            Self::CondBr { safepoint, .. } => Some(safepoint),
+            Self::Call { statepoint, .. } => statepoint.as_ref(),
+            Self::CondBr { statepoint, .. } => Some(statepoint),
             _ => None,
         }
     }
@@ -1263,14 +1268,14 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Call {
                 callee,
                 args,
-                safepoint,
+                statepoint,
             } => {
                 let args_s = args
                     .iter()
                     .map(|a| a.display(self.m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                let safepoint_s = safepoint
+                let statepoint_s = statepoint
                     .as_ref()
                     .map_or("".to_string(), |sp| format!(" {}", sp.display(self.m)));
                 let func = self.m.func(*callee);
@@ -1279,20 +1284,27 @@ impl fmt::Display for DisplayableInst<'_> {
                 } else {
                     ""
                 };
-                write!(f, "call {}{}({}){}", idem, func.name(), args_s, safepoint_s)
+                write!(
+                    f,
+                    "call {}{}({}){}",
+                    idem,
+                    func.name(),
+                    args_s,
+                    statepoint_s
+                )
             }
             Inst::CondBr {
                 cond,
                 true_bb,
                 false_bb,
-                safepoint,
+                statepoint,
             } => write!(
                 f,
                 "condbr {}, bb{}, bb{} {}",
                 cond.display(self.m),
                 usize::from(*true_bb),
                 usize::from(*false_bb),
-                safepoint.display(self.m)
+                statepoint.display(self.m)
             ),
             Inst::ICmp { lhs, pred, rhs, .. } => {
                 write!(f, "{pred} {}, {}", lhs.display(self.m), rhs.display(self.m))
@@ -1364,7 +1376,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 default_dest,
                 case_values,
                 case_dests,
-                safepoint,
+                statepoint,
             } => {
                 let cases = case_values
                     .iter()
@@ -1377,7 +1389,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     test_val.display(self.m),
                     usize::from(*default_dest),
                     cases.join(", "),
-                    safepoint.display(self.m)
+                    statepoint.display(self.m)
                 )
             }
             Inst::Phi {
@@ -1396,7 +1408,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 ftyidx: _,
                 callop,
                 args,
-                safepoint,
+                statepoint,
             } => {
                 let args_s = args
                     .iter()
@@ -1408,7 +1420,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     "icall {}({}) {}",
                     callop.display(self.m),
                     args_s,
-                    safepoint.display(self.m)
+                    statepoint.display(self.m)
                 )
             }
             Inst::Select {
@@ -1432,12 +1444,14 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::FCmp { lhs, pred, rhs, .. } => {
                 write!(f, "{pred} {}, {}", lhs.display(self.m), rhs.display(self.m))
             }
-            Inst::Promote { val, safepoint, .. } => {
+            Inst::Promote {
+                val, statepoint, ..
+            } => {
                 write!(
                     f,
                     "promote {} {}",
                     val.display(self.m),
-                    safepoint.display(self.m)
+                    statepoint.display(self.m)
                 )
             }
             Inst::FNeg { val } => {

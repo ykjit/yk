@@ -8,7 +8,7 @@
 ;         %0_2: ptr = alloca i32, 1, 4
 ;         *%0_2 = 1i32
 ;         %0_4: i1 = eq %0_0, 1i32
-;         condbr %0_4, bb1, bb2 [safepoint: 1i64, ()]
+;         condbr %0_4, bb1, bb2 [statepoint: 1i64, ()]
 ;     ...
 
 

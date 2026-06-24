@@ -36,7 +36,7 @@ use crate::aotsmp::AOT_STACKMAPS;
 use crate::{
     MTThread,
     compile::{
-        CompilationError, DeoptSafepoint,
+        CompilationError, Statepoint,
         j2::{
             codebuf::{CodeBufInProgress, ExeCodeBuf},
             compiled_trace::{CompiledGuardIdx, DeoptVar, J2CompiledTrace, J2TraceStart},
@@ -1477,19 +1477,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        exit_safepoint: &'static DeoptSafepoint,
+        exit_statepoint: &'static Statepoint,
         ret_val: Option<InstIdx>,
     ) -> Result<(), CompilationError> {
         #[cfg(not(test))]
         let csrs = {
             let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-            let (_, prologue) = aot_smaps.get(usize::try_from(exit_safepoint.id).unwrap());
+            let (_, prologue) = aot_smaps.get(usize::try_from(exit_statepoint.id).unwrap());
             &prologue.csrs
         };
 
         #[cfg(test)]
         let csrs = {
-            assert_eq!(exit_safepoint.id, 0);
+            assert_eq!(exit_statepoint.id, 0);
             [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
         };
 

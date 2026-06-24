@@ -28,7 +28,7 @@ use crate::{
             regalloc::{RegFill, RegT, TestRegIter, VarLoc, VarLocs},
         },
         jitc_yk::{
-            aot_ir::{BBlockId, BBlockIdx, DeoptSafepoint, FuncIdx},
+            aot_ir::{BBlockId, BBlockIdx, FuncIdx, Statepoint},
             arbbitint::ArbBitInt,
         },
     },
@@ -44,10 +44,10 @@ lrlex_mod!("compile/j2/hir.l");
 lrpar_mod!("compile/j2/hir.y");
 type StorageT = u16;
 
-/// In unit test mode, there are are no [DeoptSafepoint]s, since we're running as a normal Rust
-/// binary, not a ykllvm compiled C program. If we want to use a [DeoptSafepoint] in tests, we have
-/// to create a dummy.
-static TEST_DEOPT_SAFEPOINT: DeoptSafepoint = DeoptSafepoint {
+/// In unit test mode, there are are no [DeoptStatepoint]s, since we're running as a normal Rust
+/// binary, not a ykllvm compiled C program. If we want to use a [DeoptStatepoint] in tests, we
+/// have to create a dummy.
+static TEST_DEOPT_STATEPOINT: Statepoint = Statepoint {
     id: 0,
     lives: Vec::new(),
 };
@@ -517,7 +517,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                                 BBlockIdx::new(0),
                                 BBlockInstIdx::new(0),
                             ),
-                            pc_safepoint: &TEST_DEOPT_SAFEPOINT,
+                            pc_statepoint: &TEST_DEOPT_STATEPOINT,
                             smapidx: smaps.len_idx(),
                         });
                         smaps.push(lives);
