@@ -775,6 +775,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     switch: gextra.switch.clone(),
                 });
             }
+            if self.log {
+                self.be.log(format!("gidx {gidx:?}"));
+            }
 
             // Make sure we reuse the `ginsts` and `gterms` allocations.
             ginsts = std::mem::take(&mut gblock.insts);
@@ -2427,6 +2430,7 @@ mod test {
           guard_completed:
             fromvlocs=[Stack(8)]
             tovlocs=[Reg(R0, Undefined)]
+          ; gidx 0
         "#],
         );
 
@@ -2460,6 +2464,7 @@ mod test {
             tovlocs=[Reg(R0, Undefined)]
             fromvlocs=[Stack(16)]
             tovlocs=[Reg(R1, Undefined)]
+          ; gidx 0
         "#],
         );
 
@@ -2494,6 +2499,7 @@ mod test {
           guard_completed:
             fromvlocs=[Stack(8)]
             tovlocs=[Reg(R0, Undefined)]
+          ; gidx 0
         "#],
         );
 
@@ -2625,6 +2631,7 @@ mod test {
           guard_completed:
             fromvlocs=[Stack(8)]
             tovlocs=[Stack(24)]
+          ; gidx 0
         "#],
         );
     }
@@ -2685,6 +2692,7 @@ mod test {
           guard_completed:
             fromvlocs=[Stack(8)]
             tovlocs=[Reg(R2, Undefined)]
+          ; gidx 0
         "#],
         );
     }
