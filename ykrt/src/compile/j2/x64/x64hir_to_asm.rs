@@ -6533,6 +6533,7 @@ mod test {
               term [%0]
             ",
             &["
+              ; gidx 0
               ; l{{1}}
               sub rsp, 0x80
               ; term []
@@ -6561,6 +6562,7 @@ mod test {
               term [%0]
             ",
             &["
+              ; gidx 0
               ; l{{1}}
               sub rsp, 0x80
               ; term []
