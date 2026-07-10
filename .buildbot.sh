@@ -260,7 +260,7 @@ cd ..
 
 # Check licenses.
 wait "${cargo_deny_mdbook_pid}" || ( cat "${cargo_deny_mdbook_tmp}" && exit 1 )
-cargo-deny check license
+cargo-deny check licenses
 
 # Build the docs
 cd docs
