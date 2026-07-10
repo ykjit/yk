@@ -1075,6 +1075,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             callee,
             args,
             statepoint,
+            statepoint_after: _,
         } = inst
         else {
             panic!()
@@ -1233,6 +1234,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             callop,
             args,
             statepoint,
+            statepoint_after: _,
         } = inst
         else {
             panic!()

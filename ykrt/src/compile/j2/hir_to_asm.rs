@@ -643,7 +643,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .get(frame.pc_statepoint.smapidx)
                     .0
                     .live_vals
-                    .iter();
+                    .iter()
+                    .take(frame.pc_statepoint.lives.len());
                 #[cfg(test)]
                 let smap_lives_iter = self.m.smaps[usize::from(frame.smapidx)].iter();
 
