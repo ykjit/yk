@@ -9,7 +9,7 @@
 //     yk-execution: enter-jit-code
 //     i=3
 //     i=2
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     ...
 
 // Check that basic trace compilation works with nested calls.

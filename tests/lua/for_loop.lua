@@ -43,5 +43,5 @@ io.stderr:write("exit\n")
 --     5
 --     6
 --     7
---     yk-execution: deoptimise TraceId(0) ...
+--     yk-execution: deoptimise {"trid": "0", ...
 --     exit

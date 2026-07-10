@@ -13,7 +13,7 @@
 //     1 3 4 6 2 5 end
 //     i=5
 //     1 2 3 4 6 5 end
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that foreign code calling back to "native" code works.
 

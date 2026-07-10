@@ -6,7 +6,7 @@
 //     i=12
 //     i=13
 //     i=14
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     ...
 
 // Check that tracing mutation of a global pointer works.

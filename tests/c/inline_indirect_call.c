@@ -29,7 +29,7 @@
 //     yk-execution: enter-jit-code
 //     foo 5
 //     foo 4
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check that an indirect call whose callee is marked `yk_indirect_inline` is

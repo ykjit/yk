@@ -70,13 +70,13 @@ io.stderr:write("exit\n")
 --     yk-execution: enter-jit-code: unrolling.lua:4: GETTABUP
 --     j 1
 --     j 2
---     yk-execution: deoptimise TraceId(1) ...
+--     yk-execution: deoptimise {"trid": "1", ...
 --     i 4
 --     yk-execution: enter-jit-code: unrolling.lua:2: GTI
 --     j 0
 --     j 1
 --     j 2
---     yk-execution: deoptimise TraceId(1) ...
+--     yk-execution: deoptimise {"trid": "1", ...
 --     yk-tracing: start-side-tracing: unrolling.lua:4: GETTABUP
 --     i 5
 --     exit

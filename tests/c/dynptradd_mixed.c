@@ -25,7 +25,7 @@
 //     yk-execution: enter-jit-code
 //     i=2, y=3
 //     i=1, y=4
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check dynamic ptradd instructions work.
 

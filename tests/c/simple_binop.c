@@ -41,7 +41,7 @@
 //     xor2 -2
 //     shl 2
 //     ---
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Test some binary operations.

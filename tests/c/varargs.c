@@ -9,7 +9,7 @@
 //     yk-execution: enter-jit-code
 //     i=6
 //     i=6
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check varargs calls work.
 

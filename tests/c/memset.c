@@ -19,7 +19,7 @@
 //     yk-execution: enter-jit-code
 //     2: x
 //     1: x
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check `memset` works.

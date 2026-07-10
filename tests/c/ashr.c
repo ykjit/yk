@@ -15,7 +15,7 @@
 //     yk-execution: enter-jit-code
 //     2: -536870880 8191
 //     1: -1073741760 16383
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Test ashr instructions.

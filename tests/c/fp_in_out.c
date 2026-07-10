@@ -13,7 +13,7 @@
 //     3.200000
 //     2.100000
 //     2.200000
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that passing floats to/from a function works correctly.
 

@@ -39,7 +39,7 @@
 //     udiv2 715827882
 //     udiv3 1431655764
 //     udiv4 42
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Test unsigned division.

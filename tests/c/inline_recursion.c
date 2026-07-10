@@ -18,12 +18,12 @@
 //     2
 //     3
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "9"}
 //     0
 //     1
 //     2
 //     yk-execution: enter-jit-code
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "10"}
 //     0
 //     1
 //     0

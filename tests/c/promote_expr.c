@@ -18,7 +18,7 @@
 //     y=150
 //     y=200
 //     y=250
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that expression promotion works in traces.
 //

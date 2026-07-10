@@ -19,7 +19,7 @@
 //     yk-execution: enter-jit-code
 //     2 -> 3.350000 3.350000 4.350000
 //     1 -> 3.350000 3.350000 4.350000
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check 32- and 64-bit float constants work properly.
 

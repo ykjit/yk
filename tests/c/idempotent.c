@@ -51,7 +51,7 @@
 //     2: 43 43
 //     1: 41 41
 //     1: 43 43
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that idempotent functions work, both when arguments are and aren't promoted.
 

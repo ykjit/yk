@@ -18,7 +18,7 @@
 //     yk-execution: enter-jit-code
 //     2: 3
 //     1: 2
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 
 // Check that we can reliably deal with "foreign" (not compiled with ykllvm)

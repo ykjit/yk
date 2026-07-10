@@ -23,7 +23,7 @@
 //     2: 2.370000 -> -2.370000
 //     1: 1.840000 -> -1.840000
 //     1: 1.370000 -> -1.370000
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check floating point `fneg` works.

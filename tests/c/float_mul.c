@@ -35,7 +35,7 @@
 //     yk-execution: enter-jit-code
 //     2 -> 0.666600 1.680000
 //     1 -> 0.333300 0.840000
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check floating point multiplication works.
 

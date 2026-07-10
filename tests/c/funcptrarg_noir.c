@@ -17,7 +17,7 @@
 //     z=3
 //     yk-execution: enter-jit-code
 //     z=3
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Test indirect calls where we don't have IR for the callee.
 

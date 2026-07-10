@@ -26,7 +26,7 @@
 //     int to long 1
 //     long to long long 1
 //     uint8_t to uint32_t 3
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Test zero extend.

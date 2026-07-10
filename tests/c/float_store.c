@@ -34,7 +34,7 @@
 //     1 -> 0.813008
 //     1 -> 0.813008
 //     1 -> 0.813008
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that load / stores to floats work.
 

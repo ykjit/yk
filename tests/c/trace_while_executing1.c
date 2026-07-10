@@ -18,7 +18,7 @@
 //     1: 3
 //     0: 2
 //     0: 1
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     yk-warning: tracing-aborted: tracing continued into a JIT frame
 //     exit
 

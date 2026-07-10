@@ -15,7 +15,7 @@
 //     yk-execution: enter-jit-code
 //     ptr: {{ptr}}
 //     ptr: {{ptr}}
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check that pointer to integer conversion works.

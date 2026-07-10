@@ -20,7 +20,7 @@
 //     yk-execution: enter-jit-code
 //     neg=-3
 //     neg=-4
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that sign extending a negative value works.
 

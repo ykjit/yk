@@ -31,7 +31,7 @@
 //     2
 //     foo
 //     1
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     bar
 //     0
 //     exit

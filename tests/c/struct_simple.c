@@ -13,7 +13,7 @@
 //     2:1
 //     yk-execution: enter-jit-code
 //     1:1
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     ...
 
 // Check that we can handle struct field accesses.

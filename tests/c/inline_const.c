@@ -19,7 +19,7 @@
 //     yk-execution: enter-jit-code
 //     foo 3
 //     foo 3
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check that constant return values of functions inlined into a trace are

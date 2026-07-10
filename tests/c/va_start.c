@@ -20,7 +20,7 @@
 //     yk-execution: enter-jit-code
 //     2: 23
 //     1: 11
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check that functions using `va_start` and `va_end` (etc.) are handled

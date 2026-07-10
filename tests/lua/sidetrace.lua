@@ -45,10 +45,10 @@ io.stderr:write("exit\n")
 --     --- End debugstrs ---
 --     <4
 --     yk-execution: enter-jit-code: sidetrace.lua:2: LTI
---     yk-execution: deoptimise TraceId(0) ...
+--     yk-execution: deoptimise {"trid": "0", ...
 --     >=5
 --     yk-execution: enter-jit-code: sidetrace.lua:2: LTI
---     yk-execution: deoptimise TraceId(0) ...
+--     yk-execution: deoptimise {"trid": "0", ...
 --     yk-tracing: start-side-tracing: sidetrace.lua:2: LTI
 --     >=6
 --     yk-tracing: stop-tracing: sidetrace.lua:2: LTI
@@ -81,5 +81,5 @@ io.stderr:write("exit\n")
 --     >=8
 --     >=9
 --     >=10
---     yk-execution: deoptimise TraceId(1) ...
+--     yk-execution: deoptimise {"trid": "1", ...
 --     exit
