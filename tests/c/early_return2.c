@@ -12,7 +12,7 @@
 //     --- End hir ---
 //     b1
 //     7
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     yk-execution: deoptimise {"trid": "0", "gidx": "9"}
 //     yk-tracing: start-side-tracing
 //     b1
@@ -36,7 +36,7 @@
 //     --- End hir ---
 //     b3
 //     8
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     yk-execution: deoptimise {"trid": "0", "gidx": "10"}
 //     yk-tracing: start-side-tracing
 //     b3
@@ -47,7 +47,7 @@
 //     --- End hir ---
 //     b3
 //     6
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     yk-execution: deoptimise {"trid": "2", "gidx": "2"}
 //     yk-tracing: start-side-tracing
 //     b2
@@ -58,7 +58,7 @@
 //     --- End hir ---
 //     b2
 //     4
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     b2
 //     3
 //     b2

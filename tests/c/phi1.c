@@ -23,7 +23,7 @@
 //     ...
 //     --- End hir ---
 //     i=3, val=1
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     i=2, val=1
 //     i=1, val=1
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

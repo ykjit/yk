@@ -46,7 +46,7 @@
 //     --- End hir ---
 //     3: 41 41
 //     3: 43 43
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2: 41 41
 //     2: 43 43
 //     1: 41 41

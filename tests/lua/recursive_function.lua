@@ -44,7 +44,7 @@ io.stderr:write("exit\n")
 --     recursive_function.lua:4: CALL
 --     --- End debugstrs ---
 --     2
---     yk-execution: enter-jit-code: recursive_function.lua:2: GETTABUP
+--     yk-execution: enter-jit-code {"trid": "0"}: recursive_function.lua:2: GETTABUP
 --     1
 --     0
 --     yk-execution: deoptimise ...

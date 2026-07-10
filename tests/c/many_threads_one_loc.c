@@ -13,7 +13,7 @@
 //     }
 //     ...
 //     --- End aot ---
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     ...
 
 // Check that compiling and running traces in parallel works.

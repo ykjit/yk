@@ -15,7 +15,7 @@
 //     ...
 //     --- End hir ---
 //     z=3
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     z=3
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 

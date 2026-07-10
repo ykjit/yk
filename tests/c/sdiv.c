@@ -38,7 +38,7 @@
 //     sdiv6 -715827882
 //     sdiv7 -3074457345618258602
 //     sdiv8 -42
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     sdiv1 -10922
 //     sdiv2 -715827882
 //     sdiv3 -3074457345618258602

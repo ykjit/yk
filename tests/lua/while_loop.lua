@@ -40,7 +40,7 @@ io.stderr:write("exit\n")
 --     while_loop.lua:4: JMP
 --     --- End debugstrs ---
 --     4
---     yk-execution: enter-jit-code: while_loop.lua:2: LEI
+--     yk-execution: enter-jit-code {"trid": "0"}: while_loop.lua:2: LEI
 --     5
 --     6
 --     yk-execution: deoptimise {"trid": "0", ...

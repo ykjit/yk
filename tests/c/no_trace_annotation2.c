@@ -20,7 +20,7 @@
 //     --- End hir ---
 //     Can't JIT this!
 //     Or this!
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     Can't JIT this!
 //     Or this!
 //     Can't JIT this!

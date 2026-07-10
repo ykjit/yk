@@ -27,7 +27,7 @@
 //     i=3
 //     f32->int: 5, 4, -1
 //     f64->int: 2, 3, -1
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     i=2
 //     f32->int: 5, 4, -1
 //     f64->int: 2, 3, -1

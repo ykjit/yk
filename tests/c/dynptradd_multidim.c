@@ -28,7 +28,7 @@
 //     ...
 //     --- End hir ---
 //     i=1, elem=111
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     i=2, elem=222
 //     i=3, elem=333
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

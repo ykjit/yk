@@ -24,7 +24,7 @@
 //     srem2 1
 //     srem3 2
 //     srem4 1
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     srem 1
 //     srem2 1
 //     srem3 0

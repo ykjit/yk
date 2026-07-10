@@ -12,7 +12,7 @@
 //     u32 4294967295
 //     u16 65535
 //     u8 255
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     u64 18446744073709551615
 //     u32 4294967295
 //     u16 65535

@@ -46,7 +46,7 @@
 //     ...
 //     --- End aot ---
 //     ...
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     1.000000 < 1.000000: 0
 //     2.000000 < 2.000000: 0
 //     1.000000 < 2.000000: 1

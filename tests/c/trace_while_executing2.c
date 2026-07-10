@@ -12,7 +12,7 @@
 //       ...
 //     --- End hir ---
 //     0: 4
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     0: 3
 //     yk-execution: deoptimise {"trid": "0", "gidx": "3"}
 //     yk-tracing: start-tracing
@@ -20,7 +20,7 @@
 //     yk-tracing: stop-tracing
 //     ...
 //     0: 2
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "1"}
 //     0: 1
 //     yk-execution: deoptimise {"trid": "1", "gidx": "1"}
 //     exit

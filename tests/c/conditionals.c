@@ -3,7 +3,7 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     res=2
 //     ...
 

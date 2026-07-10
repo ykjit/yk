@@ -8,7 +8,7 @@
 //     yk-tracing: stop-tracing
 //     i=3
 //     1 4 6 3 2 5 end
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     i=4
 //     1 3 4 6 2 5 end
 //     i=5

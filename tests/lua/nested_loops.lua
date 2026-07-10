@@ -27,15 +27,15 @@ io.stderr:write(x)
 --     nested_loops.lua:5: ADDI
 --     nested_loops.lua:4: FORLOOP
 --     --- End debugstrs ---
---     yk-execution: enter-jit-code: nested_loops.lua:5: ADDI
+--     yk-execution: enter-jit-code {"trid": "0"}: nested_loops.lua:5: ADDI
 --     yk-execution: deoptimise {"trid": "0", ...
---     yk-execution: enter-jit-code: nested_loops.lua:5: ADDI
+--     yk-execution: enter-jit-code {"trid": "0"}: nested_loops.lua:5: ADDI
 --     yk-execution: deoptimise {"trid": "0", ...
---     yk-execution: enter-jit-code: nested_loops.lua:5: ADDI
+--     yk-execution: enter-jit-code {"trid": "0"}: nested_loops.lua:5: ADDI
 --     yk-execution: deoptimise {"trid": "0", ...
---     yk-execution: enter-jit-code: nested_loops.lua:5: ADDI
+--     yk-execution: enter-jit-code {"trid": "0"}: nested_loops.lua:5: ADDI
 --     yk-execution: deoptimise {"trid": "0", ...
---     yk-execution: enter-jit-code: nested_loops.lua:5: ADDI
+--     yk-execution: enter-jit-code {"trid": "0"}: nested_loops.lua:5: ADDI
 --     yk-execution: deoptimise {"trid": "0", ...
 --     yk-tracing: start-side-tracing: nested_loops.lua:5: ADDI
 --     yk-tracing: stop-tracing: nested_loops.lua:3: ADDI
@@ -73,6 +73,6 @@ io.stderr:write(x)
 --     ; }
 --     nested_loops.lua:2: FORLOOP
 --     --- End debugstrs ---
---     yk-execution: enter-jit-code: nested_loops.lua:5: ADDI
+--     yk-execution: enter-jit-code {"trid": "0"}: nested_loops.lua:5: ADDI
 --     yk-execution: deoptimise {"trid": "1", ...
 --     251502

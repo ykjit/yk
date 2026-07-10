@@ -39,7 +39,7 @@ io.stderr:write("exit\n")
 --     for_loop.lua:2: FORLOOP
 --     --- End debugstrs ---
 --     4
---     yk-execution: enter-jit-code: for_loop.lua:3: GETTABUP
+--     yk-execution: enter-jit-code {"trid": "0"}: for_loop.lua:3: GETTABUP
 --     5
 --     6
 --     7

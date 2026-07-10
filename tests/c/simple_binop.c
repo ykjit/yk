@@ -22,7 +22,7 @@
 //     xor2 -4
 //     shl 6
 //     ---
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     and 0
 //     or 3
 //     lshr 1

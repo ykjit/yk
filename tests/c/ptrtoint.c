@@ -12,7 +12,7 @@
 //     ...
 //     --- End hir ---
 //     ptr: {{ptr}}
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     ptr: {{ptr}}
 //     ptr: {{ptr}}
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

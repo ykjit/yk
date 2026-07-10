@@ -16,7 +16,7 @@
 //     u64_top_bit: 9223372036854775808 == {{double_u64_top_bit}}
 //     u64_top_bit_minus_one: 9223372036854775807 == {{double_u64_top_bit}}
 //     u64_max: 18446744073709551615 == {{double_u64_max}}
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     i: 2 == 2.000000
 //     u64_123456: 123456 == {{double_u64_123456}}
 //     u64_zero: 0 == {{double_zero}}

@@ -27,7 +27,7 @@
 //     ...
 //     --- End hir ---
 //     a=99 b=765 y=200
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     a=99 b=765 y=300
 //     a=99 b=765 y=400
 //     a=99 b=765 y=500

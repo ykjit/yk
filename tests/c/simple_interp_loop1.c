@@ -13,7 +13,7 @@
 //     pc=1, mem=8
 //     pc=2, mem=7
 //     pc=3, mem=6
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     pc=0, mem=6
 //     pc=1, mem=5
 //     pc=2, mem=4

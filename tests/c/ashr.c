@@ -12,7 +12,7 @@
 //     ...
 //     --- End hir ---
 //     3: -268435440 4095
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2: -536870880 8191
 //     1: -1073741760 16383
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

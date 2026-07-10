@@ -437,7 +437,7 @@ impl MT {
                 yklog!(
                     self.log,
                     Verbosity::Execution,
-                    "enter-jit-code",
+                    &format!("enter-jit-code {{\"trid\": \"{}\"}}", ctr.ctrid().as_u64()),
                     loc.hot_location()
                 );
                 self.stats.trace_executed();

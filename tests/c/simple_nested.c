@@ -6,7 +6,7 @@
 //     i=5
 //     yk-tracing: stop-tracing
 //     i=4
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     i=3
 //     i=2
 //     yk-execution: deoptimise {"trid": "0", "gidx": "1"}

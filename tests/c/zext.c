@@ -19,7 +19,7 @@
 //     int to long 3
 //     long to long long 3
 //     uint8_t to uint32_t 3
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     int to long 2
 //     long to long long 2
 //     uint8_t to uint32_t 3

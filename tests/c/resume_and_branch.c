@@ -4,7 +4,7 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     ...
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     x=2
 //     ...
 
