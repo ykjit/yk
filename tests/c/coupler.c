@@ -17,7 +17,7 @@
 //       ...
 //     --- End hir ---
 //     3
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "1"}
 //     2
 //     yk-execution: deoptimise {"trid": "1", "gidx": "0"}
 //     yk-tracing: start-side-tracing

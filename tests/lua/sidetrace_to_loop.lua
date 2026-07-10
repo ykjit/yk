@@ -48,12 +48,12 @@ io.stderr:write("exit\n")
 --     sidetrace_to_loop.lua:12: JMP
 --     --- End debugstrs ---
 --     h2
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:2: GTI
+--     yk-execution: enter-jit-code {"trid": "0"}: sidetrace_to_loop.lua:2: GTI
 --     yk-execution: deoptimise ...
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:2: GTI
+--     yk-execution: enter-jit-code {"trid": "0"}: sidetrace_to_loop.lua:2: GTI
 --     yk-execution: deoptimise ...
 --     h3
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:2: GTI
+--     yk-execution: enter-jit-code {"trid": "0"}: sidetrace_to_loop.lua:2: GTI
 --     yk-execution: deoptimise ...
 --     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:2: GTI
 --     yk-tracing: stop-tracing: sidetrace_to_loop.lua:7: FORLOOP
@@ -90,9 +90,9 @@ io.stderr:write("exit\n")
 --     sidetrace_to_loop.lua:7: LOADI
 --     sidetrace_to_loop.lua:7: FORPREP
 --     --- End debugstrs ---
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:7: FORLOOP
+--     yk-execution: enter-jit-code {"trid": "2"}: sidetrace_to_loop.lua:7: FORLOOP
 --     yk-execution: deoptimise ...
---     yk-execution: enter-jit-code: sidetrace_to_loop.lua:2: GTI
+--     yk-execution: enter-jit-code {"trid": "0"}: sidetrace_to_loop.lua:2: GTI
 --     yk-execution: deoptimise ...
 --     yk-tracing: start-side-tracing: sidetrace_to_loop.lua:2: GTI
 --     exit

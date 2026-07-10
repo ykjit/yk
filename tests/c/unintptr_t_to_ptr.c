@@ -16,7 +16,7 @@
 //     ...
 //     --- End aot ---
 //     3: 0x3
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2: 0x2
 //     1: 0x1
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

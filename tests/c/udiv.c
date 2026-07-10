@@ -30,7 +30,7 @@
 //     udiv2 715827882
 //     udiv3 1431655764
 //     udiv4 42
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     udiv 21845
 //     udiv2 715827882
 //     udiv3 1431655764

@@ -10,7 +10,7 @@
 //     ...
 //     --- End hir ---
 //     2
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     3
 //     4
 //     5
@@ -21,16 +21,16 @@
 //     10
 //     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     12
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     14
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     16
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     18
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     yk-tracing: start-side-tracing
 //     20
@@ -39,7 +39,7 @@
 //     ...
 //     --- End hir ---
 //     22
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     24
 //     26
 //     28
@@ -53,7 +53,7 @@
 //     ...
 //     --- End hir ---
 //     48
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     51
 //     54
 //     57

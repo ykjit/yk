@@ -22,7 +22,7 @@
 //     --- End hir ---
 //     in interpreter
 //     3
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2
 //     1
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

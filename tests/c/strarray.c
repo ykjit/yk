@@ -14,7 +14,7 @@
 //     ...
 //     --- End aot ---
 //     cucumber
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     tomato
 //     banana
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

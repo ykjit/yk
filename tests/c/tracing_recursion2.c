@@ -14,7 +14,7 @@
 //     --- End hir ---
 //     ...
 //     2
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     1
 //     return
 //     exit

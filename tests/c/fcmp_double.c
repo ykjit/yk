@@ -19,7 +19,7 @@
 //     0.000000 == -0.000000: 1
 //     yk-tracing: stop-tracing
 //     ...
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     1.100000 == 2.200000: 0
 //     1.100000 == 1.100000: 1
 //     1.100000 != 2.200000: 1

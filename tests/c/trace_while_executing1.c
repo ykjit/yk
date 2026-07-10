@@ -12,7 +12,7 @@
 //       ...
 //     --- End hir ---
 //     0: 4
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     0: 3
 //     yk-tracing: start-tracing
 //     1: 3

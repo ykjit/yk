@@ -25,7 +25,7 @@
 //     ...
 //     --- End hir ---
 //     3 -> 3.000000
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2 -> 2.000000
 //     1 -> 1.000000
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

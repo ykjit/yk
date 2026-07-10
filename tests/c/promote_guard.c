@@ -6,13 +6,13 @@
 //     y=100
 //     yk-tracing: stop-tracing
 //     y=200
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     y=300
 //     y=400
 //     y=500
 //     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     y=700
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     y=800
 //     y=900
 //     y=1000

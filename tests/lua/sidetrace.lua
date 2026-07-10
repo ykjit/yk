@@ -44,10 +44,10 @@ io.stderr:write("exit\n")
 --     sidetrace.lua:1: FORLOOP
 --     --- End debugstrs ---
 --     <4
---     yk-execution: enter-jit-code: sidetrace.lua:2: LTI
+--     yk-execution: enter-jit-code {"trid": "0"}: sidetrace.lua:2: LTI
 --     yk-execution: deoptimise {"trid": "0", ...
 --     >=5
---     yk-execution: enter-jit-code: sidetrace.lua:2: LTI
+--     yk-execution: enter-jit-code {"trid": "0"}: sidetrace.lua:2: LTI
 --     yk-execution: deoptimise {"trid": "0", ...
 --     yk-tracing: start-side-tracing: sidetrace.lua:2: LTI
 --     >=6
@@ -77,7 +77,7 @@ io.stderr:write("exit\n")
 --     sidetrace.lua:1: FORLOOP
 --     --- End debugstrs ---
 --     >=7
---     yk-execution: enter-jit-code: sidetrace.lua:2: LTI
+--     yk-execution: enter-jit-code {"trid": "0"}: sidetrace.lua:2: LTI
 --     >=8
 --     >=9
 --     >=10

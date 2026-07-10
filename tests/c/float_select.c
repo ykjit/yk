@@ -17,7 +17,7 @@
 //     ...
 //     --- End hir ---
 //     9: -8.160000
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     8: 8.840000
 //     7: -6.160000
 //     6: 6.840000

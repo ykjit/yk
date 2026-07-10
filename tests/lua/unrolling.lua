@@ -67,12 +67,12 @@ io.stderr:write("exit\n")
 --     unrolling.lua:3: FORPREP
 --     --- End debugstrs ---
 --     j 0
---     yk-execution: enter-jit-code: unrolling.lua:4: GETTABUP
+--     yk-execution: enter-jit-code {"trid": "1"}: unrolling.lua:4: GETTABUP
 --     j 1
 --     j 2
 --     yk-execution: deoptimise {"trid": "1", ...
 --     i 4
---     yk-execution: enter-jit-code: unrolling.lua:2: GTI
+--     yk-execution: enter-jit-code {"trid": "2"}: unrolling.lua:2: GTI
 --     j 0
 --     j 1
 --     j 2

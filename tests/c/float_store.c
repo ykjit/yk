@@ -23,7 +23,7 @@
 //     3 -> 2.439024
 //     3 -> 2.439024
 //     3 -> 2.439024
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2 -> 1.626016
 //     2 -> 1.626016
 //     2 -> 1.626016

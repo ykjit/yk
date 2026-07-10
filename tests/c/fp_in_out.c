@@ -8,7 +8,7 @@
 //     yk-tracing: stop-tracing
 //     4.100000
 //     4.200000
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     3.100000
 //     3.200000
 //     2.100000

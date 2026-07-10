@@ -32,7 +32,7 @@
 //     3
 //     foo-if
 //     bar
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2
 //     foo-if
 //     bar

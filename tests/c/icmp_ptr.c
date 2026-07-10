@@ -6,7 +6,7 @@
 //     p1==p2: 1, p2==p3: 0
 //     yk-tracing: stop-tracing
 //     p1==p2: 1, p2==p3: 0
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     p1==p2: 1, p2==p3: 0
 //     p1==p2: 1, p2==p3: 0
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}

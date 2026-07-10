@@ -21,7 +21,7 @@
 //     add 4
 //     sub 2
 //     mul 9
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     add 3
 //     sub 1
 //     mul 6

@@ -69,7 +69,7 @@ io.stderr:write("exit\n")
 --     recursive_function_indirect.lua:9: TAILCALL
 --     --- End debugstrs ---
 --     3
---     yk-execution: enter-jit-code: recursive_function_indirect.lua:9: GETTABUP
+--     yk-execution: enter-jit-code {"trid": "1"}: recursive_function_indirect.lua:9: GETTABUP
 --     2
 --     1
 --     0
