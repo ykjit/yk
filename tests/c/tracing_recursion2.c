@@ -17,6 +17,7 @@
 //     yk-execution: enter-jit-code {"trid": "0"}
 //     1
 //     return
+//     yk-execution: return {"trid": "0"}
 //     exit
 
 // Check that traces that left the interpreter loop during tracing emit a

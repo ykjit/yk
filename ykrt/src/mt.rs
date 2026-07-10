@@ -452,6 +452,7 @@ impl MT {
                 MTThread::with_borrow_mut(|mtt| {
                     mtt.push_tstate(MTThreadState::Executing {
                         mt: Arc::clone(self),
+                        trid: ctr.ctrid(),
                     });
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
@@ -1274,6 +1275,8 @@ enum MTThreadState {
         gtrace: Option<(Arc<dyn CompiledTrace>, GuardId)>,
     },
     Executing {
+        /// The ID of the executing [CompiledTrace]).
+        trid: TraceId,
         mt: Arc<MT>,
     },
 }
@@ -1381,16 +1384,28 @@ impl MTThread {
     #[unsafe(no_mangle)]
     pub(crate) fn trace_returned() {
         THREAD_MTTHREAD.with_borrow_mut(|mtt| match mtt.peek_mut_tstate() {
-            MTThreadState::Executing { .. } => {
+            MTThreadState::Executing { mt, trid } => {
+                yklog!(
+                    mt.log,
+                    Verbosity::Execution,
+                    &format!("return {{\"trid\": \"{}\"}}", trid.as_u64()),
+                    None
+                );
                 mtt.pop_tstate();
             }
-            MTThreadState::Tracing { .. } => {
+            MTThreadState::Tracing { mt, trid, .. } => {
                 // We could consider stopping tracing at this point, as we've got an "early return"
                 // trace. It's mildly awkward to do that, so we just keep the state set to tracing
                 // and allow a normal control point call to deal with it.
+                yklog!(
+                    mt.log,
+                    Verbosity::Execution,
+                    &format!("return {{\"trid\": \"{}\"}}", trid.as_u64()),
+                    None
+                );
             }
             _ => panic!(),
-        });
+        })
     }
 
     /// Return a reference to the [CompiledTrace] with ID `ctrid`.
@@ -1401,7 +1416,7 @@ impl MTThread {
     /// here means that something has gone wrong elsewhere.
     pub(crate) fn compiled_trace(&self, trid: TraceId) -> Arc<dyn CompiledTrace> {
         for tstate in self.tstate.iter().rev() {
-            if let MTThreadState::Executing { mt } = tstate {
+            if let MTThreadState::Executing { mt, .. } = tstate {
                 return mt.compiled_trace(trid);
             }
         }
