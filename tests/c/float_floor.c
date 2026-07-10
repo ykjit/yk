@@ -21,7 +21,7 @@
 //     2: -1.160000 -> -2.000000
 //     1: 1.840000 -> 1.000000
 //     1: -0.160000 -> -1.000000
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check floating point `floor` works.
 

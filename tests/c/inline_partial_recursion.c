@@ -34,7 +34,7 @@
 //     3
 //     yk-execution: enter-jit-code
 //     2
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "12"}
 //     yk-tracing: start-side-tracing
 //     yk-tracing: stop-tracing
 //     --- Begin hir ---

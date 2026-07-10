@@ -35,7 +35,7 @@
 //     yk-execution: enter-jit-code
 //     2 -> 4.000000 10.000000
 //     1 -> 2.000000 5.000000
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check floating point division works.
 

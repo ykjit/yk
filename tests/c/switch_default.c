@@ -24,7 +24,7 @@
 //     i=2
 //     yk-execution: enter-jit-code
 //     i=1
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     ...
 
 // Check that tracing the default arm of a switch works correctly.

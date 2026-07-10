@@ -37,7 +37,7 @@
 //     foo-if
 //     bar
 //     1
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     foo-else
 //     bar
 //     0

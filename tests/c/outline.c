@@ -21,7 +21,7 @@
 //     yk-execution: enter-jit-code
 //     i=2, r=3
 //     i=1, r=1
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     0
 //     exit
 

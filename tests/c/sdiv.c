@@ -55,7 +55,7 @@
 //     sdiv6 -715827882
 //     sdiv7 -3074457345618258602
 //     sdiv8 -42
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Test signed division.

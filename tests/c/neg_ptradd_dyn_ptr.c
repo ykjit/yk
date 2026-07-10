@@ -20,7 +20,7 @@
 //     yk-execution: enter-jit-code
 //     i=2, deref=7
 //     i=3, deref=6
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that basic trace compilation works.
 

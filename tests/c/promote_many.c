@@ -41,7 +41,7 @@
 //     298584
 //     398112
 //     497640
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check that promotion works in traces.

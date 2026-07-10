@@ -22,7 +22,7 @@
 //     pc=1, mem=1
 //     pc=2, mem=1
 //     pc=3, mem=0
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
 //     pc=4, mem=0
 //     pc=5, mem=0
 

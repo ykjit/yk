@@ -25,7 +25,7 @@
 //     yk-execution: enter-jit-code
 //     2
 //     1
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that yk_is_interpreting executes code in the interpreter but not
 // during tracing or in traced code. The hir above checks that the call

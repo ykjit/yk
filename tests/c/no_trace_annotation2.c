@@ -27,7 +27,7 @@
 //     Or this!
 //     Can't JIT this!
 //     Or this!
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check that the `yk_outline` annotation works when a `yk_outline` annotated

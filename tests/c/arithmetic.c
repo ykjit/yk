@@ -28,7 +28,7 @@
 //     add 2
 //     sub 0
 //     mul 3
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Test some binary operations.

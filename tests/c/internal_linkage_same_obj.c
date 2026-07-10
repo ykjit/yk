@@ -15,7 +15,7 @@
 //     yk-execution: enter-jit-code
 //     x=0
 //     x=0
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that we can call a static function with internal linkage from the same
 // compilation unit.

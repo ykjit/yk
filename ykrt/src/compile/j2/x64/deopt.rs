@@ -152,7 +152,11 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
 
     mt.log.log(
         Verbosity::Execution,
-        &format!("deoptimise {:?} {gid:?}", ctr.ctrid()),
+        &format!(
+            "deoptimise {{\"trid\": \"{:?}\", \"gidx\": \"{}\"}}",
+            ctr.ctrid().as_u64(),
+            usize::from(gidx)
+        ),
     );
 
     mt.deopt();

@@ -16,7 +16,7 @@
 //     yk-execution: enter-jit-code
 //     i=2, g=1010
 //     i=1, g=1015
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     ...
 
 // Check that mutating a global works.

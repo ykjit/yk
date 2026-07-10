@@ -31,7 +31,7 @@
 //     a=99 b=765 y=300
 //     a=99 b=765 y=400
 //     a=99 b=765 y=500
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that promotion works in traces.
 

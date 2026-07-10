@@ -26,7 +26,7 @@
 //     3: -2.160000
 //     2: 2.840000
 //     1: -0.160000
-//     yk-execution: deoptimise ...
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 // Check floating point `select` works.
