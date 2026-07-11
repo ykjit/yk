@@ -5,7 +5,7 @@
 
 #[cfg(feature = "ykd")]
 use parking_lot::Mutex;
-use std::{env, error::Error, fs::File, io::Write, path::PathBuf};
+use std::{env, error::Error, fmt, fs::File, io::Write, path::PathBuf};
 use strum::{EnumCount, FromRepr};
 
 #[cfg(feature = "ykd")]
@@ -74,14 +74,17 @@ impl Log {
     }
 
     #[cfg(feature = "ykd")]
-    pub(crate) fn log_with_hl_debug(&self, level: Verbosity, msg: &str, hl: &Mutex<HotLocation>) {
-        // If the hot location has a debug string, append it to the log message.
-        let msg = if let Some(dstr) = hl.lock().debug_str.as_ref() {
-            &format!("{msg}: {dstr}")
-        } else {
-            msg
-        };
-        self.log(level, msg);
+    pub(crate) fn log_with_hl_debug<F>(&self, level: Verbosity, msg: F, hl: &Mutex<HotLocation>)
+    where
+        F: FnOnce(&mut dyn fmt::Write) -> fmt::Result,
+    {
+        self.log(level, |log| {
+            msg(log)?;
+            if let Some(dstr) = hl.lock().debug_str.as_ref() {
+                write!(log, ": {dstr}")?;
+            }
+            Ok(())
+        });
     }
 
     /// Log `msg` with the [Verbosity] level `verbosity`.
@@ -89,7 +92,10 @@ impl Log {
     /// # Panics
     ///
     /// If `level == Verbosity::None`.
-    pub(crate) fn log(&self, level: Verbosity, msg: &str) {
+    pub(crate) fn log<F>(&self, level: Verbosity, msg: F)
+    where
+        F: FnOnce(&mut dyn fmt::Write) -> fmt::Result,
+    {
         if level <= self.level {
             let prefix = match level {
                 Verbosity::Disabled => panic!(),
@@ -98,9 +104,13 @@ impl Log {
                 Verbosity::Tracing => "yk-tracing",
                 Verbosity::Execution => "yk-execution",
             };
+            let mut buf = String::new();
+            if msg(&mut buf).is_err() {
+                return;
+            }
             match &self.path {
                 Some(p) => {
-                    let s = format!("{prefix}: {msg}\n");
+                    let s = format!("{prefix}: {buf}\n");
                     File::options()
                         .append(true)
                         .open(p)
@@ -108,7 +118,7 @@ impl Log {
                         .ok();
                 }
                 None => {
-                    eprintln!("{prefix}: {msg}");
+                    eprintln!("{prefix}: {buf}");
                 }
             }
         }
