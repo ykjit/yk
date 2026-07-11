@@ -360,25 +360,24 @@ impl MT {
                     mt.stats.trace_compiled_err();
                     match e {
                         CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
-                            mt.log.log(
-                                Verbosity::Warning,
-                                &format!("trace-compilation-aborted: {e}"),
-                            );
+                            mt.log.log(Verbosity::Warning, |log| {
+                                write!(log, "trace-compilation-aborted: {e}")
+                            });
                         }
                         CompilationError::InternalError(e) => {
                             #[cfg(feature = "ykd")]
                             panic!("{e}");
                             #[cfg(not(feature = "ykd"))]
                             {
-                                mt.log.log(
-                                    Verbosity::Error,
-                                    &format!("trace-compilation-aborted: {e}"),
-                                );
+                                mt.log.log(Verbosity::Error, |log| {
+                                    write!(log, "trace-compilation-aborted: {e}")
+                                });
                             }
                         }
                         CompilationError::ResourceExhausted(e) => {
-                            mt.log
-                                .log(Verbosity::Error, &format!("trace-compilation-aborted: {e}"));
+                            mt.log.log(Verbosity::Error, |log| {
+                                write!(log, "trace-compilation-aborted: {e}")
+                            });
                         }
                     }
                     match trace_start {
@@ -428,7 +427,7 @@ impl MT {
                 yklog!(
                     self.log,
                     Verbosity::Warning,
-                    "abort-tracing",
+                    |log| write!(log, "abort-tracing"),
                     loc.hot_location()
                 );
                 self.stats.trace_recorded_err();
@@ -437,7 +436,11 @@ impl MT {
                 yklog!(
                     self.log,
                     Verbosity::Execution,
-                    &format!("enter-jit-code {{\"trid\": \"{}\"}}", ctr.ctrid().as_u64()),
+                    |log| write!(
+                        log,
+                        "enter-jit-code {{\"trid\": \"{}\"}}",
+                        ctr.ctrid().as_u64()
+                    ),
                     loc.hot_location()
                 );
                 self.stats.trace_executed();
@@ -477,7 +480,7 @@ impl MT {
                 yklog!(
                     self.log,
                     Verbosity::Warning,
-                    "tracing-aborted: unrolled inner loop",
+                    |log| write!(log, "tracing-aborted: unrolled inner loop"),
                     loc.hot_location()
                 );
                 let thread_tracer = MTThread::with_borrow_mut(|mtt| {
@@ -530,7 +533,7 @@ impl MT {
                         yklog!(
                             self.log,
                             Verbosity::Tracing,
-                            "stop-tracing",
+                            |log| write!(log, "stop-tracing"),
                             loc.hot_location()
                         );
                         let trace_end = match coupler_tid {
@@ -562,7 +565,7 @@ impl MT {
                         yklog!(
                             self.log,
                             Verbosity::Warning,
-                            &format!("stop-tracing-aborted: {e}"),
+                            |log| write!(log, "stop-tracing-aborted: {e}"),
                             loc.hot_location()
                         );
                         self.stats.timing_state(TimingState::None);
@@ -587,7 +590,7 @@ impl MT {
         yklog!(
             self.log,
             Verbosity::Tracing,
-            "start-tracing",
+            |log| write!(log, "start-tracing"),
             _loc.hot_location()
         );
         let tracer = {
@@ -652,7 +655,7 @@ impl MT {
                 yklog!(
                     self.log,
                     Verbosity::Tracing,
-                    "stop-tracing",
+                    |log| write!(log, "stop-tracing"),
                     _loc.hot_location()
                 );
                 self.queue_compile_job(Trace {
@@ -672,7 +675,7 @@ impl MT {
                 yklog!(
                     self.log,
                     Verbosity::Warning,
-                    &format!("stop-tracing-aborted: {e}"),
+                    |log| write!(log, "stop-tracing-aborted: {e}"),
                     _loc.hot_location()
                 );
             }
@@ -1135,7 +1138,7 @@ impl MT {
                     yklog!(
                         self.log,
                         Verbosity::Warning,
-                        &format!("tracing-aborted: {}", AbortKind::BackIntoExecution),
+                        |log| write!(log, "tracing-aborted: {}", AbortKind::BackIntoExecution),
                         Some(&*hl)
                     );
                 }
@@ -1164,7 +1167,7 @@ impl MT {
         yklog!(
             self.log,
             Verbosity::Warning,
-            &format!("tracing-aborted: {}", AbortKind::LongJmpEncountered),
+            |log| write!(log, "tracing-aborted: {}", AbortKind::LongJmpEncountered),
             Some(&*hl)
         );
         self.stats.trace_recorded_err();
@@ -1192,7 +1195,7 @@ impl MT {
                 yklog!(
                     self.log,
                     Verbosity::Tracing,
-                    "start-side-tracing",
+                    |log| write!(log, "start-side-tracing"),
                     Some(&*hl)
                 );
                 let tracer = {
@@ -1388,7 +1391,7 @@ impl MTThread {
                 yklog!(
                     mt.log,
                     Verbosity::Execution,
-                    &format!("return {{\"trid\": \"{}\"}}", trid.as_u64()),
+                    |log| write!(log, "return {{\"trid\": \"{}\"}}", trid.as_u64()),
                     None
                 );
                 mtt.pop_tstate();
@@ -1400,7 +1403,7 @@ impl MTThread {
                 yklog!(
                     mt.log,
                     Verbosity::Execution,
-                    &format!("return {{\"trid\": \"{}\"}}", trid.as_u64()),
+                    |log| write!(log, "return {{\"trid\": \"{}\"}}", trid.as_u64()),
                     None
                 );
             }
