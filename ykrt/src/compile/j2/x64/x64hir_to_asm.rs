@@ -866,7 +866,7 @@ impl<'a> X64HirToAsm<'a> {
             };
 
             self.asm.push_inst(match val_bitw {
-                8 => IcedInst::with2(Code::Mov_rm8_r8, memop, valr.to_reg8()),
+                1..=8 => IcedInst::with2(Code::Mov_rm8_r8, memop, valr.to_reg8()),
                 16 => IcedInst::with2(Code::Mov_rm16_r16, memop, valr.to_reg16()),
                 32 => IcedInst::with2(Code::Mov_rm32_r32, memop, valr.to_reg32()),
                 64 => IcedInst::with2(Code::Mov_rm64_r64, memop, valr.to_reg64()),
@@ -8188,6 +8188,118 @@ mod test {
 
     #[test]
     fn cg_store_int() {
+        // i1
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i1 = arg [reg]
+              store %1, %0
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov [r.64.x], r.8.y
+              ...
+            "],
+        );
+
+        // i2
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i2 = arg [reg]
+              store %1, %0
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov [r.64.x], r.8.y
+              ...
+            "],
+        );
+
+        // i3
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i3 = arg [reg]
+              store %1, %0
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov [r.64.x], r.8.y
+              ...
+            "],
+        );
+
+        // i4
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i4 = arg [reg]
+              store %1, %0
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov [r.64.x], r.8.y
+              ...
+            "],
+        );
+
+        // i5
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i5 = arg [reg]
+              store %1, %0
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov [r.64.x], r.8.y
+              ...
+            "],
+        );
+
+        // i6
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i6 = arg [reg]
+              store %1, %0
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov [r.64.x], r.8.y
+              ...
+            "],
+        );
+
+        // i7
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i7 = arg [reg]
+              store %1, %0
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov [r.64.x], r.8.y
+              ...
+            "],
+        );
+
         // i8
         codegen_and_test(
             "
