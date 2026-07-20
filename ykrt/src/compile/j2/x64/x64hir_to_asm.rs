@@ -1513,6 +1513,17 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RBP,
         ));
 
+        if ret_val.is_some() {
+            // trace_returned clobbers RAX so if we have `return X`, we need to push/pop that
+            // around the call to `trace_returned`. We push/pop twice as a simple, visible hack of
+            // 16-byte alignment.
+            // OPT: We can probably MOV this to another register rather than to the stack.
+            self.asm
+                .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RAX));
+            self.asm
+                .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RAX));
+        }
+
         let callr = if let Some(ret_val) = ret_val {
             match b.inst_ty(self.m, ret_val) {
                 Ty::Double => todo!(),
@@ -1557,6 +1568,12 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             // This cast is fine on x64, and this module will only be compiled on that platform.
             MTThread::trace_returned as *const () as i64,
         ));
+        if ret_val.is_some() {
+            self.asm
+                .push_inst(IcedInst::with1(Code::Push_r64, IcedReg::RAX));
+            self.asm
+                .push_inst(IcedInst::with1(Code::Push_r64, IcedReg::RAX));
+        }
 
         Ok(())
     }
@@ -4339,14 +4356,16 @@ enum RegOrMemOp {
 mod test {
     use super::X64HirToAsm;
     use crate::{
+        StackMapIdx,
         compile::j2::{
             codebuf::CodeBufInProgress,
-            hir::{InstIdx, Mod, TraceEnd},
+            hir::{BlockLikeT, InstIdx, Mod, TraceEnd},
             hir_parser::str_to_mod,
             hir_to_asm::{HirToAsm, HirToAsmBackend},
-            regalloc::{RegFill, VarLoc},
+            regalloc::{RegAlloc, RegFill, VarLoc},
             x64::x64regalloc::{NORMAL_GP_REGS, Reg},
         },
+        compile::jitc_yk::aot_ir::Statepoint,
         location::{HotLocation, HotLocationKind},
         mt::MT,
         varlocs,
@@ -4357,8 +4376,13 @@ mod test {
     use regex::{Regex, RegexBuilder};
     use std::{
         collections::{HashMap, HashSet},
-        sync::Arc,
+        sync::{Arc, LazyLock},
     };
+
+    static TEST_EXIT_STATEPOINT: LazyLock<Statepoint> = LazyLock::new(|| Statepoint {
+        smapidx: StackMapIdx::from(0),
+        lives: Vec::new(),
+    });
 
     /// All x64 registers sorted by class. Later we allow users to match all (e.g.) 8 bit registers with `r.8._`.
     const X64_REGS: [(&str, &str); 4] = [
@@ -4531,6 +4555,39 @@ mod test {
         }));
         let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), true);
         let log = HirToAsm::new(&m, hl, be, true).build_test().unwrap();
+
+        let mut failures = Vec::new();
+        for ptn in ptns {
+            match fmatcher(ptn).matches(&log) {
+                Ok(()) => return,
+                Err(e) => failures.push(e.to_string()),
+            }
+        }
+        panic!("{}", failures.join("\n\n"));
+    }
+
+    /// For the module `mod_s`, run it through the x64 backend, generate code for a `return` trace,
+    /// and check the output matches one of the fm patterns in `ptns`.
+    fn codegen_and_test_return(mod_s: &str, ptns: &[&str]) {
+        let m = str_to_mod::<Reg>(mod_s);
+        let TraceEnd::Test { args_vlocs, block } = &m.trace_end else {
+            panic!()
+        };
+        let ret_val = match block.term_vars() {
+            [iidx] => Some(*iidx),
+            [] => None,
+            _ => panic!(),
+        };
+        let term_iidx = InstIdx::from(block.insts_len() - 1);
+        let mut be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), true);
+        let mut ra = RegAlloc::new(&m, block, args_vlocs, 0);
+        be.star_return_end(&mut ra, block, term_iidx, &TEST_EXIT_STATEPOINT, ret_val)
+            .unwrap();
+
+        let entry_label = be.entry_label;
+        be.asm.attach_label(entry_label);
+        be.asm.block_completed();
+        let log = be.asm.into_exe(entry_label, &[]).unwrap().1.unwrap();
 
         let mut failures = Vec::new();
         for ptn in ptns {
@@ -4856,6 +4913,48 @@ mod test {
         assert_eq!(
             x64be.reg_hint(b, args_vlocs, InstIdx::new(7), InstIdx::new(1)),
             Some(Reg::R13)
+        );
+    }
+
+    #[test]
+    fn return_value_preserves_rax() {
+        codegen_and_test_return(
+            r#"
+          %0: i32 = arg [reg]
+          term [%0]
+        "#,
+            &["
+          ...
+          push rax
+          push rax
+          mov r.64.call, {{_}}
+          call r.64.call
+          pop rax
+          pop rax
+          ...
+          ret
+            "],
+        );
+    }
+
+    #[test]
+    fn star_return_without_value_does_not_preserve_rax() {
+        codegen_and_test_return(
+            "term []",
+            &["
+              ...
+              mov r.64.call, {{_}}
+              call r.64.call
+              mov rsp, rbp
+              sub rsp, 0x28
+              pop rbx
+              pop r12
+              pop r13
+              pop r14
+              pop r15
+              pop rbp
+              ret
+            "],
         );
     }
 
