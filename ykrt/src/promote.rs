@@ -63,7 +63,7 @@ pub extern "C" fn __yk_promote_ptr(val: *const c_void) -> *const c_void {
     if MTThread::is_tracing() {
         MTThread::with_borrow_mut(|mtt| {
             // We ignore the return value as we can't really cancel tracing from this function.
-            mtt.promote_usize(val as usize);
+            mtt.promote_ptr(val);
         });
     }
     val
@@ -100,6 +100,18 @@ pub extern "C" fn __yk_idempotent_promote_i8(val: i8) -> i8 {
         MTThread::with_borrow_mut(|mtt| {
             // We ignore the return value as we can't really cancel tracing from this function.
             mtt.promote_i8(val);
+        });
+    }
+    val
+}
+
+/// Records a pointer return value of an idempotent function during trace recording.
+#[unsafe(no_mangle)]
+pub extern "C" fn __yk_idempotent_promote_ptr(val: *const c_void) -> *const c_void {
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_ptr(val);
         });
     }
     val
