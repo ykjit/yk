@@ -102,6 +102,7 @@ void yk_location_drop(YkLocation);
                                unsigned int: __yk_promote_c_unsigned_int, \
                                long long: __yk_promote_c_long_long, \
                                uintptr_t: __yk_promote_usize, \
+                               uint8_t *: __yk_promote_ptr, \
                                void *: __yk_promote_ptr \
                               )(X)
 int __yk_promote_c_int(int);
