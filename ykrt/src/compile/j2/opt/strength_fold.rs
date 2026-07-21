@@ -446,15 +446,27 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         return OptOutcome::NotNeeded;
     }
 
-    if expect
-        && let cond_inst @ Inst::ICmp(ICmp {
-            pred: IPred::Eq, ..
-        }) = opt.inst(cond)
+    let mut cond_inst = opt.inst(cond).to_owned();
+    if (expect
+        && matches!(
+            cond_inst,
+            Inst::ICmp(ICmp {
+                pred: IPred::Eq,
+                ..
+            })
+        ))
+        || (!expect
+            && matches!(
+                cond_inst,
+                Inst::ICmp(ICmp {
+                    pred: IPred::Ne,
+                    ..
+                })
+            ))
     {
-        let mut cond_inst = cond_inst.to_owned();
         cond_inst.canonicalise(opt);
         let Inst::ICmp(ICmp {
-            pred: IPred::Eq,
+            pred: _,
             lhs,
             rhs,
             samesign,
@@ -1763,7 +1775,7 @@ mod test {
         ",
         );
 
-        // Equivalency determined by guards
+        // Equivalency determined by guards: eq
         test_sf(
             "
           %0: i8 = arg [reg]
@@ -1805,6 +1817,53 @@ mod test {
           %1: i8 = arg
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
+          term [%0, %0]
+          ...
+        ",
+        );
+
+        // Equivalency determined by guards: ne (for ints)
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 1
+          %3: i8 = 4
+          %4: i1 = icmp ne %0, %3
+          %5: i1 = icmp ne %0, %1
+          guard false, %4, []
+          guard false, %5, []
+          blackbox %0
+          blackbox %1
+          term [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %3: i8 = 4
+          %4: i1 = icmp ne %0, %3
+          %5: i1 = icmp ne %0, %1
+          guard false, %4, []
+          guard false, %5, []
+          blackbox %3
+          blackbox %3
+          term [%3, %3]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i1 = icmp ne %0, %1
+          guard false, %2, []
+          term [%0, %1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i1 = icmp ne %0, %1
+          guard false, %2, []
           term [%0, %0]
           ...
         ",
