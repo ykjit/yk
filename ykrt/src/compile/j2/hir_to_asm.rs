@@ -1307,8 +1307,15 @@ pub(super) trait HirToAsmBackend {
     /// Adjust `dst_bitw` bits of `reg` from `src_fill` to `dst_fill`.
     fn arrange_fill(&mut self, reg: Self::Reg, src_fill: RegFill, dst_bitw: u32, dst_fill: RegFill);
 
-    /// Copy `from_reg` to `to_reg`.
-    fn copy_reg(&mut self, from_reg: Self::Reg, to_reg: Self::Reg) -> Result<(), CompilationError>;
+    /// Copy `src_reg` to `dst_reg`, adjusting the copied value's fill if necessary.
+    fn copy_reg_with_fill(
+        &mut self,
+        src_reg: Self::Reg,
+        src_fill: RegFill,
+        dst_reg: Self::Reg,
+        dst_fill: RegFill,
+        dst_bitw: u32,
+    ) -> Result<(), CompilationError>;
 
     /// If the stack is currently at offset `stack_off`, return an aligned offset suitable for a
     /// value of `bitw` bits: the value will be stored exactly at the returned offset. Note: this
@@ -2050,12 +2057,15 @@ mod test {
             ));
         }
 
-        fn copy_reg(
+        fn copy_reg_with_fill(
             &mut self,
-            from_reg: Self::Reg,
-            to_reg: Self::Reg,
+            src_reg: Self::Reg,
+            src_fill: RegFill,
+            dst_reg: Self::Reg,
+            dst_fill: RegFill,
+            dst_bitw: u32,
         ) -> Result<(), CompilationError> {
-            self.log.push(format!("copy_reg: {to_reg:?}={from_reg:?}"));
+            self.log.push(format!("copy_reg: src_reg={src_reg:?}, src_fill={src_fill:?}, dst_reg={dst_reg:?}, dst_fill={dst_fill:?}, dst_bitw={dst_bitw:?}"));
             Ok(())
         }
 
@@ -2423,8 +2433,7 @@ mod test {
           spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
           ptradd: R0=R0 + 8
           ; %1: ptr = ptradd %0, 8
-          arrange_fill: reg=R0, from=Undefined, dst_bitw=64, to=Undefined
-          copy_reg: R0=R1
+          copy_reg: src_reg=R1, src_fill=Undefined, dst_reg=R0, dst_fill=Undefined, dst_bitw=64
           ; %0: ptr = arg [Reg("R1", Undefined)]
           guard_completed:
             fromvlocs=[Stack(8)]
@@ -2455,8 +2464,7 @@ mod test {
           spill: reg=R1, in_fill=Undefined, stack_off=8, bitw=64
           ptradd: R1=R0 + 8
           ; %1: ptr = ptradd %0, 8
-          arrange_fill: reg=R0, from=Undefined, dst_bitw=64, to=Undefined
-          copy_reg: R0=R1
+          copy_reg: src_reg=R1, src_fill=Undefined, dst_reg=R0, dst_fill=Undefined, dst_bitw=64
           ; %0: ptr = arg [Reg("R1", Undefined)]
           guard_completed:
             fromvlocs=[Stack(8)]
@@ -2489,10 +2497,8 @@ mod test {
           ; %3: ptr = dynptradd %2, %1, 8
           ptradd: R0=R0 + 8
           ; %2: ptr = ptradd %0, 8
-          arrange_fill: reg=R1, from=Undefined, dst_bitw=64, to=Zeroed
-          copy_reg: R1=R2
-          arrange_fill: reg=R0, from=Undefined, dst_bitw=64, to=Undefined
-          copy_reg: R0=R1
+          copy_reg: src_reg=R2, src_fill=Undefined, dst_reg=R1, dst_fill=Zeroed, dst_bitw=64
+          copy_reg: src_reg=R1, src_fill=Undefined, dst_reg=R0, dst_fill=Undefined, dst_bitw=64
           ; %1: i64 = arg [Reg("R2", Undefined)]
           ; %0: ptr = arg [Reg("R1", Undefined)]
           guard_completed:
@@ -2624,8 +2630,7 @@ mod test {
           spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
           ptradd: R0=R0 + 8
           ; %1: ptr = ptradd %0, 8
-          arrange_fill: reg=R0, from=Undefined, dst_bitw=64, to=Undefined
-          copy_reg: R0=R1
+          copy_reg: src_reg=R1, src_fill=Undefined, dst_reg=R0, dst_fill=Undefined, dst_bitw=64
           ; %0: ptr = arg [Reg("R1", Undefined)]
           guard_completed:
             fromvlocs=[Stack(8)]
@@ -2681,8 +2686,7 @@ mod test {
           ; guard true, %2, [%0]
           ; %2: i1 = icmp eq %0, %1
           ; %1: i8 = 4
-          arrange_fill: reg=R1, from=Undefined, dst_bitw=8, to=Undefined
-          copy_reg: R1=R0
+          copy_reg: src_reg=R0, src_fill=Undefined, dst_reg=R1, dst_fill=Undefined, dst_bitw=8
           ; %0: i8 = arg [Reg("R0", Undefined)]
           controlpoint_loop_start 2 0
           ; term [%0]
