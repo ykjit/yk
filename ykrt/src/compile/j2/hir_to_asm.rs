@@ -721,11 +721,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         .all(|(x, y)| {
                             x.bitw == y.bitw
                                 && x.fromvlocs.len() == y.fromvlocs.len()
-                                && x.fromvlocs.iter().zip(y.fromvlocs.iter()).all(|(x, y)| {
-                                    x == y
-                                        || (matches!(x, VarLoc::Const(_))
-                                            && matches!(x, VarLoc::Stack(_) | VarLoc::StackOff(_)))
-                                })
+                                && x.fromvlocs
+                                    .iter()
+                                    .zip(y.fromvlocs.iter())
+                                    .all(|(x, y)| x == y)
                         })
                     && gextra.switch == gbody.switch
                 {
