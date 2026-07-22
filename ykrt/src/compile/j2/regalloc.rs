@@ -736,7 +736,10 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         n_out.set_fill_iidxs(reg, RegFill::Undefined, smallvec![]);
                         rtn_fills.push(RegFill::Undefined);
                     } else {
-                        let in_fill = RegFill::from_regcnstrfill(in_fill);
+                        let mut in_fill = RegFill::from_regcnstrfill(in_fill);
+                        if in_fill == RegFill::Undefined && n_out.iidxs(reg).contains(in_iidx) {
+                            in_fill = n_out.fill(reg);
+                        }
                         n_out.set_fill_iidxs(reg, in_fill, smallvec![*in_iidx]);
                         rtn_fills.push(in_fill);
                     }
@@ -899,8 +902,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 }
                 RegCnstr::Input {
                     in_iidx, in_fill, ..
+                } => {
+                    let mut in_fill = RegFill::from_regcnstrfill(in_fill);
+                    if in_fill == RegFill::Undefined && n_in.iidxs(reg).contains(in_iidx) {
+                        in_fill = n_in.fill(reg);
+                    }
+                    n_in.set_fill_iidxs(reg, in_fill, smallvec![*in_iidx]);
                 }
-                | RegCnstr::InputOutput {
+                RegCnstr::InputOutput {
                     in_iidx, in_fill, ..
                 } => {
                     n_in.set_fill_iidxs(
@@ -2417,6 +2426,41 @@ pub(crate) mod test {
             Ok(())
         }
 
+        fn i_shl(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            Shl { lhs, rhs, .. }: &crate::compile::j2::hir::Shl,
+        ) -> Result<(), CompilationError> {
+            let [lhsr, rhsr, outr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        can_be_same_as_input: false,
+                    },
+                ],
+            )?;
+            self.ra_log
+                .push(format!("shl %{iidx:?} {lhsr:?} {rhsr:?} {outr:?}"));
+            Ok(())
+        }
+
         fn i_trunc(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -2788,6 +2832,32 @@ pub(crate) mod test {
           arrange_fill GPR0 from=Zeroed dst_bitw=8 to=Undefined
           copy_reg from=GPR1 to=GPR0
           alloc %1 GPR0 GPR1
+          arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
+          copy_reg from=GPR0 to=GPR1
+          arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
+        "],
+        );
+    }
+
+    #[test]
+    fn make_use_of_undefined() {
+        build_and_test(
+            r#"
+          %0: i8 = arg [reg ("GPR0", undefined)]
+          %1: i8 = 1
+          %2: i8 = shl %0, %1
+          %3: i8 = add %0, %0
+          blackbox %2
+          blackbox %3
+          term [%0]
+        "#,
+            |_| true,
+            &["
+          arrange_fill GPR0 from=Zeroed dst_bitw=8 to=Undefined
+          copy_reg from=GPR1 to=GPR0
+          alloc %3 GPR0 GPR1
+          shl %2 GPR0 GPR2 GPR3
+          const GPR2 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 1 })
           arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
           copy_reg from=GPR0 to=GPR1
           arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
