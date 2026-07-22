@@ -132,23 +132,35 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// Snapshot this register allocator in a way that is suitable for a
     /// [super::hir::GuardRestore].
     pub(super) fn vlocs_from_iidxs(&mut self, iidxs: &[InstIdx]) -> Vec<VarLocs<AB::Reg>> {
-        let mut out = Vec::with_capacity(iidxs.len());
-        for iidx in iidxs {
-            let mut vlocs = VarLocs::new();
-            if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
-                vlocs.push(VarLoc::Const(kind.clone()));
-            }
-            for (reg, rstate) in self.rstates.iter() {
-                if rstate.iidxs.contains(iidx) {
-                    vlocs.push(VarLoc::Reg(reg, rstate.fill));
+        let mut out = iidxs
+            .iter()
+            .map(|iidx| {
+                let mut vlocs = VarLocs::new();
+                if let Inst::Const(Const { kind, .. }) = self.b.inst(*iidx) {
+                    vlocs.push(VarLoc::Const(kind.clone()));
+                }
+                vlocs
+            })
+            .collect::<Vec<_>>();
+
+        for (reg, rstate) in self.rstates.iter() {
+            for iidx in &rstate.iidxs {
+                for i in iidxs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, v)| (v == iidx).then_some(i))
+                {
+                    out[i].push(VarLoc::Reg(reg, rstate.fill));
                 }
             }
+        }
+
+        for (iidx, vlocs) in iidxs.iter().zip(out.iter_mut()) {
             match &self.istates[*iidx] {
                 IState::None => (),
                 IState::Stack(off) => vlocs.push(VarLoc::Stack(*off)),
                 IState::StackOff(off) => vlocs.push(VarLoc::StackOff(*off)),
             }
-            out.push(vlocs);
         }
         out
     }
