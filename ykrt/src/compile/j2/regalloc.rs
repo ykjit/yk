@@ -1715,17 +1715,17 @@ impl AnyOfFill {
         }
     }
 
-    /// Return the current [AnyOfFill] extended with the accepted of [RegFill::Undefined].
+    /// Return the current [AnyOfFill] extended with [RegFill::Undefined].
     pub(super) const fn with_undefined(self) -> Self {
         Self(self.0 | ANYOFFILL_UNDEFINED)
     }
 
-    /// Return the current [AnyOfFill] extended with the accepted of [RegFill::Signed].
+    /// Return the current [AnyOfFill] extended with [RegFill::Signed].
     pub(super) const fn with_signed(self) -> Self {
         Self(self.0 | ANYOFFILL_SIGNED)
     }
 
-    /// Return the current [AnyOfFill] extended with the accepted of [RegFill::Zeroed].
+    /// Return the current [AnyOfFill] extended with [RegFill::Zeroed].
     pub(super) const fn with_zeroed(self) -> Self {
         Self(self.0 | ANYOFFILL_ZEROED)
     }
