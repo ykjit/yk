@@ -1253,24 +1253,44 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
-    fn copy_reg(&mut self, from_reg: Self::Reg, to_reg: Self::Reg) -> Result<(), CompilationError> {
+    fn copy_reg_with_fill(
+        &mut self,
+        src_reg: Self::Reg,
+        src_fill: RegFill,
+        dst_reg: Self::Reg,
+        dst_fill: RegFill,
+        dst_bitw: u32,
+    ) -> Result<(), CompilationError> {
         assert!(
-            (from_reg.is_gp() && to_reg.is_gp()) || (from_reg.is_fp() && to_reg.is_fp()),
-            "{from_reg:?} {to_reg:?}"
+            (src_reg.is_gp() && dst_reg.is_gp()) || (src_reg.is_fp() && dst_reg.is_fp()),
+            "{src_reg:?} {dst_reg:?}"
         );
-        if from_reg.is_gp() {
+        if src_reg.is_gp()
+            && src_fill == RegFill::Undefined
+            && dst_fill == RegFill::Zeroed
+            && dst_bitw == 32
+        {
             self.asm.push_inst(IcedInst::with2(
-                Code::Mov_r64_rm64,
-                to_reg.to_reg64(),
-                from_reg.to_reg64(),
+                Code::Mov_r32_rm32,
+                dst_reg.to_reg32(),
+                src_reg.to_reg32(),
             ));
         } else {
-            assert!(from_reg.is_fp());
-            self.asm.push_inst(IcedInst::with2(
-                Code::Movsd_xmm_xmmm64,
-                to_reg.to_xmm(),
-                from_reg.to_xmm(),
-            ));
+            self.arrange_fill(dst_reg, src_fill, dst_bitw, dst_fill);
+            if src_reg.is_gp() {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r64_rm64,
+                    dst_reg.to_reg64(),
+                    src_reg.to_reg64(),
+                ));
+            } else {
+                assert!(src_reg.is_fp());
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movsd_xmm_xmmm64,
+                    dst_reg.to_xmm(),
+                    src_reg.to_xmm(),
+                ));
+            }
         }
         Ok(())
     }
@@ -4973,6 +4993,29 @@ mod test {
               lea r.64.x, [rbp-0x20]
               ; %1: i8 = load %0
               movzx r.32._, byte [r.64.x]
+              ...
+            "],
+        );
+    }
+
+    #[test]
+    fn copy_with_fill() {
+        codegen_and_test(
+            "
+              extern getpid() -> i32
+
+              %0: ptr = @getpid
+              %1: i32 = call getpid %0()
+              %2: i64 = zext %1
+              blackbox %1
+              blackbox %2
+              term []
+            ",
+            &["
+              ...
+              call ...
+              mov r.32.x, eax
+              ; %2: i64 = zext %1
               ...
             "],
         );

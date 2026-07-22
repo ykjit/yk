@@ -553,8 +553,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             dst_fill,
         } in ractions.distinct_copies.iter()
         {
-            be.arrange_fill(*dst_reg, *src_fill, *bitw, *dst_fill);
-            be.copy_reg(*src_reg, *dst_reg)?;
+            be.copy_reg_with_fill(*src_reg, *src_fill, *dst_reg, *dst_fill, *bitw)?;
         }
 
         for RegCopy {
@@ -2212,13 +2211,15 @@ pub(crate) mod test {
             ));
         }
 
-        fn copy_reg(
+        fn copy_reg_with_fill(
             &mut self,
-            from_reg: Self::Reg,
-            to_reg: Self::Reg,
+            src_reg: Self::Reg,
+            src_fill: RegFill,
+            dst_reg: Self::Reg,
+            dst_fill: RegFill,
+            dst_bitw: u32,
         ) -> Result<(), CompilationError> {
-            self.ra_log
-                .push(format!("copy_reg from={from_reg:?} to={to_reg:?}"));
+            self.ra_log.push(format!("copy_reg: src_reg={src_reg:?}, src_fill={src_fill:?}, dst_reg={dst_reg:?}, dst_fill={dst_fill:?}, dst_bitw={dst_bitw:?}"));
             Ok(())
         }
 
@@ -2656,13 +2657,13 @@ pub(crate) mod test {
             |s| !s.starts_with("arrange_fill"),
             &["
           alloc %7 GPR1 GPR0
-          copy_reg from=GPR2 to=GPR1
+          copy_reg: src_reg=GPR2, src_fill=Zeroed, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
           alloc %6 GPR1 GPR0
-          copy_reg from=GPR1 to=GPR2
+          copy_reg: src_reg=GPR1, src_fill=Undefined, dst_reg=GPR2, dst_fill=Zeroed, dst_bitw=8
           alloc %5 GPR1 GPR3
           alloc %4 GPR1 GPR2
           unspill stack_off=8 GPR1 Undefined bitw=8
-          copy_reg from=GPR1 to=GPR3
+          copy_reg: src_reg=GPR1, src_fill=Undefined, dst_reg=GPR3, dst_fill=Zeroed, dst_bitw=8
           spill GPR3 Undefined stack_off=8 bitw=8
         "],
         );
@@ -2829,11 +2830,9 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 from=Zeroed dst_bitw=8 to=Undefined
-          copy_reg from=GPR1 to=GPR0
+          copy_reg: src_reg=GPR1, src_fill=Zeroed, dst_reg=GPR0, dst_fill=Undefined, dst_bitw=8
           alloc %1 GPR0 GPR1
-          arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
-          copy_reg from=GPR0 to=GPR1
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
           arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
         "],
         );
@@ -2853,13 +2852,11 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 from=Zeroed dst_bitw=8 to=Undefined
-          copy_reg from=GPR1 to=GPR0
+          copy_reg: src_reg=GPR1, src_fill=Zeroed, dst_reg=GPR0, dst_fill=Undefined, dst_bitw=8
           alloc %3 GPR0 GPR1
           shl %2 GPR0 GPR2 GPR3
           const GPR2 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 1 })
-          arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
-          copy_reg from=GPR0 to=GPR1
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
           arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
         "],
         );
@@ -2897,8 +2894,7 @@ pub(crate) mod test {
             |_| true,
             &["
           alloc %3 GPR0 GPR1
-          arrange_fill GPR0 from=Zeroed dst_bitw=8 to=Zeroed
-          copy_reg from=GPR1 to=GPR0
+          copy_reg: src_reg=GPR1, src_fill=Zeroed, dst_reg=GPR0, dst_fill=Zeroed, dst_bitw=8
           alloc %1 GPR0 GPR1
           const GPR1 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
           const GPR0 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 2 })
@@ -2918,14 +2914,11 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
-          copy_reg from=GPR2 to=GPR1
+          copy_reg: src_reg=GPR2, src_fill=Undefined, dst_reg=GPR1, dst_fill=Undefined, dst_bitw=64
           alloc %2 GPR1 GPR0
           unspill stack_off=8 GPR0 Undefined bitw=64
-          arrange_fill GPR2 from=Undefined dst_bitw=64 to=Undefined
-          copy_reg from=GPR0 to=GPR2
-          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Zeroed
-          copy_reg from=GPR0 to=GPR1
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR2, dst_fill=Undefined, dst_bitw=64
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=64
           spill GPR1 Undefined stack_off=8 bitw=64
         "],
         );
@@ -2945,11 +2938,9 @@ pub(crate) mod test {
         "#,
             |_| true,
             &["
-          arrange_fill GPR0 from=Undefined dst_bitw=64 to=Undefined
-          copy_reg from=GPR1 to=GPR0
+          copy_reg: src_reg=GPR1, src_fill=Undefined, dst_reg=GPR0, dst_fill=Undefined, dst_bitw=64
           trunc %1 GPR0
-          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
-          copy_reg from=GPR0 to=GPR1
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Undefined, dst_bitw=64
         "],
         );
 
@@ -2980,8 +2971,7 @@ pub(crate) mod test {
             &["
           trunc %2 GPR1
           trunc %1 GPR1
-          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
-          copy_reg from=GPR0 to=GPR1
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Undefined, dst_bitw=64
         "],
         );
 
@@ -3015,8 +3005,7 @@ pub(crate) mod test {
           zext %2 GPR1
           arrange_fill GPR1 from=Undefined dst_bitw=32 to=Zeroed
           trunc %1 GPR1
-          arrange_fill GPR1 from=Undefined dst_bitw=64 to=Undefined
-          copy_reg from=GPR0 to=GPR1
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Undefined, dst_bitw=64
         "],
         );
     }
@@ -3079,8 +3068,7 @@ pub(crate) mod test {
           unspill stack_off=48 GPR0 Undefined bitw=8
           spill GPR0 Undefined stack_off=32 bitw=8
           alloc %3 GPR0 GPR2
-          arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
-          copy_reg from=GPR3 to=GPR1
+          copy_reg: src_reg=GPR3, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
           arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
           arrange_fill GPR2 from=Undefined dst_bitw=8 to=Zeroed
           arrange_fill GPR3 from=Undefined dst_bitw=8 to=Zeroed
