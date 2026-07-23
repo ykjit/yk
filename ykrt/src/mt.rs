@@ -476,7 +476,10 @@ impl MT {
             TransitionControlPoint::StopReturnTracing(trid) => {
                 self.stop_tracing(frameaddr, loc, trid, TraceEnd::Loop);
             }
-            TransitionControlPoint::StopUnrollTracing { unroll_tid } => {
+            TransitionControlPoint::StopUnrollTracing {
+                inner_hl,
+                unroll_tid,
+            } => {
                 yklog!(
                     self.log,
                     Verbosity::Warning,
@@ -492,12 +495,7 @@ impl MT {
                 });
                 let _ = thread_tracer.stop();
                 self.stats.trace_recorded_err();
-                self.start_tracing(
-                    frameaddr,
-                    loc,
-                    loc.hot_location_arc_clone().unwrap(),
-                    unroll_tid,
-                );
+                self.start_tracing(frameaddr, loc, inner_hl, unroll_tid);
             }
             TransitionControlPoint::StopSideTracing {
                 trid,
@@ -860,17 +858,33 @@ impl MT {
                         return TransitionControlPoint::StopLoopTracing(*tracing_trid);
                     } else {
                         // ...and we have unrolled an inner loop.
+                        //
+                        // We have more than one option here (e.g. we could chop off the end of the
+                        // trace), but we aim to do the simplest thing: throw away the trace, reset
+                        // the outer loop, and start tracing the inner loop. There is, however, a
+                        // race here that we need to handle carefully.
 
-                        // We could be much more clever here, but for now we throw away the
-                        // recorded trace, start tracing the inner loop again, and mark the outer
-                        // loop as ready for tracing as soon as it's next encountered.
                         assert!(!Arc::ptr_eq(&hl, tracing_hl));
-                        let unroll_tid = self.next_trace_id();
-                        lk.kind = HotLocationKind::Tracing(unroll_tid);
-                        drop(lk);
-                        let mut lk = tracing_hl.lock();
-                        lk.kind = HotLocationKind::Counting(self.hot_threshold());
-                        return TransitionControlPoint::StopUnrollTracing { unroll_tid };
+                        // We now have a potential race in the inner loop, so only if it's in the
+                        // Counting state do we restart tracing.
+                        if let HotLocationKind::Counting(_) = lk.kind {
+                            let unroll_tid = self.next_trace_id();
+                            lk.kind = HotLocationKind::Tracing(unroll_tid);
+                            drop(lk);
+                            let mut lk = tracing_hl.lock();
+                            lk.kind = HotLocationKind::Counting(self.hot_threshold());
+                            return TransitionControlPoint::StopUnrollTracing {
+                                inner_hl: hl,
+                                unroll_tid,
+                            };
+                        } else {
+                            // We raced with something: all we can do is throw away the trace, and
+                            // put the outer loop back in counting mode.
+                            drop(lk);
+                            let mut lk = tracing_hl.lock();
+                            lk.kind = HotLocationKind::Counting(self.hot_threshold());
+                            return TransitionControlPoint::AbortTracing;
+                        }
                     }
                 }
 
@@ -1625,6 +1639,8 @@ enum TransitionControlPoint {
     StopReturnTracing(TraceId),
     /// A trace has completed but it is unrolled one iteration of an inner loop.
     StopUnrollTracing {
+        /// The [HotLocation] of the inner loop: we will restart tracing this.
+        inner_hl: Arc<Mutex<HotLocation>>,
         unroll_tid: TraceId,
     },
     /// A (Guard, Coupler | Return) trace has completed.
@@ -2320,6 +2336,42 @@ mod tests {
             loc2.hot_location().unwrap().lock().kind,
             HotLocationKind::Tracing(_)
         );
+    }
+
+    #[test]
+    fn unroll_trace_only_restarts_counting_inner_loop() {
+        // Test the race condition that unrolling can happen upon: we've unrolled a loop, but in
+        // the interim someone else has started tracing the inner loop. When we encounter that, all
+        // we can do is abort the trace, and put the outer loop in a state where it can retry
+        // tracing.
+
+        let mt = Arc::new(MT::new().unwrap());
+        mt.set_hot_threshold(0);
+        let loc_outer = Location::new();
+        let loc_inner = Location::new();
+
+        expect_start_tracing(&mt, &loc_outer);
+        assert_matches!(
+            mt.transition_control_point(&loc_inner, ptr::null_mut()),
+            TransitionControlPoint::NoAction
+        );
+        loc_inner.hot_location().unwrap().lock().kind =
+            HotLocationKind::Compiling(mt.next_trace_id());
+
+        assert_matches!(
+            mt.transition_control_point(&loc_inner, ptr::null_mut()),
+            TransitionControlPoint::AbortTracing
+        );
+
+        assert_matches!(
+            loc_outer.hot_location().unwrap().lock().kind,
+            HotLocationKind::Counting(0)
+        );
+
+        MTThread::with_borrow_mut(|mtt| {
+            mtt.pop_tstate();
+        });
+        MTThread::set_tracing(IsTracing::None);
     }
 
     #[test]
