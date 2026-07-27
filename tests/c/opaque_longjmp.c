@@ -9,17 +9,18 @@
 //     I'm in g via a longjump
 //     in interp loop: i=3
 //     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: irregular control flow detected (trace ended with outline successor pending)
 //     maybe_hidden_longjump: x=3
 //     I'm in g via calling deeper
 //     in interp loop: i=2
-//     yk-tracing: start-tracing
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     maybe_hidden_longjump: x=2
 //     I'm in g via calling deeper
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     in interp loop: i=1
-//     yk-tracing: stop-tracing
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     maybe_hidden_longjump: x=1
 //     I'm in g via calling deeper
+//     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
 #include <assert.h>
@@ -33,6 +34,9 @@
 #define G_CALL_DEEPER 2
 
 jmp_buf buf;
+
+// This test used to trace "opaque longjmps" but after the introduction of
+// call traces implicitly tests the latter.
 
 void g(int x) {
   if (x == G_LONGJMP) {

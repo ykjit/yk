@@ -305,7 +305,10 @@ impl<Reg: RegT> Mod<Reg> {
         }
 
         match &self.trace_end {
-            TraceEnd::Coupler { .. } | TraceEnd::Loop { .. } | TraceEnd::Return { .. } => todo!(),
+            TraceEnd::Call { .. }
+            | TraceEnd::Coupler { .. }
+            | TraceEnd::Loop { .. }
+            | TraceEnd::Return { .. } => todo!(),
             #[cfg(test)]
             TraceEnd::Test { args_vlocs, block } => {
                 block.assert_well_formed(self, args_vlocs, args_vlocs);
@@ -343,6 +346,7 @@ impl<Reg: RegT> Mod<Reg> {
         }
         out.push("  },\n  \"end\": {".to_owned());
         match &self.trace_end {
+            TraceEnd::Call { .. } => out.push("    \"kind\": \"Call\"".to_owned()),
             TraceEnd::Coupler { tgt_ctr, .. } => out.push(format!(
                 "    \"kind\": \"Coupler\",\n    \"tgt_trid\": \"{}\"",
                 tgt_ctr.trid
@@ -369,6 +373,7 @@ impl<Reg: RegT> Display for Mod<Reg> {
                 .join("\n; ")
         );
         match &self.trace_end {
+            TraceEnd::Call { entry } => write!(f, "{json_info}\n{}", entry.to_string(self)),
             TraceEnd::Coupler { entry, .. } => write!(f, "{json_info}\n{}", entry.to_string(self)),
             TraceEnd::Loop { entry, peel, .. } => match peel {
                 Some(x) => write!(
@@ -441,6 +446,9 @@ pub(super) enum TraceStart<Reg: RegT> {
 /// Where did this trace end?
 #[derive(Debug)]
 pub(super) enum TraceEnd<Reg: RegT> {
+    Call {
+        entry: Block,
+    },
     /// This trace ended at a different [crate::location::Location] than it started from.
     Coupler {
         entry: Block,
@@ -448,7 +456,10 @@ pub(super) enum TraceEnd<Reg: RegT> {
     },
     /// This trace ended at the same [crate::location::Location] that it started from, thus forming
     /// a loop.
-    Loop { entry: Block, peel: Option<Block> },
+    Loop {
+        entry: Block,
+        peel: Option<Block>,
+    },
     /// This trace ended early when a `return` statement in the function containing the control
     /// point function was encountered.
     Return {

@@ -844,15 +844,7 @@ impl MT {
                 let mut lk = hl.lock();
                 if seen_hls.push_and_check_any_loop_closed(Arc::clone(&hl)) {
                     // We have traced this location more than once...
-                    if frame_relationship(frameaddr, *tracing_frameaddr)
-                        == FrameRelationship::Frame2IsCallerOfFrame1
-                    {
-                        lk.kind = match lk.tracecompilation_error(self) {
-                            TraceFailed::KeepTrying => HotLocationKind::Counting(0),
-                            TraceFailed::DontTrace => HotLocationKind::DontTrace,
-                        };
-                        return TransitionControlPoint::AbortTracing;
-                    } else if seen_hls.is_loop() {
+                    if seen_hls.is_loop() {
                         // ...and the entire trace is a single loop.
                         lk.kind = HotLocationKind::Compiling(*tracing_trid);
                         return TransitionControlPoint::StopLoopTracing(*tracing_trid);
@@ -897,20 +889,10 @@ impl MT {
                         };
                         drop(lk);
                         let mut lk = tracing_hl.lock();
-                        if frame_relationship(frameaddr, *tracing_frameaddr)
-                            == FrameRelationship::Frame2IsCallerOfFrame1
-                        {
-                            lk.kind = match lk.tracecompilation_error(self) {
-                                TraceFailed::KeepTrying => HotLocationKind::Counting(0),
-                                TraceFailed::DontTrace => HotLocationKind::DontTrace,
-                            };
-                            TransitionControlPoint::AbortTracing
-                        } else {
-                            lk.kind = HotLocationKind::Compiling(*tracing_trid);
-                            TransitionControlPoint::StopCouplerTracing {
-                                start_tid: *tracing_trid,
-                                coupler_tid,
-                            }
+                        lk.kind = HotLocationKind::Compiling(*tracing_trid);
+                        TransitionControlPoint::StopCouplerTracing {
+                            start_tid: *tracing_trid,
+                            coupler_tid,
                         }
                     }
                     HotLocationKind::Counting(_) => TransitionControlPoint::NoAction,
@@ -996,21 +978,14 @@ impl MT {
                         let Some((parent_ctr, gid)) = gtrace else {
                             panic!()
                         };
-                        if frame_relationship(frameaddr, *tracing_frameaddr)
-                            == FrameRelationship::Frame2IsCallerOfFrame1
-                        {
-                            parent_ctr.guard(*gid).trace_or_compile_failed(self);
-                            TransitionControlPoint::AbortTracing
-                        } else {
-                            let gid = *gid;
-                            let parent_ctr = Arc::clone(parent_ctr);
-                            TransitionControlPoint::StopSideTracing {
-                                trid: *tracing_trid,
-                                gid,
-                                parent_ctr,
-                                coupler_tid: Some(coupler_tid),
-                                start: false,
-                            }
+                        let gid = *gid;
+                        let parent_ctr = Arc::clone(parent_ctr);
+                        TransitionControlPoint::StopSideTracing {
+                            trid: *tracing_trid,
+                            gid,
+                            parent_ctr,
+                            coupler_tid: Some(coupler_tid),
+                            start: false,
                         }
                     }
                     HotLocationKind::Counting(_) => {
@@ -1021,20 +996,13 @@ impl MT {
                             panic!()
                         };
                         let gid = *gid;
-                        if frame_relationship(frameaddr, *tracing_frameaddr)
-                            == FrameRelationship::Frame2IsCallerOfFrame1
-                        {
-                            parent_ctr.guard(gid).trace_or_compile_failed(self);
-                            TransitionControlPoint::AbortTracing
-                        } else {
-                            let parent_ctr = Arc::clone(parent_ctr);
-                            TransitionControlPoint::StopSideTracing {
-                                trid: *tracing_trid,
-                                gid,
-                                parent_ctr,
-                                coupler_tid: Some(next_tid),
-                                start: true,
-                            }
+                        let parent_ctr = Arc::clone(parent_ctr);
+                        TransitionControlPoint::StopSideTracing {
+                            trid: *tracing_trid,
+                            gid,
+                            parent_ctr,
+                            coupler_tid: Some(next_tid),
+                            start: true,
                         }
                     }
                     HotLocationKind::DontTrace => TransitionControlPoint::NoAction,
@@ -1054,20 +1022,13 @@ impl MT {
                         };
                         let gid = *gid;
                         let parent_ctr = Arc::clone(parent_ctr);
-                        if frame_relationship(frameaddr, *tracing_frameaddr)
-                            == FrameRelationship::Frame2IsCallerOfFrame1
-                        {
-                            parent_ctr.guard(gid).trace_or_compile_failed(self);
-                            return TransitionControlPoint::AbortTracing;
-                        } else {
-                            return TransitionControlPoint::StopSideTracing {
-                                trid: *tracing_trid,
-                                gid,
-                                parent_ctr,
-                                coupler_tid: Some(next_trid),
-                                start: true,
-                            };
-                        }
+                        return TransitionControlPoint::StopSideTracing {
+                            trid: *tracing_trid,
+                            gid,
+                            parent_ctr,
+                            coupler_tid: Some(next_trid),
+                            start: true,
+                        };
                     }
                 }
                 // We raced with another thread which has started tracing this

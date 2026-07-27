@@ -80,6 +80,7 @@ impl<'a> X64HirToAsm<'a> {
         // we may have to redo the whole compilation! The least worst option is therefore to guess
         // too much and free memory afterwards.
         let num_hir_insts = match &m.trace_end {
+            TraceEnd::Call { entry } => entry.insts_len(),
             TraceEnd::Coupler { entry, .. } => entry.insts_len(),
             TraceEnd::Loop { entry, peel } => {
                 entry.insts_len() + peel.as_ref().map(|x| x.insts_len()).unwrap_or(0)

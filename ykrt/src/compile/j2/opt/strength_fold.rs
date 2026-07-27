@@ -437,10 +437,10 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
 
     let cond = opt.equiv_iidx(cond);
     if let Some(ConstKind::Int(x)) = opt.as_constkind(cond) {
-        // Contradictions should have been spotted before we get to here.
-        assert!(
-            (expect && x.to_zero_ext_u8() == Some(1)) || (!expect && x.to_zero_ext_u8() == Some(0))
-        );
+        if (expect && x.to_zero_ext_u8() == Some(0)) || (!expect && x.to_zero_ext_u8() == Some(1)) {
+            // Let contradictions pass through.
+            return OptOutcome::Rewritten(inst.into());
+        }
         // A guard that references a constant is, by definition, not needed and doesn't affect
         // future analyses.
         return OptOutcome::NotNeeded;

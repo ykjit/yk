@@ -186,6 +186,14 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
 
                 let (post_stack_label, entry_stack_off) = match &self.m.trace_end {
+                    TraceEnd::Call { entry } => {
+                        let ra = RegAlloc::<AB>::new(self.m, entry, &args_vlocs, base_stack_off);
+                        let entry_stack_off = self.p_block(entry, Some(entry), ra, &args_vlocs)?;
+                        let post_stack_label = self.be.controlpoint_coupler_or_return_start(
+                            entry_stack_off - base_stack_off,
+                        )?;
+                        (post_stack_label, entry_stack_off)
+                    }
                     TraceEnd::Coupler { entry, tgt_ctr } => {
                         let mut ra =
                             RegAlloc::<AB>::new(self.m, entry, &args_vlocs, base_stack_off);
@@ -299,6 +307,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             } => {
                 let src_stack_off = src_ctr.guard_stack_off(*src_gridx);
                 let entry_stack_off = match &self.m.trace_end {
+                    TraceEnd::Call { entry } => {
+                        let ra = RegAlloc::<AB>::new(self.m, entry, args_vlocs, src_stack_off);
+                        self.p_block(entry, Some(entry), ra, args_vlocs)?
+                    }
                     TraceEnd::Coupler { entry, tgt_ctr } => {
                         let mut ra = RegAlloc::<AB>::new(self.m, entry, args_vlocs, src_stack_off);
                         self.be.star_coupler_end(tgt_ctr)?;

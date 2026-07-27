@@ -251,6 +251,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         // further processing of the trace should occur.
         let termendk = self.p_blocks()?;
         match &termendk {
+            TraceEndKind::Call => (),
             TraceEndKind::Return(_) => (),
             TraceEndKind::Term => {
                 assert!(self.promotions_iter.next().is_none());
@@ -292,6 +293,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             } => {
                 let (entry, tys) = self.opt.build()?;
                 match termendk {
+                    TraceEndKind::Call => (
+                        hir::TraceStart::ControlPoint { entry_statepoint },
+                        hir::TraceEnd::Call { entry },
+                        tys,
+                    ),
                     TraceEndKind::Return(exit_statepoint) => (
                         hir::TraceStart::ControlPoint { entry_statepoint },
                         hir::TraceEnd::Return {
@@ -308,6 +314,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 }
             }
             BuildModKind::Loop { entry_statepoint } => match termendk {
+                TraceEndKind::Call => {
+                    let (entry, tys) = self.opt.build()?;
+                    (
+                        hir::TraceStart::ControlPoint { entry_statepoint },
+                        hir::TraceEnd::Call { entry },
+                        tys,
+                    )
+                }
                 TraceEndKind::Return(exit_statepoint) => {
                     let (entry, tys) = self.opt.build()?;
                     (
@@ -337,6 +351,15 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             } => {
                 let (entry, tys) = self.opt.build()?;
                 match termendk {
+                    TraceEndKind::Call => (
+                        hir::TraceStart::Guard {
+                            args_vlocs,
+                            src_ctr,
+                            src_gidx,
+                        },
+                        hir::TraceEnd::Call { entry },
+                        tys,
+                    ),
                     TraceEndKind::Return(exit_statepoint) => (
                         hir::TraceStart::Guard {
                             args_vlocs,
@@ -887,6 +910,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     CallProcessedKind::Ignored => (),
                     CallProcessedKind::Inlined => continue,
                     CallProcessedKind::Outlined => (),
+                    CallProcessedKind::Terminated => return Ok(TraceEndKind::Call),
                 },
                 Inst::Cast { .. } => self.p_cast(pc.clone(), inst)?,
                 Inst::CondBr { .. } => self.p_condbr(pc.clone(), bid, inst)?,
@@ -900,6 +924,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     CallProcessedKind::Ignored => (),
                     CallProcessedKind::Inlined => continue,
                     CallProcessedKind::Outlined => (),
+                    CallProcessedKind::Terminated => return Ok(TraceEndKind::Call),
                 },
                 Inst::InsertValue { .. } => todo!(),
                 Inst::Load { .. } => self.p_load(pc.clone(), inst)?,
@@ -1075,7 +1100,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             callee,
             args,
             statepoint,
-            statepoint_after: _,
+            statepoint_after,
         } = inst
         else {
             panic!()
@@ -1085,7 +1110,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         if inst.is_control_point(self.am) || inst.is_debug_call(self.am) {
             return Ok(CallProcessedKind::Ignored);
         }
-        self.p_static_call(iid, bid, *callee, args, statepoint.as_ref())
+        self.p_static_call(
+            iid,
+            bid,
+            *callee,
+            args,
+            statepoint.as_ref(),
+            statepoint_after.as_ref(),
+        )
     }
 
     fn p_static_call(
@@ -1095,6 +1127,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         callee: FuncIdx,
         args: &[Operand],
         statepoint: Option<&'static Statepoint>,
+        statepoint_after: Option<&'static Statepoint>,
     ) -> Result<CallProcessedKind, CompilationError> {
         let func = self.am.func(callee);
         // Ignore calls the software tracer makes to record blocks.
@@ -1126,8 +1159,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             {
                 let const_iidx = self.promotion_data_to_const(self.am.type_(fty.ret_ty()))?;
                 self.frames.last_mut().unwrap().set_local(iid, const_iidx);
-                self.outline_until(bid)?;
-                return Ok(CallProcessedKind::Outlined);
+                match self.outline_until(bid)? {
+                    OutliningKind::SuccessorFound => return Ok(CallProcessedKind::Outlined),
+                    OutliningKind::DidNotFindSuccessor => {
+                        panic!("Outlining in idempotent function failed")
+                    }
+                }
             }
             for _ in 0..self.am.type_(fty.ret_ty()).bytew() {
                 let _ = self.promotions_iter.next().unwrap();
@@ -1216,10 +1253,26 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
                 self.opt.feed_void(inst)?;
             } else {
-                self.push_inst_and_link_local(iid, inst)?;
+                self.push_inst_and_link_local(iid.clone(), inst)?;
             }
-            self.outline_until(bid)?;
-            Ok(CallProcessedKind::Outlined)
+            match self.outline_until(bid)? {
+                OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
+                OutliningKind::DidNotFindSuccessor => {
+                    let i1_tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
+                    let ciidx = self
+                        .const_to_iidx(i1_tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(1, 0)))?;
+                    self.push_guard(
+                        bid,
+                        self.next_pc(iid),
+                        true,
+                        ciidx,
+                        statepoint_after.unwrap(),
+                        None,
+                    )?;
+                    self.opt.feed_void(hir::Term(Vec::new()).into())?;
+                    Ok(CallProcessedKind::Terminated)
+                }
+            }
         }
     }
 
@@ -1234,7 +1287,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             callop,
             args,
             statepoint,
-            statepoint_after: _,
+            statepoint_after,
         } = inst
         else {
             panic!()
@@ -1258,7 +1311,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             };
             if let Some(fname) = self.j2.dladdr(*vaddr) {
                 let callee = self.am.funcidx(&CString::new(fname).unwrap());
-                return self.p_static_call(iid.clone(), bid, callee, args, Some(statepoint));
+                return self.p_static_call(
+                    iid.clone(),
+                    bid,
+                    callee,
+                    args,
+                    Some(statepoint),
+                    Some(statepoint_after),
+                );
             }
         }
 
@@ -1275,15 +1335,24 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
             self.opt.feed_void(inst.into())?;
         } else {
-            self.push_inst_and_link_local(iid, inst)?;
+            self.push_inst_and_link_local(iid.clone(), inst)?;
         }
-        self.outline_until(bid)?;
-        Ok(CallProcessedKind::Outlined)
+        match self.outline_until(bid)? {
+            OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
+            OutliningKind::DidNotFindSuccessor => {
+                let i1_tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
+                let ciidx =
+                    self.const_to_iidx(i1_tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(1, 0)))?;
+                self.push_guard(bid, self.next_pc(iid), true, ciidx, statepoint_after, None)?;
+                self.opt.feed_void(hir::Term(Vec::new()).into())?;
+                Ok(CallProcessedKind::Terminated)
+            }
+        }
     }
 
     /// Outline until the successor block to `bid` is encountered. Returns `Err` if irregular
     /// control flow is detected.
-    fn outline_until(&mut self, cur_bid: BBlockId) -> Result<(), CompilationError> {
+    fn outline_until(&mut self, cur_bid: BBlockId) -> Result<OutliningKind, CompilationError> {
         // Now we skip over all the blocks in this call.
         let tgt_bid = match self.am.bblock(&cur_bid).insts().last().unwrap() {
             Inst::Br { succ } => {
@@ -1306,10 +1375,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         loop {
             let ta = {
                 let Some(Ok(ta)) = self.ta_iter.peek() else {
-                    return Err(CompilationError::General(
-                "irregular control flow detected (trace ended with outline successor pending)"
-                    .into(),
-            ));
+                    return Ok(OutliningKind::DidNotFindSuccessor);
                 };
                 ta.to_owned()
             };
@@ -1358,7 +1424,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             prev_bid = cnd_bid;
             self.ta_iter.next();
         }
-        Ok(())
+        Ok(OutliningKind::SuccessorFound)
     }
 
     /// Check that `cnd_bid` is a successor to `prev_bid` returning `Err` otherwise.
@@ -2113,6 +2179,11 @@ fn iter_to_array<const N: usize>(iter: &mut dyn Iterator<Item = &u8>) -> [u8; N]
     out
 }
 
+enum OutliningKind {
+    SuccessorFound,
+    DidNotFindSuccessor,
+}
+
 /// What happened when we processed a call (static or indirect)?
 enum CallProcessedKind {
     /// We ignored the call.
@@ -2121,10 +2192,14 @@ enum CallProcessedKind {
     Inlined,
     /// We outlined the call.
     Outlined,
+    /// This process finishes with this call (i.e. this is a Call trace).
+    Terminated,
 }
 
 /// How did the trace end?
 enum TraceEndKind {
+    /// In a call.
+    Call,
     /// It looped or coupled to another trace.
     Term,
     /// It returned to an outer caller.
