@@ -912,6 +912,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_ctpop(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::CtTz(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_cttz(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::DebugStr(..) => {}
                 Inst::DynPtrAdd(x) => {
                     if ra.is_used(iidx) {
@@ -1477,6 +1482,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &CtPop,
+    ) -> Result<(), CompilationError>;
+
+    fn i_cttz(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &CtTz,
     ) -> Result<(), CompilationError>;
 
     fn i_dynptradd(

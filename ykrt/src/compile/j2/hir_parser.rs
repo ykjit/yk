@@ -361,6 +361,12 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let val = self.p_local(val);
                     self.insts.push(CtPop { tyidx, val }.into());
                 }
+                AstInst::CtTz { local, ty, val } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let val = self.p_local(val);
+                    self.insts.push(CtTz { tyidx, val }.into());
+                }
                 AstInst::DynPtrAdd {
                     local,
                     ty,
@@ -1295,6 +1301,11 @@ enum AstInst {
         kind: AstConst,
     },
     CtPop {
+        local: Span,
+        ty: AstTy,
+        val: Span,
+    },
+    CtTz {
         local: Span,
         ty: AstTy,
         val: Span,

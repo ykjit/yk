@@ -823,6 +823,7 @@ pub(super) enum Inst {
     Call,
     Const,
     CtPop,
+    CtTz,
     DebugStr,
     DynPtrAdd,
     FAdd,
@@ -1597,6 +1598,65 @@ impl InstT for CtPop {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!("ctpop %{}", usize::from(self.val))
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
+/// Count the number of trailing zero bits, with the same semantics as `llvm.cttz.`.
+#[derive(Clone, Debug)]
+pub(super) struct CtTz {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+}
+
+impl InstT for CtTz {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            m.ty(self.tyidx).bitw(),
+            b.inst_bitw(m, self.val),
+            "%{iidx:?}: inconsistent bit widths for return type and val"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.val = opt.equiv_iidx(self.val)
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::CtTz(CtTz { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(b, self.val)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.val = iidx_map(self.val);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("cttz %{}", usize::from(self.val))
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
