@@ -142,6 +142,7 @@ impl Module {
                 Const::Global { .. }
                 | Const::Val(_)
                 | Const::Poison(_)
+                | Const::Undef(_)
                 | Const::Unimplemented { .. } => (),
                 Const::ConstExpr(ce) => self.consts[i] = Const::ConstExpr(ce.eval(self)),
             }
@@ -968,7 +969,14 @@ pub(crate) enum Inst {
         val: Option<Operand>,
     },
     #[deku(id = "9")]
-    InsertValue { agg: Operand, elem: Operand },
+    InsertValue {
+        agg: Operand,
+        elem: Operand,
+        #[deku(temp)]
+        num_indices: usize,
+        #[deku(count = "num_indices")]
+        indices: Vec<usize>,
+    },
     /// This opcode adds to the `ptr` operand:
     ///  - a constant offset
     ///  - zero or more dynamic offsets.
@@ -1390,11 +1398,12 @@ impl fmt::Display for DisplayableInst<'_> {
                     vol
                 )
             }
-            Inst::InsertValue { agg, elem } => write!(
+            Inst::InsertValue { agg, elem, indices } => write!(
                 f,
-                "insert_val {}, {}",
+                "insert_val {}, {}, {:?}",
                 agg.display(self.m),
-                elem.display(self.m)
+                elem.display(self.m),
+                indices,
             ),
             Inst::Cast {
                 cast_kind,
@@ -2237,6 +2246,8 @@ pub(crate) enum Const {
     #[deku(id = "3")]
     Poison(TyIdx),
     #[deku(id = "4")]
+    Undef(TyIdx),
+    #[deku(id = "5")]
     Unimplemented {
         tyidx: TyIdx,
         #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
@@ -2261,6 +2272,7 @@ impl Const {
             Const::ConstExpr(e) => e.constval(),
             Const::Global(gidx) => m.global_decl(*gidx).constval(),
             Const::Poison(_) => todo!(),
+            Const::Undef(_) => todo!(),
             Const::Unimplemented { llvm_const_str, .. } => {
                 panic!("unimplemented const: {llvm_const_str}")
             }
@@ -2273,6 +2285,7 @@ impl Const {
             Self::Global(gidx) => m.global_decl(*gidx).tyidx(),
             Self::ConstExpr(ce) => ce.tyidx(),
             Const::Poison(tyidx) => *tyidx,
+            Const::Undef(tyidx) => *tyidx,
             Self::Unimplemented { tyidx, .. } => *tyidx,
         }
     }
@@ -2290,6 +2303,7 @@ impl Display for DisplayableConst<'_> {
             Const::ConstExpr(ce) => write!(f, "{}", ce.display(self.m)),
             Const::Global(gidx) => write!(f, "@{}", self.m.global_decl(*gidx).name()),
             Const::Poison(tyidx) => write!(f, "poison<{}>", self.m.type_(*tyidx).display(self.m)),
+            Const::Undef(tyidx) => write!(f, "undef<{}>", self.m.type_(*tyidx).display(self.m)),
             Const::Unimplemented { llvm_const_str, .. } => {
                 write!(f, "unimplemented <<{llvm_const_str}>>")
             }

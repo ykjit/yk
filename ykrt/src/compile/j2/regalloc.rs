@@ -381,6 +381,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         self.stack_off = stack_off;
     }
 
+    /// Reserve `size` fresh bytes on the stack frame (8-byte aligned).
+    pub(super) fn reserve_stack(&mut self, size: u32) -> u32 {
+        let off = self.stack_off.next_multiple_of(8) + size;
+        self.stack_off = off;
+        off
+    }
+
     /// For guard bodies, ensure that the instructions `iidxs` are marked as used at `term_iidx`.
     pub(super) fn keep_alive_at_term(&mut self, _term_iidx: InstIdx, iidxs: &[InstIdx]) {
         for iidx in iidxs {

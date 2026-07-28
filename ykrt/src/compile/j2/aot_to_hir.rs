@@ -751,7 +751,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 hir::Ty::Func(Box::new(fty))
             }
-            Ty::Struct(_ty) => todo!(),
+            Ty::Struct(_ty) => hir::Ty::Ptr(0),
             Ty::Float(FloatTy::Double) => hir::Ty::Double,
             Ty::Float(FloatTy::Float) => hir::Ty::Float,
             Ty::Unimplemented(_) => todo!(),
@@ -759,12 +759,155 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         self.opt.push_ty(tyidx)
     }
 
+    /// Build the HIR function type for a call. Same as [Self::p_ty] except for a `Ty::Struct`
+    /// return, always the SysV ABI's register-packed case using `RAX`/`RDX`.
+    fn p_call_func_ty<'b>(
+        &mut self,
+        aot_fty: &'b FuncTy,
+    ) -> Result<(hir::TyIdx, Option<&'b StructTy>), CompilationError> {
+        let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
+        let (rtn_tyidx, struct_ty) = match aot_rtn_ty {
+            Ty::Struct(struct_ty) => {
+                let bit_size = struct_ty.bit_size();
+                assert!(
+                    bit_size <= 128,
+                    "got {bit_size} bits, struct with >16 bytes should use a pointer return, not Struct-typed"
+                );
+                let lo_bitw = u32::try_from(bit_size.min(64)).unwrap();
+                (self.opt.push_ty(hir::Ty::Int(lo_bitw))?, Some(struct_ty))
+            }
+            _ => (self.p_ty(aot_rtn_ty)?, None),
+        };
+        let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
+        for arg_ty in aot_fty.arg_tyidxs() {
+            args_tyidxs.push(self.p_ty(self.am.type_(*arg_ty))?);
+        }
+        let fty = hir::FuncTy {
+            rtn_tyidx,
+            args_tyidxs,
+            has_varargs: aot_fty.is_vararg(),
+        };
+        Ok((self.opt.push_ty(hir::Ty::Func(Box::new(fty)))?, struct_ty))
+    }
+
+    /// For a register-packed struct return, spills the eightbyte(s) to a fresh [hir::Alloca]
+    /// and rebinds `iid` to that address. No-op if `struct_ty` is `None`.
+    fn p_call_reg_pair_result(
+        &mut self,
+        iid: InstId,
+        struct_ty: Option<&StructTy>,
+        lo_iidx: hir::InstIdx,
+    ) -> Result<(), CompilationError> {
+        let Some(struct_ty) = struct_ty else {
+            return Ok(());
+        };
+        let bit_size = struct_ty.bit_size();
+        // Feed `CallResultHigh` first -- before `Alloca` below, whose codegen could itself claim
+        // `RDX` -- per its placement invariant.
+        let hi_iidx = if bit_size > 64 {
+            let hi_tyidx = self
+                .opt
+                .push_ty(hir::Ty::Int(u32::try_from(bit_size - 64).unwrap()))?;
+            Some(
+                self.opt
+                    .feed(hir::CallResultHigh { tyidx: hi_tyidx }.into())?,
+            )
+        } else {
+            None
+        };
+
+        let size = u32::try_from(bit_size.div_ceil(8)).unwrap();
+        let ptr = self.opt.feed(hir::Alloca { size }.into())?;
+        self.opt.feed_void(
+            hir::Store {
+                ptr,
+                val: lo_iidx,
+                is_volatile: false,
+            }
+            .into(),
+        )?;
+        if let Some(hi_iidx) = hi_iidx {
+            let hi_ptr = self.opt.feed(
+                hir::PtrAdd {
+                    ptr,
+                    off: 8,
+                    in_bounds: false,
+                    nusw: false,
+                    nuw: false,
+                }
+                .into(),
+            )?;
+            self.opt.feed_void(
+                hir::Store {
+                    ptr: hi_ptr,
+                    val: hi_iidx,
+                    is_volatile: false,
+                }
+                .into(),
+            )?;
+        }
+        self.frames.last_mut().unwrap().set_local(iid, ptr);
+        Ok(())
+    }
+
+    /// Materialise a zero-filled `struct_ty` constant: a fresh [hir::Alloca] plus zero `Store`s.
+    /// Only called for `Const::Poison`/`Const::Undef` structs.
+    fn zero_struct_const(
+        &mut self,
+        struct_ty: &StructTy,
+    ) -> Result<hir::InstIdx, CompilationError> {
+        let size = u32::try_from(struct_ty.bit_size().div_ceil(8)).unwrap();
+        let ptr = self.opt.feed(hir::Alloca { size }.into())?;
+        // Plain stores rather than `hir::MemSet`: `size` is always small here, and `MemSet`'s
+        // x64 codegen has a pre-existing regalloc bug with constant operands.
+        let mut off = 0u32;
+        while off < size {
+            let chunk = std::cmp::min(8, size - off);
+            let bitw = chunk * 8;
+            let tyidx = self.opt.push_ty(hir::Ty::Int(bitw))?;
+            let zero =
+                self.const_to_iidx(tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(bitw, 0)))?;
+            let dst = if off == 0 {
+                ptr
+            } else {
+                self.opt.feed(
+                    hir::PtrAdd {
+                        ptr,
+                        off: i32::try_from(off).unwrap(),
+                        in_bounds: false,
+                        nusw: false,
+                        nuw: false,
+                    }
+                    .into(),
+                )?
+            };
+            self.opt.feed_void(
+                hir::Store {
+                    ptr: dst,
+                    val: zero,
+                    is_volatile: false,
+                }
+                .into(),
+            )?;
+            off += chunk;
+        }
+        Ok(ptr)
+    }
+
     /// Process an [Operand] and return the [hir::InstIdx] it references. Note: this can insert
     /// instructions into [self.opt]!
     fn p_operand(&mut self, op: &Operand) -> Result<hir::InstIdx, CompilationError> {
         match op {
             Operand::Const(cidx) => {
-                let c = self.am.const_(*cidx).constval(self.am);
+                let const_ = self.am.const_(*cidx);
+                if let Const::Poison(tyidx) | Const::Undef(tyidx) = const_ {
+                    // Neither carries bytes so can't be used here.
+                    let Ty::Struct(struct_ty) = self.am.type_(*tyidx) else {
+                        todo!("non-struct poison/undef constant");
+                    };
+                    return self.zero_struct_const(struct_ty);
+                }
+                let c = const_.constval(self.am);
                 let bytes = c.bytes();
                 match self.am.type_(c.tyidx()) {
                     Ty::Integer(x) => {
@@ -915,7 +1058,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::Cast { .. } => self.p_cast(pc.clone(), inst)?,
                 Inst::CondBr { .. } => self.p_condbr(pc.clone(), bid, inst)?,
                 Inst::DebugStr { .. } => self.p_debugstr(pc.clone())?,
-                Inst::ExtractValue { .. } => todo!(),
+                Inst::ExtractValue { .. } => self.p_extractvalue(pc.clone(), inst)?,
                 Inst::FCmp { .. } => self.p_fcmp(pc.clone(), inst)?,
                 Inst::FNeg { .. } => self.p_fneg(pc.clone(), inst)?,
                 Inst::Freeze { .. } => self.p_freeze(pc.clone(), inst)?,
@@ -926,7 +1069,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     CallProcessedKind::Outlined => (),
                     CallProcessedKind::Terminated => return Ok(TraceEndKind::Call),
                 },
-                Inst::InsertValue { .. } => todo!(),
+                Inst::InsertValue { .. } => self.p_insertvalue(pc.clone(), inst)?,
                 Inst::Load { .. } => self.p_load(pc.clone(), inst)?,
                 Inst::LoadArg { .. } => self.p_loadarg(pc.clone(), inst)?,
                 Inst::Phi { .. } => unreachable!(),
@@ -1240,20 +1383,26 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 FuncMemory::ReadWrite => hir::CallEffects::ReadWrite,
             };
 
+            let Ty::Func(aot_fty) = self.am.type_(func.tyidx()) else {
+                panic!()
+            };
+            let (call_func_tyidx, struct_ty) = self.p_call_func_ty(aot_fty)?;
             let inst = hir::Call {
                 tgt: tgt_iidx,
-                func_tyidx: ftyidx,
+                func_tyidx: call_func_tyidx,
                 args: jargs,
                 effects,
             }
             .into();
-            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
+            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(call_func_tyidx)
+            else {
                 panic!()
             };
             if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
                 self.opt.feed_void(inst)?;
             } else {
-                self.push_inst_and_link_local(iid.clone(), inst)?;
+                let lo_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
+                self.p_call_reg_pair_result(iid.clone(), struct_ty, lo_iidx)?;
             }
             match self.outline_until(bid)? {
                 OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
@@ -1322,20 +1471,24 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
         }
 
-        let ftyidx = self.p_ty(self.am.type_(*ftyidx))?;
+        let Ty::Func(aot_fty) = self.am.type_(*ftyidx) else {
+            panic!()
+        };
+        let (call_func_tyidx, struct_ty) = self.p_call_func_ty(aot_fty)?;
         let inst = hir::Call {
             tgt: tgt_iidx,
-            func_tyidx: ftyidx,
+            func_tyidx: call_func_tyidx,
             args: jargs,
             effects: hir::CallEffects::ReadWrite,
         };
-        let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
+        let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(call_func_tyidx) else {
             panic!()
         };
         if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
             self.opt.feed_void(inst.into())?;
         } else {
-            self.push_inst_and_link_local(iid.clone(), inst)?;
+            let lo_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
+            self.p_call_reg_pair_result(iid.clone(), struct_ty, lo_iidx)?;
         }
         match self.outline_until(bid)? {
             OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
@@ -1783,6 +1936,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             return Ok(());
         }
 
+        if let Ty::Struct(_) = self.am.type_(*tyidx) {
+            let ptr = self.p_operand(ptr)?;
+            self.frames.last_mut().unwrap().set_local(iid, ptr);
+            return Ok(());
+        }
+
         let tyidx = self.p_ty(self.am.type_(*tyidx))?;
         let ptr = self.p_operand(ptr)?;
         self.push_inst_and_link_local(
@@ -1791,6 +1950,50 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 tyidx,
                 ptr,
                 is_volatile: *volatile,
+            },
+        )
+        .map(|_| ())
+    }
+
+    /// Read a field out of a struct-by-value. Since a struct is represented by the address of
+    /// its backing memory (see `p_ty`), this is a `ptr_add` to the field's offset then `load`.
+    fn p_extractvalue(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::ExtractValue { tyidx, op, indices } = inst else {
+            panic!()
+        };
+
+        let Ty::Struct(struct_ty) = op.type_(self.am) else {
+            panic!() // IR malformed: extractvalue's operand must be a struct.
+        };
+        if indices.len() != 1 {
+            todo!("extractvalue with nested indices");
+        }
+        let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
+
+        assert_eq!(field_bit_off % 8, 0, "field not byte-aligned");
+        let byte_off = field_bit_off / 8;
+
+        let mut ptr = self.p_operand(op)?;
+        if byte_off != 0 {
+            ptr = self.opt.feed(
+                hir::PtrAdd {
+                    ptr,
+                    off: i32::try_from(byte_off).unwrap(),
+                    in_bounds: false,
+                    nusw: false,
+                    nuw: false,
+                }
+                .into(),
+            )?;
+        }
+
+        let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
+        self.push_inst_and_link_local(
+            iid,
+            hir::Load {
+                tyidx: res_tyidx,
+                ptr,
+                is_volatile: false,
             },
         )
         .map(|_| ())
@@ -1991,6 +2194,51 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 .into(),
             )
             .map(|_| ())
+    }
+
+    /// Write a field into a struct-by-value: a `store` at the field's offset (see `p_ty`); the
+    /// result aliases the same base address.
+    fn p_insertvalue(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::InsertValue { agg, elem, indices } = inst else {
+            panic!()
+        };
+        let Ty::Struct(struct_ty) = agg.type_(self.am) else {
+            panic!() // IR malformed: insertvalue's aggregate operand must be a struct.
+        };
+        // Nested aggregates (struct-in-struct) need a multi-level offset walk; unimplemented.
+        if indices.len() != 1 {
+            todo!("insertvalue with nested indices");
+        }
+        let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
+        assert_eq!(field_bit_off % 8, 0, "field not byte-aligned");
+        let byte_off = field_bit_off / 8;
+
+        let base_ptr = self.p_operand(agg)?;
+        let val = self.p_operand(elem)?;
+        let store_ptr = if byte_off != 0 {
+            self.opt.feed(
+                hir::PtrAdd {
+                    ptr: base_ptr,
+                    off: i32::try_from(byte_off).unwrap(),
+                    in_bounds: false,
+                    nusw: false,
+                    nuw: false,
+                }
+                .into(),
+            )?
+        } else {
+            base_ptr
+        };
+        self.opt.feed_void(
+            hir::Store {
+                ptr: store_ptr,
+                val,
+                is_volatile: false,
+            }
+            .into(),
+        )?;
+        self.frames.last_mut().unwrap().set_local(iid, base_ptr);
+        Ok(())
     }
 
     fn p_switch(

@@ -53,7 +53,6 @@ use crate::{
         },
     },
     mt::TraceId,
-    varlocs,
 };
 use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
@@ -892,35 +891,39 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         reg_fill: RegFill,
     ) -> VarLocs<Self::Reg> {
         use yksmp::Location as L;
-        assert_eq!(smp_locs.len(), 1, "Multi-locations not yet supported");
-        match &smp_locs[0] {
-            L::Register(dwarf_reg, _sz, extras) => {
-                let mut vlocs = VarLocs::new();
-                vlocs.push(VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill));
-                for x in extras {
-                    if *x >= 0 {
-                        vlocs.push(VarLoc::Reg(
-                            Reg::from_dwarf_reg(x.cast_unsigned()),
-                            reg_fill,
-                        ));
-                    } else {
-                        vlocs.push(VarLoc::Stack(u32::from(x.unsigned_abs())));
+        // A struct-by-value spanning >1 register/stack slot can surface as multiple separate
+        // top-level `Location` entries for one value, not just one with `extras`. Concatenate
+        // every entry's pieces, in order, into one combined `VarLocs`.
+        let mut vlocs = VarLocs::new();
+        for loc in smp_locs.iter() {
+            match loc {
+                L::Register(dwarf_reg, _sz, extras) => {
+                    vlocs.push(VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill));
+                    for x in extras {
+                        if *x >= 0 {
+                            vlocs.push(VarLoc::Reg(
+                                Reg::from_dwarf_reg(x.cast_unsigned()),
+                                reg_fill,
+                            ));
+                        } else {
+                            vlocs.push(VarLoc::Stack(u32::from(x.unsigned_abs())));
+                        }
                     }
                 }
-                vlocs
-            }
-            L::Direct(6, off, _sz) => {
-                assert!(*off <= 0);
-                varlocs![VarLoc::StackOff(off.unsigned_abs())]
-            }
-            L::Indirect(6, off, _sz) => {
-                assert!(*off <= 0);
-                varlocs![VarLoc::Stack(off.unsigned_abs())]
-            }
-            x => {
-                todo!("{:?}", x);
+                L::Direct(6, off, _sz) => {
+                    assert!(*off <= 0);
+                    vlocs.push(VarLoc::StackOff(off.unsigned_abs()));
+                }
+                L::Indirect(6, off, _sz) => {
+                    assert!(*off <= 0);
+                    vlocs.push(VarLoc::Stack(off.unsigned_abs()));
+                }
+                x => {
+                    todo!("{:?}", x);
+                }
             }
         }
+        vlocs
     }
 
     fn tmp_reg_from_vlocs(vlocs: &[VarLocs<Self::Reg>]) -> Self::Reg {
@@ -1766,6 +1769,27 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_alloca(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        size: u32,
+    ) -> Result<(), CompilationError> {
+        let [outr] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Output {
+                out_fill: RegCnstrFill::Zeroed,
+                regs: &NORMAL_GP_REGS,
+                can_be_same_as_input: false,
+            }],
+        )?;
+        let off = ra.reserve_stack(size);
+        self.move_stackoff(outr, off)?;
+        Ok(())
+    }
+
     fn i_add(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -2320,6 +2344,26 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 u32::try_from(fp_args_off).unwrap(),
             ));
         }
+        Ok(())
+    }
+
+    fn i_call_result_high(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+    ) -> Result<(), CompilationError> {
+        // No code to emit -- the preceding `Call` already ran; `RDX` holds the value, we just
+        // need the register allocator to know it lives there now.
+        let [_] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Output {
+                out_fill: RegCnstrFill::Undefined,
+                regs: &[Reg::RDX],
+                can_be_same_as_input: false,
+            }],
+        )?;
         Ok(())
     }
 

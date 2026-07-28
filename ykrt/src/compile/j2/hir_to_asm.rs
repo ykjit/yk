@@ -887,6 +887,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_abs(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::Alloca(Alloca { size }) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_alloca(&mut ra, b, iidx, *size)?;
+                    }
+                }
                 Inst::Add(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_add(&mut ra, b, iidx, x)?;
@@ -916,6 +921,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     ra.blackbox(iidx, *val);
                 }
                 Inst::Call(x) => self.be.i_call(&mut ra, b, iidx, x)?,
+                Inst::CallResultHigh(_) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_call_result_high(&mut ra, b, iidx)?;
+                    }
+                }
                 Inst::Const(_) => {
                     ra.alloc_const(&mut self.be, iidx)?;
                 }
@@ -1448,6 +1458,14 @@ pub(super) trait HirToAsmBackend {
         inst: &Abs,
     ) -> Result<(), CompilationError>;
 
+    fn i_alloca(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        size: u32,
+    ) -> Result<(), CompilationError>;
+
     fn i_add(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -1486,6 +1504,13 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &Call,
+    ) -> Result<(), CompilationError>;
+
+    fn i_call_result_high(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
     ) -> Result<(), CompilationError>;
 
     fn i_ctpop(

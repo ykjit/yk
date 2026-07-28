@@ -825,6 +825,7 @@ pub(super) trait InstT: std::fmt::Debug {
 pub(super) enum Inst {
     Abs,
     Add,
+    Alloca,
     And,
     Arg,
     AShr,
@@ -832,6 +833,7 @@ pub(super) enum Inst {
     #[cfg(test)]
     BlackBox,
     Call,
+    CallResultHigh,
     Const,
     CtPop,
     CtTz,
@@ -951,6 +953,48 @@ impl InstT for Abs {
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
         self.tyidx
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct Alloca {
+    /// Size in bytes of the reservation.
+    pub size: u32,
+}
+
+impl InstT for Alloca {
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        // Never CSE: each `Alloca` needs its own distinct memory, even if two instances happen
+        // to request the same size.
+        false
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::none(b)
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut _iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("alloca {}", self.size)
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_ptr0()
     }
 }
 
@@ -1444,6 +1488,52 @@ impl InstT for Call {
 
     fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
         m.func_ty(self.func_tyidx).rtn_tyidx
+    }
+}
+
+/// The second (`RDX`) half of a struct-by-value call return that the SysV ABI packs across
+/// `RAX`:`RDX` ([Call] only models the `RAX` half). Must be the instruction immediately
+/// following its [Call], with nothing in between, so codegen captures `RDX` before anything
+/// else can clobber it -- not enforced generically, just by its sole producer in
+/// `aot_to_hir.rs`.
+#[derive(Clone, Debug)]
+pub(super) struct CallResultHigh {
+    pub tyidx: TyIdx,
+}
+
+impl InstT for CallResultHigh {
+    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::none(b)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut _iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        "call_result_high".to_string()
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
