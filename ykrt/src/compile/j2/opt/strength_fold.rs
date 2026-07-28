@@ -32,6 +32,7 @@ impl PassT for StrengthFold {
             Inst::And(x) => opt_and(opt, x),
             Inst::BitCast(x) => opt_bitcast(opt, x),
             Inst::CtPop(x) => opt_ctpop(opt, x),
+            Inst::CtTz(x) => opt_cttz(opt, x),
             Inst::DynPtrAdd(x) => opt_dynptradd(opt, x),
             Inst::FAdd(x) => opt_fadd(opt, x),
             Inst::FDiv(x) => opt_fdiv(opt, x),
@@ -283,6 +284,22 @@ fn opt_ctpop(opt: &mut PassOpt, mut inst: CtPop) -> OptOutcome {
         return OptOutcome::Rewritten(Inst::Const(Const {
             tyidx,
             kind: ConstKind::Int(ArbBitInt::from_u64(c.bitw(), u64::from(c.count_ones()))),
+        }));
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_cttz(opt: &mut PassOpt, mut inst: CtTz) -> OptOutcome {
+    inst.canonicalise(opt);
+    let CtTz { tyidx, val } = inst;
+    if let Some(ConstKind::Int(c)) = opt.as_constkind(val) {
+        // LLVM's ctpop has a polymorphic return type: since the maximum number of bits we can
+        // represent in LLVM IR is 2^23, and `count_ones` returns a `u32`, using
+        // `ArbBitInt::from_u64` is always safe.
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(c.bitw(), u64::from(c.trailing_zeros()))),
         }));
     }
 
@@ -1368,6 +1385,41 @@ mod test {
           %0: i64 = 4660
           %1: i64 = 5
           blackbox %1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_cttz() {
+        // Constant fold the number of set bits
+        test_sf(
+            "
+          %0: i64 = 0
+          %1: i64 = cttz %0
+          blackbox %1
+          %3: i64 = 1
+          %4: i64 = cttz %3
+          blackbox %4
+          %6: i64 = 2
+          %7: i64 = cttz %6
+          blackbox %7
+          %9: i64 = 0xFFFFFFFFFFFFFFFF
+          %10: i64 = cttz %9
+          blackbox %10
+        ",
+            "
+          %0: i64 = 0
+          %1: i64 = 64
+          blackbox %1
+          %3: i64 = 1
+          %4: i64 = 0
+          blackbox %4
+          %6: i64 = 2
+          %7: i64 = 1
+          blackbox %7
+          %9: i64 = 18446744073709551615
+          %10: i64 = 0
+          blackbox %10
         ",
         );
     }
