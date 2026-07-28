@@ -93,6 +93,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         };
 
         match trace_end {
+            TraceEnd::Call { .. } => format!("{trace_name}_call"),
             TraceEnd::Loop { .. } => format!("{trace_name}_loop"),
             TraceEnd::Coupler { .. } => {
                 let tgt = tgt_ctr.unwrap();

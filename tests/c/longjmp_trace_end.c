@@ -7,17 +7,19 @@
 //     yk-tracing: start-tracing
 //     enter
 //     in loop: i=4
-//     yk-warning: abort-tracing
+//     yk-tracing: stop-tracing
 //     jumped
 //     in loop: i=3
-//     yk-tracing: start-tracing
+//     yk-execution: enter-jit-code {"trid": "0"}
+//     yk-execution: deoptimise {"trid": "0", "gidx": "2"}
 //     jumped
 //     in loop: i=2
-//     yk-tracing: stop-tracing
-//     yk-warning: trace-compilation-aborted: irregular control flow detected (unexpected successor)
+//     yk-execution: enter-jit-code {"trid": "0"}
+//     yk-execution: deoptimise {"trid": "0", "gidx": "2"}
 //     jumped
 //     in loop: i=1
-//     yk-tracing: start-tracing
+//     yk-execution: enter-jit-code {"trid": "0"}
+//     yk-execution: deoptimise {"trid": "0", "gidx": "2"}
 //     jumped
 //     exit
 
