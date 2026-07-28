@@ -4,7 +4,7 @@
 //! right method in this module to call.
 
 use crate::mt::MTThread;
-use std::ffi::{c_int, c_longlong, c_uint, c_void};
+use std::ffi::{c_int, c_longlong, c_uint, c_ushort, c_void};
 
 /// Promote a `c_int` during trace recording.
 #[unsafe(no_mangle)]
@@ -14,6 +14,19 @@ pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
         MTThread::with_borrow_mut(|mtt| {
             // We ignore the return value as we can't really cancel tracing from this function.
             mtt.promote_i32(val);
+        });
+    }
+    val
+}
+
+/// Promote a `c_uint` during trace recording.
+#[unsafe(no_mangle)]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+pub extern "C" fn __yk_promote_c_unsigned_short(val: c_ushort) -> c_ushort {
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_u16(val);
         });
     }
     val
@@ -88,6 +101,18 @@ pub extern "C" fn __yk_idempotent_promote_i32(val: i32) -> i32 {
         MTThread::with_borrow_mut(|mtt| {
             // We ignore the return value as we can't really cancel tracing from this function.
             mtt.promote_i32(val);
+        });
+    }
+    val
+}
+
+/// Records a 16-bit return value of an idempotent function during trace recording.
+#[unsafe(no_mangle)]
+pub extern "C" fn __yk_idempotent_promote_i16(val: i16) -> i16 {
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_i16(val);
         });
     }
     val

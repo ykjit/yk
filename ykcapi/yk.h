@@ -99,6 +99,7 @@ void yk_location_drop(YkLocation);
 // type of the value passed.
 #define yk_promote(X) _Generic((X), \
                                int: __yk_promote_c_int, \
+                               unsigned short: __yk_promote_c_unsigned_short, \
                                unsigned int: __yk_promote_c_unsigned_int, \
                                long long: __yk_promote_c_long_long, \
                                uintptr_t: __yk_promote_usize, \
@@ -106,6 +107,7 @@ void yk_location_drop(YkLocation);
                                void *: __yk_promote_ptr \
                               )(X)
 int __yk_promote_c_int(int);
+unsigned short __yk_promote_c_unsigned_short(unsigned short);
 unsigned int __yk_promote_c_unsigned_int(unsigned int);
 long long __yk_promote_c_long_long(long long);
 // Rust defines `usize` to be layout compatible with `uintptr_t`.
