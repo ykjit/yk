@@ -965,14 +965,19 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_fneg(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::FSub(x) => {
+                Inst::FPClass(x) => {
                     if ra.is_used(iidx) {
-                        self.be.i_fsub(&mut ra, b, iidx, x)?;
+                        self.be.i_fpclass(&mut ra, b, iidx, x)?;
                     }
                 }
                 Inst::FPExt(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fpext(&mut ra, b, iidx, x)?;
+                    }
+                }
+                Inst::FSub(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fsub(&mut ra, b, iidx, x)?;
                     }
                 }
                 Inst::FPToSI(x) => {
@@ -1566,6 +1571,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &FSub,
+    ) -> Result<(), CompilationError>;
+
+    fn i_fpclass(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FPClass,
     ) -> Result<(), CompilationError>;
 
     fn i_fpext(

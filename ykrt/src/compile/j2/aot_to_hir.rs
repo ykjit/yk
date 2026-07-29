@@ -1506,6 +1506,26 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
+            "is" if parts[2] == "fpclass" => {
+                let [val, test]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let test = if let hir::Inst::Const(hir::Const {
+                    kind: hir::ConstKind::Int(x),
+                    ..
+                }) = self.opt.inst(test)
+                {
+                    assert_eq!(x.bitw(), 32);
+                    x.to_zero_ext_u32().unwrap()
+                } else {
+                    panic!()
+                };
+                let fty = self.opt.func_ty(ftyidx);
+                let hinst = hir::FPClass {
+                    tyidx: fty.rtn_tyidx,
+                    val,
+                    test,
+                };
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
+            }
             "lifetime" => Ok(()),
             "memcpy" => {
                 let [dst, src, len, volatile]: [hir::InstIdx; 4] =
