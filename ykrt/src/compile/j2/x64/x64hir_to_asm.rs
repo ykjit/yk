@@ -2817,7 +2817,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             match b.inst_ty(self.m, *val) {
                 Ty::Double => {
                     self.asm
-                        .push_inst(IcedInst::with1(Code::Seta_rm8, tmpr.to_reg8()));
+                        .push_inst(IcedInst::with1(Code::Seta_rm8, tgtr.to_reg8()));
                     self.asm.push_inst(IcedInst::with2(
                         Code::Cmp_rm64_r64,
                         tmpr.to_reg64(),
@@ -6773,7 +6773,7 @@ mod test {
               sub r.64.tmp, r.64.out
               mov r.64.out, 0x7FEFFFFFFFFFFFFE
               cmp r.64.tmp, r.64.out
-              seta r.8.tmp
+              seta r.8.out
               ; blackbox %1
               ; term [%0]
             "],
