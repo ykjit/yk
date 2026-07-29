@@ -650,6 +650,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             assert_eq!(gextra.deopt_vars.len(), gblock.term_vars().len());
             let mut deopt_term_iter = gextra.deopt_vars.iter().zip(gblock.term_vars().iter());
             for frame in gextra.deopt_frames.iter() {
+                let frame_deopt_vars_off = deopt_vars.len();
                 #[cfg(not(test))]
                 let smap_lives_iter = aot_smaps
                     .get(frame.pc_statepoint.smapidx)
@@ -697,19 +698,43 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         }
                     };
                     #[cfg(not(test))]
-                    let mut tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
+                    let tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
                     #[cfg(test)]
-                    let mut tovlocs = smap_loc.clone();
-                    if fromvlocs == tovlocs {
-                        // Optimise away situations where we would just move a
-                        // value from VLoc X to VLoc X.
-                        tovlocs = VarLocs::new();
-                    }
+                    let tovlocs = smap_loc.clone();
                     deopt_vars.push(DeoptVar {
                         bitw: gblock.inst_bitw(self.m, *term_iidx),
                         fromvlocs,
                         tovlocs,
                     });
+                }
+
+                // We can end up in situations where multiple values map to the same location, so
+                // we want to weed out smaller values, as those can accidentally overwrite wider
+                // values at the same place.
+                let frame_deopt_vars = &mut deopt_vars[frame_deopt_vars_off..];
+                for i in 0..frame_deopt_vars.len() {
+                    let (before, from_i) = frame_deopt_vars.split_at_mut(i);
+                    let (deopt_var, after) = from_i.split_first_mut().unwrap();
+                    deopt_var.tovlocs.retain(|vloc| {
+                        !before.iter().chain(after.iter()).any(|other| {
+                            other.bitw > deopt_var.bitw
+                                && other.tovlocs.iter().any(|other_vloc| {
+                                    match (&*vloc, other_vloc) {
+                                        (VarLoc::Stack(x), VarLoc::Stack(y)) => x == y,
+                                        (VarLoc::Reg(x, _), VarLoc::Reg(y, _)) => x == y,
+                                        _ => false,
+                                    }
+                                })
+                        })
+                    });
+                }
+                // Weed out no-opts.
+                for deopt_var in frame_deopt_vars {
+                    if deopt_var.fromvlocs == deopt_var.tovlocs {
+                        // Optimise away situations where we would just move a value from VLoc X
+                        // to VLoc X.
+                        deopt_var.tovlocs = VarLocs::new();
+                    }
                 }
                 deopt_frames.push(DeoptFrame {
                     pc: frame.pc.clone(),
@@ -2674,6 +2699,29 @@ mod test {
             fromvlocs=[Stack(8)]
             tovlocs=[Stack(24)]
           ; gidx 0
+            "#],
+        );
+
+        // Test that when multiple values deopt to the same place, the wider value is the one used.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i64 = arg [reg]
+          guard true, %0, [%1, %2], [[[reg("R0", undefined)], [reg("R0", undefined)]]]
+          term [%0, %1, %2]
+        "#,
+            |s| {
+                s == "guard_completed:"
+                    || s.trim_start().starts_with("fromvlocs=")
+                    || s.trim_start().starts_with("tovlocs=")
+            },
+            &[r#"
+          guard_completed:
+            fromvlocs=[Stack(8)]
+            tovlocs=[]
+            fromvlocs=[Stack(16)]
+            tovlocs=[Reg(R0, Undefined)]
         "#],
         );
     }
