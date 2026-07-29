@@ -843,8 +843,9 @@ pub(super) enum Inst {
     Floor,
     FMul,
     FNeg,
-    FSub,
+    FPClass,
     FPExt,
+    FSub,
     FPToSI,
     Freeze,
     Guard,
@@ -2241,6 +2242,75 @@ impl InstT for FNeg {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!("fneg %{}", usize::from(self.val),)
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
+/// Determine if a floating point value fits within one or more classes, with the same semantics as
+/// `llvm.is.fpclass.`.
+#[derive(Clone, Debug)]
+pub(super) struct FPClass {
+    pub tyidx: TyIdx,
+    pub val: InstIdx,
+    /// This bit pattern follows the same format as llvm.is.fpclass's argument of the same name.
+    pub test: u32,
+}
+
+impl InstT for FPClass {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            self.tyidx,
+            m.tyidx_int1(),
+            "%{iidx:?}: fpclass references a non-i1 for its condition"
+        );
+
+        assert_matches!(
+            m.ty(b.inst(self.val).tyidx(m)),
+            Ty::Float | Ty::Double,
+            "%{iidx:?}: float / double required"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::FPClass(FPClass { tyidx, val, test }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+            && self.test == *test
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(b, self.val)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.val = iidx_map(self.val);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("fpclass %{}, 0b{:b}", usize::from(self.val), self.test)
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {

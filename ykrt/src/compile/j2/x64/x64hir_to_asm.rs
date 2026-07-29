@@ -2779,6 +2779,80 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         )
     }
 
+    fn i_fpclass(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        FPClass {
+            tyidx: _,
+            val,
+            test,
+        }: &FPClass,
+    ) -> Result<(), CompilationError> {
+        let [srcr, tmpr, tgtr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Temp {
+                    regs: &NORMAL_GP_REGS,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: false,
+                },
+            ],
+        )?;
+
+        // FIXME: For now I'm only tackling the specific case I see, rather than forcing myself to
+        // think about the general case.
+        if *test == 0b1111100111 {
+            match b.inst_ty(self.m, *val) {
+                Ty::Double => {
+                    self.asm
+                        .push_inst(IcedInst::with1(Code::Seta_rm8, tmpr.to_reg8()));
+                    self.asm.push_inst(IcedInst::with2(
+                        Code::Cmp_rm64_r64,
+                        tmpr.to_reg64(),
+                        tgtr.to_reg64(),
+                    ));
+                    self.asm.push_inst(IcedInst::with2(
+                        Code::Mov_r64_imm64,
+                        tgtr.to_reg64(),
+                        0x7feffffffffffffe_u64,
+                    ));
+                    self.asm.push_inst(IcedInst::with2(
+                        Code::Sub_rm64_r64,
+                        tmpr.to_reg64(),
+                        tgtr.to_reg64(),
+                    ));
+                    self.asm.push_inst(IcedInst::with2(
+                        Code::Mov_r64_imm64,
+                        tgtr.to_reg64(),
+                        0x8000000000000001_u64,
+                    ));
+                    self.asm.push_inst(IcedInst::with2(
+                        Code::Movq_rm64_xmm,
+                        tmpr.to_reg64(),
+                        srcr.to_xmm(),
+                    ));
+                }
+                Ty::Float => todo!(),
+                _ => unreachable!(),
+            }
+        } else {
+            todo!("0b{test:b}");
+        }
+        Ok(())
+    }
+
     fn i_fpext(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -6678,6 +6752,30 @@ mod test {
               ; %2: double = fsub %0, %1
               subsd fp.128.x, fp.128.y
               ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_fpclass() {
+        codegen_and_test(
+            r#"
+              %0: double  = arg [reg ("xmm0", undefined)]
+              %1: i1 = fpclass %0, 999
+              blackbox %1
+              term [%0]
+            "#,
+            &["
+              ...
+              ; %1: i1 = fpclass %0, 0b1111100111
+              movq r.64.tmp, xmm0
+              mov r.64.out, 0x8000000000000001
+              sub r.64.tmp, r.64.out
+              mov r.64.out, 0x7FEFFFFFFFFFFFFE
+              cmp r.64.tmp, r.64.out
+              seta r.8.tmp
+              ; blackbox %1
+              ; term [%0]
             "],
         );
     }

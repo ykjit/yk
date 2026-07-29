@@ -465,6 +465,22 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let rhs = self.p_local(rhs);
                     self.insts.push(FSub { tyidx, lhs, rhs }.into());
                 }
+                AstInst::FPClass {
+                    local,
+                    ty,
+                    val,
+                    test,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let val = self.p_local(val);
+                    let test = self
+                        .lexer
+                        .span_str(test)
+                        .parse::<u32>()
+                        .unwrap_or_else(|e| self.err_span(test, &e.to_string()));
+                    self.insts.push(FPClass { tyidx, val, test }.into());
+                }
                 AstInst::FPExt { local, ty, val } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -1357,6 +1373,12 @@ enum AstInst {
         ty: AstTy,
         lhs: Span,
         rhs: Span,
+    },
+    FPClass {
+        local: Span,
+        ty: AstTy,
+        val: Span,
+        test: Span,
     },
     FPExt {
         local: Span,
