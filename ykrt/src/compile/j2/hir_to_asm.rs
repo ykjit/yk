@@ -916,6 +916,16 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     ra.blackbox(iidx, *val);
                 }
                 Inst::Call(x) => self.be.i_call(&mut ra, b, iidx, x)?,
+                Inst::CallStructReturnHigh(_) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_call_struct_return_high(&mut ra, b, iidx)?;
+                    }
+                }
+                Inst::CallStructReturnLow(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_call_struct_return_low(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::Const(_) => {
                     ra.alloc_const(&mut self.be, iidx)?;
                 }
@@ -1491,6 +1501,21 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &Call,
+    ) -> Result<(), CompilationError>;
+
+    fn i_call_struct_return_high(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+    ) -> Result<(), CompilationError>;
+
+    fn i_call_struct_return_low(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &CallStructReturnLow,
     ) -> Result<(), CompilationError>;
 
     fn i_ctpop(
