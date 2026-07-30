@@ -759,6 +759,69 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         self.opt.push_ty(tyidx)
     }
 
+    /// Build the HIR function type for a call. Same as [Self::p_ty] except for a `Ty::Struct`
+    /// return, always the SysV ABI's register-packed case using `RAX`/`RDX`.
+    fn p_call_func_ty<'b>(
+        &mut self,
+        aot_fty: &'b FuncTy,
+    ) -> Result<(hir::TyIdx, Option<&'b StructTy>), CompilationError> {
+        let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
+        let (rtn_tyidx, struct_ty) = match aot_rtn_ty {
+            Ty::Struct(struct_ty) => {
+                let bit_size = struct_ty.bit_size();
+                assert!(
+                    bit_size <= 128,
+                    "got {bit_size} bits, struct with >16 bytes should use a pointer return, not Struct-typed"
+                );
+                let lo_bitw = u32::try_from(bit_size.min(64)).unwrap();
+                (self.opt.push_ty(hir::Ty::Int(lo_bitw))?, Some(struct_ty))
+            }
+            _ => (self.p_ty(aot_rtn_ty)?, None),
+        };
+        let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
+        for arg_ty in aot_fty.arg_tyidxs() {
+            args_tyidxs.push(self.p_ty(self.am.type_(*arg_ty))?);
+        }
+        let fty = hir::FuncTy {
+            rtn_tyidx,
+            args_tyidxs,
+            has_varargs: aot_fty.is_vararg(),
+        };
+        Ok((self.opt.push_ty(hir::Ty::Func(Box::new(fty)))?, struct_ty))
+    }
+
+    /// For a register-packed struct return, feeds the low/high eightbyte(s) and rebinds `iid` to
+    /// [hir::CallStructReturnLow] -- no memory touched. No-op if `struct_ty` is `None`.
+    fn p_call_struct_return(
+        &mut self,
+        iid: InstId,
+        struct_ty: Option<&StructTy>,
+        lo_iidx: hir::InstIdx,
+    ) -> Result<(), CompilationError> {
+        let Some(struct_ty) = struct_ty else {
+            return Ok(());
+        };
+        let bit_size = struct_ty.bit_size();
+        let lo_tyidx = self
+            .opt
+            .push_ty(hir::Ty::Int(u32::try_from(bit_size.min(64)).unwrap()))?;
+        self.push_inst_and_link_local(
+            iid,
+            hir::CallStructReturnLow {
+                call: lo_iidx,
+                tyidx: lo_tyidx,
+            },
+        )?;
+        if bit_size > 64 {
+            let hi_tyidx = self
+                .opt
+                .push_ty(hir::Ty::Int(u32::try_from(bit_size - 64).unwrap()))?;
+            self.opt
+                .feed(hir::CallStructReturnHigh { tyidx: hi_tyidx }.into())?;
+        }
+        Ok(())
+    }
+
     /// Process an [Operand] and return the [hir::InstIdx] it references. Note: this can insert
     /// instructions into [self.opt]!
     fn p_operand(&mut self, op: &Operand) -> Result<hir::InstIdx, CompilationError> {
@@ -915,7 +978,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::Cast { .. } => self.p_cast(pc.clone(), inst)?,
                 Inst::CondBr { .. } => self.p_condbr(pc.clone(), bid, inst)?,
                 Inst::DebugStr { .. } => self.p_debugstr(pc.clone())?,
-                Inst::ExtractValue { .. } => todo!(),
+                Inst::ExtractValue { .. } => self.p_extractvalue(pc.clone(), inst)?,
                 Inst::FCmp { .. } => self.p_fcmp(pc.clone(), inst)?,
                 Inst::FNeg { .. } => self.p_fneg(pc.clone(), inst)?,
                 Inst::Freeze { .. } => self.p_freeze(pc.clone(), inst)?,
@@ -1209,10 +1272,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             //      (which could be zero, or many, and may include recursive calls) until that
             //      function returns.
 
-            let ftyidx = self.p_ty(self.am.type_(func.tyidx()))?;
-
             // Handle LLVM intrinsics.
             if func.name().starts_with("llvm.") {
+                let ftyidx = self.p_ty(self.am.type_(func.tyidx()))?;
                 self.p_llvm_intrinsic(iid, ftyidx, func.name(), jargs)?;
                 return Ok(CallProcessedKind::Outlined);
             }
@@ -1240,20 +1302,26 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 FuncMemory::ReadWrite => hir::CallEffects::ReadWrite,
             };
 
+            let Ty::Func(aot_fty) = self.am.type_(func.tyidx()) else {
+                panic!()
+            };
+            let (call_func_tyidx, struct_ty) = self.p_call_func_ty(aot_fty)?;
             let inst = hir::Call {
                 tgt: tgt_iidx,
-                func_tyidx: ftyidx,
+                func_tyidx: call_func_tyidx,
                 args: jargs,
                 effects,
             }
             .into();
-            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
+            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(call_func_tyidx)
+            else {
                 panic!()
             };
             if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
                 self.opt.feed_void(inst)?;
             } else {
-                self.push_inst_and_link_local(iid.clone(), inst)?;
+                let lo_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
+                self.p_call_struct_return(iid.clone(), struct_ty, lo_iidx)?;
             }
             match self.outline_until(bid)? {
                 OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
@@ -1803,6 +1871,13 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             return Ok(());
         }
 
+        // Case for memmory packed struct. This happens whith inlined functions that return a struct.
+        if let Ty::Struct(_) = self.am.type_(*tyidx) {
+            let ptr = self.p_operand(ptr)?;
+            self.frames.last_mut().unwrap().set_local(iid, ptr);
+            return Ok(());
+        }
+
         let tyidx = self.p_ty(self.am.type_(*tyidx))?;
         let ptr = self.p_operand(ptr)?;
         self.push_inst_and_link_local(
@@ -1811,6 +1886,121 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 tyidx,
                 ptr,
                 is_volatile: *volatile,
+            },
+        )
+        .map(|_| ())
+    }
+
+    /// Read a struct field and dispatches to whichever representation the struct value is
+    /// actually in. Either in memory, or in registers packed.
+    fn p_extractvalue(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::ExtractValue { tyidx, op, indices } = inst else {
+            panic!()
+        };
+
+        let Ty::Struct(struct_ty) = op.type_(self.am) else {
+            panic!() // IR malformed: extractvalue's operand must be a struct.
+        };
+
+        if let Operand::Local(aot_iid) = op
+            && indices.len() == 1
+        {
+            let lo_iidx = self.frames.last().unwrap().get_local(&*self.opt, aot_iid);
+            match self.opt.inst(lo_iidx) {
+                hir::Inst::CallStructReturnLow(_) => {
+                    return self.p_extractvalue_register_packed(
+                        iid, *tyidx, struct_ty, indices[0], lo_iidx,
+                    );
+                }
+                _ => {}
+            }
+        }
+        self.p_extractvalue_memory_backed(iid, *tyidx, op, struct_ty, indices)
+    }
+
+    fn p_extractvalue_register_packed(
+        &mut self,
+        iid: InstId,
+        tyidx: TyIdx,
+        struct_ty: &StructTy,
+        index: usize,
+        lo_iidx: hir::InstIdx,
+    ) -> Result<(), CompilationError> {
+        let bit_size = struct_ty.bit_size();
+        let field_bit_off = struct_ty.field_bit_offs()[index];
+        // A field sharing an eightbyte with others would need a shift before truncating.
+        assert_eq!(
+            field_bit_off % 64,
+            0,
+            "extractvalue field not aligned to a register boundary"
+        );
+        let hi_iidx = lo_iidx + 1;
+        let (chunk_iidx, chunk_bitw) = if field_bit_off == 0 {
+            (lo_iidx, u32::try_from(bit_size.min(64)).unwrap())
+        } else {
+            match self.opt.inst(hi_iidx) {
+                hir::Inst::CallStructReturnHigh(_) => {}
+                _ => panic!("extractvalue field offset beyond the struct's register-pair width"),
+            }
+            (hi_iidx, u32::try_from(bit_size - 64).unwrap())
+        };
+        let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
+        let res_bitw = self.opt.ty(res_tyidx).bitw();
+        if res_bitw == chunk_bitw {
+            self.frames.last_mut().unwrap().set_local(iid, chunk_iidx);
+        } else {
+            assert!(
+                res_bitw < chunk_bitw,
+                "extractvalue field wider than its chunk"
+            );
+            self.push_inst_and_link_local(
+                iid,
+                hir::Trunc {
+                    tyidx: res_tyidx,
+                    val: chunk_iidx,
+                    nuw: false,
+                    nsw: false,
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    fn p_extractvalue_memory_backed(
+        &mut self,
+        iid: InstId,
+        tyidx: TyIdx,
+        op: &Operand,
+        struct_ty: &StructTy,
+        indices: &[usize],
+    ) -> Result<(), CompilationError> {
+        assert_eq!(indices.len(), 1, "extractvalue with nested indices");
+        let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
+
+        assert_eq!(field_bit_off % 8, 0, "field not byte-aligned");
+        let byte_off = field_bit_off / 8;
+
+        let mut ptr = self.p_operand(op)?;
+        if byte_off != 0 {
+            ptr = self.opt.feed(
+                hir::PtrAdd {
+                    ptr,
+                    off: i32::try_from(byte_off).unwrap(),
+                    in_bounds: false,
+                    nusw: false,
+                    nuw: false,
+                }
+                .into(),
+            )?;
+        }
+
+        let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
+        self.push_inst_and_link_local(
+            iid,
+            hir::Load {
+                tyidx: res_tyidx,
+                ptr,
+                is_volatile: false,
             },
         )
         .map(|_| ())

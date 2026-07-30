@@ -459,6 +459,24 @@ pub(super) const NORMAL_GP_REGS: [Reg; 14] = [
     Reg::RAX,
 ];
 
+/// [NORMAL_GP_REGS] minus `RDX`, for values that must avoid it (e.g. a register-packed struct
+/// call's low eightbyte, so it doesn't clobber the high eightbyte in `RDX`).
+pub(super) const GP_REGS_NO_RDX: [Reg; 13] = [
+    Reg::R15,
+    Reg::R14,
+    Reg::R13,
+    Reg::R12,
+    Reg::R11,
+    Reg::R10,
+    Reg::R9,
+    Reg::R8,
+    Reg::RDI,
+    Reg::RSI,
+    Reg::RBX,
+    Reg::RCX,
+    Reg::RAX,
+];
+
 pub(super) const ALL_XMM_REGS: [Reg; 16] = [
     Reg::XMM0,
     Reg::XMM1,

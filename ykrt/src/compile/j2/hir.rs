@@ -832,6 +832,8 @@ pub(super) enum Inst {
     #[cfg(test)]
     BlackBox,
     Call,
+    CallStructReturnHigh,
+    CallStructReturnLow,
     Const,
     CtPop,
     CtTz,
@@ -1445,6 +1447,96 @@ impl InstT for Call {
 
     fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
         m.func_ty(self.func_tyidx).rtn_tyidx
+    }
+}
+
+/// The `RDX` half of a register-packed struct call return ([Call] models the `RAX` half). Must
+/// immediately follow [CallStructReturnLow] (itself immediately after [Call]).
+#[derive(Clone, Debug)]
+pub(super) struct CallStructReturnHigh {
+    pub tyidx: TyIdx,
+}
+
+impl InstT for CallStructReturnHigh {
+    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::none(b)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut _iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        "call_struct_return_high".to_string()
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
+/// The `RAX` half of a register-packed struct call return. May be relocated to any register
+/// except `RDX`, which [CallStructReturnHigh] needs next. Must immediately follow [Call].
+#[derive(Clone, Debug)]
+pub(super) struct CallStructReturnLow {
+    pub call: InstIdx,
+    pub tyidx: TyIdx,
+}
+
+impl InstT for CallStructReturnLow {
+    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.call = opt.equiv_iidx(self.call);
+    }
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(b, self.call)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.call = iidx_map(self.call);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("call_struct_return_low %{}", usize::from(self.call))
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
