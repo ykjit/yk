@@ -11,11 +11,11 @@
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{10_1}}: {0: i8, 64: i64} = call make_struct()...
+//     %{{s}}: {0: i8, 64: i64} = load %{{_}}
 //     ...
-//     %{{11_2}}: i8 = extractvalue %{{10_1}}, [0]
+//     %{{_}}: i8 = extractvalue %{{s}}, [0]
 //     ...
-//     %{{11_5}}: i64 = extractvalue %{{10_1}}, [1]
+//     %{{_}}: i64 = extractvalue %{{s}}, [1]
 //     ...
 //     --- End aot ---
 //     --- Begin hir ---
@@ -64,6 +64,7 @@ struct S {
   uint64_t b;
 };
 
+__attribute__((always_inline))
 struct S make_struct() {
   struct S ret = {1, 999};
   return ret;
