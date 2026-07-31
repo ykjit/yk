@@ -1823,7 +1823,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         .map(|_| ())
     }
 
-    /// Read a struct field via `extractvalue` supporting only memory-backed as `ptr_add`+`load`.
     fn p_extractvalue(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
         let Inst::ExtractValue { tyidx, op, indices } = inst else {
             panic!()
