@@ -1,4 +1,3 @@
-// ignore-if: true # not yet implemented in j2
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0
 // Run-time:
@@ -24,7 +23,7 @@
 //     --- End hir ---
 //     2
 //     999
-//     yk-execution: enter-jit-code
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2
 //     999
 //     2
@@ -50,6 +49,7 @@ struct S {
   uint8_t a;
   uint64_t b;
 };
+
 
 struct S make_struct() {
   struct S ret = {1, 999};
