@@ -1826,11 +1826,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     /// Read a struct field via `extractvalue` supporting only memory-backed as `ptr_add`+`load`.
     fn p_extractvalue(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
         let Inst::ExtractValue { tyidx, op, indices } = inst else {
-            panic!("extractvalue must have a type, an operand and indices.")
+            panic!()
         };
 
         let Ty::Struct(struct_ty) = op.type_(self.am) else {
-            panic!("extractvalue's operand must be a struct.")
+            panic!()
         };
 
         assert_eq!(indices.len(), 1, "extractvalue with nested indices");
