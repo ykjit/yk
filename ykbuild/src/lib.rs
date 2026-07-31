@@ -18,6 +18,8 @@ pub fn target_dir() -> PathBuf {
         .unwrap()
         .parent()
         .unwrap()
+        .parent()
+        .unwrap()
         .to_owned()
 }
 

@@ -111,7 +111,7 @@ pub fn full_cargo_profile() -> String {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     Path::new(&out_dir)
         .components()
-        .nth_back(3)
+        .nth_back(4)
         .map(|x| x.as_os_str().to_str().unwrap())
         .unwrap()
         .to_owned()

@@ -58,6 +58,8 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
+        .parent()
+        .unwrap()
         .to_owned();
     ykllvm_build_dir.push("ykllvm");
     create_dir_all(&ykllvm_build_dir).unwrap();
