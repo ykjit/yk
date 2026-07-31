@@ -48,7 +48,7 @@ use crate::{
             },
             x64::{
                 asm::{Asm, LabelIdx, RelocKind},
-                x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
+                x64regalloc::{ALL_XMM_REGS, GP_REGS_NO_RDX, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
             },
         },
     },
@@ -875,6 +875,53 @@ impl<'a> X64HirToAsm<'a> {
             });
         }
 
+        Ok(())
+    }
+
+    fn i_extractvalue_low(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        iidx: InstIdx,
+        aggregate: InstIdx,
+    ) -> Result<(), CompilationError> {
+        if iidx < 1 || aggregate != iidx - 1 {
+            todo!("unsupported extractvalue sequence")
+        }
+        let [_] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Cast {
+                in_iidx: aggregate,
+                out_fill: RegCnstrFill::Undefined,
+                regs: &GP_REGS_NO_RDX,
+            }],
+        )?;
+        Ok(())
+    }
+
+    fn i_extractvalue_high(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        aggregate: InstIdx,
+    ) -> Result<(), CompilationError> {
+        if usize::from(iidx) < 2 || aggregate != iidx - 2 {
+            todo!("unsupported extractvalue sequence")
+        }
+        if !matches!(b.inst(iidx - 1), Inst::ExtractValue(lo) if lo.aggregate == aggregate && lo.field_bit_off == 0)
+        {
+            todo!("unsupported extractvalue sequence")
+        }
+        let [_] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Output {
+                out_fill: RegCnstrFill::Undefined,
+                regs: &[Reg::RDX],
+                can_be_same_as_input: false,
+            }],
+        )?;
         Ok(())
     }
 }
@@ -2321,6 +2368,28 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             ));
         }
         Ok(())
+    }
+
+    fn i_extractvalue(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        ExtractValue {
+            aggregate,
+            field_bit_off,
+            ..
+        }: &ExtractValue,
+    ) -> Result<(), CompilationError> {
+        // We only support extracting from a register-packed struct return.
+        if !matches!(b.inst(*aggregate), Inst::Call(_)) {
+            panic!();
+        }
+        if *field_bit_off == 0 {
+            self.i_extractvalue_low(ra, iidx, *aggregate)
+        } else {
+            self.i_extractvalue_high(ra, b, iidx, *aggregate)
+        }
     }
 
     fn i_ctpop(

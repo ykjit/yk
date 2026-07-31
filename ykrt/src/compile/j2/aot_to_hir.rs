@@ -759,6 +759,73 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         self.opt.push_ty(tyidx)
     }
 
+    fn p_call_func_ty<'b>(
+        &mut self,
+        aot_fty: &'b FuncTy,
+    ) -> Result<(hir::TyIdx, Option<&'b StructTy>), CompilationError> {
+        let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
+        let (rtn_tyidx, struct_ty) = match aot_rtn_ty {
+            Ty::Struct(struct_ty) => {
+                let bit_size = struct_ty.bit_size();
+                assert!(
+                    bit_size <= 128,
+                    "got {bit_size} bits, struct with >16 bytes should use a pointer return, not Struct-typed"
+                );
+                let lo_tyidx = self
+                    .opt
+                    .push_ty(hir::Ty::Int(u32::try_from(bit_size.min(64)).unwrap()))?;
+                (lo_tyidx, Some(struct_ty))
+            }
+            _ => (self.p_ty(aot_rtn_ty)?, None),
+        };
+        let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
+        for arg_ty in aot_fty.arg_tyidxs() {
+            args_tyidxs.push(self.p_ty(self.am.type_(*arg_ty))?);
+        }
+        let fty = hir::FuncTy {
+            rtn_tyidx,
+            args_tyidxs,
+            has_varargs: aot_fty.is_vararg(),
+        };
+        Ok((self.opt.push_ty(hir::Ty::Func(Box::new(fty)))?, struct_ty))
+    }
+
+    fn p_call_extractvalues(
+        &mut self,
+        call_iidx: hir::InstIdx,
+        struct_ty: Option<&StructTy>,
+    ) -> Result<(), CompilationError> {
+        let Some(struct_ty) = struct_ty else {
+            return Ok(());
+        };
+        let bit_size = struct_ty.bit_size();
+        let lo_tyidx = self
+            .opt
+            .push_ty(hir::Ty::Int(u32::try_from(bit_size.min(64)).unwrap()))?;
+        self.opt.feed(
+            hir::ExtractValue {
+                aggregate: call_iidx,
+                field_bit_off: 0,
+                tyidx: lo_tyidx,
+            }
+            .into(),
+        )?;
+        if bit_size > 64 {
+            let hi_tyidx = self
+                .opt
+                .push_ty(hir::Ty::Int(u32::try_from(bit_size - 64).unwrap()))?;
+            self.opt.feed(
+                hir::ExtractValue {
+                    aggregate: call_iidx,
+                    field_bit_off: 64,
+                    tyidx: hi_tyidx,
+                }
+                .into(),
+            )?;
+        }
+        Ok(())
+    }
+
     /// Process an [Operand] and return the [hir::InstIdx] it references. Note: this can insert
     /// instructions into [self.opt]!
     fn p_operand(&mut self, op: &Operand) -> Result<hir::InstIdx, CompilationError> {
@@ -1209,10 +1276,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             //      (which could be zero, or many, and may include recursive calls) until that
             //      function returns.
 
-            let ftyidx = self.p_ty(self.am.type_(func.tyidx()))?;
-
             // Handle LLVM intrinsics.
             if func.name().starts_with("llvm.") {
+                let ftyidx = self.p_ty(self.am.type_(func.tyidx()))?;
                 self.p_llvm_intrinsic(iid, ftyidx, func.name(), jargs)?;
                 return Ok(CallProcessedKind::Outlined);
             }
@@ -1240,20 +1306,26 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 FuncMemory::ReadWrite => hir::CallEffects::ReadWrite,
             };
 
+            let Ty::Func(aot_fty) = self.am.type_(func.tyidx()) else {
+                panic!()
+            };
+            let (call_func_tyidx, struct_ty) = self.p_call_func_ty(aot_fty)?;
             let inst = hir::Call {
                 tgt: tgt_iidx,
-                func_tyidx: ftyidx,
+                func_tyidx: call_func_tyidx,
                 args: jargs,
                 effects,
             }
             .into();
-            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
+            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(call_func_tyidx)
+            else {
                 panic!()
             };
             if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
                 self.opt.feed_void(inst)?;
             } else {
-                self.push_inst_and_link_local(iid.clone(), inst)?;
+                let call_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
+                self.p_call_extractvalues(call_iidx, struct_ty)?;
             }
             match self.outline_until(bid)? {
                 OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
@@ -1832,6 +1904,72 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             panic!()
         };
 
+        if let Operand::Local(aot_iid) = op
+            && indices.len() == 1
+        {
+            let aggregate_iidx = self.frames.last().unwrap().get_local(&*self.opt, aot_iid);
+            if let hir::Inst::Call(_) = self.opt.inst(aggregate_iidx) {
+                return self.p_extractvalue_register_packed(
+                    iid,
+                    *tyidx,
+                    struct_ty,
+                    indices[0],
+                    aggregate_iidx,
+                );
+            }
+        }
+        self.p_extractvalue_memory_backed(iid, *tyidx, op, struct_ty, indices)
+    }
+
+    fn p_extractvalue_register_packed(
+        &mut self,
+        iid: InstId,
+        tyidx: TyIdx,
+        struct_ty: &StructTy,
+        index: usize,
+        aggregate_iidx: hir::InstIdx,
+    ) -> Result<(), CompilationError> {
+        let bit_size = struct_ty.bit_size();
+        let field_bit_off = struct_ty.field_bit_offs()[index];
+        let (chunk_iidx, chunk_bitw) = if field_bit_off == 0 {
+            (aggregate_iidx + 1, u32::try_from(bit_size.min(64)).unwrap())
+        } else {
+            assert!(
+                bit_size > 64,
+                "extractvalue field offset beyond the struct's register-pair width"
+            );
+            (aggregate_iidx + 2, u32::try_from(bit_size - 64).unwrap())
+        };
+        let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
+        let res_bitw = self.opt.ty(res_tyidx).bitw();
+        if res_bitw == chunk_bitw {
+            self.frames.last_mut().unwrap().set_local(iid, chunk_iidx);
+        } else {
+            assert!(
+                res_bitw < chunk_bitw,
+                "extractvalue field wider than its chunk"
+            );
+            self.push_inst_and_link_local(
+                iid,
+                hir::Trunc {
+                    tyidx: res_tyidx,
+                    val: chunk_iidx,
+                    nuw: false,
+                    nsw: false,
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    fn p_extractvalue_memory_backed(
+        &mut self,
+        iid: InstId,
+        tyidx: TyIdx,
+        op: &Operand,
+        struct_ty: &StructTy,
+        indices: &[usize],
+    ) -> Result<(), CompilationError> {
         assert_eq!(indices.len(), 1, "extractvalue with nested indices");
         let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
         // LLVM struct fields are always byte-aligned.
@@ -1856,7 +1994,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             )?;
         }
 
-        let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
+        let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
         self.push_inst_and_link_local(
             iid,
             hir::Load {
