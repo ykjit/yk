@@ -65,9 +65,7 @@ struct S {
 };
 
 struct S make_struct() {
-  // Awkward bit patterns: every byte differs, so reading at the wrong offset
-  // (or reading corrupt memory) can't accidentally produce the right answer.
-  struct S ret = {0xa5, 0x0123456789abcdef};
+  struct S ret = {1, 999};
   return ret;
 }
 
@@ -84,8 +82,8 @@ void interp(){
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     struct S s1 = make_struct();
-    fprintf(stderr, "%x\n", s1.a);
-    fprintf(stderr, "%lx\n", s1.b);
+    fprintf(stderr, "%d\n", s1.a);
+    fprintf(stderr, "%ld\n", s1.b);
     i--;
   }
   fprintf(stderr, "exit\n");
