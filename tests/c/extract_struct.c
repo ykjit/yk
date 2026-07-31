@@ -50,7 +50,6 @@ struct S {
   uint64_t b;
 };
 
-
 struct S make_struct() {
   struct S ret = {1, 999};
   return ret;
