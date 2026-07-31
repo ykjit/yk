@@ -25,7 +25,7 @@ use crate::{
             compiled_trace::{
                 CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace, J2TraceStart,
             },
-            hir,
+            hir::{self, InstT},
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
         },
@@ -1839,6 +1839,10 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let byte_off = field_bit_off / 8;
 
         let mut ptr = self.p_operand(op)?;
+        assert_eq!(
+            *self.opt.ty(self.opt.inst(ptr).tyidx(&*self.opt)),
+            hir::Ty::Ptr(0)
+        );
         if byte_off > 0 {
             ptr = self.opt.feed(
                 hir::PtrAdd {
