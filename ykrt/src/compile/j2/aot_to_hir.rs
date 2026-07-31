@@ -1838,7 +1838,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let byte_off = field_bit_off / 8;
 
         let mut ptr = self.p_operand(op)?;
-        if byte_off != 0 {
+        if byte_off > 0 {
             ptr = self.opt.feed(
                 hir::PtrAdd {
                     ptr,
