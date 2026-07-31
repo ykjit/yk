@@ -20,6 +20,21 @@
 //     --- End aot ---
 //     --- Begin hir ---
 //     ...
+//     %{{a}}: i8 = load %{{ptr}}
+//     store %{{a}}, %{{s1}}
+//     %{{s1b}}: ptr = ptradd %{{s1}}, 8
+//     %{{padd}}: ptr = ptradd %{{ptr}}, 8
+//     %{{b}}: i64 = load %{{padd}}
+//     store %{{b}}, %{{s1b}}
+//     ...
+//     %{{a2}}: i32 = 2
+//     ...
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{a2}}) ; @fprintf
+//     ...
+//     %{{b_load}}: i64 = load %{{s1b}}
+//     ...
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{b_load}}) ; @fprintf
+//     ...
 //     --- End hir ---
 //     2
 //     999
@@ -31,11 +46,8 @@
 //     yk-execution: deoptimise ...
 //     exit
 
-// Test that trace builder handles loading structs by rewriting `extractvalue`
-// instructions into `ptr_add`s and `load`s. We only check that the AOT IR
-// contains a struct load and check that the trace does the correct thing.
-// Matching on the JIT IR is difficult since the `ptr_add`s and `load`s are
-// not easily distinguished from unrelated `ptr_add`s and `load`s.
+// Test that the trace builder handles loading structs by rewriting
+// `extractvalue` instructions into `ptradd`s and `load`s.
 
 #include <assert.h>
 #include <stdint.h>

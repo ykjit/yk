@@ -1823,22 +1823,23 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         .map(|_| ())
     }
 
-    /// Read a struct field via `extractvalue` supporting only memory-backed as `ptr_add`+`load`.
     fn p_extractvalue(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
         let Inst::ExtractValue { tyidx, op, indices } = inst else {
-            panic!("extractvalue must have a type, an operand and indices.")
+            panic!()
         };
 
         let Ty::Struct(struct_ty) = op.type_(self.am) else {
-            panic!("extractvalue's operand must be a struct.")
+            panic!()
         };
 
         assert_eq!(indices.len(), 1, "extractvalue with nested indices");
         let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
+        // LLVM struct fields are always byte-aligned.
+        assert_eq!(field_bit_off % 8, 0);
         let byte_off = field_bit_off / 8;
 
         let mut ptr = self.p_operand(op)?;
-        if byte_off != 0 {
+        if byte_off > 0 {
             ptr = self.opt.feed(
                 hir::PtrAdd {
                     ptr,
