@@ -6,7 +6,7 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
-//     2
+//     1
 //     999
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
@@ -27,27 +27,29 @@
 //     %{{b}}: i64 = load %{{padd}}
 //     store %{{b}}, %{{s1b}}
 //     ...
-//     %{{a2}}: i32 = 2
+//     %{{a_ext}}: i32 = zext %{{a}}
 //     ...
-//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{a2}}) ; @fprintf
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{a_ext}}) ; @fprintf
 //     ...
 //     %{{b_load}}: i64 = load %{{s1b}}
 //     ...
 //     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{b_load}}) ; @fprintf
 //     ...
 //     --- End hir ---
-//     2
+//     1
 //     999
 //     yk-execution: enter-jit-code {"trid": "0"}
-//     2
+//     1
 //     999
-//     2
+//     1
 //     999
 //     yk-execution: deoptimise ...
 //     exit
 
 // Test that the trace builder handles loading structs by rewriting
-// `extractvalue` instructions into `ptradd`s and `load`s.
+// `extractvalue` instructions into `ptradd`s and `load`s. Both fields are
+// followed from their `load` to the `fprintf` that prints them, so that we
+// know we haven't matched unrelated `ptradd`s/`load`s.
 
 #include <assert.h>
 #include <stdint.h>
@@ -80,7 +82,6 @@ void interp(){
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     struct S s1 = make_struct();
-    s1.a = 2;
     fprintf(stderr, "%d\n", s1.a);
     fprintf(stderr, "%ld\n", s1.b);
     i--;
