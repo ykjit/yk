@@ -1834,6 +1834,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
         assert_eq!(indices.len(), 1, "extractvalue with nested indices");
         let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
+        // LLVM struct fields are always byte-aligned.
+        assert_eq!(field_bit_off % 8, 0);
         let byte_off = field_bit_off / 8;
 
         let mut ptr = self.p_operand(op)?;
