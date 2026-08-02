@@ -108,11 +108,10 @@ impl<'a> ExtraLinkage<'a> {
 // Determine the "full" cargo profile name, as it appears as an argument to `--profile` (not just
 // "debug" or "release", which is all cargo's `PROFILE` environment` can report).
 pub fn full_cargo_profile() -> String {
-    let out_dir = std::env::var("OUT_DIR").unwrap();
-    Path::new(&out_dir)
-        .components()
-        .nth_back(3)
-        .map(|x| x.as_os_str().to_str().unwrap())
+    ykbuild::target_dir()
+        .file_name()
+        .unwrap()
+        .to_str()
         .unwrap()
         .to_owned()
 }
