@@ -474,13 +474,13 @@ impl MT {
                 start_tid,
                 coupler_tid,
             } => {
-                self.stop_tracing(frameaddr, loc, start_tid, TraceEnd::Coupler(coupler_tid));
+                self.stop_tracing(loc, start_tid, TraceEnd::Coupler(coupler_tid));
             }
             TransitionControlPoint::StopLoopTracing(trid) => {
-                self.stop_tracing(frameaddr, loc, trid, TraceEnd::Loop);
+                self.stop_tracing(loc, trid, TraceEnd::Loop);
             }
             TransitionControlPoint::StopReturnTracing(trid) => {
-                self.stop_tracing(frameaddr, loc, trid, TraceEnd::Loop);
+                self.stop_tracing(loc, trid, TraceEnd::Loop);
             }
             TransitionControlPoint::StopUnrollTracing {
                 inner_hl,
@@ -634,13 +634,7 @@ impl MT {
     }
 
     /// Stop tracing of the trace with id `trid` at `loc`.
-    fn stop_tracing(
-        self: &Arc<Self>,
-        _frameaddr: *mut c_void,
-        _loc: &Location,
-        ctrid: TraceId,
-        trace_end: TraceEnd,
-    ) {
+    fn stop_tracing(self: &Arc<Self>, _loc: &Location, ctrid: TraceId, trace_end: TraceEnd) {
         // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
         // will have put a `Some` in the `Rc`.
         let (hl, thread_tracer, promotions, debug_strs) =
