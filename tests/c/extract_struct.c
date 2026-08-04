@@ -1,4 +1,3 @@
-// ignore-if: true # not yet implemented in j2
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0
 // Run-time:
@@ -7,36 +6,50 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
-//     2
+//     1
 //     999
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{10_1}}: {0: i8, 64: i64} = call make_struct()...
+//     %{{s}}: {0: i8, 64: i64} = load %{{_}}
 //     ...
-//     %{{11_2}}: i8 = extractvalue %{{10_1}}, [0]
+//     %{{_}}: i8 = extractvalue %{{s}}, [0]
 //     ...
-//     %{{11_5}}: i64 = extractvalue %{{10_1}}, [1]
+//     %{{_}}: i64 = extractvalue %{{s}}, [1]
 //     ...
 //     --- End aot ---
 //     --- Begin hir ---
 //     ...
+//     %{{a}}: i8 = load %{{ptr}}
+//     store %{{a}}, %{{s1}}
+//     %{{s1b}}: ptr = ptradd %{{s1}}, 8
+//     %{{padd}}: ptr = ptradd %{{ptr}}, 8
+//     %{{b}}: i64 = load %{{padd}}
+//     store %{{b}}, %{{s1b}}
+//     ...
+//     %{{a_ext}}: i32 = zext %{{a}}
+//     ...
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{a_ext}}) ; @fprintf
+//     ...
+//     %{{b_load}}: i64 = load %{{s1b}}
+//     ...
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{b_load}}) ; @fprintf
+//     ...
 //     --- End hir ---
-//     2
+//     1
 //     999
-//     yk-execution: enter-jit-code
-//     2
+//     yk-execution: enter-jit-code {"trid": "0"}
+//     1
 //     999
-//     2
+//     1
 //     999
 //     yk-execution: deoptimise ...
 //     exit
 
-// Test that trace builder handles loading structs by rewriting `extractvalue`
-// instructions into `ptr_add`s and `load`s. We only check that the AOT IR
-// contains a struct load and check that the trace does the correct thing.
-// Matching on the JIT IR is difficult since the `ptr_add`s and `load`s are
-// not easily distinguished from unrelated `ptr_add`s and `load`s.
+// Test that the trace builder handles loading structs by rewriting
+// `extractvalue` instructions into `ptradd`s and `load`s. Both fields are
+// followed from their `load` to the `fprintf` that prints them, so that we
+// know we haven't matched unrelated `ptradd`s/`load`s.
 
 #include <assert.h>
 #include <stdint.h>
@@ -51,6 +64,7 @@ struct S {
   uint64_t b;
 };
 
+__attribute__((always_inline))
 struct S make_struct() {
   struct S ret = {1, 999};
   return ret;
@@ -69,7 +83,6 @@ void interp(){
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     struct S s1 = make_struct();
-    s1.a = 2;
     fprintf(stderr, "%d\n", s1.a);
     fprintf(stderr, "%ld\n", s1.b);
     i--;
