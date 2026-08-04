@@ -67,10 +67,7 @@ fn main() {
         .as_os_str()
         .to_owned();
     let mut ykllvm_build_dir = target_dir.join(profile);
-    assert!(
-        ykllvm_build_dir.is_dir(),
-        "{ykllvm_build_dir:?} is not a directory"
-    );
+    assert!(ykllvm_build_dir.is_dir());
     ykllvm_build_dir.push("ykllvm");
     create_dir_all(&ykllvm_build_dir).unwrap();
 
