@@ -12,7 +12,18 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
+
+/// How long should a [TraceId] stay in the [JobQueue::failures] set? This timeout is needed purely
+/// to stop [JobQueue::failures] growing to an unbounded length: it's therefore better for entries
+/// to stay in here a bit too long than a bit too short a period of time. There is no perfect value
+/// for this, but we would typically expect failures to be detected in under a second. However,
+/// occasionally, a very long cascade of failures could cause this period to be stretched out,
+/// potentially to an unbounded period of time. In practise, that's very unlikely -- and if it does
+/// happen, the poor user will have bigger problems -- but we choose a fairly big value here to
+/// make this unlikely to happen.
+const FAILURE_EXPIRE_TIME: Duration = Duration::from_secs(60);
 
 /// A job for the job queue.
 pub(crate) struct Job {
@@ -55,12 +66,18 @@ pub(crate) struct JobQueue {
     /// job)`. Before `job` is run, `coupler_tid`, if it is `Some`, must be present in
     /// [MT::compiled_traces].
     queue: Arc<(Condvar, Mutex<VecDeque<Job>>)>,
+    /// [TraceId]s which have failed to trace / compile. We need to track these (at least for a
+    /// while) because tracing may be active using one of these as its target, and when it's
+    /// reported to the job queue we'll need to immediately abandon it. The [Instant] records
+    /// when a given record expires (i.e. not when it was inserted!).
+    failures: Mutex<Vec<(Instant, TraceId)>>,
 }
 
 impl JobQueue {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
+            failures: Mutex::new(Vec::new()),
             max_worker_threads: AtomicUsize::new(cmp::max(
                 1,
                 match env::var("YK_JOBS") {
@@ -112,8 +129,26 @@ impl JobQueue {
         }
     }
 
+    /// This function expires "old" failed traces from the queue.
+    fn expire_failures(&self) {
+        let mut failures_lk = self.failures.lock();
+        let now = Instant::now();
+        failures_lk.retain(|(expires_at, _)| *expires_at < now);
+    }
+
     /// Queue `job` to be run on a worker thread.
     pub(crate) fn push(self: &Arc<Self>, mt: &Arc<MT>, job: Job) {
+        // Check if this job couples to an already failed [TraceId].
+        if let Some(coupler_trid) = job.coupler_tid {
+            let failures_lk = self.failures.lock();
+            if failures_lk.iter().any(|(_, x)| x == &coupler_trid) {
+                drop(failures_lk);
+                // `coupler_failed` will naturally insert the job's trid into the `failures` set.
+                (job.coupler_failed)();
+                return;
+            }
+        }
+
         #[cfg(feature = "yk_testing")]
         if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
             // To ensure that we properly test that compilation can occur in another thread, we
@@ -170,6 +205,11 @@ impl JobQueue {
                     // If the strong count for `mt` is 0 then it has been dropped and there is no
                     // point trying to do further work, even if there is work in the queue.
                     while let Some(mt_st) = mt_wk.upgrade() {
+                        // Since we're running in a thread, we don't mind paying the (generally
+                        // very small, but you can't be sure) penalty of expiring entries from the
+                        // `failures` set.
+                        self_cl.expire_failures();
+
                         // Search through the queue looking for the first job we can compile (i.e.
                         // there is no coupler trace ID, or the coupler trade ID has been
                         // compiled).
@@ -230,6 +270,8 @@ impl JobQueue {
     pub(crate) fn notify_failure(self: &Arc<Self>, _mt: &Arc<MT>, trid: TraceId) {
         let mut removed = Vec::new();
         let mut i = 0;
+        let mut failures_lk = self.failures.lock();
+        failures_lk.push((Instant::now() + FAILURE_EXPIRE_TIME, trid));
         let mut lk = self.queue.1.lock();
         while i < lk.len() {
             if lk[i].coupler_tid == Some(trid) {
@@ -239,8 +281,37 @@ impl JobQueue {
             }
         }
         drop(lk);
+        drop(failures_lk);
         for x in removed {
             (x.coupler_failed)();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn dependency_on_failure_fails() {
+        let jq = JobQueue::new();
+        let mt = MT::new().unwrap();
+        let failure_trid = TraceId::from_u64(123);
+        jq.notify_failure(&mt, failure_trid);
+
+        let ran = Arc::new(AtomicBool::new(false));
+        let ran_cl = Arc::clone(&ran);
+        jq.push(
+            &mt,
+            Job::new(
+                Box::new(|| unreachable!()),
+                Some(failure_trid),
+                Box::new(move || ran_cl.store(true, Ordering::Relaxed)),
+            ),
+        );
+
+        assert!(ran.load(Ordering::Relaxed));
+        assert!(jq.queue.1.lock().is_empty());
     }
 }
