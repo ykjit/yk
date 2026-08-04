@@ -634,6 +634,9 @@ impl MT {
     }
 
     /// Stop tracing of the trace with id `trid` at `loc`.
+    ///
+    /// If an error occurs while tracing, the original tracing [Location] will be put back into
+    /// either the `Counting` or `DontTrace` states.
     fn stop_tracing(self: &Arc<Self>, loc: &Location, ctrid: TraceId, trace_end: TraceEnd) {
         let _loc = loc; // Only used in `cfg(test)`.
         // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
@@ -674,6 +677,17 @@ impl MT {
             }
             Err(e) => {
                 MTThread::set_tracing(IsTracing::None);
+                let mut lk = hl.lock();
+                // We could have raced with another thread which has changed the state from
+                // `Compiling`.
+                if let HotLocationKind::Compiling(_) = lk.kind {
+                    if let TraceFailed::DontTrace = lk.tracecompilation_error(self) {
+                        lk.kind = HotLocationKind::DontTrace;
+                    } else {
+                        lk.kind = HotLocationKind::Counting(0);
+                    }
+                }
+                drop(lk);
                 self.job_queue.notify_failure(self, ctrid);
                 self.stats.timing_state(TimingState::None);
                 self.stats.trace_recorded_err();
