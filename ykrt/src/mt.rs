@@ -634,7 +634,8 @@ impl MT {
     }
 
     /// Stop tracing of the trace with id `trid` at `loc`.
-    fn stop_tracing(self: &Arc<Self>, _loc: &Location, ctrid: TraceId, trace_end: TraceEnd) {
+    fn stop_tracing(self: &Arc<Self>, loc: &Location, ctrid: TraceId, trace_end: TraceEnd) {
+        let _loc = loc; // Only used in `cfg(test)`.
         // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
         // will have put a `Some` in the `Rc`.
         let (hl, thread_tracer, promotions, debug_strs) =
