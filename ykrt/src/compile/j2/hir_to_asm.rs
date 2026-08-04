@@ -649,7 +649,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             let mut deopt_vars = Vec::with_capacity(gextra.deopt_vars.len());
             assert_eq!(gextra.deopt_vars.len(), gblock.term_vars().len());
             let mut deopt_term_iter = gextra.deopt_vars.iter().zip(gblock.term_vars().iter());
-            for frame in gextra.deopt_frames.iter() {
+            for (frame_idx, frame) in gextra.deopt_frames.iter().enumerate() {
                 let frame_deopt_vars_off = deopt_vars.len();
                 #[cfg(not(test))]
                 let smap_lives_iter = aot_smaps
@@ -728,11 +728,23 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         })
                     });
                 }
-                // Weed out no-opts.
+                // Optimise no-ops. We have to be careful here: same-offset-stack-based writes are
+                // no-ops in the controlpoint frame, but not in subsequent frames (since we create
+                // the latter from scratch); and `Const` / `Reg` `StackOff` / `Const`s are no-ops
+                // everywhere.
                 for deopt_var in frame_deopt_vars {
-                    if deopt_var.fromvlocs == deopt_var.tovlocs {
-                        // Optimise away situations where we would just move a value from VLoc X
-                        // to VLoc X.
+                    if deopt_var.fromvlocs == deopt_var.tovlocs
+                        && (frame_idx == 0
+                            || deopt_var.fromvlocs.iter().all(|vloc| {
+                                matches!(
+                                    vloc,
+                                    VarLoc::Const(_) | VarLoc::Reg(_, _) | VarLoc::StackOff(_)
+                                )
+                            }))
+                    {
+                        // We rely on deopt skipping over `tovlocs` when it's empty in order for
+                        // no-ops to be a meaningful optimisation (though if a given backend's
+                        // deopt doesn't do that, it doesn't affect correctness).
                         deopt_var.tovlocs = VarLocs::new();
                     }
                 }
@@ -2722,6 +2734,28 @@ mod test {
             tovlocs=[]
             fromvlocs=[Stack(16)]
             tovlocs=[Reg(R0, Undefined)]
+        "#],
+        );
+
+        // Stack VarLocs are only a no-op (i.e. empty `tovlocs`) in the controlpoint frame.
+        build_and_test(
+            r#"
+          %0: i1 = arg [reg]
+          %1: ptr = arg [stack(8)]
+          guard true, %0, [%1, %1], [[[stack(8)]], [[stack(8)]]]
+          term [%0, %1]
+        "#,
+            |s| {
+                s == "guard_completed:"
+                    || s.trim_start().starts_with("fromvlocs=")
+                    || s.trim_start().starts_with("tovlocs=")
+            },
+            &[r#"
+          guard_completed:
+            fromvlocs=[Stack(8)]
+            tovlocs=[]
+            fromvlocs=[Stack(8)]
+            tovlocs=[Stack(8)]
         "#],
         );
     }
