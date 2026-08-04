@@ -25,7 +25,7 @@ use crate::{
             compiled_trace::{
                 CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace, J2TraceStart,
             },
-            hir,
+            hir::{self, InstT},
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
             regalloc::{RegT, VarLoc, VarLocs},
         },
@@ -915,7 +915,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::Cast { .. } => self.p_cast(pc.clone(), inst)?,
                 Inst::CondBr { .. } => self.p_condbr(pc.clone(), bid, inst)?,
                 Inst::DebugStr { .. } => self.p_debugstr(pc.clone())?,
-                Inst::ExtractValue { .. } => todo!(),
+                Inst::ExtractValue { .. } => self.p_extractvalue(pc.clone(), inst)?,
                 Inst::FCmp { .. } => self.p_fcmp(pc.clone(), inst)?,
                 Inst::FNeg { .. } => self.p_fneg(pc.clone(), inst)?,
                 Inst::Freeze { .. } => self.p_freeze(pc.clone(), inst)?,
@@ -1803,12 +1803,67 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             return Ok(());
         }
 
+        // Case for memory packed struct. This happens with inlined functions that return a struct.
+        if let Ty::Struct(_) = self.am.type_(*tyidx) {
+            let ptr = self.p_operand(ptr)?;
+            self.frames.last_mut().unwrap().set_local(iid, ptr);
+            return Ok(());
+        }
+
         let tyidx = self.p_ty(self.am.type_(*tyidx))?;
         let ptr = self.p_operand(ptr)?;
         self.push_inst_and_link_local(
             iid,
             hir::Load {
                 tyidx,
+                ptr,
+                is_volatile: *volatile,
+            },
+        )
+        .map(|_| ())
+    }
+
+    fn p_extractvalue(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::ExtractValue { tyidx, op, indices } = inst else {
+            panic!()
+        };
+
+        let Ty::Struct(struct_ty) = op.type_(self.am) else {
+            panic!()
+        };
+        let Inst::Load { volatile, .. } = op.to_inst(self.am) else {
+            todo!()
+        };
+
+        assert_eq!(indices.len(), 1, "extractvalue with nested indices");
+        let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
+        // LLVM struct fields are always byte-aligned.
+        assert_eq!(field_bit_off % 8, 0);
+        let byte_off = field_bit_off / 8;
+
+        let mut ptr = self.p_operand(op)?;
+        assert_eq!(
+            *self.opt.ty(self.opt.inst(ptr).tyidx(&*self.opt)),
+            hir::Ty::Ptr(0)
+        );
+        if byte_off > 0 {
+            ptr = self.opt.feed(
+                hir::PtrAdd {
+                    ptr,
+                    off: i32::try_from(byte_off).unwrap(),
+                    in_bounds: false,
+                    nusw: false,
+                    nuw: false,
+                }
+                .into(),
+            )?;
+        }
+
+        let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
+        self.push_inst_and_link_local(
+            iid,
+            hir::Load {
+                tyidx: res_tyidx,
                 ptr,
                 is_volatile: *volatile,
             },
