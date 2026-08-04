@@ -415,15 +415,21 @@ impl MT {
         match self.transition_control_point(loc, frameaddr) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::AbortTracing => {
-                let thread_tracer = MTThread::with_borrow_mut(|mtt| {
-                    if let MTThreadState::Tracing { thread_tracer, .. } = mtt.pop_tstate() {
-                        thread_tracer
+                let (trid, thread_tracer) = MTThread::with_borrow_mut(|mtt| {
+                    if let MTThreadState::Tracing {
+                        trid,
+                        thread_tracer,
+                        ..
+                    } = mtt.pop_tstate()
+                    {
+                        (trid, thread_tracer)
                     } else {
                         panic!()
                     }
                 });
                 let _ = thread_tracer.stop();
                 MTThread::set_tracing(IsTracing::None);
+                self.job_queue.notify_failure(self, trid);
                 yklog!(
                     self.log,
                     Verbosity::Warning,
@@ -486,14 +492,20 @@ impl MT {
                     |log| write!(log, "tracing-aborted: unrolled inner loop"),
                     loc.hot_location()
                 );
-                let thread_tracer = MTThread::with_borrow_mut(|mtt| {
-                    if let MTThreadState::Tracing { thread_tracer, .. } = mtt.pop_tstate() {
-                        thread_tracer
+                let (trid, thread_tracer) = MTThread::with_borrow_mut(|mtt| {
+                    if let MTThreadState::Tracing {
+                        trid,
+                        thread_tracer,
+                        ..
+                    } = mtt.pop_tstate()
+                    {
+                        (trid, thread_tracer)
                     } else {
                         panic!()
                     }
                 });
                 let _ = thread_tracer.stop();
+                self.job_queue.notify_failure(self, trid);
                 self.stats.trace_recorded_err();
                 self.start_tracing(frameaddr, loc, inner_hl, unroll_tid);
             }
