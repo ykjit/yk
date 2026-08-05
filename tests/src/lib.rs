@@ -161,6 +161,9 @@ pub fn mk_compiler(
     // ever changes, then we should build arguments as an "unparsed" string and parse that to `sh
     // -c` and let the shell do the parsing.
     let yk_flags = yk_flags.trim().split(' ');
+    let ykcapi_dir = ykbuild::target_dir();
+    compiler.arg(format!("-L{}", ykcapi_dir.display()));
+    compiler.arg(format!("-Wl,-rpath={}", ykcapi_dir.display()));
     compiler.args(yk_flags);
 
     compiler.args(extra_objs);
