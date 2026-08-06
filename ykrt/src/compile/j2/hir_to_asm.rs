@@ -763,18 +763,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 // about-to-be-created sidetrace is, so we can't factor that into our comparison.
                 if gextra.bid == gbody.bid
                     && deopt_frames == gbody.deopt_frames
-                    && deopt_vars.len() == gbody.deopt_vars.len()
-                    && deopt_vars
-                        .iter()
-                        .zip(gbody.deopt_vars.iter())
-                        .all(|(x, y)| {
-                            x.bitw == y.bitw
-                                && x.fromvlocs.len() == y.fromvlocs.len()
-                                && x.fromvlocs
-                                    .iter()
-                                    .zip(y.fromvlocs.iter())
-                                    .all(|(x, y)| x == y)
-                        })
+                    && deopt_vars_compatible(&gbody.deopt_vars, &deopt_vars)
                     && gextra.switch == gbody.switch
                 {
                     gidx = cnd_gidx;
@@ -1273,6 +1262,22 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
         Ok(ra.stack_off())
     }
+}
+
+/// Are the "from" deopt vars in `cnd` compatible with those in `with`? Note: this relationship is
+/// not necessarily symmetric.
+fn deopt_vars_compatible<Reg: RegT>(cnd: &[DeoptVar<Reg>], with: &[DeoptVar<Reg>]) -> bool {
+    if cnd.len() != with.len() {
+        return false;
+    }
+    cnd.iter().zip(with.iter()).all(|(x, y)| {
+        x.bitw == y.bitw
+            && x.fromvlocs.len() == y.fromvlocs.len()
+            && x.fromvlocs
+                .iter()
+                .zip(y.fromvlocs.iter())
+                .all(|(x, y)| x == y)
+    })
 }
 
 /// The trait that backends must implement to assemble a trace into machine code.
@@ -1933,6 +1938,7 @@ mod test {
         },
         location::{HotLocation, HotLocationKind},
         mt::TraceId,
+        varlocs,
     };
     use fm::{FMBuilder, FMatcher};
 
@@ -1941,6 +1947,41 @@ mod test {
     use regex::Regex;
     use std::sync::Arc;
     use strum::{Display, EnumCount, FromRepr};
+
+    #[test]
+    fn deopt_vars_compatibility() {
+        let x = vec![DeoptVar {
+            bitw: 64,
+            fromvlocs: varlocs![
+                VarLoc::Stack(8),
+                VarLoc::Reg(TestReg::R0, RegFill::Undefined)
+            ],
+            tovlocs: VarLocs::new(),
+        }];
+        let y = vec![DeoptVar {
+            bitw: 64,
+            fromvlocs: varlocs![
+                VarLoc::Stack(8),
+                VarLoc::Reg(TestReg::R0, RegFill::Undefined)
+            ],
+            tovlocs: VarLocs::new(),
+        }];
+        let z = vec![DeoptVar {
+            bitw: 64,
+            fromvlocs: varlocs![
+                VarLoc::Stack(8),
+                VarLoc::Reg(TestReg::R0, RegFill::Zeroed)
+            ],
+            tovlocs: VarLocs::new(),
+        }];
+
+        assert!(deopt_vars_compatible(&x, &x));
+        assert!(deopt_vars_compatible(&y, &y));
+        assert!(deopt_vars_compatible(&x, &y));
+        assert!(deopt_vars_compatible(&y, &x));
+        assert!(!deopt_vars_compatible(&x, &z));
+        assert!(!deopt_vars_compatible(&y, &z));
+    }
 
     #[derive(Copy, Clone, Debug, Display, EnumCount, FromRepr, PartialEq)]
     #[repr(u8)]
