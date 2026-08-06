@@ -1276,7 +1276,21 @@ fn deopt_vars_compatible<Reg: RegT>(cnd: &[DeoptVar<Reg>], with: &[DeoptVar<Reg>
             && x.fromvlocs
                 .iter()
                 .zip(y.fromvlocs.iter())
-                .all(|(x, y)| x == y)
+                // OPT: We could do this unsorted, but then we have to do the checks in both
+                // directions. It's unclear if that's worth it, when the common case is "both sides
+                // have 1 entry".
+                .all(|(x, y)| match (x, y) {
+                    (VarLoc::Stack(lhs), VarLoc::Stack(rhs)) => lhs == rhs,
+                    (VarLoc::StackOff(lhs), VarLoc::StackOff(rhs)) => lhs == rhs,
+                    (VarLoc::Reg(reglhs, reglhs_fill), VarLoc::Reg(regrhs, regrhs_fill)) => {
+                        reglhs == regrhs
+                            && (reglhs_fill == regrhs_fill
+                                || *reglhs_fill == RegFill::Undefined
+                                || *regrhs_fill == RegFill::Undefined)
+                    }
+                    (VarLoc::Const(lhs), VarLoc::Const(rhs)) => lhs == rhs,
+                    _ => false,
+                })
     })
 }
 
@@ -1968,10 +1982,7 @@ mod test {
         }];
         let z = vec![DeoptVar {
             bitw: 64,
-            fromvlocs: varlocs![
-                VarLoc::Stack(8),
-                VarLoc::Reg(TestReg::R0, RegFill::Zeroed)
-            ],
+            fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Zeroed)],
             tovlocs: VarLocs::new(),
         }];
 
@@ -1979,8 +1990,16 @@ mod test {
         assert!(deopt_vars_compatible(&y, &y));
         assert!(deopt_vars_compatible(&x, &y));
         assert!(deopt_vars_compatible(&y, &x));
-        assert!(!deopt_vars_compatible(&x, &z));
-        assert!(!deopt_vars_compatible(&y, &z));
+        assert!(deopt_vars_compatible(&x, &z));
+        assert!(deopt_vars_compatible(&z, &x));
+
+        let sgn = vec![DeoptVar {
+            bitw: 64,
+            fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Signed)],
+            tovlocs: VarLocs::new(),
+        }];
+        assert!(!deopt_vars_compatible(&z, &sgn));
+        assert!(!deopt_vars_compatible(&sgn, &z));
     }
 
     #[derive(Copy, Clone, Debug, Display, EnumCount, FromRepr, PartialEq)]
