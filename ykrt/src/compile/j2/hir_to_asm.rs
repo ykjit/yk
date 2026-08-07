@@ -906,7 +906,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // below to see how these are used.
         let mut gexit_vars = Vob::from_elem(false, b.insts_len());
         let mut gcopy = Vob::from_elem(false, b.insts_len());
-        let mut gqueue = Vec::new();
+        let mut gqueue: Vec<InstIdx> = Vec::new();
 
         self.be.about_to_process_block(b, args_vlocs);
 
@@ -1056,6 +1056,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     gqueue.extend(&gextra.deopt_vars);
 
                     while let Some(giidx) = gqueue.pop() {
+                        if gcopy.get(giidx.to_raw_index()).unwrap() {
+                            continue;
+                        }
                         let inst = b.inst(giidx);
 
                         if let Inst::Load(Load {
@@ -1082,12 +1085,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             // We don't copy instructions that are used by non-guard instructions
                             // unless: they're a `Const`; aren't in a register; don't have
                             // side-effects.
-                            gexit_vars.set((giidx).to_raw_index(), true);
+                            gexit_vars.set(giidx.to_raw_index(), true);
                             continue;
                         }
 
                         // We can copy this instruction!
-                        gcopy.set((giidx).to_raw_index(), true);
+                        gcopy.set(giidx.to_raw_index(), true);
                         // Add all this instruction's operand references to the queue.
                         for op_iidx in inst.iter_iidxs(b) {
                             gqueue.push(op_iidx);
