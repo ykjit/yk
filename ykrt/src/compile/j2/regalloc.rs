@@ -1523,11 +1523,11 @@ pub(super) trait TestRegIter<Reg: RegT> {
 }
 
 /// An unordered set of [VarLoc]s.
-///
-/// Note: this happens to be stored as a [SmallVec] because that is an efficient use of space, but
-/// nothing should be inferred about the order of [VarLoc]s from that.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(super) struct VarLocs<Reg: RegT> {
+    /// Note: this happens to be stored as a [SmallVec] because that is an efficient use of space
+    /// -- typically there are 1 or at most two [VarLoc]s per [VarLocs] -- but nothing should be
+    /// inferred about the order of [VarLoc]s from that.
     raw: SmallVec<[VarLoc<Reg>; 1]>,
 }
 
@@ -1573,6 +1573,20 @@ impl<Reg: RegT> VarLocs<Reg> {
     /// of the retained elements.
     pub fn retain<F: FnMut(&mut VarLoc<Reg>) -> bool>(&mut self, f: F) {
         self.raw.retain(f);
+    }
+}
+
+impl<Reg: RegT> PartialEq for VarLocs<Reg> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            false
+        } else if self.len() == 1 {
+            // When there's only one item we can do a very quick comparison.
+            self.raw[0] == other.raw[0]
+        } else {
+            self.iter().all(|x| other.iter().any(|y| x == y))
+                && other.iter().all(|x| other.iter().any(|y| x == y))
+        }
     }
 }
 
@@ -1919,6 +1933,7 @@ pub(crate) mod test {
         },
         location::{HotLocation, HotLocationKind},
         mt::TraceId,
+        varlocs,
     };
     use fm::{FMBuilder, FMatcher};
 
@@ -1981,6 +1996,28 @@ pub(crate) mod test {
         assert!(AnyOfFill::new().with_undefined().has_undefined());
         assert!(!AnyOfFill::new().with_signed().has_undefined());
         assert!(!AnyOfFill::new().with_zeroed().has_undefined());
+    }
+
+    #[test]
+    fn varlocs_are_unordered() {
+        let x = varlocs![
+            VarLoc::Stack(8),
+            VarLoc::Reg(TestReg::GPR0, RegFill::Undefined)
+        ];
+        let y = varlocs![
+            VarLoc::Reg(TestReg::GPR0, RegFill::Undefined),
+            VarLoc::Stack(8)
+        ];
+        assert_eq!(x, x);
+        assert_eq!(y, y);
+        assert_eq!(x, y);
+
+        let z = varlocs![
+            VarLoc::Reg(TestReg::GPR0, RegFill::Zeroed),
+            VarLoc::Stack(8)
+        ];
+        assert_ne!(x, z);
+        assert_ne!(y, z);
     }
 
     #[derive(Copy, Clone, Debug, Display, EnumCount, FromRepr, PartialEq)]
