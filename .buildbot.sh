@@ -257,8 +257,8 @@ cd ykcbf
 git fetch --depth=1 origin "$YKCBF_COMMIT"
 git checkout "$YKCBF_COMMIT"
 PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug make
-./bf_simple_yk lang_tests/bench.bf
-./bf_simple_yk lang_tests/hanoi-opt.bf
+YKD_SERIALISE_COMPILATION=1 ./bf_simple_yk lang_tests/bench.bf
+YKD_SERIALISE_COMPILATION=1 ./bf_simple_yk lang_tests/hanoi-opt.bf
 cd ..
 
 # Check licenses.
