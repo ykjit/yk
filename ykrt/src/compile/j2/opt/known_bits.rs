@@ -13,14 +13,14 @@ use crate::compile::{
     },
     jitc_yk::arbbitint::ArbBitInt,
 };
-use index_vec::IndexVec;
+use index_type::vec::TypedVec;
 
 /// Known-bits analysis.
 pub(super) struct KnownBits {
     /// Maps an SSA value to its corresponding known bits.  The value is None by default when
     /// unpopulated. When querying for the value, a None value is returned as a `KnownBitValue`
     /// with all bits set to unknown.
-    known_bits: IndexVec<InstIdx, Option<KnownBitValue>>,
+    known_bits: TypedVec<InstIdx, Option<KnownBitValue>>,
     /// The KnownBitValue of the current instruction being processed. This is only committed at
     /// the end of the instruction's analysis.
     pending_commit: Option<KnownBitValue>,
@@ -78,10 +78,10 @@ impl PassT for KnownBits {
         &mut self,
         opt: &mut PassOpt,
         entry: &Block,
-        map: &IndexVec<InstIdx, InstIdx>,
+        map: &TypedVec<InstIdx, InstIdx>,
     ) {
         assert!(self.pending_commit.is_none());
-        let mut new = IndexVec::with_capacity(entry.insts_len());
+        let mut new = TypedVec::with_capacity(entry.insts_len());
         for iidx in entry.term_vars().iter().cloned() {
             if let Some(ConstKind::Int(x)) = opt.as_constkind(map[iidx]) {
                 new.push(Some(KnownBitValue::from_const(x.clone())));
@@ -97,7 +97,7 @@ impl KnownBits {
     /// Create an empty known bits analysis object.
     pub(super) fn new() -> Self {
         KnownBits {
-            known_bits: IndexVec::new(),
+            known_bits: TypedVec::new(),
             pending_commit: None,
         }
     }

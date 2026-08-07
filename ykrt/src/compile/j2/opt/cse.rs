@@ -24,7 +24,7 @@ use crate::compile::j2::{
         fullopt::{CommitInstOpt, OptOutcome, PassOpt, PassT},
     },
 };
-use index_vec::IndexVec;
+use index_type::{IndexType, vec::TypedVec};
 use strum::EnumCount;
 
 /// Common supexpression elimination.
@@ -47,10 +47,10 @@ impl CSE {
         // Because we use `HEAD_UINT::MAX` as our "we haven't seen anything here yet" value, we
         // have to make sure we won't overlap with a genuine value.
         const {
-            assert!(InstIdx::MAX_INDEX > Inst::COUNT);
+            assert!(InstIdx::MAX_RAW_INDEX > Inst::COUNT);
         }
         Self {
-            heads: [InstIdx::from_usize(InstIdx::MAX_INDEX); Inst::COUNT],
+            heads: [InstIdx::MAX_INDEX; Inst::COUNT],
             predecessors: Vec::new(),
         }
     }
@@ -71,14 +71,17 @@ impl PassT for CSE {
 
         // Work out what the maximum iidx this instruction refers to: we know there's no point
         // going further back than that.
-        let max_ref = inst.iter_iidxs(opt).max().unwrap_or(InstIdx::from(0));
+        let max_ref = inst
+            .iter_iidxs(opt)
+            .max()
+            .unwrap_or(InstIdx::from_raw_index(0));
         let mut cur = self.heads[InstDiscriminants::from(&inst) as usize];
         while cur != InstIdx::MAX_INDEX && cur >= max_ref {
             let equiv = opt.equiv_iidx(cur);
             if equiv >= max_ref && opt.inst(equiv).cse_eq(opt, &inst) {
                 return OptOutcome::Equiv(equiv);
             }
-            cur = self.predecessors[usize::from(cur)];
+            cur = self.predecessors[(cur).to_raw_index()];
         }
         OptOutcome::Rewritten(inst)
     }
@@ -92,7 +95,7 @@ impl PassT for CSE {
         let dim_off = InstDiscriminants::from(inst) as usize;
         let prev = self.heads[dim_off];
         self.predecessors.push(prev);
-        self.heads[dim_off] = InstIdx::from_usize(self.predecessors.len() - 1);
+        self.heads[dim_off] = InstIdx::from_raw_index(self.predecessors.len() - 1);
     }
 
     fn equiv_committed(&mut self, _equiv1: InstIdx, _equiv2: InstIdx) {}
@@ -101,9 +104,9 @@ impl PassT for CSE {
         &mut self,
         opt: &mut PassOpt,
         _entry: &Block,
-        _map: &IndexVec<InstIdx, InstIdx>,
+        _map: &TypedVec<InstIdx, InstIdx>,
     ) {
-        self.heads = [InstIdx::from_usize(InstIdx::MAX_INDEX); Inst::COUNT];
+        self.heads = [InstIdx::MAX_INDEX; Inst::COUNT];
         self.predecessors.clear();
         for _ in 0..opt.insts_len() {
             self.predecessors.push(InstIdx::MAX);

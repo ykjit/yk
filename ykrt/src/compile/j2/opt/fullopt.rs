@@ -132,7 +132,7 @@ use crate::compile::{
         },
     },
 };
-use index_vec::*;
+use index_type::{IndexType, typed_vec, vec::TypedVec};
 use smallvec::SmallVec;
 use std::{
     assert_matches,
@@ -153,7 +153,7 @@ pub(in crate::compile::j2) struct FullOpt {
 
 impl FullOpt {
     pub(in crate::compile::j2) fn new() -> Self {
-        let mut tys = IndexVec::new();
+        let mut tys = TypedVec::new();
         let mut ty_map = HashMap::new();
         let tyidx_void = tys.push(Ty::Void);
         ty_map.insert(Ty::Void, tyidx_void);
@@ -169,9 +169,9 @@ impl FullOpt {
                 Box::new(CSE::new()),
             ],
             inner: OptInternal {
-                insts: IndexVec::new(),
+                insts: TypedVec::new(),
                 consts_map: HashMap::new(),
-                guard_extras: IndexVec::new(),
+                guard_extras: TypedVec::new(),
                 tys,
                 tyidx_int1,
                 tyidx_ptr0,
@@ -182,11 +182,11 @@ impl FullOpt {
     }
 
     #[cfg(test)]
-    pub(in crate::compile::j2) fn new_testing(tys: IndexVec<TyIdx, Ty>) -> Self {
+    pub(in crate::compile::j2) fn new_testing(tys: TypedVec<TyIdx, Ty>) -> Self {
         let ty_map = HashMap::from_iter(
             tys.iter()
                 .enumerate()
-                .map(|(x, y)| (y.to_owned(), TyIdx::from(x))),
+                .map(|(x, y)| (y.to_owned(), TyIdx::from_raw_index(x))),
         );
         let tyidx_ptr0 = *ty_map.get(&Ty::Ptr(0)).unwrap_or_else(|| panic!());
         let tyidx_void = *ty_map.get(&Ty::Void).unwrap_or_else(|| panic!());
@@ -199,9 +199,9 @@ impl FullOpt {
                 Box::new(CSE::new()),
             ],
             inner: OptInternal {
-                insts: IndexVec::new(),
+                insts: TypedVec::new(),
                 consts_map: HashMap::new(),
-                guard_extras: IndexVec::new(),
+                guard_extras: TypedVec::new(),
                 tys,
                 tyidx_int1,
                 tyidx_ptr0,
@@ -280,7 +280,7 @@ impl FullOpt {
         F: FnMut(&mut dyn PassT, &CommitInstOpt, InstIdx),
     {
         if let Inst::Const(x) = &inst {
-            let iidx = self.inner.insts.len_idx();
+            let iidx = self.inner.insts.len();
             self.inner
                 .consts_map
                 .insert(HashableConst(x.to_owned()), iidx);
@@ -322,11 +322,11 @@ impl ModLikeT for FullOpt {
 
 impl BlockLikeT for FullOpt {
     fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.inner.insts[usize::from(idx)].inst
+        &self.inner.insts[idx].inst
     }
 
     fn insts_len(&self) -> usize {
-        self.inner.insts.len()
+        self.inner.insts.len_usize()
     }
 
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
@@ -339,7 +339,7 @@ impl BlockLikeT for FullOpt {
 }
 
 impl OptT for FullOpt {
-    fn build(self: Box<Self>) -> Result<(Block, IndexVec<TyIdx, Ty>), CompilationError> {
+    fn build(self: Box<Self>) -> Result<(Block, TypedVec<TyIdx, Ty>), CompilationError> {
         Ok((
             Block {
                 insts: self
@@ -347,7 +347,7 @@ impl OptT for FullOpt {
                     .insts
                     .into_iter()
                     .map(|x| x.inst)
-                    .collect::<IndexVec<_, _>>(),
+                    .collect::<TypedVec<_, _>>(),
                 guard_extras: self.inner.guard_extras,
             },
             self.inner.tys,
@@ -356,14 +356,14 @@ impl OptT for FullOpt {
 
     fn build_with_peel(
         mut self: Box<Self>,
-    ) -> Result<(Block, Option<Block>, IndexVec<TyIdx, Ty>), CompilationError> {
+    ) -> Result<(Block, Option<Block>, TypedVec<TyIdx, Ty>), CompilationError> {
         // First of all create the entry iteration `Block`. This is useful when we're creating the
         // peel `Block` below.
         let entry = Block {
             insts: mem::take(&mut self.inner.insts)
                 .into_iter()
                 .map(|x| x.inst)
-                .collect::<IndexVec<_, _>>(),
+                .collect::<TypedVec<_, _>>(),
             guard_extras: mem::take(&mut self.inner.guard_extras),
         };
         self.inner.consts_map.clear();
@@ -371,26 +371,26 @@ impl OptT for FullOpt {
 
         // Dead code analysis: we don't want to waste energy feeding things into the peel that
         // can't possibly be used.
-        let mut is_used = Vob::from_elem(false, entry.insts.len());
+        let mut is_used = Vob::from_elem(false, entry.insts.len_usize());
         for (iidx, inst) in entry.insts_iter(..).rev() {
-            if is_used[usize::from(iidx)]
+            if is_used[iidx.to_raw_index()]
                 || inst
                     .read_effects()
                     .interferes(Effects::none().add_volatile())
                 || inst.write_effects().interferes(Effects::all())
             {
-                is_used.set(usize::from(iidx), true);
+                is_used.set(iidx.to_raw_index(), true);
                 for op_iidx in inst.iter_iidxs(&entry) {
-                    is_used.set(usize::from(op_iidx), true);
+                    is_used.set(op_iidx.to_raw_index(), true);
                 }
             }
         }
 
         // For each terminal exit variable in the entry block, create an arg/const in the peel
         // block.
-        let mut map = index_vec![InstIdx::MAX; entry.insts.len()];
+        let mut map = typed_vec![InstIdx::MAX; entry.insts.len_usize()];
         for entry_iidx in entry.term_vars() {
-            let peel_iidx = self.inner.insts.len_idx();
+            let peel_iidx = self.inner.insts.len();
             // FIXME: The next line won't work when we do loop-invariant code motion.
             map[peel_iidx] = peel_iidx;
             map[*entry_iidx] = peel_iidx;
@@ -430,8 +430,8 @@ impl OptT for FullOpt {
         }
 
         // Feed each instruction from `entry` (except the arguments!) into the peel.
-        for iidx in (entry.term_vars().len()..entry.insts_len()).map(InstIdx::new) {
-            if !is_used[usize::from(iidx)] {
+        for iidx in (entry.term_vars().len()..entry.insts_len()).map(InstIdx::from_raw_index) {
+            if !is_used[iidx.to_raw_index()] {
                 continue;
             }
             let mut inst = entry.inst(iidx).clone();
@@ -477,7 +477,7 @@ impl OptT for FullOpt {
             insts: mem::take(&mut self.inner.insts)
                 .into_iter()
                 .map(|x| x.inst)
-                .collect::<IndexVec<_, _>>(),
+                .collect::<TypedVec<_, _>>(),
             guard_extras: mem::take(&mut self.inner.guard_extras),
         };
 
@@ -525,13 +525,13 @@ impl EquivIIdxT for FullOpt {
 // The shared part of the optimiser.
 
 struct OptInternal {
-    insts: IndexVec<InstIdx, InstEquiv>,
+    insts: TypedVec<InstIdx, InstEquiv>,
     /// A map allowing us to deduplicate constants. Note the use of [HashableConst]: constant
     /// deduplication is "best effort" because of the difficulties imposed by floating point
     /// numbers.
     consts_map: HashMap<HashableConst, InstIdx>,
-    guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
-    tys: IndexVec<TyIdx, Ty>,
+    guard_extras: TypedVec<GuardExtraIdx, GuardExtra>,
+    tys: TypedVec<TyIdx, Ty>,
     /// The [TyIdx] for [Ty::Int(1)].
     tyidx_int1: TyIdx,
     /// The [TyIdx] for [Ty::Ptr(0)].
@@ -661,7 +661,7 @@ pub(super) trait PassT {
         &mut self,
         opt: &mut PassOpt,
         entry: &Block,
-        map: &IndexVec<InstIdx, InstIdx>,
+        map: &TypedVec<InstIdx, InstIdx>,
     );
 }
 
@@ -704,7 +704,9 @@ impl PassOpt<'_> {
         {
             return *x;
         }
-        let iidx = InstIdx::from_usize(self.optinternal.insts.len() + self.inner.pre_insts.len());
+        let iidx = InstIdx::from_raw_index(
+            self.optinternal.insts.len_usize() + self.inner.pre_insts.len(),
+        );
         self.inner.pre_insts.push(preinst);
         iidx
     }
@@ -729,7 +731,7 @@ impl BlockLikeT for PassOpt<'_> {
     }
 
     fn insts_len(&self) -> usize {
-        self.optinternal.insts.len()
+        self.optinternal.insts.len_usize()
     }
 
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
@@ -812,7 +814,7 @@ impl BlockLikeT for CommitInstOpt<'_> {
     }
 
     fn insts_len(&self) -> usize {
-        self.inner.insts.len()
+        self.inner.insts.len_usize()
     }
 
     fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
@@ -857,7 +859,7 @@ pub(in crate::compile::j2) mod test {
     use super::*;
     use crate::compile::j2::{hir_parser::str_to_mod, regalloc::RegT, regalloc::test::TestReg};
     use fm::FMBuilder;
-    use index_vec::IndexVec;
+    use index_type::vec::TypedVec;
     use lazy_static::lazy_static;
     use regex::Regex;
 
@@ -897,10 +899,10 @@ pub(in crate::compile::j2) mod test {
         // all, so when we get to `blackbox %2` there is no `%2` to reference: we'd get an
         // out-of-bounds error! We thus need to rewrite this to `blackbox %0` _before_ feeding the
         // instruction to the optimiser.
-        let mut opt_map = IndexVec::with_capacity(insts.len());
+        let mut opt_map = TypedVec::with_capacity(insts.len_usize());
         let mut insts_iter = insts.into_iter();
         for _ in 0..args_vlocs.len() {
-            opt_map.push(opt_map.len_idx());
+            opt_map.push(opt_map.len());
             fopt.feed_arg(insts_iter.next().unwrap().clone()).unwrap();
         }
         for inst in insts_iter {
@@ -910,14 +912,14 @@ pub(in crate::compile::j2) mod test {
                 x.geidx = GuardExtraIdx::MAX;
                 fopt.feed_guard(x, fopt.inner.guard_extras[geidx].clone())
                     .unwrap();
-                opt_map.push(opt_map.len_idx());
+                opt_map.push(opt_map.len());
             } else if let Inst::Arg(_) = inst {
                 unreachable!();
             } else if *m.ty(inst.tyidx(&m)) == Ty::Void {
                 if let Some(x) = fopt.feed_void(inst).unwrap() {
                     opt_map.push(x);
                 } else {
-                    opt_map.push(opt_map.len_idx());
+                    opt_map.push(opt_map.len());
                 }
             } else {
                 opt_map.push(fopt.feed(inst).unwrap());
@@ -1000,7 +1002,7 @@ pub(in crate::compile::j2) mod test {
         }
         // We need to maintain a manual map of iidxs the user has written in their test to the
         // current state of the actual optimiser. See the comment in [full_opt_test].
-        let mut opt_map = IndexVec::with_capacity(insts.len());
+        let mut opt_map = TypedVec::with_capacity(insts.len_usize());
         for mut inst in insts.into_iter() {
             inst.rewrite_iidxs(&mut *fopt, |x| opt_map[x]);
             let mut popt_inner = PassOptInner::new();
@@ -1042,7 +1044,7 @@ pub(in crate::compile::j2) mod test {
                 }
             }
 
-            let iidx = fopt.inner.insts.len_idx();
+            let iidx = fopt.inner.insts.len();
             opt_map.push(iidx);
             fopt.inner.insts.push(InstEquiv {
                 inst,

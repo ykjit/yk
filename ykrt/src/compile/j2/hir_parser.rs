@@ -35,7 +35,7 @@ use crate::{
     },
     mt::TraceId,
 };
-use index_vec::IndexVec;
+use index_type::{IndexType, vec::TypedVec};
 use lrlex::{DefaultLexerTypes, LRNonStreamingLexer, lrlex_mod};
 use lrpar::{NonStreamingLexer, Span, lrpar_mod};
 use smallvec::SmallVec;
@@ -49,15 +49,15 @@ type StorageT = u16;
 /// binary, not a ykllvm compiled C program. If we want to use a [DeoptStatepoint] in tests, we
 /// have to create a dummy.
 static TEST_DEOPT_STATEPOINT: LazyLock<Statepoint> = LazyLock::new(|| Statepoint {
-    smapidx: StackMapIdx::from(0),
+    smapidx: StackMapIdx::from_raw_index(0),
     lives: Vec::new(),
 });
 
 struct HirParser<'lexer, 'input: 'lexer, Reg: RegT> {
     lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
     externs: HashMap<&'input str, (TyIdx, Vec<AstFuncAttr>)>,
-    insts: IndexVec<InstIdx, Inst>,
-    tys: IndexVec<TyIdx, Ty>,
+    insts: TypedVec<InstIdx, Inst>,
+    tys: TypedVec<TyIdx, Ty>,
     /// The [TyIdx] for [Ty::Int(1)].
     tyidx_int1: TyIdx,
     /// The [TyIdx] for [Ty::Ptr(0)].
@@ -133,11 +133,11 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
         }
 
         let mut args_vlocs = Vec::new();
-        let mut guards = IndexVec::new();
+        let mut guards = TypedVec::new();
         let mut testregiter = Reg::iter_test_regs();
         let mut autoregused = false;
         let mut manualregused = false;
-        let mut smaps = IndexVec::new();
+        let mut smaps: TypedVec<StackMapIdx, Vec<VarLocs<Reg>>> = TypedVec::new();
         for inst in astinsts {
             match inst {
                 AstInst::Blackbox(span) => {
@@ -528,7 +528,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into_iter()
                         .map(|x| self.p_local(x))
                         .collect::<Vec<_>>();
-                    let mut deopt_frames = SmallVec::with_capacity(smaps.len());
+                    let mut deopt_frames = SmallVec::with_capacity(smaps.len_usize());
                     for x in gsmaps {
                         let lives = x
                             .into_iter()
@@ -541,7 +541,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                                 BBlockInstIdx::new(0),
                             ),
                             pc_statepoint: &TEST_DEOPT_STATEPOINT,
-                            smapidx: smaps.len_idx(),
+                            smapidx: smaps.len(),
                         });
                         smaps.push(lives);
                     }
@@ -1054,7 +1054,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
         if n != self.insts.len() {
             self.err_span(
                 span,
-                &format!("Incorrect local: should be '%{}'", self.insts.len()),
+                &format!("Incorrect local: should be '%{}'", self.insts.len_usize()),
             );
         }
     }
@@ -1064,7 +1064,7 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
         assert_eq!(s.chars().nth(0).unwrap(), '%');
         s[1..]
             .parse::<u32>()
-            .map(|x| InstIdx::from(usize::try_from(x).unwrap()))
+            .map(|x| InstIdx::from_raw_index(usize::try_from(x).unwrap()))
             .unwrap_or_else(|e| self.err_span(span, &e.to_string()))
     }
 
@@ -1219,7 +1219,7 @@ pub(super) fn str_to_mod<Reg: RegT>(s: &str) -> Mod<Reg> {
         panic!("No AST produced")
     };
 
-    let mut tys = IndexVec::new();
+    let mut tys = TypedVec::new();
     let mut ty_map = HashMap::new();
     let tyidx_void = tys.push(Ty::Void);
     ty_map.insert(Ty::Void, tyidx_void);
@@ -1231,7 +1231,7 @@ pub(super) fn str_to_mod<Reg: RegT>(s: &str) -> Mod<Reg> {
     let hp = HirParser {
         lexer: &lexer,
         externs: HashMap::new(),
-        insts: IndexVec::new(),
+        insts: TypedVec::new(),
         tys,
         tyidx_int1,
         tyidx_ptr0,

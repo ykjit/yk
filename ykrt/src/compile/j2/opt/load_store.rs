@@ -28,7 +28,7 @@ use crate::compile::j2::{
         fullopt::{CommitInstOpt, OptOutcome, PassOpt, PassT},
     },
 };
-use index_vec::IndexVec;
+use index_type::vec::TypedVec;
 use std::{collections::HashMap, mem};
 
 /// Load/Store elimination
@@ -209,7 +209,7 @@ impl PassT for LoadStore {
         &mut self,
         opt: &mut PassOpt,
         entry: &Block,
-        map: &IndexVec<InstIdx, InstIdx>,
+        map: &TypedVec<InstIdx, InstIdx>,
     ) {
         let mut new_hv = HashMap::new();
 

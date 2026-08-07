@@ -36,8 +36,9 @@ use crate::{
     mt::{MT, TraceId},
     trace::TraceAction,
 };
+use index_type::IndexType;
 #[cfg(test)]
-use index_vec::IndexVec;
+use index_type::vec::TypedVec;
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
 use std::{
@@ -209,7 +210,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     .as_any()
                     .downcast::<J2CompiledTrace<Reg>>()
                     .unwrap();
-                let src_gidx = CompiledGuardIdx::from(usize::from(*src_gid));
+                let src_gidx = CompiledGuardIdx::from_raw_index(usize::from(*src_gid));
                 let prev_bid = src_ctr.bid(src_gidx);
                 self.prev_bid = Some(prev_bid);
                 let tgt_ctr = tgt_ctr.as_ref().map(|x| {
@@ -398,7 +399,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             tyidx_void,
             addr_name_map: self.addr_name_map,
             #[cfg(test)]
-            smaps: IndexVec::new(),
+            smaps: TypedVec::new(),
         };
 
         let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -494,7 +495,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 pc,
                 pc_statepoint,
                 #[cfg(test)]
-                smapidx: StackMapIdx::new(0),
+                smapidx: StackMapIdx::from_raw_index(0),
             });
         }
 

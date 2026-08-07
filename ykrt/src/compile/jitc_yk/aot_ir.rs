@@ -30,6 +30,7 @@
 use crate::aotsmp::StackMapIdx;
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
+use index_type::IndexType;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -402,8 +403,8 @@ index!(ArgIdx);
 /// avoid type inference errors, so it's easier to have a single helper function rather than inline
 /// this into each `map` attribute.
 fn map_to_stackmapidx(v: u64) -> Result<StackMapIdx, DekuError> {
-    match usize::try_from(v).map(StackMapIdx::try_from) {
-        Ok(Ok(x)) => Ok(x),
+    match usize::try_from(v).map(StackMapIdx::from_raw_index) {
+        Ok(x) => Ok(x),
         _ => Err(DekuError::Parse(Cow::Borrowed("Couldn't map StackMapIdx"))),
     }
 }

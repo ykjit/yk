@@ -27,7 +27,7 @@ use crate::compile::{
     j2::codebuf::{CodeBufInProgress, ExeCodeBuf},
 };
 use iced_x86::{Encoder, Formatter, Instruction as Op, NasmFormatter};
-use index_vec::{IndexVec, index_vec};
+use index_type::{IndexType, typed_vec, vec::TypedVec};
 use std::slice;
 
 pub(super) struct Asm {
@@ -43,7 +43,7 @@ pub(super) struct Asm {
     fmtr: Option<NasmFormatter>,
     /// Labels. New labels start with a value of `None`; when they are assigned to an instruction,
     /// this will become `Some(...)`.
-    labels: IndexVec<LabelIdx, Option<u32>>,
+    labels: TypedVec<LabelIdx, Option<u32>>,
     /// Operations (CALLs, JMPs), which need relocating. These are not stored in any particular
     /// order.
     relocs: Vec<(u32, u8, RelocKind)>,
@@ -71,7 +71,7 @@ impl Asm {
             buf_end_off: buf_used,
             enc: Encoder::new(64),
             fmtr,
-            labels: index_vec![],
+            labels: typed_vec![],
             relocs: Vec::new(),
             log: if log { Some(Vec::new()) } else { None },
         }
@@ -95,7 +95,7 @@ impl Asm {
     /// before `attach_label` is called).
     pub(super) fn attach_label(&mut self, lidx: LabelIdx) {
         if let Some(log) = &mut self.log {
-            log.push(format!("; l{}", usize::from(lidx)));
+            log.push(format!("; l{}", (lidx).to_raw_index()));
         }
         self.labels[lidx] = Some(self.buf_end_off);
     }
@@ -221,7 +221,7 @@ impl Asm {
             let off = s.rfind(' ').unwrap();
             match &reloc {
                 RelocKind::AbsoluteWithLabel(lidx) | RelocKind::NearWithLabel(lidx) => {
-                    s.replace_range(off.., &format!(" l{}", usize::from(*lidx)));
+                    s.replace_range(off.., &format!(" l{}", (*lidx).to_raw_index()));
                 }
                 RelocKind::NearWithAddr(addr) | RelocKind::NearCallWithAddr(addr) => {
                     s.replace_range(off.., &format!(" 0x{addr:X}"));
@@ -352,15 +352,14 @@ pub(super) enum RelocKind {
     NearCallWithAddr(usize),
 }
 
-index_vec::define_index_type! {
-    struct BlockIdx = u16;
-}
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+#[allow(dead_code)]
+struct BlockIdx(u16);
 
-index_vec::define_index_type! {
-    /// The offset of an operation in a [Block].
-    struct OpIdx = u32;
-}
+/// The offset of an operation in a [Block].
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+#[allow(dead_code)]
+struct OpIdx(u32);
 
-index_vec::define_index_type! {
-    pub(in crate::compile::j2) struct LabelIdx = u32;
-}
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+pub(in crate::compile::j2) struct LabelIdx(u32);

@@ -1,4 +1,4 @@
-use index_vec::{IndexVec, define_index_type};
+use index_type::{IndexType, vec::TypedVec};
 use object::{Object, ObjectSection};
 use std::sync::LazyLock;
 #[cfg(not(test))]
@@ -6,10 +6,15 @@ use std::thread;
 use ykaddr::obj::SELF_BIN_MMAP;
 use yksmp::{PrologueInfo, Record, StackMapParser};
 
-define_index_type! {
-    /// The index of a given stackmap in a module's [Record]s.
-    pub struct StackMapIdx = usize;
-    DISPLAY_FORMAT = "{}";
+/// The index of a given stackmap in a module's [Record]s.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+pub struct StackMapIdx(usize);
+
+impl std::fmt::Display for StackMapIdx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_raw_index().fmt(f)
+    }
 }
 
 /// Parsed stackmap information of the AOT module.
@@ -18,7 +23,7 @@ pub(crate) struct AOTStackmapInfo {
     pinfos: Vec<PrologueInfo>,
     /// All stackmap records of the module, and the index of the prologue info relevant for each
     /// record.
-    records: IndexVec<StackMapIdx, (Record, usize)>,
+    records: TypedVec<StackMapIdx, (Record, usize)>,
 }
 
 impl AOTStackmapInfo {
@@ -47,7 +52,7 @@ pub(crate) static AOT_STACKMAPS: LazyLock<Result<AOTStackmapInfo, String>> = Laz
         let (pinfos, records) = StackMapParser::parse(data);
         Ok(AOTStackmapInfo {
             pinfos,
-            records: IndexVec::from_vec(records),
+            records: TypedVec::from_vec(records),
         })
     }
 
