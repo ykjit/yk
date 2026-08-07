@@ -9,13 +9,13 @@ use crate::compile::{
         opt::{EquivIIdxT, OptT},
     },
 };
-use index_vec::*;
+use index_type::vec::TypedVec;
 use std::{assert_matches, collections::HashMap};
 
 pub(in crate::compile::j2) struct NoOpt {
-    insts: IndexVec<InstIdx, Inst>,
-    guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
-    tys: IndexVec<TyIdx, Ty>,
+    insts: TypedVec<InstIdx, Inst>,
+    guard_extras: TypedVec<GuardExtraIdx, GuardExtra>,
+    tys: TypedVec<TyIdx, Ty>,
     /// The [TyIdx] for [Ty::Int(1)].
     tyidx_int1: TyIdx,
     /// The [TyIdx] for [Ty::Ptr(0)].
@@ -28,7 +28,7 @@ pub(in crate::compile::j2) struct NoOpt {
 
 impl NoOpt {
     pub(in crate::compile::j2) fn new() -> Self {
-        let mut tys = IndexVec::new();
+        let mut tys = TypedVec::new();
         let mut ty_map = HashMap::new();
         let tyidx_void = tys.push(Ty::Void);
         ty_map.insert(Ty::Void, tyidx_void);
@@ -37,8 +37,8 @@ impl NoOpt {
         let tyidx_int1 = tys.push(Ty::Int(1));
         ty_map.insert(Ty::Int(1), tyidx_int1);
         Self {
-            insts: IndexVec::new(),
-            guard_extras: IndexVec::new(),
+            insts: TypedVec::new(),
+            guard_extras: TypedVec::new(),
             tys,
             tyidx_int1,
             tyidx_ptr0,
@@ -72,11 +72,11 @@ impl ModLikeT for NoOpt {
 
 impl BlockLikeT for NoOpt {
     fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[usize::from(idx)]
+        &self.insts[idx]
     }
 
     fn insts_len(&self) -> usize {
-        self.insts.len()
+        self.insts.len_usize()
     }
 
     fn gextra(&self, _geidx: GuardExtraIdx) -> &GuardExtra {
@@ -89,7 +89,7 @@ impl BlockLikeT for NoOpt {
 }
 
 impl OptT for NoOpt {
-    fn build(self: Box<Self>) -> Result<(Block, IndexVec<TyIdx, Ty>), CompilationError> {
+    fn build(self: Box<Self>) -> Result<(Block, TypedVec<TyIdx, Ty>), CompilationError> {
         Ok((
             Block {
                 insts: self.insts,
@@ -101,7 +101,7 @@ impl OptT for NoOpt {
 
     fn build_with_peel(
         self: Box<Self>,
-    ) -> Result<(Block, Option<Block>, IndexVec<TyIdx, Ty>), CompilationError> {
+    ) -> Result<(Block, Option<Block>, TypedVec<TyIdx, Ty>), CompilationError> {
         self.build().map(|(bk, tys)| (bk, None, tys))
     }
 

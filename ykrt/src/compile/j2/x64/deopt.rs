@@ -14,6 +14,7 @@ use crate::{
     log::Verbosity,
     mt::{MTThread, TraceId},
 };
+use index_type::IndexType;
 use std::{
     alloc::{Layout, alloc},
     ffi::c_void,
@@ -140,7 +141,7 @@ thread_local! {
 #[unsafe(no_mangle)]
 pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> ! {
     let gid = GuardId::from(usize::try_from(gid).unwrap());
-    let gidx = CompiledGuardIdx::from(usize::from(gid));
+    let gidx = CompiledGuardIdx::from_raw_index(usize::from(gid));
     let ctr = MTThread::with_borrow(|mtt| mtt.compiled_trace(TraceId::from_u64(trid)))
         .as_any()
         .downcast::<J2CompiledTrace<Reg>>()
@@ -155,7 +156,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             log,
             "deoptimise {{\"trid\": \"{:?}\", \"gidx\": \"{}\"}}",
             ctr.ctrid().as_u64(),
-            usize::from(gidx)
+            gidx.to_raw_index()
         )
     });
 

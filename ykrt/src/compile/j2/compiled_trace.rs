@@ -12,7 +12,7 @@ use crate::{
     location::HotLocation,
     mt::{MT, TraceId},
 };
-use index_vec::IndexVec;
+use index_type::{IndexType, vec::TypedVec};
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::{
@@ -28,7 +28,7 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     pub trid: TraceId,
     pub hl: Weak<Mutex<HotLocation>>,
     codebuf: ExeCodeBuf,
-    pub guards: IndexVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
+    pub guards: TypedVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
     pub trace_start: J2TraceStart<Reg>,
     /// The name used for this trace as linker symbol.
     symbol_name: String,
@@ -40,7 +40,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         m: &Mod<Reg>,
         hl: Weak<Mutex<HotLocation>>,
         codebuf: ExeCodeBuf,
-        guards: IndexVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
+        guards: TypedVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
         trace_start: J2TraceStart<Reg>,
     ) -> Self {
         // Extract source trace ID for guard traces.
@@ -169,7 +169,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     }
 
     fn guard(&self, gid: GuardId) -> &Guard {
-        let gidx = CompiledGuardIdx::from(usize::from(gid));
+        let gidx = CompiledGuardIdx::from_raw_index(usize::from(gid));
         self.guards[gidx].guard()
     }
 
@@ -177,7 +177,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     // / J2CompiledTrace makes this awkward.
     #[cfg(target_arch = "x86_64")]
     fn patch_guard(&self, gid: GuardId, tgt: *const std::ffi::c_void) {
-        let gidx = CompiledGuardIdx::from(usize::from(gid));
+        let gidx = CompiledGuardIdx::from_raw_index(usize::from(gid));
         for patch_off in &self.guards[gidx].patch_offs {
             let patch_off = usize::try_from(*patch_off).unwrap();
             self.codebuf.patch(patch_off, 10, |patch_addr| {
@@ -322,9 +322,8 @@ pub(super) struct DeoptVar<Reg: RegT> {
     pub tovlocs: VarLocs<Reg>,
 }
 
-index_vec::define_index_type! {
-    pub(super) struct CompiledGuardIdx = u16;
-}
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+pub(super) struct CompiledGuardIdx(u16);
 
 #[cfg(test)]
 mod tests {
@@ -336,19 +335,19 @@ mod tests {
             x64::Reg,
         },
     };
-    use index_vec::IndexVec;
+    use index_type::vec::TypedVec;
     use std::sync::LazyLock;
 
     fn empty_block() -> Block {
         Block {
-            insts: IndexVec::new(),
-            guard_extras: IndexVec::new(),
+            insts: TypedVec::new(),
+            guard_extras: TypedVec::new(),
         }
     }
 
     // Dummy DeoptStatepoint for testing
     static TEST_DEOPT_STATEPOINT: LazyLock<Statepoint> = LazyLock::new(|| Statepoint {
-        smapidx: StackMapIdx::new(0),
+        smapidx: StackMapIdx::from_raw_index(0),
         lives: Vec::new(),
     });
 

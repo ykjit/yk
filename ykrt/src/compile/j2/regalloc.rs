@@ -61,7 +61,7 @@ use crate::compile::{
         hir_to_asm::HirToAsmBackend,
     },
 };
-use index_vec::{Idx, IndexVec, index_vec};
+use index_type::{IndexType, typed_vec, vec::TypedVec};
 use smallvec::{SmallVec, smallvec};
 use std::{
     assert_matches,
@@ -76,7 +76,7 @@ pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
     /// The [VarLocs] for each `arg` in [Self::b].
     args_vlocs: &'a [VarLocs<AB::Reg>],
     /// The state of each instruction.
-    istates: IndexVec<InstIdx, IState>,
+    istates: TypedVec<InstIdx, IState>,
     /// The state of each register.
     rstates: RStates<AB::Reg>,
     /// For each instruction, has it yet been used?
@@ -96,11 +96,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // Before processing the main body of a trace, set the stack offset (if any) of entry
         // variables, so that we don't end up unnecessarily spilling them twice during execution.
         // This is an optimisation rather than a necessity.
-        let mut istates = index_vec![IState::None; b.insts_len()];
+        let mut istates = typed_vec![IState::None; b.insts_len()];
         for (iidx, vlocs) in args_vlocs
             .iter()
             .enumerate()
-            .map(|(i, x)| (InstIdx::from_usize(i), x))
+            .map(|(i, x)| (InstIdx::from_raw_index(i), x))
         {
             for vloc in vlocs.iter() {
                 match vloc {
@@ -175,7 +175,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         for (iidx, vlocs) in args_vlocs
             .iter()
             .enumerate()
-            .map(|(x, y)| (InstIdx::from(x), y))
+            .map(|(x, y)| (InstIdx::from_raw_index(x), y))
         {
             for vloc in vlocs.iter() {
                 if let VarLoc::Reg(reg, fill) = vloc {
@@ -202,7 +202,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         for (iidx, vlocs) in args_vlocs
             .iter()
             .enumerate()
-            .map(|(x, y)| (InstIdx::from(x), y))
+            .map(|(x, y)| (InstIdx::from_raw_index(x), y))
         {
             if let IState::Stack(stack_off) = self.istates[iidx]
                 && !vlocs.iter().any(|vloc| matches!(vloc, VarLoc::Stack(_)))
@@ -307,7 +307,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 continue;
             }
             assert!(!b.insts.is_empty());
-            self.is_used.set(usize::from(*iidx), true);
+            self.is_used.set(iidx.to_raw_index(), true);
             let bitw = self.b.inst_bitw(self.m, *iidx);
             for vloc in term_vlocs.iter() {
                 if term_vlocs
@@ -318,9 +318,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 }
                 match vloc {
                     VarLoc::Stack(to_stack_off) => {
-                        if usize::from(*iidx) < all_args_vlocs.len()
+                        if iidx.to_raw_index() < all_args_vlocs.len()
                             && let Some(VarLoc::Stack(from_stack_off)) = all_args_vlocs
-                                [usize::from(*iidx)]
+                                [iidx.to_raw_index()]
                             .iter()
                             .find(|vloc| matches!(vloc, VarLoc::Stack(_)))
                         {
@@ -384,7 +384,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// For guard bodies, ensure that the instructions `iidxs` are marked as used at `term_iidx`.
     pub(super) fn keep_alive_at_term(&mut self, _term_iidx: InstIdx, iidxs: &[InstIdx]) {
         for iidx in iidxs {
-            self.is_used.set(usize::from(*iidx), true);
+            self.is_used.set(iidx.to_raw_index(), true);
         }
     }
 
@@ -416,14 +416,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
             // Work out all the nodes (i.e. registers) and the number of incoming edges (i.e.
             // register copies) to those nodes.
-            let mut nodes = Vob::from_elem(false, AB::Reg::MAX_REGIDX.index());
-            let mut indegrees = index_vec![0; AB::Reg::MAX_REGIDX.index()];
+            let mut nodes = Vob::from_elem(false, AB::Reg::MAX_REGIDX.to_raw_index());
+            let mut indegrees = typed_vec![0; AB::Reg::MAX_REGIDX.to_raw_index()];
             for RegCopy {
                 src_reg, dst_reg, ..
             } in &ractions.distinct_copies
             {
-                nodes.set(src_reg.regidx().index(), true);
-                nodes.set(dst_reg.regidx().index(), true);
+                nodes.set(src_reg.regidx().to_raw_index(), true);
+                nodes.set(dst_reg.regidx().to_raw_index(), true);
                 indegrees[dst_reg.regidx()] += 1;
             }
 
@@ -431,7 +431,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             // that happens naturally because of our `Vob` representation of `nodes`.
             let mut queue = nodes
                 .iter_set_bits(..)
-                .map(|x| AB::Reg::from_regidx(<AB::Reg as RegT>::RegIdx::from_usize(x)))
+                .map(|x| AB::Reg::from_regidx(<AB::Reg as RegT>::RegIdx::from_raw_index(x)))
                 .filter(|reg| indegrees[reg.regidx()] == 0)
                 .collect::<Vec<_>>();
 
@@ -598,13 +598,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     ///
     /// Note: being used in a guard's entry_vars counts as "being used".
     pub(super) fn is_used(&self, iidx: InstIdx) -> bool {
-        self.is_used[usize::from(iidx)]
+        self.is_used[iidx.to_raw_index()]
     }
 
     /// Force the value `iidx` to be marked as used at `cur_iidx`. Must only be used for testing purposes.
     #[cfg(test)]
     pub(super) fn blackbox(&mut self, _cur_iidx: InstIdx, iidx: InstIdx) {
-        self.is_used.set(usize::from(iidx), true);
+        self.is_used.set(iidx.to_raw_index(), true);
     }
 
     /// Return an iterator which will produce all the registers in which `iidx` is contained.
@@ -853,7 +853,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             match cnstr {
                 RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } => (),
                 RegCnstr::Input { in_iidx, .. } => {
-                    self.is_used.set(usize::from(*in_iidx), true);
+                    self.is_used.set((*in_iidx).to_raw_index(), true);
                 }
                 RegCnstr::InputOutput {
                     in_iidx, out_fill, ..
@@ -870,7 +870,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             out_bitw,
                         )?;
                     }
-                    self.is_used.set(usize::from(*in_iidx), true);
+                    self.is_used.set((*in_iidx).to_raw_index(), true);
                 }
                 RegCnstr::Output {
                     out_fill,
@@ -984,7 +984,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             self.istates[*ka_iidx] = IState::Stack(self.stack_off);
                         }
                     }
-                    self.is_used.set(usize::from(*ka_iidx), true);
+                    self.is_used.set((*ka_iidx).to_raw_index(), true);
                 }
             }
         }
@@ -1171,7 +1171,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     continue;
                 }
                 if let RegCnstr::Input { regs, in_iidx, .. } = cnstr
-                    && !self.is_used[usize::from(*in_iidx)]
+                    && !self.is_used[(*in_iidx).to_raw_index()]
                     && regs.contains(&output_reg)
                 {
                     allocs[i] = Some(output_reg);
@@ -1217,7 +1217,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             // their register.
             for (j, in_cnstr) in cnstrs.iter().enumerate() {
                 if let RegCnstr::Input { regs, in_iidx, .. } = in_cnstr
-                    && !self.is_used[usize::from(*in_iidx)]
+                    && !self.is_used[(*in_iidx).to_raw_index()]
                     && regs.contains(&allocs[j].unwrap())
                 {
                     allocs[i] = allocs[j];
@@ -1381,13 +1381,13 @@ enum IState {
 
 #[derive(Clone, Debug)]
 struct RStates<Reg: RegT> {
-    rstate: IndexVec<Reg::RegIdx, RState>,
+    rstate: TypedVec<Reg::RegIdx, RState>,
 }
 
 impl<Reg: RegT> RStates<Reg> {
     fn new() -> Self {
         Self {
-            rstate: index_vec![RState::default(); Reg::MAX_REGIDX.index()],
+            rstate: typed_vec![RState::default(); Reg::MAX_REGIDX.to_raw_index()],
         }
     }
 
@@ -1448,7 +1448,7 @@ impl Default for RState {
 ///     to consider registers as (sensible!) indexes.
 pub(super) trait RegT: Clone + Copy + Debug + Display + PartialEq + Send + Sync {
     /// A register's index. Every register must be convertible to/from this type.
-    type RegIdx: Idx;
+    type RegIdx: Debug + IndexType;
     /// How many registers are available in this system?
     const MAX_REGIDX: Self::RegIdx;
     /// Return the undefined register for this backend: this will be "allocated" by constraints
@@ -2002,18 +2002,19 @@ pub(crate) mod test {
 
     impl RegT for TestReg {
         type RegIdx = TestRegIdx;
-        const MAX_REGIDX: TestRegIdx = TestRegIdx::from_usize_unchecked(TestReg::COUNT);
+        // `TestReg` has fewer than `u8::MAX` variants, so its count fits in `TestRegIdx`.
+        const MAX_REGIDX: TestRegIdx = TestRegIdx(TestReg::COUNT as u8);
 
         fn undefined() -> Self {
             TestReg::Undefined
         }
 
         fn from_regidx(idx: Self::RegIdx) -> Self {
-            TestReg::from_repr(idx.raw()).unwrap()
+            TestReg::from_repr(idx.to_scalar()).unwrap()
         }
 
         fn regidx(&self) -> Self::RegIdx {
-            TestRegIdx::from(*self as usize)
+            TestRegIdx::from_raw_index(*self as usize)
         }
 
         fn is_caller_saved(&self) -> bool {
@@ -2035,9 +2036,8 @@ pub(crate) mod test {
         }
     }
 
-    index_vec::define_index_type! {
-        pub(crate) struct TestRegIdx = u8;
-    }
+    #[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+    pub(crate) struct TestRegIdx(u8);
 
     struct TestRegTestIter<Reg> {
         fp_regs: Box<dyn Iterator<Item = Reg>>,
@@ -2096,7 +2096,7 @@ pub(crate) mod test {
 
     impl PeelRegsBuilderT<TestReg> for TestPeelRegsBuilder {
         fn force_set(&mut self, reg: TestReg) {
-            self.set_regs[usize::from(reg.regidx())] = true;
+            self.set_regs[reg.regidx().to_raw_index()] = true;
         }
 
         fn is_full(&self, _ignore_caller_save: bool) -> bool {
@@ -2172,7 +2172,7 @@ pub(crate) mod test {
             hint_iidx: InstIdx,
         ) -> Option<Self::Reg> {
             if let Inst::Arg(_) = b.inst(hint_iidx)
-                && let Some(VarLoc::Reg(reg, _)) = args_vlocs[usize::from(hint_iidx)]
+                && let Some(VarLoc::Reg(reg, _)) = args_vlocs[(hint_iidx).to_raw_index()]
                     .iter()
                     .find(|x| matches!(x, VarLoc::Reg(_, _)))
             {
@@ -2267,13 +2267,13 @@ pub(crate) mod test {
 
         fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
             self.ra_log.push("controlpoint_loop_end".to_owned());
-            Ok(TestLabelIdx::new(1))
+            Ok(TestLabelIdx::from_raw_index(1))
         }
 
         fn controlpoint_peel_start(&mut self, peel_label: Self::Label) -> Self::Label {
             self.ra_log
                 .push(format!("controlpoint_peel_start {peel_label:?}"));
-            TestLabelIdx::new(2)
+            TestLabelIdx::from_raw_index(2)
         }
 
         fn controlpoint_loop_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {}
@@ -2286,7 +2286,7 @@ pub(crate) mod test {
             _gridx: CompiledGuardIdx,
             _args_vlocs: &[VarLocs<Self::Reg>],
         ) -> Result<Self::Label, CompilationError> {
-            Ok(TestLabelIdx::new(0))
+            Ok(TestLabelIdx::from_raw_index(0))
         }
 
         fn guard_completed(
@@ -2384,7 +2384,7 @@ pub(crate) mod test {
             )?;
 
             self.ra_log.push(format!("alloc %{iidx:?} {cndr:?}"));
-            Ok(TestLabelIdx::new(0))
+            Ok(TestLabelIdx::from_raw_index(0))
         }
 
         fn i_icmp(
@@ -2503,9 +2503,13 @@ pub(crate) mod test {
         }
     }
 
-    index_vec::define_index_type! {
-        struct TestLabelIdx = u32;
-        IMPL_RAW_CONVERSIONS = true;
+    #[derive(Clone, Copy, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+    struct TestLabelIdx(u32);
+
+    impl std::fmt::Debug for TestLabelIdx {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            std::fmt::Debug::fmt(&self.to_raw_index(), f)
+        }
     }
 
     lazy_static! {

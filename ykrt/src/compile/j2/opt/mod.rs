@@ -6,7 +6,7 @@
 //! then used by optimisation passes.
 
 use crate::compile::{CompilationError, j2::hir::*};
-use index_vec::IndexVec;
+use index_type::vec::TypedVec;
 
 mod cse;
 pub(super) mod fullopt;
@@ -20,14 +20,14 @@ mod strength_fold;
 pub(super) trait OptT: EquivIIdxT + ModLikeT + BlockLikeT {
     /// The optimiser has now been fed the complete input and should turn it into: an entry
     /// [Block]; and a set of types (suitable for putting in a [Mod]).
-    fn build(self: Box<Self>) -> Result<(Block, IndexVec<TyIdx, Ty>), CompilationError>;
+    fn build(self: Box<Self>) -> Result<(Block, TypedVec<TyIdx, Ty>), CompilationError>;
 
     /// The optimiser has now been fed the complete input and should turn it into: an entry
     /// [Block]; (optionally) a peeled [Block]; and a set of types (suitable for putting in a
     /// [Mod]).
     fn build_with_peel(
         self: Box<Self>,
-    ) -> Result<(Block, Option<Block>, IndexVec<TyIdx, Ty>), CompilationError>;
+    ) -> Result<(Block, Option<Block>, TypedVec<TyIdx, Ty>), CompilationError>;
 
     /// Feed a non-[Ty::Void] instruction into the optimiser and return an [InstIdx]. The returned
     /// [InstIdx] may refer to a previously inserted instruction, as an optimiser might prove that
@@ -84,7 +84,7 @@ pub(super) trait EquivIIdxT {
     /// %6: i32 = sub %0, %1
     /// ```
     ///
-    /// From instructions 1..=5 `equiv_iidx(InstIdx::from(0))` will return `0`; from that point
+    /// From instructions 1..=5 `equiv_iidx(InstIdx::from_raw_index(0))` will return `0`; from that point
     /// onwards it may (depending on the optimiser!) return `3` because the `guard` proves that it
     /// is equivalent.
     ///

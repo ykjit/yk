@@ -110,7 +110,7 @@ use crate::{
     mt::{MT, TraceId},
     varlocs,
 };
-use index_vec::IndexVec;
+use index_type::{IndexType, vec::TypedVec};
 use parking_lot::Mutex;
 use smallvec::{SmallVec, smallvec};
 use std::{ffi::c_void, sync::Arc};
@@ -124,9 +124,9 @@ pub(super) struct HirToAsm<'a, AB: HirToAsmBackend> {
     log: bool,
     /// The intermediate [AsmGuard] for each [Guard] block in a trace's "main" (i.e. non-[Guard])
     /// blocks. These use [GuardBlockIdx] to emphasise that there is a 1:1 mapping between
-    /// [GuardExtra::gbidx] and this [IndexVec].
+    /// [GuardExtra::gbidx] and this [TypedVec].
     /// These will initially be set to `None`; as the main blocks are processed, they will be set
-    /// to `Some`. Note: [Self::asm_guards] will empty this [IndexVec] completely.
+    /// to `Some`. Note: [Self::asm_guards] will empty this [TypedVec] completely.
     gexits: Vec<GuardExit<'a, AB>>,
 }
 
@@ -149,7 +149,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
                 // FIXME: Relying on stackmap 0 being the control point is a horrible hack.
                 let base_stack_off = u32::try_from({
-                    let (smap, prologue) = aot_smaps.get(StackMapIdx::from(0));
+                    let (smap, prologue) = aot_smaps.get(StackMapIdx::from_raw_index(0));
                     if prologue.hasfp {
                         // FIXME: This needs porting! https://github.com/ykjit/yk/issues/1936
                         #[cfg(not(target_arch = "x86_64"))]
@@ -266,7 +266,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.star_return_end(
                             &mut ra,
                             entry,
-                            InstIdx::from(entry.insts_len() - 1),
+                            InstIdx::from_raw_index(entry.insts_len() - 1),
                             exit_statepoint,
                             rtn_val,
                         )?;
@@ -337,7 +337,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.star_return_end(
                             &mut ra,
                             entry,
-                            InstIdx::from(entry.insts_len() - 1),
+                            InstIdx::from_raw_index(entry.insts_len() - 1),
                             exit_statepoint,
                             rtn_val,
                         )?;
@@ -388,7 +388,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     )
                 },
             )
-            .collect::<IndexVec<_, _>>();
+            .collect::<TypedVec<_, _>>();
 
         if self.log {
             let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -485,7 +485,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             .iter()
             .enumerate()
             .map(|(iidx, vlocs)| {
-                if matches!(peel.inst(InstIdx::from(iidx)), Inst::Const(_)) {
+                if matches!(peel.inst(InstIdx::from_raw_index(iidx)), Inst::Const(_)) {
                     VarLocs::new()
                 } else if let Some(x) = vlocs.iter().find(|x| matches!(x, VarLoc::Reg(_, _))) {
                     let mut new_vlocs = vlocs.clone();
@@ -520,7 +520,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                            cur_iidx: InstIdx,
                            op_iidx: InstIdx| {
             if let Inst::Arg(_) = peel.inst(op_iidx)
-                && !peel_vlocs[usize::from(op_iidx)]
+                && !peel_vlocs[op_iidx.to_raw_index()]
                     .iter()
                     .any(|x| matches!(x, VarLoc::Reg(_, _)))
                 && let Some(reg) =
@@ -529,13 +529,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 if peel.term_vars().contains(&op_iidx) {
                     // For loop invariant values, we want to reuse stack values if there are any:
                     // donig so means we won't need to respill in the peel.
-                    peel_vlocs[usize::from(op_iidx)].push(VarLoc::Reg(reg, RegFill::Undefined));
+                    peel_vlocs[op_iidx.to_raw_index()].push(VarLoc::Reg(reg, RegFill::Undefined));
                 } else {
                     // If this value isn't loop invariant, erasing any stack values is a win: if
                     // we're really lucky the value will never need to be spilt; if we're unlucky,
                     // it will at worst be spilt part of the way through a trace (and won't need a
                     // costly move at the trace's end).
-                    peel_vlocs[usize::from(op_iidx)] =
+                    peel_vlocs[op_iidx.to_raw_index()] =
                         varlocs![VarLoc::Reg(reg, RegFill::Undefined)];
                 }
             }
@@ -570,7 +570,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     /// Assemble guards.
     fn asm_guards(
         &mut self,
-    ) -> Result<IndexVec<CompiledGuardIdx, GuardBody<AB>>, CompilationError> {
+    ) -> Result<TypedVec<CompiledGuardIdx, GuardBody<AB>>, CompilationError> {
         // For each guard we've encountered while assembling the main [Block]s, we now get the
         // backend to produce code for the associated guard body. We've already identified which
         // instructions should end up in the guard body, so this isn't too difficult: we create a
@@ -579,7 +579,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
         // Since we're creating temporary [Block]s, we can reuse the allocation for its
         // instructions and term_vars, so we hoist these out of the loop.
-        let mut ginsts: IndexVec<InstIdx, Inst> = IndexVec::new();
+        let mut ginsts: TypedVec<InstIdx, Inst> = TypedVec::new();
         let mut gterms: Vec<InstIdx> = Vec::new();
 
         // There is a little bit of awkwardness in testing mode, where there are no stackmaps:
@@ -588,8 +588,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
 
         let gexits = std::mem::take(&mut self.gexits);
-        let mut gbodies: IndexVec<CompiledGuardIdx, GuardBody<AB>> =
-            IndexVec::with_capacity(gexits.len());
+        let mut gbodies: TypedVec<CompiledGuardIdx, GuardBody<AB>> =
+            TypedVec::with_capacity(gexits.len());
         for gexit in gexits.into_iter() {
             let gextra = gexit.block.gextra(gexit.geidx);
 
@@ -606,7 +606,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             ginsts.clear();
             let mut gblock = Block {
                 insts: std::mem::take(&mut ginsts),
-                guard_extras: IndexVec::new(),
+                guard_extras: TypedVec::new(),
             };
 
             // Given an [InstIdx] `x` from the main `Block`, return its position in the guard's
@@ -615,9 +615,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             // be done with a binary search.
             let map = |x: InstIdx| {
                 if let Ok(i) = gexit.exit_vars.binary_search(&x) {
-                    InstIdx::from(i)
+                    InstIdx::from_raw_index(i)
                 } else if let Ok(i) = gexit.copy_in.binary_search(&x) {
-                    InstIdx::from(gexit.exit_vars.len() + i)
+                    InstIdx::from_raw_index(gexit.exit_vars.len() + i)
                 } else {
                     panic!()
                 }
@@ -659,7 +659,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .iter()
                     .take(frame.pc_statepoint.lives.len());
                 #[cfg(test)]
-                let smap_lives_iter = self.m.smaps[usize::from(frame.smapidx)].iter();
+                let smap_lives_iter = self.m.smaps[frame.smapidx].iter();
 
                 for smap_loc in smap_lives_iter {
                     let (deopt_iidx, term_iidx) = deopt_term_iter.next().unwrap();
@@ -757,7 +757,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             assert!(!gblock.insts.is_empty());
 
             let mut merged = false;
-            let mut gidx = gbodies.len_idx();
+            let mut gidx = gbodies.len();
             for (cnd_gidx, gbody) in gbodies.iter_mut_enumerated() {
                 // NOTE: at this point we don't know what the `extra_stack_len` of the
                 // about-to-be-created sidetrace is, so we can't factor that into our comparison.
@@ -788,7 +788,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 .map(|x| x.fromvlocs.clone())
                 .collect::<Vec<_>>();
             let patch_label = self.be.guard_end(self.m.trid, gidx, &vlocs)?;
-            ra.keep_alive_at_term(InstIdx::from(gblock.insts.len() - 1), gblock.term_vars());
+            ra.keep_alive_at_term(
+                InstIdx::from_raw_index(gblock.insts.len_usize() - 1),
+                gblock.term_vars(),
+            );
             stack_off = self.p_block(&gblock, None, ra, &gexit.exit_vlocs)?;
             let extra_stack_len = stack_off - gexit.stack_off;
             if merged {
@@ -824,7 +827,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 });
             }
             if self.log {
-                self.be.log(format!("gidx {gidx:?}"));
+                self.be.log(format!("gidx {}", gidx.to_raw_index()));
             }
 
             // Make sure we reuse the `ginsts` and `gterms` allocations.
@@ -853,7 +856,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         } else {
             self.be.log(format!(
                 "%{}: {} = {}{extra}",
-                usize::from(iidx),
+                iidx.to_raw_index(),
                 ty.to_string(self.m),
                 inst.to_string(self.m, b)
             ));
@@ -882,15 +885,15 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 show.set(i, true);
             }
             for (iidx, inst) in b.insts_iter(..).rev() {
-                if show[usize::from(iidx)]
+                if show[iidx.to_raw_index()]
                     || inst.write_effects().interferes(Effects::all())
                     || inst
                         .read_effects()
                         .interferes(Effects::none().add_volatile())
                 {
-                    show.set(usize::from(iidx), true);
+                    show.set(iidx.to_raw_index(), true);
                     for op_iidx in inst.iter_iidxs(b) {
-                        show.set(usize::from(op_iidx), true);
+                        show.set(op_iidx.to_raw_index(), true);
                     }
                 }
             }
@@ -1062,12 +1065,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             // We can copy non-volatile `Load`s in if there are no write effects
                             // between the `Load` and the current guard.
                             if ra.is_used(giidx)
-                                || b.insts_iter(giidx + 1..iidx).any(|(_, inst)| {
-                                    inst.write_effects()
-                                        .interferes(Effects::all().minus_guard())
-                                })
+                                || b.insts_iter(giidx.checked_add_scalar(1).unwrap()..iidx)
+                                    .any(|(_, inst)| {
+                                        inst.write_effects()
+                                            .interferes(Effects::all().minus_guard())
+                                    })
                             {
-                                gexit_vars.set(usize::from(giidx), true);
+                                gexit_vars.set((giidx).to_raw_index(), true);
                                 continue;
                             }
                         } else if inst.read_write_effects().interferes(Effects::all())
@@ -1078,12 +1082,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             // We don't copy instructions that are used by non-guard instructions
                             // unless: they're a `Const`; aren't in a register; don't have
                             // side-effects.
-                            gexit_vars.set(usize::from(giidx), true);
+                            gexit_vars.set((giidx).to_raw_index(), true);
                             continue;
                         }
 
                         // We can copy this instruction!
-                        gcopy.set(usize::from(giidx), true);
+                        gcopy.set((giidx).to_raw_index(), true);
                         // Add all this instruction's operand references to the queue.
                         for op_iidx in inst.iter_iidxs(b) {
                             gqueue.push(op_iidx);
@@ -1094,7 +1098,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     // guard.
                     let exit_vars = gexit_vars
                         .iter_set_bits(..)
-                        .map(InstIdx::from)
+                        .map(InstIdx::from_raw_index)
                         .collect::<Vec<_>>();
                     let label = self.be.i_guard(&mut ra, b, iidx, x, &exit_vars)?;
                     let exit_vlocs = ra.vlocs_from_iidxs(&exit_vars);
@@ -1106,7 +1110,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         exit_vlocs,
                         copy_in: gcopy
                             .iter_set_bits(..)
-                            .map(InstIdx::from)
+                            .map(InstIdx::from_raw_index)
                             .collect::<Vec<_>>(),
                         stack_off: ra.stack_off(),
                     });
@@ -1251,7 +1255,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     }
                 }
             }
-            if self.log && logging_show[usize::from(iidx)] {
+            if self.log && logging_show[iidx.to_raw_index()] {
                 self.log_inst(b, iidx, "");
             }
         }
@@ -1262,7 +1266,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
         if self.log {
             for (iidx, _inst) in insts_iter {
-                let pp_vlocs = args_vlocs[usize::from(iidx)]
+                let pp_vlocs = args_vlocs[iidx.to_raw_index()]
                     .iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
@@ -1956,18 +1960,19 @@ mod test {
 
     impl RegT for TestReg {
         type RegIdx = TestRegIdx;
-        const MAX_REGIDX: TestRegIdx = TestRegIdx::from_usize_unchecked(TestReg::COUNT);
+        // `TestReg` has fewer than `u8::MAX` variants, so its count fits in `TestRegIdx`.
+        const MAX_REGIDX: TestRegIdx = TestRegIdx(TestReg::COUNT as u8);
 
         fn undefined() -> Self {
             TestReg::Undefined
         }
 
         fn from_regidx(idx: Self::RegIdx) -> Self {
-            TestReg::from_repr(idx.raw()).unwrap()
+            TestReg::from_repr(idx.to_scalar()).unwrap()
         }
 
         fn regidx(&self) -> Self::RegIdx {
-            TestRegIdx::from(*self as usize)
+            TestRegIdx::from_raw_index(*self as usize)
         }
 
         fn is_caller_saved(&self) -> bool {
@@ -1989,9 +1994,8 @@ mod test {
         }
     }
 
-    index_vec::define_index_type! {
-        pub(crate) struct TestRegIdx = u8;
-    }
+    #[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+    pub(crate) struct TestRegIdx(u8);
 
     struct TestRegTestIter<Reg> {
         gp_regs: Box<dyn Iterator<Item = Reg>>,
@@ -2030,9 +2034,13 @@ mod test {
         }
     }
 
-    index_vec::define_index_type! {
-        struct TestLabelIdx = u32;
-        IMPL_RAW_CONVERSIONS = true;
+    #[derive(Clone, Copy, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+    struct TestLabelIdx(u32);
+
+    impl std::fmt::Debug for TestLabelIdx {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            std::fmt::Debug::fmt(&self.to_raw_index(), f)
+        }
     }
 
     struct TestPeelRegsBuilder {
@@ -2049,7 +2057,7 @@ mod test {
 
     impl PeelRegsBuilderT<TestReg> for TestPeelRegsBuilder {
         fn force_set(&mut self, reg: TestReg) {
-            self.set_regs[usize::from(reg.regidx())] = true;
+            self.set_regs[reg.regidx().to_raw_index()] = true;
         }
 
         fn is_full(&self, _ignore_caller_save: bool) -> bool {
@@ -2163,13 +2171,13 @@ mod test {
 
         fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
             self.log.push("controlpoint_loop_end".to_owned());
-            Ok(TestLabelIdx::new(1))
+            Ok(TestLabelIdx::from_raw_index(1))
         }
 
         fn controlpoint_peel_start(&mut self, peel_label: Self::Label) -> Self::Label {
             self.log
                 .push(format!("controlpoint_peel_start {peel_label:?}"));
-            TestLabelIdx::new(2)
+            TestLabelIdx::from_raw_index(2)
         }
 
         fn controlpoint_loop_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
@@ -2189,7 +2197,7 @@ mod test {
             _gidx: CompiledGuardIdx,
             _args_vlocs: &[VarLocs<Self::Reg>],
         ) -> Result<Self::Label, CompilationError> {
-            Ok(TestLabelIdx::new(0))
+            Ok(TestLabelIdx::from_raw_index(0))
         }
 
         fn guard_completed(
@@ -2289,7 +2297,7 @@ mod test {
                     .collect::<Vec<_>>()
                     .join(", "),
             ));
-            Ok(TestLabelIdx::new(0))
+            Ok(TestLabelIdx::from_raw_index(0))
         }
 
         fn i_load(

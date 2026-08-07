@@ -7,6 +7,7 @@ use crate::compile::j2::{
     regalloc::{PeelRegsBuilderT, RegT},
 };
 use iced_x86::Register;
+use index_type::IndexType;
 use std::marker::PhantomData;
 use strum::{EnumCount, FromRepr};
 
@@ -244,18 +245,19 @@ impl Reg {
 
 impl RegT for Reg {
     type RegIdx = RegIdx;
-    const MAX_REGIDX: RegIdx = RegIdx::from_usize_unchecked(Reg::COUNT);
+    // `Reg` has fewer than `u8::MAX` variants, so its variant count fits in `RegIdx`.
+    const MAX_REGIDX: RegIdx = RegIdx(Reg::COUNT as u8);
 
     fn undefined() -> Reg {
         Reg::Undefined
     }
 
     fn from_regidx(idx: Self::RegIdx) -> Self {
-        Reg::from_repr(idx.raw()).unwrap()
+        Reg::from_repr(idx.to_scalar()).unwrap()
     }
 
     fn regidx(&self) -> Self::RegIdx {
-        RegIdx::from(*self as u8)
+        RegIdx::from_raw_index(usize::from(*self as u8))
     }
 
     #[cfg(target_os = "linux")]
@@ -433,10 +435,8 @@ impl TestRegIter<Reg> for X64TestRegIter<Reg> {
     }
 }
 
-index_vec::define_index_type! {
-    pub(in crate::compile::j2) struct RegIdx = u8;
-    IMPL_RAW_CONVERSIONS = true;
-}
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+pub(in crate::compile::j2) struct RegIdx(u8);
 
 /// The normal, usable, general purposes x64 registers (excluding RSP, RBP, and so on).
 pub(super) const NORMAL_GP_REGS: [Reg; 14] = [
@@ -673,51 +673,123 @@ mod test {
         // Test that we leave some registers spare.
         let mut prb = PeelRegsBuilder::new();
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R11)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R10)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R9)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R8)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::RDI)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::RSI)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::RDX)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::RCX)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::RAX)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R15)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R14)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             None
         );
         // RBX, R12, R13 left free
@@ -725,35 +797,83 @@ mod test {
         // Test that we don't allocate caller saved registers after a call.
         let mut prb = PeelRegsBuilder::new();
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R11)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R10)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R15)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R14)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R13)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R12)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::RBX)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(1), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(1)
+            ),
             None
         );
     }
@@ -786,27 +906,63 @@ mod test {
         // Check that we put call arguments in sensible registers.
         let mut prb = PeelRegsBuilder::new();
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(5), InstIdx::new(0)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(0)
+            ),
             Some(Reg::RDI)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, false, InstIdx::new(5), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                false,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::RSI)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(6), InstIdx::new(0)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(6),
+                InstIdx::from_raw_index(0)
+            ),
             Some(Reg::R15)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(6), InstIdx::new(1)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(6),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R14)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(7), InstIdx::new(2)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(7),
+                InstIdx::from_raw_index(2)
+            ),
             Some(Reg::R13)
         );
         assert_eq!(
-            prb.try_alloc_reg_for(&m, b, true, InstIdx::new(8), InstIdx::new(3)),
+            prb.try_alloc_reg_for(
+                &m,
+                b,
+                true,
+                InstIdx::from_raw_index(8),
+                InstIdx::from_raw_index(3)
+            ),
             Some(Reg::R12)
         );
     }

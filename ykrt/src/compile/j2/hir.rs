@@ -180,7 +180,7 @@ use crate::{
     mt::TraceId,
 };
 use enum_dispatch::enum_dispatch;
-use index_vec::IndexVec;
+use index_type::{IndexType, vec::TypedVec};
 use smallvec::SmallVec;
 use std::{
     assert_matches,
@@ -280,7 +280,7 @@ pub(super) struct Mod<Reg: RegT> {
     pub trid: TraceId,
     pub trace_start: TraceStart<Reg>,
     pub trace_end: TraceEnd<Reg>,
-    pub tys: IndexVec<TyIdx, Ty>,
+    pub tys: TypedVec<TyIdx, Ty>,
     /// The [TyIdx] for [Ty::Int(1)].
     pub tyidx_int1: TyIdx,
     /// The [TyIdx] for [Ty::Ptr(0)].
@@ -290,7 +290,7 @@ pub(super) struct Mod<Reg: RegT> {
     /// A map of names to pointers. Will be `None` if logging was disabled.
     pub addr_name_map: Option<HashMap<usize, Option<String>>>,
     #[cfg(test)]
-    pub smaps: IndexVec<StackMapIdx, Vec<VarLocs<Reg>>>,
+    pub smaps: TypedVec<StackMapIdx, Vec<VarLocs<Reg>>>,
 }
 
 impl<Reg: RegT> Mod<Reg> {
@@ -334,12 +334,15 @@ impl<Reg: RegT> Mod<Reg> {
             "  \"start\": {".to_owned(),
         ];
         match &self.trace_start {
-            TraceStart::ControlPoint { .. } => out.push("    \"kind\": \"ControlPoint\"".to_owned()),
+            TraceStart::ControlPoint { .. } => {
+                out.push("    \"kind\": \"ControlPoint\"".to_owned())
+            }
             TraceStart::Guard {
                 src_ctr, src_gidx, ..
             } => out.push(format!(
-                "    \"kind\": \"Guard\",\n    \"src_trid\": \"{}\",\n    \"gidx\": \"{src_gidx:?}\"",
-                src_ctr.trid
+                "    \"kind\": \"Guard\",\n    \"src_trid\": \"{}\",\n    \"gidx\": \"{}\"",
+                src_ctr.trid,
+                src_gidx.to_raw_index()
             )),
             #[cfg(test)]
             TraceStart::Test => out.push("    \"kind\": \"Test\"".to_owned()),
@@ -484,9 +487,9 @@ pub(super) enum TraceEnd<Reg: RegT> {
 /// An ordered sequence of instructions.
 #[derive(Debug)]
 pub(super) struct Block {
-    pub insts: IndexVec<InstIdx, Inst>,
+    pub insts: TypedVec<InstIdx, Inst>,
     /// Extra information that is too big to fit in a [Guard] instruction.
-    pub guard_extras: IndexVec<GuardExtraIdx, GuardExtra>,
+    pub guard_extras: TypedVec<GuardExtraIdx, GuardExtra>,
 }
 
 impl Block {
@@ -498,7 +501,7 @@ impl Block {
         exit_vlocs: &[VarLocs<Reg>],
     ) {
         for (iidx, inst) in self.insts_iter(..) {
-            if iidx < InstIdx::from(args_vlocs.len()) {
+            if iidx < InstIdx::from_raw_index(args_vlocs.len()) {
                 assert_matches!(
                     inst,
                     Inst::Arg(_) | Inst::Const(_),
@@ -506,7 +509,7 @@ impl Block {
                 );
             } else if let Inst::Arg(_) = inst {
                 panic!("%{iidx:?}: 'arg' instructions cannot appear after trace entry");
-            } else if iidx == self.insts.last_idx()
+            } else if iidx == self.insts.indices().next_back().unwrap()
                 && let Inst::Term(Term(term_vars)) = inst
             {
                 assert_eq!(
@@ -516,7 +519,7 @@ impl Block {
                 );
 
                 for (i, (x, y)) in args_vlocs.iter().zip(exit_vlocs.iter()).enumerate() {
-                    let entry_tyidx = self.insts[InstIdx::from(i)].tyidx(m);
+                    let entry_tyidx = self.insts[InstIdx::from_raw_index(i)].tyidx(m);
                     let exit_tyidx = self.insts[term_vars[i]].tyidx(m);
                     if entry_tyidx != exit_tyidx {
                         panic!(
@@ -543,7 +546,7 @@ impl Block {
             if let Inst::Term(_) = inst {
                 assert_eq!(
                     iidx,
-                    self.insts.last_idx(),
+                    self.insts.indices().next_back().unwrap(),
                     "%{iidx:?}: term must be the last instruction in a trace"
                 );
             }
@@ -559,17 +562,23 @@ impl Block {
         T: RangeBounds<InstIdx>,
     {
         let start = match range.start_bound() {
-            Bound::Included(x) => min(usize::from(*x), self.insts.len()),
-            Bound::Excluded(x) => min(usize::from(*x + 1), self.insts.len()),
+            Bound::Included(x) => min(x.to_raw_index(), self.insts.len_usize()),
+            Bound::Excluded(x) => min(
+                x.to_raw_index().checked_add(1).unwrap(),
+                self.insts.len_usize(),
+            ),
             Bound::Unbounded => 0,
         };
         let end = match range.end_bound() {
-            Bound::Included(x) => min(usize::from(*x + 1), self.insts.len()),
-            Bound::Excluded(x) => min(usize::from(*x), self.insts.len()),
-            Bound::Unbounded => self.insts.len(),
+            Bound::Included(x) => min(
+                x.to_raw_index().checked_add(1).unwrap(),
+                self.insts.len_usize(),
+            ),
+            Bound::Excluded(x) => min(x.to_raw_index(), self.insts.len_usize()),
+            Bound::Unbounded => self.insts.len_usize(),
         };
         (start..end).map(|i| {
-            let i = InstIdx::from(i);
+            let i = InstIdx::from_raw_index(i);
             (i, &self.insts[i])
         })
     }
@@ -620,26 +629,26 @@ impl Block {
                 show.set(i, true);
             }
             for (iidx, inst) in self.insts_iter(..).rev() {
-                if show[usize::from(iidx)]
+                if show[iidx.to_raw_index()]
                     || inst.write_effects().interferes(Effects::all())
                     || inst
                         .read_effects()
                         .interferes(Effects::none().add_volatile())
                 {
-                    show.set(usize::from(iidx), true);
+                    show.set(iidx.to_raw_index(), true);
                     for op_iidx in inst.iter_iidxs(self) {
-                        show.set(usize::from(op_iidx), true);
+                        show.set(op_iidx.to_raw_index(), true);
                     }
                 }
             }
             show
         };
 
-        let mut out = Vec::with_capacity(self.insts.len());
+        let mut out = Vec::with_capacity(self.insts.len_usize());
         for (iidx, inst) in self
             .insts
             .iter_enumerated()
-            .filter(|(iidx, _)| show[usize::from(*iidx)])
+            .filter(|(iidx, _)| show[iidx.to_raw_index()])
         {
             let ty = m.ty(inst.tyidx(m));
             if ty == &Ty::Void {
@@ -647,7 +656,7 @@ impl Block {
             } else {
                 out.push(format!(
                     "%{}: {} = {}",
-                    usize::from(iidx),
+                    iidx.to_raw_index(),
                     ty.to_string(m),
                     inst.to_string(m, self)
                 ));
@@ -659,11 +668,11 @@ impl Block {
 
 impl BlockLikeT for Block {
     fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[usize::from(idx)]
+        &self.insts[idx]
     }
 
     fn insts_len(&self) -> usize {
-        self.insts.len()
+        self.insts.len_usize()
     }
 
     fn gextra(&self, geidx: GuardExtraIdx) -> &GuardExtra {
@@ -740,38 +749,40 @@ pub(super) struct FuncTy {
     pub rtn_tyidx: TyIdx,
 }
 
-index_vec::define_index_type! {
-    /// The index type for guard blocks.
-    pub(super) struct GuardBlockIdx = u16;
-}
+/// The index type for guard blocks.
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+#[allow(dead_code)]
+pub(super) struct GuardBlockIdx(u16);
 
-index_vec::define_index_type! {
-    /// The index type for extra information about guards that doesn't fit into a [Guard] object.
-    pub(super) struct GuardExtraIdx = u16;
-}
+/// The index type for extra information about guards that doesn't fit into a [Guard] object.
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+pub(super) struct GuardExtraIdx(u16);
 
 impl GuardExtraIdx {
     /// The maximum representable [GuardExtraIdx].
-    pub(super) const MAX: GuardExtraIdx = GuardExtraIdx::from_raw_unchecked(u16::MAX);
+    pub(super) const MAX: GuardExtraIdx = GuardExtraIdx::MAX_INDEX;
 }
 
-// Note: if you change the `u32` here, `MAX` must also be updated.
-index_vec::define_index_type! {
-    pub(super) struct InstIdx = u32;
-}
+#[derive(Clone, Copy, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+pub(super) struct InstIdx(u32);
 
 impl InstIdx {
     /// The maximum representable [InstIdx].
-    pub(super) const MAX: InstIdx = InstIdx::from_raw_unchecked(u32::MAX);
+    pub(super) const MAX: InstIdx = InstIdx::MAX_INDEX;
 }
 
-index_vec::define_index_type! {
-    pub(super) struct TyIdx = u16;
+impl std::fmt::Debug for InstIdx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.to_raw_index(), f)
+    }
 }
 
-index_vec::define_index_type! {
-    pub(super) struct ThreadLocalIdx = u16;
-}
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+pub(super) struct TyIdx(u16);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+#[allow(dead_code)]
+pub(super) struct ThreadLocalIdx(u16);
 
 /// The trait that HIR instructions must conform to.
 #[enum_dispatch]
@@ -941,7 +952,7 @@ impl InstT for Abs {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "abs %{}{}",
-            usize::from(self.val),
+            self.val.to_raw_index(),
             if self.int_min_poison {
                 ", int_min_poison"
             } else {
@@ -1028,7 +1039,11 @@ impl InstT for Add {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("add %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
+        format!(
+            "add %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -1099,7 +1114,11 @@ impl InstT for And {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("and %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
+        format!(
+            "and %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -1215,8 +1234,8 @@ impl InstT for AShr {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "ashr %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -1282,7 +1301,7 @@ impl InstT for BitCast {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("bitcast %{}", usize::from(self.val))
+        format!("bitcast %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -1328,7 +1347,7 @@ impl InstT for BlackBox {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("blackbox %{}", usize::from(self.val))
+        format!("blackbox %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
@@ -1434,10 +1453,10 @@ impl InstT for Call {
         };
         format!(
             "call %{}({}){fname}",
-            usize::from(self.tgt),
+            (self.tgt).to_raw_index(),
             self.args
                 .iter()
-                .map(|x| format!("%{}", usize::from(*x)))
+                .map(|x| format!("%{}", x.to_raw_index()))
                 .collect::<Vec<_>>()
                 .join(", "),
         )
@@ -1609,7 +1628,7 @@ impl InstT for CtPop {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("ctpop %{}", usize::from(self.val))
+        format!("ctpop %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -1668,7 +1687,7 @@ impl InstT for CtTz {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("cttz %{}", usize::from(self.val))
+        format!("cttz %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -1781,8 +1800,8 @@ impl InstT for DynPtrAdd {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "dynptradd %{}, %{}, {}",
-            usize::from(self.ptr),
-            usize::from(self.num_elems),
+            self.ptr.to_raw_index(),
+            (self.num_elems).to_raw_index(),
             self.elem_size
         )
     }
@@ -1856,8 +1875,8 @@ impl InstT for FAdd {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "fadd %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -1927,8 +1946,8 @@ impl InstT for FCmp {
         format!(
             "fcmp {} %{}, %{}",
             self.pred.to_str(),
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -2040,8 +2059,8 @@ impl InstT for FDiv {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "fdiv %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -2107,7 +2126,7 @@ impl InstT for Floor {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("floor %{}", usize::from(self.val))
+        format!("floor %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -2179,8 +2198,8 @@ impl InstT for FMul {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "fmul %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -2241,7 +2260,7 @@ impl InstT for FNeg {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("fneg %{}", usize::from(self.val),)
+        format!("fneg %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -2310,7 +2329,7 @@ impl InstT for FPClass {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("fpclass %{}, 0b{:b}", usize::from(self.val), self.test)
+        format!("fpclass %{}, 0b{:b}", self.val.to_raw_index(), self.test)
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -2377,8 +2396,8 @@ impl InstT for FSub {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "fsub %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -2446,7 +2465,7 @@ impl InstT for FPExt {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("fpext %{}", usize::from(self.val))
+        format!("fpext %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -2511,7 +2530,7 @@ impl InstT for FPToSI {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("fptosi %{}", usize::from(self.val))
+        format!("fptosi %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -2570,7 +2589,7 @@ impl InstT for Freeze {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("freeze %{}", usize::from(self.val))
+        format!("freeze %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -2639,11 +2658,11 @@ impl InstT for Guard {
         format!(
             "guard {}, %{}, [{}]",
             if self.expect { "true" } else { "false" },
-            usize::from(self.cond),
+            self.cond.to_raw_index(),
             b.gextra(self.geidx)
                 .deopt_vars
                 .iter()
-                .map(|iidx| format!("%{}", usize::from(*iidx)))
+                .map(|iidx| format!("%{}", iidx.to_raw_index()))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -2785,8 +2804,8 @@ impl InstT for ICmp {
         format!(
             "icmp {} %{}, %{}",
             self.pred.as_str(),
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -2892,7 +2911,7 @@ impl InstT for IntToPtr {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("inttoptr %{}", usize::from(self.val))
+        format!("inttoptr %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -2949,9 +2968,9 @@ impl InstT for Load {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         if self.is_volatile {
-            format!("load volatile %{}", usize::from(self.ptr))
+            format!("load volatile %{}", self.ptr.to_raw_index())
         } else {
-            format!("load %{}", usize::from(self.ptr))
+            format!("load %{}", self.ptr.to_raw_index())
         }
     }
 
@@ -3026,8 +3045,8 @@ impl InstT for LShr {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "lshr %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -3100,9 +3119,9 @@ impl InstT for MemCpy {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "memcpy %{}, %{}, %{}, {}",
-            usize::from(self.dst),
-            usize::from(self.src),
-            usize::from(self.len),
+            self.dst.to_raw_index(),
+            self.src.to_raw_index(),
+            self.len.to_raw_index(),
             if self.is_volatile { "true" } else { "false" }
         )
     }
@@ -3182,9 +3201,9 @@ impl InstT for MemSet {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "memset %{}, %{}, %{}, {}",
-            usize::from(self.dst),
-            usize::from(self.val),
-            usize::from(self.len),
+            self.dst.to_raw_index(),
+            self.val.to_raw_index(),
+            self.len.to_raw_index(),
             if self.is_volatile { "true" } else { "false" }
         )
     }
@@ -3267,7 +3286,11 @@ impl InstT for Mul {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("mul %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
+        format!(
+            "mul %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -3345,7 +3368,11 @@ impl InstT for Or {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("or %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
+        format!(
+            "or %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -3414,7 +3441,7 @@ impl InstT for PtrAdd {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("ptradd %{}, {}", usize::from(self.ptr), self.off)
+        format!("ptradd %{}, {}", self.ptr.to_raw_index(), self.off)
     }
 
     fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
@@ -3479,7 +3506,7 @@ impl InstT for PtrToInt {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("ptrtoint %{}", usize::from(self.val))
+        format!("ptrtoint %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -3553,8 +3580,8 @@ impl InstT for SDiv {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "sdiv %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -3634,9 +3661,9 @@ impl InstT for Select {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "select %{}, %{}, %{}",
-            usize::from(self.cond),
-            usize::from(self.truev),
-            usize::from(self.falsev)
+            self.cond.to_raw_index(),
+            self.truev.to_raw_index(),
+            self.falsev.to_raw_index()
         )
     }
 
@@ -3707,7 +3734,7 @@ impl InstT for SExt {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("sext %{}", usize::from(self.val))
+        format!("sext %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -3782,7 +3809,11 @@ impl InstT for Shl {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("shl %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
+        format!(
+            "shl %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -3847,7 +3878,7 @@ impl InstT for SIToFP {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("sitofp %{}", usize::from(self.val))
+        format!("sitofp %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -3920,8 +3951,8 @@ impl InstT for SMax {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "smax %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -3995,8 +4026,8 @@ impl InstT for SMin {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "smin %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -4064,8 +4095,8 @@ impl InstT for SRem {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "srem %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -4128,8 +4159,8 @@ impl InstT for Store {
         format!(
             "store {}%{}, %{}",
             if self.is_volatile { "volatile " } else { "" },
-            usize::from(self.val),
-            usize::from(self.ptr)
+            self.val.to_raw_index(),
+            self.ptr.to_raw_index()
         )
     }
 
@@ -4205,7 +4236,11 @@ impl InstT for Sub {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("sub %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
+        format!(
+            "sub %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -4248,7 +4283,7 @@ impl InstT for Term {
             "term [{}]",
             self.0
                 .iter()
-                .map(|x| format!("%{}", usize::from(*x)))
+                .map(|x| format!("%{}", x.to_raw_index()))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -4389,7 +4424,7 @@ impl InstT for Trunc {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("trunc %{}", usize::from(self.val))
+        format!("trunc %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -4463,8 +4498,8 @@ impl InstT for UDiv {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "udiv %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -4532,7 +4567,7 @@ impl InstT for UIToFP {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("uitofp %{}", usize::from(self.val))
+        format!("uitofp %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -4605,8 +4640,8 @@ impl InstT for UMax {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "umax %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -4680,8 +4715,8 @@ impl InstT for UMin {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "umin %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -4749,8 +4784,8 @@ impl InstT for URem {
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!(
             "urem %{}, %{}",
-            usize::from(self.lhs),
-            usize::from(self.rhs)
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
         )
     }
 
@@ -4822,7 +4857,11 @@ impl InstT for Xor {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("xor %{}, %{}", usize::from(self.lhs), usize::from(self.rhs))
+        format!(
+            "xor %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -4892,7 +4931,7 @@ impl InstT for ZExt {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("zext %{}", usize::from(self.val))
+        format!("zext %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -5070,7 +5109,8 @@ mod test {
 
     impl RegT for DummyReg {
         type RegIdx = DummyRegIdx;
-        const MAX_REGIDX: DummyRegIdx = DummyRegIdx::from_usize_unchecked(DummyReg::COUNT);
+        // `DummyReg` has fewer than `u8::MAX` variants, so its count fits in `DummyRegIdx`.
+        const MAX_REGIDX: DummyRegIdx = DummyRegIdx(DummyReg::COUNT as u8);
 
         fn undefined() -> Self {
             todo!()
@@ -5097,9 +5137,8 @@ mod test {
         }
     }
 
-    index_vec::define_index_type! {
-        pub(crate) struct DummyRegIdx = u8;
-    }
+    #[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+    pub(crate) struct DummyRegIdx(u8);
 
     struct DummyRegTestIter {}
 
@@ -5132,7 +5171,7 @@ mod test {
         };
         assert!(
             block
-                .inst(InstIdx::new(0))
+                .inst(InstIdx::from_raw_index(0))
                 .iter_iidxs(block)
                 .collect::<Vec<_>>()
                 .is_empty()
@@ -5150,10 +5189,10 @@ mod test {
         };
         assert_eq!(
             block
-                .inst(InstIdx::new(1))
+                .inst(InstIdx::from_raw_index(1))
                 .iter_iidxs(block)
                 .collect::<Vec<_>>(),
-            [InstIdx::new(0)]
+            [InstIdx::from_raw_index(0)]
         );
 
         // The `Two` case.
@@ -5169,10 +5208,10 @@ mod test {
         };
         assert_eq!(
             block
-                .inst(InstIdx::new(2))
+                .inst(InstIdx::from_raw_index(2))
                 .iter_iidxs(block)
                 .collect::<Vec<_>>(),
-            [InstIdx::new(0), InstIdx::new(1)]
+            [InstIdx::from_raw_index(0), InstIdx::from_raw_index(1)]
         );
 
         // The `Three` case.
@@ -5189,10 +5228,14 @@ mod test {
         };
         assert_eq!(
             block
-                .inst(InstIdx::new(3))
+                .inst(InstIdx::from_raw_index(3))
                 .iter_iidxs(block)
                 .collect::<Vec<_>>(),
-            [InstIdx::new(0), InstIdx::new(1), InstIdx::new(2)]
+            [
+                InstIdx::from_raw_index(0),
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(2)
+            ]
         );
 
         // The `Call` case.
@@ -5210,10 +5253,10 @@ mod test {
         };
         assert_eq!(
             block
-                .inst(InstIdx::new(2))
+                .inst(InstIdx::from_raw_index(2))
                 .iter_iidxs(block)
                 .collect::<Vec<_>>(),
-            [InstIdx::new(0), InstIdx::new(1),]
+            [InstIdx::from_raw_index(0), InstIdx::from_raw_index(1),]
         );
 
         // The `Guard` case.
@@ -5230,10 +5273,14 @@ mod test {
         };
         assert_eq!(
             block
-                .inst(InstIdx::new(3))
+                .inst(InstIdx::from_raw_index(3))
                 .iter_iidxs(block)
                 .collect::<Vec<_>>(),
-            [InstIdx::new(0), InstIdx::new(1), InstIdx::new(2)]
+            [
+                InstIdx::from_raw_index(0),
+                InstIdx::from_raw_index(1),
+                InstIdx::from_raw_index(2)
+            ]
         );
 
         // The `Term` case.
@@ -5249,10 +5296,10 @@ mod test {
         };
         assert_eq!(
             block
-                .inst(InstIdx::new(2))
+                .inst(InstIdx::from_raw_index(2))
                 .iter_iidxs(block)
                 .collect::<Vec<_>>(),
-            [InstIdx::new(0), InstIdx::new(1)]
+            [InstIdx::from_raw_index(0), InstIdx::from_raw_index(1)]
         );
     }
 
@@ -6447,10 +6494,10 @@ mod test {
                 opt.feed(inst).unwrap();
             }
         }
-        let tyidx = TyIdx::from_usize(0);
-        let tyidx1 = TyIdx::from_usize(1);
-        let val = InstIdx::from_usize(0);
-        let val1 = InstIdx::from_usize(1);
+        let tyidx = TyIdx::from_raw_index(0);
+        let tyidx1 = TyIdx::from_raw_index(1);
+        let val = InstIdx::from_raw_index(0);
+        let val1 = InstIdx::from_raw_index(1);
 
         // FIXME: We need the series of tests below for every HIR element.
         let rhs = Inst::Abs(Abs {

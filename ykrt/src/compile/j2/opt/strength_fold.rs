@@ -12,7 +12,7 @@ use crate::compile::{
     },
     jitc_yk::arbbitint::ArbBitInt,
 };
-use index_vec::IndexVec;
+use index_type::vec::TypedVec;
 use num_traits::FromPrimitive;
 
 pub(super) struct StrengthFold;
@@ -73,7 +73,7 @@ impl PassT for StrengthFold {
         &mut self,
         _opt: &mut PassOpt,
         _entry: &Block,
-        _map: &IndexVec<InstIdx, InstIdx>,
+        _map: &TypedVec<InstIdx, InstIdx>,
     ) {
     }
 }

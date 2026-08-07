@@ -57,7 +57,7 @@ use crate::{
 };
 use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
-use index_vec::IndexVec;
+use index_type::{IndexType, vec::TypedVec};
 use smallvec::SmallVec;
 use std::{assert_matches, collections::HashMap, debug_assert_matches, ffi::c_void, sync::Arc};
 
@@ -67,7 +67,7 @@ pub(in crate::compile::j2) struct X64HirToAsm<'a> {
     /// The label for the main entry point into the trace we're about to compile. We create this
     /// up-front and only attach it later.
     entry_label: LabelIdx,
-    reg_hints: IndexVec<InstIdx, Reg>,
+    reg_hints: TypedVec<InstIdx, Reg>,
     /// The data section: we map any given (align, byte sequence) pair to [LabelIdx]s, which will
     /// eventually be output as their own pseudo-block.
     data_sec: HashMap<Vec<u8>, (u32, LabelIdx)>,
@@ -101,7 +101,7 @@ impl<'a> X64HirToAsm<'a> {
             m,
             asm,
             entry_label,
-            reg_hints: IndexVec::new(),
+            reg_hints: TypedVec::new(),
             data_sec: HashMap::new(),
         }
     }
@@ -211,11 +211,13 @@ impl<'a> X64HirToAsm<'a> {
         }) = b.inst(op_iidx)
         {
             assert!(op_iidx < cur_iidx);
-            if b.insts_iter(op_iidx + 1..cur_iidx).all(|(_, inst)| {
-                !inst
-                    .write_effects()
-                    .interferes(Effects::all().minus_guard())
-            }) {
+            if b.insts_iter(op_iidx.checked_add_scalar(1).unwrap()..cur_iidx)
+                .all(|(_, inst)| {
+                    !inst
+                        .write_effects()
+                        .interferes(Effects::all().minus_guard())
+                })
+            {
                 return self.flatten_ptradd_chain(b, *ptr);
             }
         }
@@ -783,11 +785,12 @@ impl<'a> X64HirToAsm<'a> {
                 .flatten_ptradd_chain(b, *load_ptr)
                 .unwrap_or((*load_ptr, 0));
             if (ptr, off) == (load_ptr, load_off)
-                && b.insts_iter(*lhs + 1..iidx).all(|(_, inst)| {
-                    !inst
-                        .write_effects()
-                        .interferes(Effects::all().minus_guard())
-                })
+                && b.insts_iter(lhs.checked_add_scalar(1).unwrap()..iidx)
+                    .all(|(_, inst)| {
+                        !inst
+                            .write_effects()
+                            .interferes(Effects::all().minus_guard())
+                    })
             {
                 let [ptrr] = ra.alloc(
                     self,
@@ -972,7 +975,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         // There's no point giving register hints for caller saved registers that span `Call`s.
         if cnd == Reg::Undefined
             || (cnd.is_caller_saved()
-                && b.insts_iter(hint_iidx + 1..cur_iidx)
+                && b.insts_iter(hint_iidx.checked_add_scalar(1).unwrap()..cur_iidx)
                     .any(|(_, inst)| matches!(inst, Inst::Call(_))))
         {
             None
@@ -1000,9 +1003,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         // Make sure that we reserve enough space in `self.reg_hints` in one shot, but don't shrink
         // it if it has more space than we need.
         self.reg_hints
-            .reserve(b.insts_len().saturating_sub(self.reg_hints.len()));
+            .reserve(b.insts_len().saturating_sub(self.reg_hints.len_usize()));
 
-        let mut last_call = InstIdx::new(0);
+        let mut last_call = InstIdx::from_raw_index(0);
         for (iidx, inst) in b.insts_iter(..) {
             // Instructions that want to forward a register hint return a `cnd_iidx`: those that
             // have a definite register hint `continue` and avoid the code after this `let`.
@@ -1025,7 +1028,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
                 // Args are special.
                 Inst::Arg(_) => {
-                    if let Some(x) = args_vlocs[usize::from(iidx)].iter().find_map(|x| {
+                    if let Some(x) = args_vlocs[iidx.to_raw_index()].iter().find_map(|x| {
                         if let VarLoc::Reg(reg, _) = x {
                             Some(*reg)
                         } else {
@@ -1084,7 +1087,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 self.reg_hints.push(cnd_reg);
             }
         }
-        assert_eq!(b.insts_len(), self.reg_hints.len());
+        assert_eq!(b.insts_len(), self.reg_hints.len_usize());
     }
 
     fn build_exe(
@@ -1510,7 +1513,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
         #[cfg(test)]
         let csrs = {
-            assert_eq!(exit_statepoint.smapidx, 0);
+            assert_eq!(
+                exit_statepoint.smapidx,
+                crate::StackMapIdx::from_raw_index(0)
+            );
             [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
         };
 
@@ -1665,7 +1671,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm.push_inst(IcedInst::with2(
             Code::Mov_r32_imm32,
             IcedReg::EDX,
-            i32::try_from(usize::from(gidx)).unwrap(),
+            i32::try_from(gidx.to_raw_index()).unwrap(),
         ));
         self.asm.push_inst(IcedInst::with2(
             Code::Mov_r64_imm64,
@@ -4500,6 +4506,7 @@ mod test {
         varlocs,
     };
     use fm::{FMBuilder, FMatcher};
+    use index_type::IndexType;
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
     use regex::{Regex, RegexBuilder};
@@ -4509,7 +4516,7 @@ mod test {
     };
 
     static TEST_EXIT_STATEPOINT: LazyLock<Statepoint> = LazyLock::new(|| Statepoint {
-        smapidx: StackMapIdx::from(0),
+        smapidx: StackMapIdx::from_raw_index(0),
         lives: Vec::new(),
     });
 
@@ -4707,7 +4714,7 @@ mod test {
             [] => None,
             _ => panic!(),
         };
-        let term_iidx = InstIdx::from(block.insts_len() - 1);
+        let term_iidx = InstIdx::from_raw_index(block.insts_len() - 1);
         let mut be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), true);
         let mut ra = RegAlloc::new(&m, block, args_vlocs, 0);
         be.star_return_end(&mut ra, block, term_iidx, &TEST_EXIT_STATEPOINT, ret_val)
@@ -4750,12 +4757,24 @@ mod test {
         };
         let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
 
-        assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(0)), Some(0));
-        assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(1)), Some(0xFF));
-        assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(2)), Some(0));
-        assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(3)), Some(0xFF));
-        assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(4)), None);
-        assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from(5)), None);
+        assert_eq!(
+            be.zero_ext_op_for_imm8(b, InstIdx::from_raw_index(0)),
+            Some(0)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm8(b, InstIdx::from_raw_index(1)),
+            Some(0xFF)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm8(b, InstIdx::from_raw_index(2)),
+            Some(0)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm8(b, InstIdx::from_raw_index(3)),
+            Some(0xFF)
+        );
+        assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from_raw_index(4)), None);
+        assert_eq!(be.zero_ext_op_for_imm8(b, InstIdx::from_raw_index(5)), None);
     }
 
     #[test]
@@ -4788,39 +4807,96 @@ mod test {
         };
         let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
 
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(6)), Some(0));
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(7)), Some(-1));
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(8)), Some(0));
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(9)), None);
         assert_eq!(
-            be.sign_ext_op_for_imm32(b, InstIdx::from(10)),
+            be.sign_ext_op_for_imm32(b, InstIdx::from_raw_index(6)),
+            Some(0)
+        );
+        assert_eq!(
+            be.sign_ext_op_for_imm32(b, InstIdx::from_raw_index(7)),
+            Some(-1)
+        );
+        assert_eq!(
+            be.sign_ext_op_for_imm32(b, InstIdx::from_raw_index(8)),
+            Some(0)
+        );
+        assert_eq!(
+            be.sign_ext_op_for_imm32(b, InstIdx::from_raw_index(9)),
+            None
+        );
+        assert_eq!(
+            be.sign_ext_op_for_imm32(b, InstIdx::from_raw_index(10)),
             Some(0x10000000)
         );
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(11)), None);
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(12)), Some(-1));
-        assert_eq!(be.sign_ext_op_for_imm32(b, InstIdx::from(13)), Some(-2));
-
-        assert_eq!(be.zero_ext_op_for_imm32(b, 1, InstIdx::from(0)), Some(0));
-        assert_eq!(be.zero_ext_op_for_imm32(b, 1, InstIdx::from(1)), Some(1));
-        assert_eq!(be.zero_ext_op_for_imm32(b, 8, InstIdx::from(2)), Some(0));
-        assert_eq!(be.zero_ext_op_for_imm32(b, 8, InstIdx::from(3)), Some(255));
-        assert_eq!(be.zero_ext_op_for_imm32(b, 16, InstIdx::from(4)), Some(0));
         assert_eq!(
-            be.zero_ext_op_for_imm32(b, 16, InstIdx::from(5)),
+            be.sign_ext_op_for_imm32(b, InstIdx::from_raw_index(11)),
+            None
+        );
+        assert_eq!(
+            be.sign_ext_op_for_imm32(b, InstIdx::from_raw_index(12)),
+            Some(-1)
+        );
+        assert_eq!(
+            be.sign_ext_op_for_imm32(b, InstIdx::from_raw_index(13)),
+            Some(-2)
+        );
+
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 1, InstIdx::from_raw_index(0)),
+            Some(0)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 1, InstIdx::from_raw_index(1)),
+            Some(1)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 8, InstIdx::from_raw_index(2)),
+            Some(0)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 8, InstIdx::from_raw_index(3)),
+            Some(255)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 16, InstIdx::from_raw_index(4)),
+            Some(0)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 16, InstIdx::from_raw_index(5)),
             Some(65535)
         );
-        assert_eq!(be.zero_ext_op_for_imm32(b, 32, InstIdx::from(6)), Some(0));
-        assert_eq!(be.zero_ext_op_for_imm32(b, 32, InstIdx::from(7)), Some(-1));
-
-        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(8)), Some(0));
-        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(9)), None);
         assert_eq!(
-            be.zero_ext_op_for_imm32(b, 64, InstIdx::from(10)),
+            be.zero_ext_op_for_imm32(b, 32, InstIdx::from_raw_index(6)),
+            Some(0)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 32, InstIdx::from_raw_index(7)),
+            Some(-1)
+        );
+
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 64, InstIdx::from_raw_index(8)),
+            Some(0)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 64, InstIdx::from_raw_index(9)),
+            None
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 64, InstIdx::from_raw_index(10)),
             Some(0x10000000)
         );
-        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(11)), None);
-        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(12)), Some(-1));
-        assert_eq!(be.zero_ext_op_for_imm32(b, 64, InstIdx::from(13)), Some(-2));
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 64, InstIdx::from_raw_index(11)),
+            None
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 64, InstIdx::from_raw_index(12)),
+            Some(-1)
+        );
+        assert_eq!(
+            be.zero_ext_op_for_imm32(b, 64, InstIdx::from_raw_index(13)),
+            Some(-2)
+        );
     }
 
     #[test]
@@ -4857,36 +4933,36 @@ mod test {
         let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
 
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from(3), InstIdx::from(1)),
-            Some((InstIdx::from(0), 0))
+            be.try_load_to_mem_op(b, InstIdx::from_raw_index(3), InstIdx::from_raw_index(1)),
+            Some((InstIdx::from_raw_index(0), 0))
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from(5), InstIdx::from(1)),
-            Some((InstIdx::from(0), 0))
+            be.try_load_to_mem_op(b, InstIdx::from_raw_index(5), InstIdx::from_raw_index(1)),
+            Some((InstIdx::from_raw_index(0), 0))
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from(6), InstIdx::from(4)),
-            Some((InstIdx::from(0), 0))
+            be.try_load_to_mem_op(b, InstIdx::from_raw_index(6), InstIdx::from_raw_index(4)),
+            Some((InstIdx::from_raw_index(0), 0))
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from(8), InstIdx::from(4)),
+            be.try_load_to_mem_op(b, InstIdx::from_raw_index(8), InstIdx::from_raw_index(4)),
             None
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from(10), InstIdx::from(4)),
+            be.try_load_to_mem_op(b, InstIdx::from_raw_index(10), InstIdx::from_raw_index(4)),
             None
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from(10), InstIdx::from(9)),
-            Some((InstIdx::from(0), 0))
+            be.try_load_to_mem_op(b, InstIdx::from_raw_index(10), InstIdx::from_raw_index(9)),
+            Some((InstIdx::from_raw_index(0), 0))
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from(14), InstIdx::from(9)),
+            be.try_load_to_mem_op(b, InstIdx::from_raw_index(14), InstIdx::from_raw_index(9)),
             None
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from(14), InstIdx::from(13)),
-            Some((InstIdx::from(0), 0))
+            be.try_load_to_mem_op(b, InstIdx::from_raw_index(14), InstIdx::from_raw_index(13)),
+            Some((InstIdx::from_raw_index(0), 0))
         );
     }
 
@@ -4917,19 +4993,39 @@ mod test {
         let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
         x64be.about_to_process_block(b, args_vlocs);
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(2), InstIdx::new(0)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(2),
+                InstIdx::from_raw_index(0)
+            ),
             Some(Reg::R8)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(3), InstIdx::new(2)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(3),
+                InstIdx::from_raw_index(2)
+            ),
             Some(Reg::R8)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(1)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R9)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(6), InstIdx::new(1)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(6),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R9)
         );
     }
@@ -4962,15 +5058,30 @@ mod test {
         let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
         x64be.about_to_process_block(b, args_vlocs);
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(4), InstIdx::new(3)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(4),
+                InstIdx::from_raw_index(3)
+            ),
             None
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(4)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(4)
+            ),
             Some(Reg::RAX)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(6), InstIdx::new(5)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(6),
+                InstIdx::from_raw_index(5)
+            ),
             Some(Reg::XMM0)
         );
     }
@@ -5002,45 +5113,95 @@ mod test {
         let mut x64be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
         x64be.about_to_process_block(b, args_vlocs);
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(2), InstIdx::new(0)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(2),
+                InstIdx::from_raw_index(0)
+            ),
             Some(Reg::R8)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(2), InstIdx::new(1)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(2),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R13)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(3), InstIdx::new(2)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(3),
+                InstIdx::from_raw_index(2)
+            ),
             Some(Reg::R8)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(3)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(3)
+            ),
             Some(Reg::R8)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(4)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(4)
+            ),
             None
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(6), InstIdx::new(5)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(6),
+                InstIdx::from_raw_index(5)
+            ),
             Some(Reg::RAX)
         );
 
         // Check clobbers either side of the `call`
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(0)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(0)
+            ),
             Some(Reg::R8)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(5), InstIdx::new(1)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R13)
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(7), InstIdx::new(0)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(7),
+                InstIdx::from_raw_index(0)
+            ),
             None
         );
         assert_eq!(
-            x64be.reg_hint(b, args_vlocs, InstIdx::new(7), InstIdx::new(1)),
+            x64be.reg_hint(
+                b,
+                args_vlocs,
+                InstIdx::from_raw_index(7),
+                InstIdx::from_raw_index(1)
+            ),
             Some(Reg::R13)
         );
     }

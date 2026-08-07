@@ -12,7 +12,7 @@ enum_dispatch = "0.3.13"
 deku = { version = "0.18.1", features = ["std"] }
 iced-x86 = { version = "1.21.0", features = ["encoder"] }
 indexmap = "2.2.6"
-index_vec = "0.1.4"
+index_type = "0.7.1"
 libc = "0.2.148"
 memmap2 = "0.9"
 num-traits = "0.2.16"
