@@ -50,15 +50,24 @@ fn main() {
     rerun_except(&[]).unwrap();
 
     // Build ykllvm in "target/<cargo-profile>". Note that the directory used here *must* be
-    // exactly the same as that produced by `ykbuild/src/lib.rs:llvm_bin_dir` and yk-config.
-    let mut ykllvm_build_dir = Path::new(&env::var("OUT_DIR").unwrap())
-        .parent()
+    // exactly the same as that produced by `ykbuild/src/lib.rs:target_dir` and yk-config.
+    let target_dir = cargo_metadata::MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .expect("failed to run `cargo metadata`")
+        .target_directory
+        .into_std_path_buf();
+    let out_dir = env::var("OUT_DIR").unwrap();
+    let profile = Path::new(&out_dir)
+        .strip_prefix(&target_dir)
+        .expect("OUT_DIR is not inside cargo's target directory")
+        .components()
+        .next()
         .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+        .as_os_str()
         .to_owned();
+    let mut ykllvm_build_dir = target_dir.join(profile);
+    assert!(ykllvm_build_dir.is_dir());
     ykllvm_build_dir.push("ykllvm");
     create_dir_all(&ykllvm_build_dir).unwrap();
 

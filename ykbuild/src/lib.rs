@@ -11,14 +11,23 @@ pub mod completion_wrapper;
 ///
 /// There are no guarantees about where this directory will be or what its name is.
 pub fn target_dir() -> PathBuf {
-    Path::new(env!("OUT_DIR"))
-        .parent()
+    let target_dir = cargo_metadata::MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .expect("failed to run `cargo metadata`")
+        .target_directory
+        .into_std_path_buf();
+    let profile = Path::new(env!("OUT_DIR"))
+        .strip_prefix(&target_dir)
+        .expect("OUT_DIR is not inside cargo's target directory")
+        .components()
+        .next()
         .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_owned()
+        .as_os_str()
+        .to_owned();
+    let dir = target_dir.join(profile);
+    assert!(dir.is_dir(), "{dir:?} is not a directory");
+    dir
 }
 
 /// Return a [Path] to the directory containing a ykllvm installation.
