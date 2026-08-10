@@ -256,7 +256,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             TraceEndKind::Return(_) => (),
             TraceEndKind::Term => {
                 assert!(self.promotions_iter.next().is_none());
-                assert_eq!(self.frames.len(), 1);
+                if self.frames.len() > 1 {
+                    // FIXME
+                    return Err(CompilationError::General(
+                        "Finishing in recursive control points not yet supported".into(),
+                    ));
+                }
                 let exit_statepoint = match &bmk {
                     BuildModKind::Loop { entry_statepoint } => entry_statepoint,
                     BuildModKind::Coupler { tgt_ctr, .. } => match &tgt_ctr.trace_start {
