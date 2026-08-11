@@ -133,7 +133,7 @@ impl JobQueue {
     fn expire_failures(&self) {
         let mut failures_lk = self.failures.lock();
         let now = Instant::now();
-        failures_lk.retain(|(expires_at, _)| *expires_at < now);
+        failures_lk.retain(|(expires_at, _)| *expires_at > now);
     }
 
     /// Queue `job` to be run on a worker thread.
