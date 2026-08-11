@@ -133,7 +133,7 @@ impl JobQueue {
     fn expire_failures(&self) {
         let mut failures_lk = self.failures.lock();
         let now = Instant::now();
-        failures_lk.retain(|(expires_at, _)| *expires_at < now);
+        failures_lk.retain(|(expires_at, _)| *expires_at > now);
     }
 
     /// Queue `job` to be run on a worker thread.
@@ -208,7 +208,7 @@ impl JobQueue {
                         // Since we're running in a thread, we don't mind paying the (generally
                         // very small, but you can't be sure) penalty of expiring entries from the
                         // `failures` set.
-                        self_cl.expire_failures();
+                        MutexGuard::unlocked(&mut lk, || self_cl.expire_failures());
 
                         // Search through the queue looking for the first job we can compile (i.e.
                         // there is no coupler trace ID, or the coupler trade ID has been
