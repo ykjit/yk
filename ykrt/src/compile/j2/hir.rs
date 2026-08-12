@@ -848,6 +848,7 @@ pub(super) enum Inst {
     CtTz,
     DebugStr,
     DynPtrAdd,
+    ExtractValue,
     FAdd,
     FCmp,
     FDiv,
@@ -1808,6 +1809,56 @@ impl InstT for DynPtrAdd {
 
     fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
         m.tyidx_ptr0()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ExtractValue {
+    pub aggregate: InstIdx,
+    pub field_bit_off: u32,
+    pub tyidx: TyIdx,
+}
+
+impl InstT for ExtractValue {
+    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.aggregate = opt.equiv_iidx(self.aggregate);
+    }
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        panic!();
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none().add_internal()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(b, self.aggregate)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.aggregate = iidx_map(self.aggregate);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "extractvalue %{} [{}]",
+            self.aggregate.to_raw_index(),
+            self.field_bit_off
+        )
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
