@@ -48,7 +48,7 @@ io.stderr:write("exit\n")
 --     j 2
 --     i 3
 --     yk-tracing: start-tracing: unrolling.lua:2: GTI
---     yk-tracing: stop-tracing: unrolling.lua:4: GETTABUP
+--     yk-tracing: stop-tracing: unrolling.lua:2: GTI
 --     --- Begin debugstrs: unrolling.lua:2: GTI ---
 --     ; {
 --     ;   "trid": "2",
