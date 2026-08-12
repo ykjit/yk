@@ -474,13 +474,13 @@ impl MT {
                 start_tid,
                 coupler_tid,
             } => {
-                self.stop_tracing(loc, start_tid, TraceEnd::Coupler(coupler_tid));
+                self.stop_tracing(start_tid, TraceEnd::Coupler(coupler_tid));
             }
             TransitionControlPoint::StopLoopTracing(trid) => {
-                self.stop_tracing(loc, trid, TraceEnd::Loop);
+                self.stop_tracing(trid, TraceEnd::Loop);
             }
             TransitionControlPoint::StopReturnTracing(trid) => {
-                self.stop_tracing(loc, trid, TraceEnd::Loop);
+                self.stop_tracing(trid, TraceEnd::Loop);
             }
             TransitionControlPoint::StopUnrollTracing {
                 inner_hl,
@@ -637,8 +637,7 @@ impl MT {
     ///
     /// If an error occurs while tracing, the original tracing [Location] will be put back into
     /// either the `Counting` or `DontTrace` states.
-    fn stop_tracing(self: &Arc<Self>, loc: &Location, ctrid: TraceId, trace_end: TraceEnd) {
-        let _loc = loc; // Only used in `cfg(test)`.
+    fn stop_tracing(self: &Arc<Self>, ctrid: TraceId, trace_end: TraceEnd) {
         // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
         // will have put a `Some` in the `Rc`.
         let (hl, thread_tracer, promotions, debug_strs) =
@@ -664,7 +663,7 @@ impl MT {
                     self.log,
                     Verbosity::Tracing,
                     |log| write!(log, "stop-tracing"),
-                    _loc.hot_location()
+                    Some(&hl)
                 );
                 self.queue_compile_job(Trace {
                     trace_start: TraceStart::ControlPoint { hl },
@@ -695,7 +694,7 @@ impl MT {
                     self.log,
                     Verbosity::Warning,
                     |log| write!(log, "stop-tracing-aborted: {e}"),
-                    _loc.hot_location()
+                    Some(&hl)
                 );
             }
         }

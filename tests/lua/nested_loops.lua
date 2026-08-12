@@ -40,7 +40,7 @@ io.stderr:write(x)
 --     yk-tracing: start-side-tracing: nested_loops.lua:5: ADDI
 --     yk-tracing: stop-tracing: nested_loops.lua:3: ADDI
 --     yk-tracing: start-tracing: nested_loops.lua:3: ADDI
---     yk-tracing: stop-tracing: nested_loops.lua:5: ADDI
+--     yk-tracing: stop-tracing: nested_loops.lua:3: ADDI
 --     --- Begin debugstrs: nested_loops.lua:3: ADDI ---
 --     ; {
 --     ;   "trid": "2",

@@ -52,7 +52,7 @@ io.stderr:write("exit\n")
 --     --- End debugstrs ---
 --     4
 --     yk-tracing: start-tracing: recursive_function_indirect.lua:9: GETTABUP
---     yk-tracing: stop-tracing: recursive_function_indirect.lua:2: GETTABUP
+--     yk-tracing: stop-tracing: recursive_function_indirect.lua:9: GETTABUP
 --     --- Begin debugstrs: recursive_function_indirect.lua:9: GETTABUP ---
 --     ; {
 --     ;   "trid": "1",
