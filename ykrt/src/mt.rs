@@ -474,13 +474,16 @@ impl MT {
                 start_tid,
                 coupler_tid,
             } => {
-                self.stop_tracing(start_tid, TraceEnd::Coupler(coupler_tid));
+                let tstate = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
+                self.stop_tracing(tstate, start_tid, TraceEnd::Coupler(coupler_tid));
             }
             TransitionControlPoint::StopLoopTracing(trid) => {
-                self.stop_tracing(trid, TraceEnd::Loop);
+                let tstate = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
+                self.stop_tracing(tstate, trid, TraceEnd::Loop);
             }
             TransitionControlPoint::StopReturnTracing(trid) => {
-                self.stop_tracing(trid, TraceEnd::Loop);
+                let tstate = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
+                self.stop_tracing(tstate, trid, TraceEnd::Loop);
             }
             TransitionControlPoint::StopUnrollTracing {
                 inner_hl,
@@ -633,28 +636,28 @@ impl MT {
         });
     }
 
-    /// Stop tracing of the trace with id `trid` at `loc`.
+    /// Stop tracing of the trace with id `cttrid` at `loc`. `state` must be of kind
+    /// `MTThreadState::Tracing`.
     ///
     /// If an error occurs while tracing, the original tracing [Location] will be put back into
     /// either the `Counting` or `DontTrace` states.
-    fn stop_tracing(self: &Arc<Self>, ctrid: TraceId, trace_end: TraceEnd) {
+    fn stop_tracing(self: &Arc<Self>, tstate: MTThreadState, ctrid: TraceId, trace_end: TraceEnd) {
         // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
         // will have put a `Some` in the `Rc`.
-        let (hl, thread_tracer, promotions, debug_strs) =
-            MTThread::with_borrow_mut(|mtt| match mtt.pop_tstate() {
-                MTThreadState::Tracing {
-                    mt: _,
-                    trid: _,
-                    hl,
-                    thread_tracer,
-                    promotions,
-                    debug_strs,
-                    frameaddr: _,
-                    seen_hls: _,
-                    gtrace: _,
-                } => (hl, thread_tracer, promotions, debug_strs),
-                _ => unreachable!(),
-            });
+        let (hl, thread_tracer, promotions, debug_strs) = match tstate {
+            MTThreadState::Tracing {
+                mt: _,
+                trid: _,
+                hl,
+                thread_tracer,
+                promotions,
+                debug_strs,
+                frameaddr: _,
+                seen_hls: _,
+                gtrace: _,
+            } => (hl, thread_tracer, promotions, debug_strs),
+            _ => unreachable!(),
+        };
         match thread_tracer.stop() {
             Ok(ta_iter) => {
                 MTThread::set_tracing(IsTracing::None);
@@ -1082,62 +1085,27 @@ impl MT {
     /// Inform this `MT` instance that `deopt` has occurred: this updates the stack of
     /// [MTThreadState]s.
     pub(crate) fn deopt(self: &Arc<Self>) {
-        loop {
-            let st = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
-            match st {
-                MTThreadState::Interpreting => todo!(),
-                MTThreadState::Tracing {
-                    trid,
-                    hl,
-                    thread_tracer,
-                    gtrace,
-                    ..
-                } => {
-                    let mut lk = hl.lock();
-                    match &lk.kind {
-                        HotLocationKind::Compiled(_) => {
-                            if let Some((parent_ctr, gidx)) = gtrace {
-                                // An inner trace has started side-tracing, then returned to the
-                                // outer trace, which deopts.
-                                let mt = Arc::clone(self);
-                                parent_ctr.guard(gidx).trace_or_compile_failed(&mt);
-                                mt.stats.trace_recorded_err();
-                                self.job_queue.notify_failure(self, trid);
-                            } else {
-                                todo!();
-                            }
-                        }
-                        HotLocationKind::Compiling(_) => {
-                            todo!();
-                        }
-                        HotLocationKind::Counting(_) => {
-                            todo!();
-                        }
-                        HotLocationKind::DontTrace => {}
-                        HotLocationKind::Tracing(trid) => {
-                            let trid = *trid;
-                            match lk.tracecompilation_error(self) {
-                                TraceFailed::KeepTrying => {
-                                    lk.kind = HotLocationKind::Counting(0);
-                                }
-                                TraceFailed::DontTrace => {
-                                    lk.kind = HotLocationKind::DontTrace;
-                                }
-                            }
-                            self.job_queue.notify_failure(self, trid);
-                        }
-                    }
+        let st = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
+        if let MTThreadState::Tracing { ref hl, trid, .. } = st {
+            // We recursed into an interpreter loop that started tracing then `return`ed back to a
+            // JIT frame. We can compile such a location as a `Return` trace.
+            let mut lk = hl.lock();
+            match lk.kind {
+                HotLocationKind::Compiled(_) | HotLocationKind::Compiling(_) => {
                     drop(lk);
-                    thread_tracer.stop().ok();
+                    let MTThreadState::Tracing { thread_tracer, .. } = st else {
+                        panic!()
+                    };
+                    let _ = thread_tracer.stop();
                     MTThread::set_tracing(IsTracing::None);
-                    yklog!(
-                        self.log,
-                        Verbosity::Warning,
-                        |log| write!(log, "tracing-aborted: {}", AbortKind::BackIntoExecution),
-                        Some(&*hl)
-                    );
                 }
-                MTThreadState::Executing { .. } => return,
+                HotLocationKind::Counting(_) => todo!(),
+                HotLocationKind::DontTrace => todo!(),
+                HotLocationKind::Tracing(_) => {
+                    lk.kind = HotLocationKind::Compiling(trid);
+                    drop(lk);
+                    self.stop_tracing(st, trid, TraceEnd::Return);
+                }
             }
         }
     }
@@ -1675,15 +1643,12 @@ enum TransitionControlPoint {
 /// Why did we abort tracing?
 #[derive(Debug)]
 enum AbortKind {
-    /// While tracing we fell back from an interpreter to a JIT frame.
-    BackIntoExecution,
     LongJmpEncountered,
 }
 
 impl std::fmt::Display for AbortKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            AbortKind::BackIntoExecution => write!(f, "tracing continued into a JIT frame"),
             AbortKind::LongJmpEncountered => write!(f, "longjmp encountered"),
         }
     }
