@@ -844,6 +844,7 @@ pub(super) enum Inst {
     BlackBox,
     Call,
     Const,
+    CopySign,
     CtPop,
     CtTz,
     DebugStr,
@@ -1576,6 +1577,80 @@ pub(super) enum ConstKind {
     Float(f32),
     Int(ArbBitInt),
     Ptr(usize),
+}
+
+/// Copies the sign from `lhs` to `rhs` with the same semantics as LLVM's `copysign`.
+#[derive(Clone, Debug)]
+pub(super) struct CopySign {
+    pub tyidx: TyIdx,
+    /// What LLVM implies is called "first".
+    pub lhs: InstIdx,
+    /// What LLVM implies is called "second".
+    pub rhs: InstIdx,
+}
+
+impl InstT for CopySign {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            self.tyidx,
+            b.inst(self.lhs).tyidx(m),
+            "%{iidx:?}: inconsistent return / lhs types"
+        );
+        assert_eq!(
+            self.tyidx,
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent return / rhs types"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::CopySign(CopySign { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "copysign %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
 }
 
 /// Count with the number of set bits, with the same semantics as `llvm.ctpop.`.
