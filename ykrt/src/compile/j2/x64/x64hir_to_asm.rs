@@ -48,7 +48,9 @@ use crate::{
             },
             x64::{
                 asm::{Asm, LabelIdx, RelocKind},
-                x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS_MINUS_RDX, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
+                x64regalloc::{
+                    ALL_XMM_REGS, NORMAL_GP_REGS, NORMAL_GP_REGS_MINUS_RDX, PeelRegsBuilder, Reg,
+                },
             },
         },
     },

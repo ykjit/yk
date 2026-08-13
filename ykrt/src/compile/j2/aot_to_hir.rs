@@ -1910,9 +1910,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             panic!()
         };
 
-        if let Operand::Local(aot_iid) = op
-            && indices.len() == 1
-        {
+        if let Operand::Local(aot_iid) = op {
             let aggregate_iidx = self.frames.last().unwrap().get_local(&*self.opt, aot_iid);
             if let hir::Inst::Call(_) = self.opt.inst(aggregate_iidx) {
                 return self.p_extractvalue_register_packed(
