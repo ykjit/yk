@@ -773,27 +773,19 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let Some(struct_ty) = struct_ty else {
             return Ok(());
         };
-        let bit_size = struct_ty.bit_size();
-        let lo_tyidx = self
-            .opt
-            .push_ty(hir::Ty::Int(u32::try_from(bit_size.min(64)).unwrap()))?;
-        self.opt.feed(
-            hir::ExtractVal {
-                val: call_iidx,
-                off: 0,
-                tyidx: lo_tyidx,
-            }
-            .into(),
-        )?;
-        if bit_size > 64 {
-            let hi_tyidx = self
-                .opt
-                .push_ty(hir::Ty::Int(u32::try_from(bit_size - 64).unwrap()))?;
+        let offs = struct_ty.field_bit_offs();
+        for i in 0..offs.len() {
+            let off = u32::try_from(offs[i]).unwrap();
+            let end = offs
+                .get(i + 1)
+                .map(|x| u32::try_from(*x).unwrap())
+                .unwrap_or_else(|| u32::try_from(struct_ty.bit_size()).unwrap());
+            let tyidx = self.opt.push_ty(hir::Ty::Int(end - off))?;
             self.opt.feed(
                 hir::ExtractVal {
                     val: call_iidx,
-                    off: 64,
-                    tyidx: hi_tyidx,
+                    off,
+                    tyidx,
                 }
                 .into(),
             )?;
@@ -1290,14 +1282,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Ty::Struct(struct_ty) => {
                     // HIR has no aggregate SSA value, so use the call's first register chunk as
                     // its result type; p_call_extractvalues (below) handles the rest.
-                    let bit_size = struct_ty.bit_size();
-                    assert!(
-                        bit_size <= 128,
-                        "got {bit_size} bits, struct with >16 bytes should use a pointer return, not a struct."
-                    );
-                    let tyidx = self
-                        .opt
-                        .push_ty(hir::Ty::Int(u32::try_from(bit_size.min(64)).unwrap()))?;
+                    let offs = struct_ty.field_bit_offs();
+                    let end = offs
+                        .get(1)
+                        .map(|x| u32::try_from(*x).unwrap())
+                        .unwrap_or_else(|| u32::try_from(struct_ty.bit_size()).unwrap());
+                    let tyidx = self.opt.push_ty(hir::Ty::Int(end))?;
                     (tyidx, Some(struct_ty))
                 }
                 _ => (self.p_ty(aot_rtn_ty)?, None),
@@ -1918,7 +1908,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 return self.p_extractvalue_register_packed(
                     iid,
                     *tyidx,
-                    struct_ty,
                     indices[0],
                     aggregate_iidx,
                 );
@@ -1931,54 +1920,25 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         &mut self,
         iid: InstId,
         tyidx: TyIdx,
-        struct_ty: &StructTy,
         index: usize,
         aggregate_iidx: hir::InstIdx,
     ) -> Result<(), CompilationError> {
-        let bit_size = struct_ty.bit_size();
-        let field_bit_off = struct_ty.field_bit_offs()[index];
-        let chunk_num = field_bit_off / 64;
-        assert!(
-            chunk_num < 2,
-            "extractvalue field offset beyond the struct's register-pair width"
-        );
-        let chunk_sub_off = u32::try_from(field_bit_off % 64).unwrap();
-        let chunk_bitw =
-            u32::try_from((bit_size - u64::try_from(chunk_num).unwrap() * 64).min(64)).unwrap();
-        let chunk_iidx =
-            hir::InstIdx::from_raw_index(aggregate_iidx.to_raw_index() + 1 + chunk_num);
-
+        let chunk_iidx = hir::InstIdx::from_raw_index(aggregate_iidx.to_raw_index() + 1 + index);
         let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
         let res_bitw = self.opt.ty(res_tyidx).bitw();
-
-        let val_iidx = if chunk_sub_off == 0 {
-            chunk_iidx
+        let chunk_bitw = self
+            .opt
+            .ty(self.opt.inst(chunk_iidx).tyidx(&*self.opt))
+            .bitw();
+        if res_bitw == chunk_bitw {
+            self.frames.last_mut().unwrap().set_local(iid, chunk_iidx);
         } else {
-            let chunk_tyidx = self.opt.inst(chunk_iidx).tyidx(&*self.opt);
-            let shift_iidx = self.const_to_iidx(
-                chunk_tyidx,
-                hir::ConstKind::Int(ArbBitInt::from_u64(chunk_bitw, u64::from(chunk_sub_off))),
-            )?;
-            self.opt.feed(
-                hir::LShr {
-                    tyidx: chunk_tyidx,
-                    lhs: chunk_iidx,
-                    rhs: shift_iidx,
-                    exact: false,
-                }
-                .into(),
-            )?
-        };
-        let avail_bitw = chunk_bitw - chunk_sub_off;
-        if res_bitw == avail_bitw {
-            self.frames.last_mut().unwrap().set_local(iid, val_iidx);
-        } else {
-            assert!(res_bitw < avail_bitw);
+            assert!(res_bitw < chunk_bitw);
             self.push_inst_and_link_local(
                 iid,
                 hir::Trunc {
                     tyidx: res_tyidx,
-                    val: val_iidx,
+                    val: chunk_iidx,
                     nuw: false,
                     nsw: false,
                 },
