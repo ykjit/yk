@@ -810,8 +810,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             .push_ty(hir::Ty::Int(u32::try_from(bit_size.min(64)).unwrap()))?;
         self.opt.feed(
             hir::ExtractVal {
-                aggregate: call_iidx,
-                field_bit_off: 0,
+                val: call_iidx,
+                off: 0,
                 tyidx: lo_tyidx,
             }
             .into(),
@@ -822,8 +822,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 .push_ty(hir::Ty::Int(u32::try_from(bit_size - 64).unwrap()))?;
             self.opt.feed(
                 hir::ExtractVal {
-                    aggregate: call_iidx,
-                    field_bit_off: 64,
+                    val: call_iidx,
+                    off: 64,
                     tyidx: hi_tyidx,
                 }
                 .into(),

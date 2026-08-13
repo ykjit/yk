@@ -2336,36 +2336,31 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        ExtractVal {
-            aggregate,
-            field_bit_off,
-            ..
-        }: &ExtractVal,
+        ExtractVal { val, off, .. }: &ExtractVal,
     ) -> Result<(), CompilationError> {
         // We only support extracting from a register-packed struct return.
-        if !matches!(b.inst(*aggregate), Inst::Call(_)) {
+        if !matches!(b.inst(*val), Inst::Call(_)) {
             panic!();
         }
-        if *field_bit_off == 0 {
-            if aggregate.to_raw_index() + 1 != iidx.to_raw_index() {
+        if *off == 0 {
+            if val.to_raw_index() + 1 != iidx.to_raw_index() {
                 todo!("")
             }
             let [_] = ra.alloc(
                 self,
                 iidx,
                 [RegCnstr::Cast {
-                    in_iidx: *aggregate,
+                    in_iidx: *val,
                     out_fill: RegCnstrFill::Undefined,
                     regs: &NORMAL_GP_REGS_MINUS_RDX,
                 }],
             )?;
         } else {
-            if aggregate.to_raw_index() + 2 != iidx.to_raw_index() {
+            if val.to_raw_index() + 2 != iidx.to_raw_index() {
                 todo!("")
             }
             let lo_iidx = InstIdx::from_raw_index(iidx.to_raw_index() - 1);
-            if !matches!(b.inst(lo_iidx), Inst::ExtractValue(lo) if lo.aggregate == *aggregate && lo.field_bit_off == 0)
-            {
+            if !matches!(b.inst(lo_iidx), Inst::ExtractVal(lo) if lo.val == *val && lo.off == 0) {
                 todo!("")
             }
             let [_] = ra.alloc(

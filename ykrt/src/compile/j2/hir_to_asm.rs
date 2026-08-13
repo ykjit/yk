@@ -969,7 +969,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_dynptradd(&mut ra, b, iidx, x)?;
                     }
                 }
-                Inst::ExtractValue(x) => {
+                Inst::ExtractVal(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_extractvalue(&mut ra, b, iidx, x)?;
                     }
