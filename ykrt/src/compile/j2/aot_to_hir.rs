@@ -1252,9 +1252,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
             let rtn_tyidx = match aot_rtn_ty {
                 Ty::Struct(struct_ty) => {
-                    // HIR has no aggregate SSA value, so the call result type is just the first
-                    // field. A later call to p_extractvalue_from_call handles the rest of the
-                    //struct fields.
+                    // HIR has no aggregate SSA value, so the call result type is just the first field.
                     let offs = struct_ty.field_bit_offs();
                     let end = offs
                         .get(1)
