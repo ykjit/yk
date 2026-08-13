@@ -19,7 +19,20 @@
 //     0: 2
 //     0: 1
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
-//     yk-warning: tracing-aborted: tracing continued into a JIT frame
+//     yk-tracing: stop-tracing
+//     --- Begin hir ---
+//     ; {
+//     ;   "trid": "1",
+//     ;   "start": {
+//     ;     "kind": "ControlPoint"
+//     ;   },
+//     ;   "end": {
+//     ;     "kind": "Return"
+//     ;   }
+//     ; }
+//     ...
+//     term []
+//     --- End hir ---
 //     exit
 
 // Test that we don't record a successful trace if we started tracing in an
