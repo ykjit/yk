@@ -765,34 +765,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         self.opt.push_ty(tyidx)
     }
 
-    fn p_call_extractvalues(
-        &mut self,
-        call_iidx: hir::InstIdx,
-        struct_ty: Option<&StructTy>,
-    ) -> Result<(), CompilationError> {
-        let Some(struct_ty) = struct_ty else {
-            return Ok(());
-        };
-        let offs = struct_ty.field_bit_offs();
-        for i in 0..offs.len() {
-            let off = u32::try_from(offs[i]).unwrap();
-            let end = offs
-                .get(i + 1)
-                .map(|x| u32::try_from(*x).unwrap())
-                .unwrap_or_else(|| u32::try_from(struct_ty.bit_size()).unwrap());
-            let tyidx = self.opt.push_ty(hir::Ty::Int(end - off))?;
-            self.opt.feed(
-                hir::ExtractVal {
-                    val: call_iidx,
-                    off,
-                    tyidx,
-                }
-                .into(),
-            )?;
-        }
-        Ok(())
-    }
-
     /// Process an [Operand] and return the [hir::InstIdx] it references. Note: this can insert
     /// instructions into [self.opt]!
     fn p_operand(&mut self, op: &Operand) -> Result<hir::InstIdx, CompilationError> {
@@ -1278,19 +1250,19 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 panic!()
             };
             let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
-            let (rtn_tyidx, struct_ty) = match aot_rtn_ty {
+            let rtn_tyidx = match aot_rtn_ty {
                 Ty::Struct(struct_ty) => {
                     // HIR has no aggregate SSA value, so use the call's first register chunk as
-                    // its result type; p_call_extractvalues (below) handles the rest.
+                    // its result type; p_extractvalue_from_call (triggered by any extractvalue
+                    // on this call's result) fetches the rest directly from the call itself.
                     let offs = struct_ty.field_bit_offs();
                     let end = offs
                         .get(1)
                         .map(|x| u32::try_from(*x).unwrap())
                         .unwrap_or_else(|| u32::try_from(struct_ty.bit_size()).unwrap());
-                    let tyidx = self.opt.push_ty(hir::Ty::Int(end))?;
-                    (tyidx, Some(struct_ty))
+                    self.opt.push_ty(hir::Ty::Int(end))?
                 }
-                _ => (self.p_ty(aot_rtn_ty)?, None),
+                _ => self.p_ty(aot_rtn_ty)?,
             };
             let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
             for arg_ty in aot_fty.arg_tyidxs() {
@@ -1312,8 +1284,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             if *self.opt.ty(rtn_tyidx) == hir::Ty::Void {
                 self.opt.feed_void(inst)?;
             } else {
-                let call_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
-                self.p_call_extractvalues(call_iidx, struct_ty)?;
+                self.push_inst_and_link_local(iid.clone(), inst)?;
             }
             match self.outline_until(bid)? {
                 OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
@@ -1905,31 +1876,44 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         if let Operand::Local(aot_iid) = op {
             let aggregate_iidx = self.frames.last().unwrap().get_local(&*self.opt, aot_iid);
             if let hir::Inst::Call(_) = self.opt.inst(aggregate_iidx) {
-                return self.p_extractvalue_register_packed(
+                return self.p_extractvalue_from_call(
                     iid,
                     *tyidx,
+                    struct_ty,
                     indices[0],
                     aggregate_iidx,
                 );
             }
         }
-        self.p_extractvalue_memory_backed(iid, *tyidx, op, struct_ty, indices)
+        self.p_extractvalue_from_load(iid, *tyidx, op, struct_ty, indices)
     }
 
-    fn p_extractvalue_register_packed(
+    fn p_extractvalue_from_call(
         &mut self,
         iid: InstId,
         tyidx: TyIdx,
+        struct_ty: &StructTy,
         index: usize,
         aggregate_iidx: hir::InstIdx,
     ) -> Result<(), CompilationError> {
-        let chunk_iidx = hir::InstIdx::from_raw_index(aggregate_iidx.to_raw_index() + 1 + index);
+        let offs = struct_ty.field_bit_offs();
+        let off = u32::try_from(offs[index]).unwrap();
+        let end = offs
+            .get(index + 1)
+            .map(|x| u32::try_from(*x).unwrap())
+            .unwrap_or_else(|| u32::try_from(struct_ty.bit_size()).unwrap());
+        let chunk_bitw = end - off;
+        let chunk_tyidx = self.opt.push_ty(hir::Ty::Int(chunk_bitw))?;
+        let chunk_iidx = self.opt.feed(
+            hir::ExtractVal {
+                val: aggregate_iidx,
+                off,
+                tyidx: chunk_tyidx,
+            }
+            .into(),
+        )?;
         let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
         let res_bitw = self.opt.ty(res_tyidx).bitw();
-        let chunk_bitw = self
-            .opt
-            .ty(self.opt.inst(chunk_iidx).tyidx(&*self.opt))
-            .bitw();
         if res_bitw == chunk_bitw {
             self.frames.last_mut().unwrap().set_local(iid, chunk_iidx);
         } else {
@@ -1947,7 +1931,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         Ok(())
     }
 
-    fn p_extractvalue_memory_backed(
+    fn p_extractvalue_from_load(
         &mut self,
         iid: InstId,
         tyidx: TyIdx,

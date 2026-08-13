@@ -2336,16 +2336,15 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        ExtractVal { val, off, .. }: &ExtractVal,
+        ExtractVal { val, off, tyidx }: &ExtractVal,
     ) -> Result<(), CompilationError> {
-        // We only support extracting from a register-packed struct return.
+        // We only support extracting from a struct returned directly by a call.
         if !matches!(b.inst(*val), Inst::Call(_)) {
             panic!();
         }
+        // Expecting struct across at most two 64-bit GP registers (RAX and RDX).
+        assert!(self.m.ty(*tyidx).bitw() <= 64);
         if *off == 0 {
-            if val.to_raw_index() + 1 != iidx.to_raw_index() {
-                todo!("")
-            }
             let [_] = ra.alloc(
                 self,
                 iidx,
@@ -2356,13 +2355,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }],
             )?;
         } else {
-            if val.to_raw_index() + 2 != iidx.to_raw_index() {
-                todo!("")
-            }
-            let lo_iidx = InstIdx::from_raw_index(iidx.to_raw_index() - 1);
-            if !matches!(b.inst(lo_iidx), Inst::ExtractVal(lo) if lo.val == *val && lo.off == 0) {
-                todo!("")
-            }
+            assert_eq!(*off, 64);
             let [_] = ra.alloc(
                 self,
                 iidx,
@@ -7517,6 +7510,93 @@ mod test {
               sete r.8._
               ...
             "],
+        );
+    }
+
+    #[test]
+    fn cg_extractvalue() {
+        codegen_and_test(
+            "
+              extern abort() -> i64
+
+              %0: ptr = @abort
+              %1: i64 = call abort %0()
+              %2: i64 = extractvalue %1 [0]
+              %3: i64 = extractvalue %1 [64]
+              blackbox %2
+              blackbox %3
+              term []
+            ",
+            &[r#"
+              ...
+              ; %1: i64 = call %0()
+              call {{addr}}
+              ...
+              ; %2: i64 = extractvalue %1 [0]
+              ...
+              ; %3: i64 = extractvalue %1 [64]
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    fn cg_extractvalue_trunc() {
+        codegen_and_test(
+            "
+              extern abort() -> i64
+
+              %0: ptr = @abort
+              %1: i64 = call abort %0()
+              %2: i64 = extractvalue %1 [0]
+              %3: i8 = trunc %2
+              blackbox %3
+              term []
+            ",
+            &[r#"
+              ...
+              ; %1: i64 = call %0()
+              call {{addr}}
+              ...
+              ; %2: i64 = extractvalue %1 [0]
+              ...
+              ; %3: i8 = trunc %2
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion `left == right` failed")]
+    fn cg_extractvalue_bad_offset() {
+        codegen_and_test(
+            "
+              extern abort() -> i64
+
+              %0: ptr = @abort
+              %1: i64 = call abort %0()
+              %2: i64 = extractvalue %1 [32]
+              blackbox %2
+              term []
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_extractvalue_chunk_too_wide() {
+        codegen_and_test(
+            "
+              extern abort() -> i64
+
+              %0: ptr = @abort
+              %1: i64 = call abort %0()
+              %2: i128 = extractvalue %1 [0]
+              blackbox %2
+              term []
+            ",
+            &[""],
         );
     }
 
