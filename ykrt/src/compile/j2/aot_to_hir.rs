@@ -1876,37 +1876,21 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         if let Operand::Local(aot_iid) = op {
             let aggregate_iidx = self.frames.last().unwrap().get_local(&*self.opt, aot_iid);
             if let hir::Inst::Call(_) = self.opt.inst(aggregate_iidx) {
-                return self.p_extractvalue_from_call(
-                    iid,
-                    *tyidx,
-                    struct_ty,
-                    indices[0],
-                    aggregate_iidx,
-                );
+                let off = u32::try_from(struct_ty.field_bit_offs()[indices[0]]).unwrap();
+                let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
+                return self
+                    .push_inst_and_link_local(
+                        iid,
+                        hir::ExtractVal {
+                            val: aggregate_iidx,
+                            off,
+                            tyidx: res_tyidx,
+                        },
+                    )
+                    .map(|_| ());
             }
         }
         self.p_extractvalue_from_load(iid, *tyidx, op, struct_ty, indices)
-    }
-
-    fn p_extractvalue_from_call(
-        &mut self,
-        iid: InstId,
-        tyidx: TyIdx,
-        struct_ty: &StructTy,
-        index: usize,
-        aggregate_iidx: hir::InstIdx,
-    ) -> Result<(), CompilationError> {
-        let off = u32::try_from(struct_ty.field_bit_offs()[index]).unwrap();
-        let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
-        self.push_inst_and_link_local(
-            iid,
-            hir::ExtractVal {
-                val: aggregate_iidx,
-                off,
-                tyidx: res_tyidx,
-            },
-        )
-        .map(|_| ())
     }
 
     fn p_extractvalue_from_load(
