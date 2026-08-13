@@ -2329,6 +2329,64 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_copysign(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        CopySign { tyidx, lhs, rhs }: &CopySign,
+    ) -> Result<(), CompilationError> {
+        let [outr, lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    can_be_same_as_input: false,
+                },
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: true,
+                },
+            ],
+        )?;
+        match self.m.ty(*tyidx) {
+            Ty::Double => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Por_xmm_xmmm128,
+                    outr.to_xmm(),
+                    rhsr.to_xmm(),
+                ));
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Psllq_xmm_imm8, rhsr.to_xmm(), 63));
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Psrlq_xmm_imm8, rhsr.to_xmm(), 63));
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Psrlq_xmm_imm8, outr.to_xmm(), 1));
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Psllq_xmm_imm8, outr.to_xmm(), 1));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movapd_xmm_xmmm128,
+                    outr.to_xmm(),
+                    lhsr.to_xmm(),
+                ));
+            }
+            Ty::Float => todo!(),
+            _ => panic!(),
+        }
+
+        Ok(())
+    }
+
     fn i_ctpop(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -6249,6 +6307,33 @@ mod test {
               ; term []
             ",
             ],
+        );
+    }
+
+    #[test]
+    fn cg_copysign() {
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: double = arg [reg]
+              %2: double = copysign %0, %1
+              term [%2, %2]
+            ",
+            &[r#"
+              ...
+              ; %0: double = arg [Reg("fp.128.x", Undefined)]
+              ; %1: double = arg [Reg("fp.128.y", Undefined)]
+              movsd fp.128.z, fp.128.x
+              ; %2: double = copysign %0, %1
+              movapd fp.128.x, fp.128.z
+              psllq fp.128.x, 1
+              psrlq fp.128.x, 1
+              psrlq fp.128.y, 0x3F
+              psllq fp.128.y, 0x3F
+              por fp.128.x, fp.128.y
+              movsd fp.128.y, fp.128.x
+              ; term [%2, %2]
+            "#],
         );
     }
 
