@@ -31,8 +31,7 @@
 //     --- Begin hir ---
 //     ...
 //     %{{call}}: i64 = call %{{_}}() ; @make_struct
-//     %{{s1_a_i64}}: i64 = extractvalue %{{call}} [0]
-//     %{{s1_a}}: i8 = trunc %{{s1_a_i64}}
+//     %{{s1_a}}: i8 = extractvalue %{{call}} [0]
 //     ...
 //     %{{s1_b}}: i64 = extractvalue %{{call}} [64]
 //     ...

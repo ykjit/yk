@@ -1896,39 +1896,17 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         index: usize,
         aggregate_iidx: hir::InstIdx,
     ) -> Result<(), CompilationError> {
-        let offs = struct_ty.field_bit_offs();
-        let off = u32::try_from(offs[index]).unwrap();
-        let end = offs
-            .get(index + 1)
-            .map(|x| u32::try_from(*x).unwrap())
-            .unwrap_or_else(|| u32::try_from(struct_ty.bit_size()).unwrap());
-        let chunk_bitw = end - off;
-        let chunk_tyidx = self.opt.push_ty(hir::Ty::Int(chunk_bitw))?;
-        let chunk_iidx = self.opt.feed(
+        let off = u32::try_from(struct_ty.field_bit_offs()[index]).unwrap();
+        let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
+        self.push_inst_and_link_local(
+            iid,
             hir::ExtractVal {
                 val: aggregate_iidx,
                 off,
-                tyidx: chunk_tyidx,
-            }
-            .into(),
-        )?;
-        let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
-        let res_bitw = self.opt.ty(res_tyidx).bitw();
-        if res_bitw == chunk_bitw {
-            self.frames.last_mut().unwrap().set_local(iid, chunk_iidx);
-        } else {
-            assert!(res_bitw < chunk_bitw);
-            self.push_inst_and_link_local(
-                iid,
-                hir::Trunc {
-                    tyidx: res_tyidx,
-                    val: chunk_iidx,
-                    nuw: false,
-                    nsw: false,
-                },
-            )?;
-        }
-        Ok(())
+                tyidx: res_tyidx,
+            },
+        )
+        .map(|_| ())
     }
 
     fn p_extractvalue_from_load(
