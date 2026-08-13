@@ -1,3 +1,4 @@
+// ignore-if: test ${YK_ARCH} != "x86_64"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0
 // Run-time:
@@ -63,6 +64,8 @@
 //     exit
 
 // Test extractvalue non-inlined calls returning structs.
+// The expected AOT/HIR output below assumes the x64 sysvabi register-packing for
+// small struct returns - two 64-bit GP registers.
 
 #include <assert.h>
 #include <stdint.h>
