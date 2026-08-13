@@ -459,22 +459,6 @@ pub(super) const NORMAL_GP_REGS: [Reg; 14] = [
     Reg::RAX,
 ];
 
-pub(super) const NORMAL_GP_REGS_MINUS_RDX: [Reg; 13] = [
-    Reg::R15,
-    Reg::R14,
-    Reg::R13,
-    Reg::R12,
-    Reg::R11,
-    Reg::R10,
-    Reg::R9,
-    Reg::R8,
-    Reg::RDI,
-    Reg::RSI,
-    Reg::RBX,
-    Reg::RCX,
-    Reg::RAX,
-];
-
 pub(super) const ALL_XMM_REGS: [Reg; 16] = [
     Reg::XMM0,
     Reg::XMM1,

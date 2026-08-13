@@ -48,9 +48,7 @@ use crate::{
             },
             x64::{
                 asm::{Asm, LabelIdx, RelocKind},
-                x64regalloc::{
-                    ALL_XMM_REGS, NORMAL_GP_REGS, NORMAL_GP_REGS_MINUS_RDX, PeelRegsBuilder, Reg,
-                },
+                x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
             },
         },
     },
@@ -2348,10 +2346,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             let [_] = ra.alloc(
                 self,
                 iidx,
-                [RegCnstr::Cast {
-                    in_iidx: *val,
+                [RegCnstr::Output {
                     out_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS_MINUS_RDX,
+                    regs: &[Reg::RAX],
+                    can_be_same_as_input: false,
                 }],
             )?;
         } else {
