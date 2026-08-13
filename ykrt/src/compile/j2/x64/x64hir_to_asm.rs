@@ -48,7 +48,7 @@ use crate::{
             },
             x64::{
                 asm::{Asm, LabelIdx, RelocKind},
-                x64regalloc::{ALL_XMM_REGS, GP_REGS_NO_RDX, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
+                x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS_MINUS_RDX, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
             },
         },
     },
@@ -896,7 +896,7 @@ impl<'a> X64HirToAsm<'a> {
             [RegCnstr::Cast {
                 in_iidx: aggregate,
                 out_fill: RegCnstrFill::Undefined,
-                regs: &GP_REGS_NO_RDX,
+                regs: &NORMAL_GP_REGS_MINUS_RDX,
             }],
         )?;
         Ok(())
