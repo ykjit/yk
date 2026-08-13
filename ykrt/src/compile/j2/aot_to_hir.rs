@@ -765,37 +765,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         self.opt.push_ty(tyidx)
     }
 
-    fn p_call_func_ty<'b>(
-        &mut self,
-        aot_fty: &'b FuncTy,
-    ) -> Result<(hir::TyIdx, Option<&'b StructTy>), CompilationError> {
-        let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
-        let (rtn_tyidx, struct_ty) = match aot_rtn_ty {
-            Ty::Struct(struct_ty) => {
-                let bit_size = struct_ty.bit_size();
-                assert!(
-                    bit_size <= 128,
-                    "got {bit_size} bits, struct with >16 bytes should use a pointer return, not a struct."
-                );
-                let lo_tyidx = self
-                    .opt
-                    .push_ty(hir::Ty::Int(u32::try_from(bit_size.min(64)).unwrap()))?;
-                (lo_tyidx, Some(struct_ty))
-            }
-            _ => (self.p_ty(aot_rtn_ty)?, None),
-        };
-        let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
-        for arg_ty in aot_fty.arg_tyidxs() {
-            args_tyidxs.push(self.p_ty(self.am.type_(*arg_ty))?);
-        }
-        let fty = hir::FuncTy {
-            rtn_tyidx,
-            args_tyidxs,
-            has_varargs: aot_fty.is_vararg(),
-        };
-        Ok((self.opt.push_ty(hir::Ty::Func(Box::new(fty)))?, struct_ty))
-    }
-
     fn p_call_extractvalues(
         &mut self,
         call_iidx: hir::InstIdx,
@@ -1312,22 +1281,45 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 FuncMemory::ReadWrite => hir::CallEffects::ReadWrite,
             };
 
+            // Build this call's HIR function type.
             let Ty::Func(aot_fty) = self.am.type_(func.tyidx()) else {
                 panic!()
             };
-            let (call_func_tyidx, struct_ty) = self.p_call_func_ty(aot_fty)?;
+            let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
+            let (rtn_tyidx, struct_ty) = match aot_rtn_ty {
+                Ty::Struct(struct_ty) => {
+                    // HIR has no aggregate SSA value, so use the call's first register chunk as
+                    // its result type; p_call_extractvalues (below) handles the rest.
+                    let bit_size = struct_ty.bit_size();
+                    assert!(
+                        bit_size <= 128,
+                        "got {bit_size} bits, struct with >16 bytes should use a pointer return, not a struct."
+                    );
+                    let tyidx = self
+                        .opt
+                        .push_ty(hir::Ty::Int(u32::try_from(bit_size.min(64)).unwrap()))?;
+                    (tyidx, Some(struct_ty))
+                }
+                _ => (self.p_ty(aot_rtn_ty)?, None),
+            };
+            let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
+            for arg_ty in aot_fty.arg_tyidxs() {
+                args_tyidxs.push(self.p_ty(self.am.type_(*arg_ty))?);
+            }
+            let fty = hir::FuncTy {
+                rtn_tyidx,
+                args_tyidxs,
+                has_varargs: aot_fty.is_vararg(),
+            };
+            let func_tyidx = self.opt.push_ty(hir::Ty::Func(Box::new(fty)))?;
             let inst = hir::Call {
                 tgt: tgt_iidx,
-                func_tyidx: call_func_tyidx,
+                func_tyidx,
                 args: jargs,
                 effects,
             }
             .into();
-            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(call_func_tyidx)
-            else {
-                panic!()
-            };
-            if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
+            if *self.opt.ty(rtn_tyidx) == hir::Ty::Void {
                 self.opt.feed_void(inst)?;
             } else {
                 let call_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
