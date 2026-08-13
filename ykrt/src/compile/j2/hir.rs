@@ -849,7 +849,7 @@ pub(super) enum Inst {
     CtTz,
     DebugStr,
     DynPtrAdd,
-    ExtractValue,
+    ExtractVal,
     FAdd,
     FCmp,
     FDiv,
@@ -1888,13 +1888,13 @@ impl InstT for DynPtrAdd {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct ExtractValue {
+pub(super) struct ExtractVal {
     pub aggregate: InstIdx,
     pub field_bit_off: u32,
     pub tyidx: TyIdx,
 }
 
-impl InstT for ExtractValue {
+impl InstT for ExtractVal {
     fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
 
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {

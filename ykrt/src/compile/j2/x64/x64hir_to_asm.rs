@@ -2336,11 +2336,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        ExtractValue {
+        ExtractVal {
             aggregate,
             field_bit_off,
             ..
-        }: &ExtractValue,
+        }: &ExtractVal,
     ) -> Result<(), CompilationError> {
         // We only support extracting from a register-packed struct return.
         if !matches!(b.inst(*aggregate), Inst::Call(_)) {

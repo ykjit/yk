@@ -1603,7 +1603,7 @@ pub(super) trait HirToAsmBackend {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        inst: &ExtractValue,
+        inst: &ExtractVal,
     ) -> Result<(), CompilationError>;
 
     fn i_fadd(
