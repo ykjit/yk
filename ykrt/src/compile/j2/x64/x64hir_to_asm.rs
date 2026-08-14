@@ -7515,10 +7515,10 @@ mod test {
     fn cg_extractvalue() {
         codegen_and_test(
             "
-              extern random() -> i64
+              extern random() -> i128
 
               %0: ptr = @random
-              %1: i64 = call random %0()
+              %1: i128 = call random %0()
               %2: i64 = extractvalue %1 [0]
               %3: i64 = extractvalue %1 [64]
               blackbox %2
@@ -7527,7 +7527,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %1: i64 = call %0()
+              ; %1: i128 = call %0()
               call {{addr}}
               ...
               ; %2: i64 = extractvalue %1 [0]
@@ -7536,16 +7536,13 @@ mod test {
               ...
             "#],
         );
-    }
 
-    #[test]
-    fn cg_extractvalue_trunc() {
         codegen_and_test(
             "
-              extern random() -> i64
+              extern random() -> i128
 
               %0: ptr = @random
-              %1: i64 = call random %0()
+              %1: i128 = call random %0()
               %2: i64 = extractvalue %1 [0]
               %3: i8 = trunc %2
               blackbox %3
@@ -7553,7 +7550,7 @@ mod test {
             ",
             &[r#"
               ...
-              ; %1: i64 = call %0()
+              ; %1: i128 = call %0()
               call {{addr}}
               ...
               ; %2: i64 = extractvalue %1 [0]
@@ -7565,14 +7562,31 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "assertion `left == right` failed")]
-    fn cg_extractvalue_bad_offset() {
+    #[should_panic]
+    fn cg_extractvalue_range_exceeds_value_width() {
         codegen_and_test(
             "
               extern random() -> i64
 
               %0: ptr = @random
               %1: i64 = call random %0()
+              %2: i64 = extractvalue %1 [64]
+              blackbox %2
+              term []
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_extractvalue_offset_not_register_aligned() {
+        codegen_and_test(
+            "
+              extern random() -> i128
+
+              %0: ptr = @random
+              %1: i128 = call random %0()
               %2: i64 = extractvalue %1 [32]
               blackbox %2
               term []
@@ -7583,16 +7597,30 @@ mod test {
 
     #[test]
     #[should_panic]
-    fn cg_extractvalue_chunk_too_wide() {
+    fn cg_extractvalue_chunk_wider_than_one_register() {
         codegen_and_test(
             "
-              extern random() -> i64
+              extern random() -> i128
 
               %0: ptr = @random
-              %1: i64 = call random %0()
+              %1: i128 = call random %0()
               %2: i128 = extractvalue %1 [0]
               blackbox %2
               term []
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_extractvalue_val_not_a_call() {
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = extractvalue %0 [0]
+              blackbox %1
+              term [%0]
             ",
             &[""],
         );

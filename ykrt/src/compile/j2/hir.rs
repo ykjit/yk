@@ -1896,7 +1896,9 @@ pub(super) struct ExtractVal {
 }
 
 impl InstT for ExtractVal {
-    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, _iidx: InstIdx) {
+        assert!(self.off + m.ty(self.tyidx).bitw() <= b.inst_bitw(m, self.val));
+    }
 
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.val = opt.equiv_iidx(self.val);
@@ -5670,6 +5672,39 @@ mod test {
             "
           %0: ptr = arg [reg]
           %1: ptr = dynptradd %0, %0, 1
+        ",
+        );
+    }
+
+    #[test]
+    fn extractvalue_in_bounds() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i128 = arg [reg]
+          %1: i64 = extractvalue %0 [0]
+          %2: i64 = extractvalue %0 [64]
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn extractvalue_out_of_bounds() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          %1: i64 = extractvalue %0 [64]
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn extractvalue_too_wide() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          %1: i128 = extractvalue %0 [0]
         ",
         );
     }
