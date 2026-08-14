@@ -101,7 +101,7 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "="  "DYNPTRADD" "LOCAL" "," "LOCAL" "," "INT" {
        Ok(AstInst::DynPtrAdd { local: $1?.span(), ty: $3?, ptr: $6?.span(), num_elems: $8?.span(), elem_size: $10?.span() })
     }
-  | "LOCAL" ":" Ty "=" "EXTRACTVALUE" "LOCAL" "[" "INT" "]" {
+  | "LOCAL" ":" Ty "=" "EXTRACTVAL" "LOCAL" "[" "INT" "]" {
       Ok(AstInst::ExtractVal { local: $1?.span(), ty: $3?, val: $6?.span(), off: $8?.span() })
     }
   | "LOCAL" ":" Ty "=" "FADD" "LOCAL" "," "LOCAL" {

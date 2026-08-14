@@ -1928,7 +1928,7 @@ impl InstT for ExtractVal {
     }
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
-        format!("extractvalue %{} [{}]", self.val.to_raw_index(), self.off)
+        format!("extractval %{} [{}]", self.val.to_raw_index(), self.off)
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -5677,34 +5677,34 @@ mod test {
     }
 
     #[test]
-    fn extractvalue_in_bounds() {
+    fn extractval_in_bounds() {
         str_to_mod::<DummyReg>(
             "
           %0: i128 = arg [reg]
-          %1: i64 = extractvalue %0 [0]
-          %2: i64 = extractvalue %0 [64]
+          %1: i64 = extractval %0 [0]
+          %2: i64 = extractval %0 [64]
         ",
         );
     }
 
     #[test]
     #[should_panic]
-    fn extractvalue_out_of_bounds() {
+    fn extractval_out_of_bounds() {
         str_to_mod::<DummyReg>(
             "
           %0: i64 = arg [reg]
-          %1: i64 = extractvalue %0 [64]
+          %1: i64 = extractval %0 [64]
         ",
         );
     }
 
     #[test]
     #[should_panic]
-    fn extractvalue_too_wide() {
+    fn extractval_too_wide() {
         str_to_mod::<DummyReg>(
             "
           %0: i64 = arg [reg]
-          %1: i128 = extractvalue %0 [0]
+          %1: i128 = extractval %0 [0]
         ",
         );
     }

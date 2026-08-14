@@ -31,14 +31,14 @@
 //     --- Begin hir ---
 //     ...
 //     %{{call}}: i64 = call %{{_}}() ; @make_struct
-//     %{{s1_a}}: i8 = extractvalue %{{call}} [0]
+//     %{{s1_a}}: i8 = extractval %{{call}} [0]
 //     ...
-//     %{{s1_b}}: i64 = extractvalue %{{call}} [64]
+//     %{{s1_b}}: i64 = extractval %{{call}} [64]
 //     ...
 //     %{{call2}}: i64 = call %{{_}}() ; @make_struct2
-//     %{{s2_a}}: i64 = extractvalue %{{call2}} [0]
+//     %{{s2_a}}: i64 = extractval %{{call2}} [0]
 //     ...
-//     %{{s2_bc}}: i64 = extractvalue %{{call2}} [64]
+//     %{{s2_bc}}: i64 = extractval %{{call2}} [64]
 //     ...
 //     %{{s2_b}}: i8 = load %{{_}}
 //     ...
@@ -64,7 +64,7 @@
 //     yk-execution: deoptimise ...
 //     exit
 
-// Test extractvalue non-inlined calls returning structs.
+// Test extractval non-inlined calls returning structs.
 // The expected AOT/HIR output below assumes the x64 sysvabi register-packing for
 // small struct returns - two 64-bit GP registers.
 
