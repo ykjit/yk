@@ -1872,15 +1872,15 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         };
 
         if let Operand::Local(aot_iid) = op {
-            let aggregate_iidx = self.frames.last().unwrap().get_local(&*self.opt, aot_iid);
-            if let hir::Inst::Call(_) = self.opt.inst(aggregate_iidx) {
+            let val_iidx = self.frames.last().unwrap().get_local(&*self.opt, aot_iid);
+            if let hir::Inst::Call(_) = self.opt.inst(val_iidx) {
                 let off = u32::try_from(struct_ty.field_bit_offs()[indices[0]]).unwrap();
                 let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
                 return self
                     .push_inst_and_link_local(
                         iid,
                         hir::ExtractVal {
-                            val: aggregate_iidx,
+                            val: val_iidx,
                             off,
                             tyidx: res_tyidx,
                         },
