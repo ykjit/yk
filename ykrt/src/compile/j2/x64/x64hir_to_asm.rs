@@ -2623,7 +2623,14 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
         let bitw = b.inst_bitw(self.m, *lhs);
         let (lhsr, rhsr) = match pred {
-            FPred::One | FPred::Oge | FPred::Ogt | FPred::Ueq | FPred::Ult | FPred::Ule => {
+            FPred::One
+            | FPred::Oge
+            | FPred::Ogt
+            | FPred::Ord
+            | FPred::Ueq
+            | FPred::Ult
+            | FPred::Ule
+            | FPred::Uno => {
                 let [lhsr, rhsr, outr] = ra.alloc(
                     self,
                     iidx,
@@ -2652,9 +2659,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     FPred::One => IcedInst::with1(Code::Setne_rm8, outr.to_reg8()),
                     FPred::Oge => IcedInst::with1(Code::Setae_rm8, outr.to_reg8()),
                     FPred::Ogt => IcedInst::with1(Code::Seta_rm8, outr.to_reg8()),
+                    FPred::Ord => IcedInst::with1(Code::Setnp_rm8, outr.to_reg8()),
                     FPred::Ueq => IcedInst::with1(Code::Sete_rm8, outr.to_reg8()),
                     FPred::Ult => IcedInst::with1(Code::Setb_rm8, outr.to_reg8()),
                     FPred::Ule => IcedInst::with1(Code::Setbe_rm8, outr.to_reg8()),
+                    FPred::Uno => IcedInst::with1(Code::Setp_rm8, outr.to_reg8()),
                     _ => unreachable!(),
                 });
                 (lhsr, rhsr)
@@ -2714,7 +2723,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }
                 (lhsr, rhsr)
             }
-            FPred::False | FPred::Ord | FPred::Uno | FPred::True => todo!(),
+            FPred::False | FPred::True => todo!(),
             FPred::Ugt | FPred::Uge | FPred::Olt | FPred::Ole => unreachable!(),
         };
         self.asm.push_inst(match bitw {
@@ -6635,6 +6644,8 @@ mod test {
                %11: i1 = fcmp ult %0, %1
                %12: i1 = fcmp ule %0, %1
                %13: i1 = fcmp une %0, %1
+               %14: i1 = fcmp ord %0, %1
+               %15: i1 = fcmp uno %0, %1
                blackbox %2
                blackbox %3
                blackbox %4
@@ -6647,6 +6658,8 @@ mod test {
                blackbox %11
                blackbox %12
                blackbox %13
+               blackbox %14
+               blackbox %15
                term [%0, %1]
             ",
             &["
@@ -6691,6 +6704,12 @@ mod test {
                setne r.8._
                setp r.8._
                or r.8._, r.8._
+               ; %14: i1 = fcmp ord %0, %1
+               ucomisd fp.128.x, fp.128.y
+               setnp r.8._
+               ; %15: i1 = fcmp uno %0, %1
+               ucomisd fp.128.x, fp.128.y
+               setp r.8._
                ; blackbox %2
                ...
             "],
