@@ -7515,10 +7515,10 @@ mod test {
     fn cg_extractvalue() {
         codegen_and_test(
             "
-              extern abort() -> i64
+              extern random() -> i64
 
-              %0: ptr = @abort
-              %1: i64 = call abort %0()
+              %0: ptr = @random
+              %1: i64 = call random %0()
               %2: i64 = extractvalue %1 [0]
               %3: i64 = extractvalue %1 [64]
               blackbox %2
@@ -7542,10 +7542,10 @@ mod test {
     fn cg_extractvalue_trunc() {
         codegen_and_test(
             "
-              extern abort() -> i64
+              extern random() -> i64
 
-              %0: ptr = @abort
-              %1: i64 = call abort %0()
+              %0: ptr = @random
+              %1: i64 = call random %0()
               %2: i64 = extractvalue %1 [0]
               %3: i8 = trunc %2
               blackbox %3
@@ -7569,10 +7569,10 @@ mod test {
     fn cg_extractvalue_bad_offset() {
         codegen_and_test(
             "
-              extern abort() -> i64
+              extern random() -> i64
 
-              %0: ptr = @abort
-              %1: i64 = call abort %0()
+              %0: ptr = @random
+              %1: i64 = call random %0()
               %2: i64 = extractvalue %1 [32]
               blackbox %2
               term []
@@ -7586,10 +7586,10 @@ mod test {
     fn cg_extractvalue_chunk_too_wide() {
         codegen_and_test(
             "
-              extern abort() -> i64
+              extern random() -> i64
 
-              %0: ptr = @abort
-              %1: i64 = call abort %0()
+              %0: ptr = @random
+              %1: i64 = call random %0()
               %2: i128 = extractvalue %1 [0]
               blackbox %2
               term []
