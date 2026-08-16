@@ -12,6 +12,8 @@ YKLUA_REPO="https://github.com/ykjit/yklua.git"
 YKLUA_COMMIT=$(git -C tests/yklua rev-parse HEAD)
 YKCBF_REPO="https://github.com/ykjit/ykcbf.git"
 YKCBF_COMMIT="431b92593180e1e376d08ecf383c4a1ab8473b3d"
+YKSOMPP_REPO="https://github.com/ykjit/yksompp.git"
+YKSOMPP_COMMIT="d01e4550cae7d802b2077ad9136e72e32abb06a0"
 
 YKLUA_TESTS_REPO="https://github.com/ykjit/yklua-tests"
 
@@ -43,6 +45,28 @@ test_yklua() {
     cd yklua-tests
     sh run.sh $(realpath ../yklua/src/lua)
     YKD_SERIALISE_COMPILATION=1 sh run.sh $(realpath ../yklua/src/lua)
+    cd ..
+}
+
+# Build yksompp and run its test suite.
+test_yksompp() {
+    if [ ! -e "yksompp" ]; then
+        git clone --depth=1 "$YKSOMPP_REPO"
+        cd yksompp
+        git fetch --depth=1 origin "$YKSOMPP_COMMIT"
+        git checkout "$YKSOMPP_COMMIT"
+        git submodule update --init --depth=1
+        cd ..
+    fi
+    cd yksompp
+    rm -rf yk-build
+    cmake -DCMAKE_CXX_COMPILER="$(yk-config "$YK_BUILD_TYPE" --cxx)" \
+        -DCMAKE_BUILD_TYPE=Debug \
+        -DYK_BUILD_TYPE="$YK_BUILD_TYPE" \
+        -S . -B yk-build
+    cmake --build yk-build --parallel "$(nproc)"
+    YKD_SERIALISE_COMPILATION=1 yk-build/SOM++ -cp Smalltalk TestSuite/TestHarness.som
+    yk-build/SOM++ -cp Smalltalk TestSuite/TestHarness.som
     cd ..
 }
 
@@ -181,8 +205,9 @@ for _ in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test
 done
 
-# test yklua in debug mode.
+# test yklua and yksompp in debug mode.
 PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug test_yklua
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug test_yksompp
 
 # Test with LLVM sanitisers
 rustup component add rust-src
@@ -230,6 +255,7 @@ for _ in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test --release
 done
 PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release test_yklua
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release test_yksompp
 
 # Do a quick run of the benchmark suite as a smoke test.
 pipx install rebench
