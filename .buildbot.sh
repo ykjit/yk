@@ -117,7 +117,7 @@ cd ykllvm
 ykllvm_hash=$(git rev-parse HEAD)
 cached_ykllvm=0
 if [ -f /opt/ykllvm_cache/ykllvm-release-with-assertions-"${ykllvm_hash}".tgz ]; then
-    mkdir inst
+    mkdir -p inst
     cd inst
     tar xfz /opt/ykllvm_cache/ykllvm-release-with-assertions-"${ykllvm_hash}".tgz
     # Minimally check that we can at least run `clang --version`: if we can't,
