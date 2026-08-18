@@ -132,9 +132,6 @@ handle_arg() {
             # Add a proper RPATH, not a RUNPATH:
             # https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1737608
             OUTPUT="${OUTPUT} -Wl,--disable-new-dtags"
-
-            # Improve the quality of profiling data.
-            OUTPUT="${OUTPUT} -Wl,--no-rosegment"
             ;;
         --libs)
             OUTPUT="${OUTPUT} -lykcapi"
