@@ -971,37 +971,69 @@ fn opt_sitofp(opt: &mut PassOpt, mut inst: SIToFP) -> OptOutcome {
 fn opt_smax(opt: &mut PassOpt, mut inst: SMax) -> OptOutcome {
     inst.canonicalise(opt);
     let SMax { tyidx, lhs, rhs } = inst.clone();
-    opt_minmax(opt, inst.into(), tyidx, lhs, rhs, |lhs_c, rhs_c| {
-        if lhs_c.to_sign_ext_i64() >= rhs_c.to_sign_ext_i64() {
-            lhs_c
-        } else {
-            rhs_c
-        }
-    })
+    opt_minmax(
+        opt,
+        inst.into(),
+        tyidx,
+        lhs,
+        rhs,
+        |lhs_c, rhs_c| {
+            if lhs_c.to_sign_ext_i64() >= rhs_c.to_sign_ext_i64() {
+                lhs_c
+            } else {
+                rhs_c
+            }
+        },
+        |rhs_c| {
+            let sbit = 1u64 << (rhs_c.bitw() - 1);
+            match rhs_c.to_zero_ext_u64().unwrap() {
+                x if x == sbit => Some(lhs),
+                x if x == sbit - 1 => Some(rhs),
+                _ => None,
+            }
+        },
+    )
 }
 
 fn opt_smin(opt: &mut PassOpt, mut inst: SMin) -> OptOutcome {
     inst.canonicalise(opt);
     let SMin { tyidx, lhs, rhs } = inst.clone();
-    opt_minmax(opt, inst.into(), tyidx, lhs, rhs, |lhs_c, rhs_c| {
-        if lhs_c.to_sign_ext_i64() <= rhs_c.to_sign_ext_i64() {
-            lhs_c
-        } else {
-            rhs_c
-        }
-    })
+    opt_minmax(
+        opt,
+        inst.into(),
+        tyidx,
+        lhs,
+        rhs,
+        |lhs_c, rhs_c| {
+            if lhs_c.to_sign_ext_i64() <= rhs_c.to_sign_ext_i64() {
+                lhs_c
+            } else {
+                rhs_c
+            }
+        },
+        |rhs_c| {
+            let sbit = 1u64 << (rhs_c.bitw() - 1);
+            match rhs_c.to_zero_ext_u64().unwrap() {
+                x if x == sbit => Some(rhs),
+                x if x == sbit - 1 => Some(lhs),
+                _ => None,
+            }
+        },
+    )
 }
 
-fn opt_minmax<F>(
+fn opt_minmax<F, G>(
     opt: &mut PassOpt,
     inst: Inst,
     tyidx: TyIdx,
     lhs: InstIdx,
     rhs: InstIdx,
-    f: F,
+    both_const: F,
+    rhs_const: G,
 ) -> OptOutcome
 where
     F: FnOnce(ArbBitInt, ArbBitInt) -> ArbBitInt,
+    G: FnOnce(ArbBitInt) -> Option<InstIdx>,
 {
     if lhs == rhs {
         return OptOutcome::Equiv(lhs);
@@ -1011,8 +1043,13 @@ where
     {
         return OptOutcome::Rewritten(Inst::Const(Const {
             tyidx,
-            kind: ConstKind::Int(f(lhs_c, rhs_c)),
+            kind: ConstKind::Int(both_const(lhs_c, rhs_c)),
         }));
+    }
+    if let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+        && let Some(iidx) = rhs_const(rhs_c.clone())
+    {
+        return OptOutcome::Equiv(iidx);
     }
     OptOutcome::Rewritten(inst)
 }
@@ -1123,25 +1160,63 @@ fn opt_udiv(opt: &mut PassOpt, mut inst: UDiv) -> OptOutcome {
 fn opt_umax(opt: &mut PassOpt, mut inst: UMax) -> OptOutcome {
     inst.canonicalise(opt);
     let UMax { tyidx, lhs, rhs } = inst.clone();
-    opt_minmax(opt, inst.into(), tyidx, lhs, rhs, |lhs_c, rhs_c| {
-        if lhs_c.to_zero_ext_u64() >= rhs_c.to_zero_ext_u64() {
-            lhs_c
-        } else {
-            rhs_c
-        }
-    })
+    opt_minmax(
+        opt,
+        inst.into(),
+        tyidx,
+        lhs,
+        rhs,
+        |lhs_c, rhs_c| {
+            if lhs_c.to_zero_ext_u64() >= rhs_c.to_zero_ext_u64() {
+                lhs_c
+            } else {
+                rhs_c
+            }
+        },
+        |rhs_c| {
+            let max = if rhs_c.bitw() == 64 {
+                u64::MAX
+            } else {
+                (1u64 << rhs_c.bitw()) - 1
+            };
+            match rhs_c.to_zero_ext_u64().unwrap() {
+                0 => Some(lhs),
+                x if x == max => Some(rhs),
+                _ => None,
+            }
+        },
+    )
 }
 
 fn opt_umin(opt: &mut PassOpt, mut inst: UMin) -> OptOutcome {
     inst.canonicalise(opt);
     let UMin { tyidx, lhs, rhs } = inst.clone();
-    opt_minmax(opt, inst.into(), tyidx, lhs, rhs, |lhs_c, rhs_c| {
-        if lhs_c.to_zero_ext_u64() <= rhs_c.to_zero_ext_u64() {
-            lhs_c
-        } else {
-            rhs_c
-        }
-    })
+    opt_minmax(
+        opt,
+        inst.into(),
+        tyidx,
+        lhs,
+        rhs,
+        |lhs_c, rhs_c| {
+            if lhs_c.to_zero_ext_u64() <= rhs_c.to_zero_ext_u64() {
+                lhs_c
+            } else {
+                rhs_c
+            }
+        },
+        |rhs_c| {
+            let max = if rhs_c.bitw() == 64 {
+                u64::MAX
+            } else {
+                (1u64 << rhs_c.bitw()) - 1
+            };
+            match rhs_c.to_zero_ext_u64().unwrap() {
+                0 => Some(rhs),
+                x if x == max => Some(lhs),
+                _ => None,
+            }
+        },
+    )
 }
 
 fn opt_xor(opt: &mut PassOpt, mut inst: Xor) -> OptOutcome {
@@ -3460,6 +3535,33 @@ mod test {
           blackbox %2
         ",
         );
+
+        test_sf(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 128
+              %2: i8 = smax %0, %1
+              term [%2]
+            ",
+            "
+              ...
+              %0: i8 = arg
+              term [%0]
+            ",
+        );
+        test_sf(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 127
+              %2: i8 = smax %0, %1
+              blackbox %2
+            ",
+            "
+              ...
+              %1: i8 = 127
+              blackbox %1
+            ",
+        );
     }
 
     #[test]
@@ -3489,6 +3591,33 @@ mod test {
           %2: i8 = 255
           blackbox %2
         ",
+        );
+
+        test_sf(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 128
+              %2: i8 = smin %0, %1
+              blackbox %2
+            ",
+            "
+              ...
+              %1: i8 = 128
+              blackbox %1
+            ",
+        );
+        test_sf(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 127
+              %2: i8 = smin %0, %1
+              term [%2]
+            ",
+            "
+              ...
+              %0: i8 = arg
+              term [%0]
+            ",
         );
     }
 
@@ -3691,6 +3820,33 @@ mod test {
           blackbox %2
         ",
         );
+
+        test_sf(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 0
+              %2: i8 = umax %0, %1
+              term [%2]
+            ",
+            "
+              ...
+              %0: i8 = arg
+              term [%0]
+            ",
+        );
+        test_sf(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 255
+              %2: i8 = umax %0, %1
+              blackbox %2
+            ",
+            "
+              ...
+              %1: i8 = 255
+              blackbox %1
+            ",
+        );
     }
 
     #[test]
@@ -3720,6 +3876,33 @@ mod test {
           %2: i8 = 1
           blackbox %2
         ",
+        );
+
+        test_sf(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 0
+              %2: i8 = umin %0, %1
+              blackbox %2
+            ",
+            "
+              ...
+              %1: i8 = 0
+              blackbox %1
+            ",
+        );
+        test_sf(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 255
+              %2: i8 = umin %0, %1
+              term [%2]
+            ",
+            "
+              ...
+              %0: i8 = arg
+              term [%0]
+            ",
         );
     }
 
