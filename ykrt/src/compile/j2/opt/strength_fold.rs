@@ -909,7 +909,15 @@ fn opt_sext(opt: &mut PassOpt, mut inst: SExt) -> OptOutcome {
             }))
         }
         Some(ConstKind::Ptr(_)) => todo!(),
-        None => OptOutcome::Rewritten(inst.into()),
+        None => {
+            let mut val_inst = opt.inst(val).to_owned();
+            val_inst.canonicalise(opt);
+            match val_inst {
+                Inst::SExt(SExt { val, .. }) => OptOutcome::Rewritten(SExt { tyidx, val }.into()),
+                Inst::ZExt(ZExt { val, .. }) => OptOutcome::Rewritten(ZExt { tyidx, val }.into()),
+                _ => OptOutcome::Rewritten(inst.into()),
+            }
+        }
     }
 }
 
@@ -1098,6 +1106,30 @@ fn opt_trunc(opt: &mut PassOpt, mut inst: Trunc) -> OptOutcome {
             tyidx: dst_tyidx,
             kind: ConstKind::Int(c.truncate(dst_bitw)),
         }));
+    }
+
+    let mut val_inst = opt.inst(val).to_owned();
+    val_inst.canonicalise(opt);
+    if let Inst::SExt(SExt { val, .. }) | Inst::ZExt(ZExt { val, .. }) = val_inst {
+        let src_bitw = opt.ty(opt.inst(val).tyidx(opt)).bitw();
+        let dst_bitw = opt.ty(tyidx).bitw();
+        if src_bitw == dst_bitw {
+            return OptOutcome::Equiv(val);
+        } else if src_bitw > dst_bitw {
+            return OptOutcome::Rewritten(
+                Trunc {
+                    tyidx,
+                    val,
+                    nuw: false,
+                    nsw: false,
+                }
+                .into(),
+            );
+        } else if let Inst::SExt { .. } = val_inst {
+            return OptOutcome::Rewritten(SExt { tyidx, val }.into());
+        } else {
+            return OptOutcome::Rewritten(ZExt { tyidx, val }.into());
+        }
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -1327,7 +1359,15 @@ fn opt_zext(opt: &mut PassOpt, mut inst: ZExt) -> OptOutcome {
             }))
         }
         Some(ConstKind::Ptr(_)) => todo!(),
-        None => OptOutcome::Rewritten(inst.into()),
+        None => {
+            let mut val_inst = opt.inst(val).to_owned();
+            val_inst.canonicalise(opt);
+            if let Inst::ZExt(ZExt { val, .. }) = val_inst {
+                OptOutcome::Rewritten(ZExt { tyidx, val }.into())
+            } else {
+                OptOutcome::Rewritten(inst.into())
+            }
+        }
     }
 }
 
@@ -3381,6 +3421,40 @@ mod test {
           blackbox %4
         ",
         );
+
+        // Sign-extending zero-extension is a no-op
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = zext %0
+          %2: i32 = sext %1
+          blackbox %2
+          term [%0]
+        ",
+            "
+          ...
+          %2: i32 = zext %0
+          blackbox %2
+          term [%0]
+        ",
+        );
+
+        // Fold nested sign extensions
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = sext %0
+          %2: i32 = sext %1
+          blackbox %2
+          term [%0]
+        ",
+            "
+          ...
+          %2: i32 = sext %0
+          blackbox %2
+          term [%0]
+        ",
+        );
     }
 
     #[test]
@@ -3728,6 +3802,35 @@ mod test {
           blackbox %4
         ",
         );
+
+        // Extending and then truncating to the original width is a no-op.
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i32 = sext %0
+          %2: i8 = trunc %1
+          term [%2]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          term [%0]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i32 = zext %0
+          %2: i8 = trunc %1
+          term [%2]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          term [%0]
+        ",
+        );
     }
 
     #[test]
@@ -4036,6 +4139,23 @@ mod test {
           %3: i8 = 255
           %4: i16 = 255
           blackbox %4
+        ",
+        );
+
+        // Combine nested zero-extensions.
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = zext %0
+          %2: i32 = zext %1
+          blackbox %2
+          term [%0]
+        ",
+            "
+          ...
+          %2: i32 = zext %0
+          blackbox %2
+          term [%0]
         ",
         );
     }
