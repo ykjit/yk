@@ -615,8 +615,9 @@ fn opt_icmp(opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
 fn opt_inttoptr(opt: &mut PassOpt, mut inst: IntToPtr) -> OptOutcome {
     inst.canonicalise(opt);
     let IntToPtr { val, .. } = inst;
+    let ptr_bitw = u32::try_from(std::mem::size_of::<usize>() * 8).unwrap();
     if let Some(ConstKind::Int(c)) = opt.as_constkind(val) {
-        if c.bitw() <= u32::try_from(std::mem::size_of::<usize>() * 8).unwrap() {
+        if c.bitw() <= ptr_bitw {
             let tyidx = opt.push_ty(Ty::Ptr(0)).unwrap();
             return OptOutcome::Rewritten(Inst::Const(Const {
                 tyidx,
@@ -625,6 +626,14 @@ fn opt_inttoptr(opt: &mut PassOpt, mut inst: IntToPtr) -> OptOutcome {
         } else {
             todo!();
         }
+    }
+
+    let mut val_inst = opt.inst(val).to_owned();
+    val_inst.canonicalise(opt);
+    if let Inst::PtrToInt(PtrToInt { tyidx, val }) = val_inst
+        && opt.ty(tyidx).bitw() >= ptr_bitw
+    {
+        return OptOutcome::Equiv(val);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -855,16 +864,27 @@ fn opt_or(opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
 fn opt_ptrtoint(opt: &mut PassOpt, mut inst: PtrToInt) -> OptOutcome {
     inst.canonicalise(opt);
     let PtrToInt { tyidx, val } = inst;
+    let ptr_bitw = u32::try_from(std::mem::size_of::<usize>() * 8).unwrap();
     if let Some(ConstKind::Ptr(addr)) = opt.as_constkind(val) {
         let dst_bitw = opt.ty(tyidx).bitw();
         let dst_tyidx = opt.push_ty(Ty::Int(dst_bitw)).unwrap();
-        if dst_bitw <= u32::try_from(std::mem::size_of::<usize>() * 8).unwrap() {
+        if dst_bitw <= ptr_bitw {
             return OptOutcome::Rewritten(Inst::Const(Const {
                 tyidx: dst_tyidx,
                 kind: ConstKind::Int(ArbBitInt::from_usize(addr).truncate(dst_bitw)),
             }));
         } else {
             todo!();
+        }
+    }
+
+    let mut val_inst = opt.inst(val).to_owned();
+    val_inst.canonicalise(opt);
+    if let Inst::IntToPtr(IntToPtr { val, .. }) = val_inst {
+        let src_bitw = opt.ty(opt.inst(val).tyidx(opt)).bitw();
+        let dst_bitw = opt.ty(tyidx).bitw();
+        if src_bitw == dst_bitw && src_bitw <= ptr_bitw {
+            return OptOutcome::Equiv(val);
         }
     }
 
@@ -2954,6 +2974,21 @@ mod test {
           blackbox %4
         ",
         );
+
+        // ptrtoint and inttoptr cancel each other out.
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: i64 = ptrtoint %0
+          %2: ptr = inttoptr %1
+          term [%2]
+        ",
+            "
+          ...
+          %0: ptr = arg
+          term [%0]
+        ",
+        );
     }
 
     #[test]
@@ -3345,6 +3380,21 @@ mod test {
           blackbox %1
           %3: i16 = 4660
           blackbox %3
+        ",
+        );
+
+        // ptrtoint and inttoptr cancel each other out.
+        test_sf(
+            "
+          %0: i64 = arg [reg]
+          %1: ptr = inttoptr %0
+          %2: i64 = ptrtoint %1
+          term [%2]
+        ",
+            "
+          ...
+          %0: i64 = arg
+          term [%0]
         ",
         );
     }
