@@ -98,6 +98,8 @@ pub(super) struct AotToHir<'a, Reg: RegT> {
     frames: Vec<Frame>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
     addr_name_map: Option<HashMap<usize, Option<String>>>,
+    /// Mapping of struct-returning Calls to its ExtractVals per struct field instructions.
+    call_extractvals: HashMap<hir::InstIdx, Vec<hir::InstIdx>>,
     /// The JIT IR this struct builds.
     phantom: PhantomData<Reg>,
 }
@@ -151,6 +153,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             opt,
             frames: Vec::new(),
             addr_name_map: should_log_any_ir().then_some(HashMap::new()),
+            call_extractvals: HashMap::new(),
             phantom: PhantomData,
         }
     }
@@ -1285,7 +1288,31 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             if *self.opt.ty(rtn_tyidx) == hir::Ty::Void {
                 self.opt.feed_void(inst)?;
             } else {
-                self.push_inst_and_link_local(iid.clone(), inst)?;
+                // Emit ExtractVal instructions immediately after the call.
+                let call_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
+                match aot_rtn_ty {
+                    Ty::Struct(struct_ty) => {
+                        let offs = struct_ty.field_bit_offs();
+                        let field_tyidxs = struct_ty.field_tyidxs();
+                        let mut extractvals = Vec::with_capacity(field_tyidxs.len());
+                        for (off, field_tyidx) in offs.iter().zip(field_tyidxs.iter()) {
+                            let off = u32::try_from(*off).unwrap();
+                            let tyidx = self.p_ty(self.am.type_(*field_tyidx))?;
+                            extractvals.push(
+                                self.opt.feed(
+                                    hir::ExtractVal {
+                                        val: call_iidx,
+                                        off,
+                                        tyidx,
+                                    }
+                                    .into(),
+                                )?,
+                            );
+                        }
+                        self.call_extractvals.insert(call_iidx, extractvals);
+                    }
+                    _ => {}
+                }
             }
             match self.outline_until(bid)? {
                 OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
@@ -1880,17 +1907,10 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 assert_eq!(indices.len(), 1);
                 let aot_iid = op.to_inst_id();
                 let val_iidx = self.frames.last().unwrap().get_local(&*self.opt, &aot_iid);
-                let off = u32::try_from(struct_ty.field_bit_offs()[indices[0]]).unwrap();
-                let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
-                self.push_inst_and_link_local(
-                    iid,
-                    hir::ExtractVal {
-                        val: val_iidx,
-                        off,
-                        tyidx: res_tyidx,
-                    },
-                )
-                .map(|_| ())
+                // Reuse the `extractval` we already emitted next to the call in `p_call`.
+                let ev_iidx = self.call_extractvals[&val_iidx][indices[0]];
+                self.frames.last_mut().unwrap().set_local(iid, ev_iidx);
+                Ok(())
             }
             Inst::Load { volatile, .. } => {
                 assert_eq!(indices.len(), 1, "extractvalue with nested indices");
