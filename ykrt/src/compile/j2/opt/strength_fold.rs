@@ -198,6 +198,38 @@ fn opt_and(opt: &mut PassOpt, mut inst: And) -> OptOutcome {
                 // for this integer type. For an i1, for example, `x & 1` can be replaced with `x`.
                 return OptOutcome::Equiv(lhs);
             }
+
+            let mut lhs_inst = opt.inst(lhs).to_owned();
+            lhs_inst.canonicalise(opt);
+            if let Inst::And(And {
+                tyidx: _,
+                lhs: lhs_lhs,
+                rhs: lhs_rhs,
+            }) = lhs_inst
+                && let Some(ConstKind::Int(lhs_rhs_c)) = opt.as_constkind(lhs_rhs)
+            {
+                // Fold `(x & c1) & c2`.
+                let c = rhs_c.bitand(&lhs_rhs_c);
+                if c == ArbBitInt::all_bits_set(c.bitw()) {
+                    return OptOutcome::Equiv(lhs_lhs);
+                }
+                let is_zero = c.to_zero_ext_u8() == Some(0);
+                let c_iidx = opt.push_pre_inst(Inst::Const(Const {
+                    tyidx,
+                    kind: ConstKind::Int(c),
+                }));
+                if is_zero {
+                    return OptOutcome::Equiv(c_iidx);
+                }
+                return OptOutcome::Rewritten(
+                    And {
+                        tyidx,
+                        lhs: lhs_lhs,
+                        rhs: c_iidx,
+                    }
+                    .into(),
+                );
+            }
         }
         _ => (),
     }
@@ -775,6 +807,40 @@ fn opt_or(opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
                 // for this integer type.
                 return OptOutcome::Equiv(rhs);
             }
+
+            let mut lhs_inst = opt.inst(lhs).to_owned();
+            lhs_inst.canonicalise(opt);
+            if let Inst::Or(Or {
+                tyidx: _,
+                lhs: lhs_lhs,
+                rhs: lhs_rhs,
+                disjoint: false,
+            }) = lhs_inst
+                && let Some(ConstKind::Int(lhs_rhs_c)) = opt.as_constkind(lhs_rhs)
+            {
+                // Fold `(x | c1) | c2`.
+                let c = rhs_c.bitor(&lhs_rhs_c);
+                if c.to_zero_ext_u8() == Some(0) {
+                    return OptOutcome::Equiv(lhs_lhs);
+                }
+                let is_all_bits_set = c == ArbBitInt::all_bits_set(c.bitw());
+                let c_iidx = opt.push_pre_inst(Inst::Const(Const {
+                    tyidx,
+                    kind: ConstKind::Int(c),
+                }));
+                if is_all_bits_set {
+                    return OptOutcome::Equiv(c_iidx);
+                }
+                return OptOutcome::Rewritten(
+                    Or {
+                        tyidx,
+                        lhs: lhs_lhs,
+                        rhs: c_iidx,
+                        disjoint: false,
+                    }
+                    .into(),
+                );
+            }
         }
         _ => (),
     }
@@ -1025,7 +1091,37 @@ fn opt_xor(opt: &mut PassOpt, mut inst: Xor) -> OptOutcome {
             if rhs_c.to_zero_ext_u8() == Some(0) {
                 // Reduce `x ^ 0` to `x`.
                 return OptOutcome::Equiv(lhs);
-            } else if bitw == 1
+            } else {
+                let mut lhs_inst = opt.inst(lhs).to_owned();
+                lhs_inst.canonicalise(opt);
+                if let Inst::Xor(Xor {
+                    tyidx: _,
+                    lhs: lhs_lhs,
+                    rhs: lhs_rhs,
+                }) = lhs_inst
+                    && let Some(ConstKind::Int(lhs_rhs_c)) = opt.as_constkind(lhs_rhs)
+                {
+                    // Fold `(x ^ c1) ^ c2`.
+                    let c = rhs_c.bitxor(&lhs_rhs_c);
+                    if c.to_zero_ext_u8() == Some(0) {
+                        return OptOutcome::Equiv(lhs_lhs);
+                    }
+                    let c_iidx = opt.push_pre_inst(Inst::Const(Const {
+                        tyidx,
+                        kind: ConstKind::Int(c),
+                    }));
+                    return OptOutcome::Rewritten(
+                        Xor {
+                            tyidx,
+                            lhs: lhs_lhs,
+                            rhs: c_iidx,
+                        }
+                        .into(),
+                    );
+                }
+            }
+
+            if bitw == 1
                 && let Inst::ICmp(ICmp {
                     pred,
                     lhs,
@@ -1287,6 +1383,24 @@ mod test {
           ...
           %1: i8 = 255
           term [%1]
+        ",
+        );
+
+        // Combine nested constant masks.
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 63
+          %2: i8 = and %0, %1
+          %3: i8 = 15
+          %4: i8 = and %2, %3
+          term [%4]
+        ",
+            "
+          ...
+          %4: i8 = 15
+          %5: i8 = and %0, %4
+          term [%5]
         ",
         );
     }
@@ -2942,6 +3056,24 @@ mod test {
           term [%1]
         ",
         );
+
+        // Combine nested constant masks.
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 16
+          %2: i8 = or %0, %1
+          %3: i8 = 32
+          %4: i8 = or %2, %3
+          term [%4]
+        ",
+            "
+          ...
+          %4: i8 = 48
+          %5: i8 = or %0, %4
+          term [%5]
+        ",
+        );
     }
 
     #[test]
@@ -3267,6 +3399,24 @@ mod test {
           ...
           %0: i8 = arg
           term [%0]
+        ",
+        );
+
+        // Combine nested constants.
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 60
+          %2: i8 = xor %0, %1
+          %3: i8 = 15
+          %4: i8 = xor %2, %3
+          term [%4]
+        ",
+            "
+          ...
+          %4: i8 = 51
+          %5: i8 = xor %0, %4
+          term [%5]
         ",
         );
     }

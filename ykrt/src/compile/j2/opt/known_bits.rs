@@ -556,8 +556,8 @@ mod test {
         let strength_fold = Rc::new(RefCell::new(StrengthFold::new()));
         user_defined_opt_test(
             mod_s,
-            |opt, inst| match strength_fold.borrow_mut().feed(opt, inst.clone()) {
-                OptOutcome::Rewritten(new_inst) => known_bits.borrow_mut().feed(opt, new_inst),
+            |opt, inst| match known_bits.borrow_mut().feed(opt, inst) {
+                OptOutcome::Rewritten(new_inst) => strength_fold.borrow_mut().feed(opt, new_inst),
                 x => x,
             },
             |opt, iidx| known_bits.borrow_mut().inst_committed(opt, iidx),
@@ -710,8 +710,9 @@ mod test {
           %1: i8 = 3
           %2: i8 = 1
           %3: i8 = and %0, %1
-          %4: i8 = and %3, %2
-          blackbox %4
+          %4: i8 = 1
+          %5: i8 = and %0, %4
+          blackbox %5
         ",
         );
     }
@@ -735,8 +736,9 @@ mod test {
           %2: i8 = 2
           %3: i8 = 3
           %4: i8 = or %0, %1
-          %5: i8 = or %4, %2
-          blackbox %5
+          %5: i8 = 3
+          %6: i8 = or %0, %5
+          blackbox %6
         ",
         );
 
@@ -756,8 +758,9 @@ mod test {
           %2: i8 = 2
           %3: i8 = 3
           %4: i8 = or %0, %1
-          %5: i8 = or %4, %2
-          blackbox %5
+          %5: i8 = 3
+          %6: i8 = or %0, %5
+          blackbox %6
         ",
         );
     }
