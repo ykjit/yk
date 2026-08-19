@@ -1907,7 +1907,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 assert_eq!(indices.len(), 1);
                 let aot_iid = op.to_inst_id();
                 let val_iidx = self.frames.last().unwrap().get_local(&*self.opt, &aot_iid);
-                // Reuse the `extractval` we already emitted next to the call in `p_call`.
                 let ev_iidx = self.call_extractvals[&val_iidx][indices[0]];
                 self.frames.last_mut().unwrap().set_local(iid, ev_iidx);
                 Ok(())
