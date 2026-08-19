@@ -1875,72 +1875,60 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             panic!()
         };
 
-        if let Operand::Local(aot_iid) = op {
-            let val_iidx = self.frames.last().unwrap().get_local(&*self.opt, aot_iid);
-            if let hir::Inst::Call(_) = self.opt.inst(val_iidx) {
+        match op.to_inst(self.am) {
+            Inst::Call { .. } => {
                 assert_eq!(indices.len(), 1);
+                let aot_iid = op.to_inst_id();
+                let val_iidx = self.frames.last().unwrap().get_local(&*self.opt, &aot_iid);
                 let off = u32::try_from(struct_ty.field_bit_offs()[indices[0]]).unwrap();
                 let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
-                return self
-                    .push_inst_and_link_local(
-                        iid,
-                        hir::ExtractVal {
-                            val: val_iidx,
-                            off,
-                            tyidx: res_tyidx,
-                        },
-                    )
-                    .map(|_| ());
+                self.push_inst_and_link_local(
+                    iid,
+                    hir::ExtractVal {
+                        val: val_iidx,
+                        off,
+                        tyidx: res_tyidx,
+                    },
+                )
+                .map(|_| ())
             }
-        }
-        self.p_extractvalue_from_load(iid, *tyidx, op, struct_ty, indices)
-    }
-
-    fn p_extractvalue_from_load(
-        &mut self,
-        iid: InstId,
-        tyidx: TyIdx,
-        op: &Operand,
-        struct_ty: &StructTy,
-        indices: &[usize],
-    ) -> Result<(), CompilationError> {
-        assert_eq!(indices.len(), 1, "extractvalue with nested indices");
-        let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
-        // LLVM struct fields are always byte-aligned.
-        assert_eq!(field_bit_off % 8, 0);
-        let byte_off = field_bit_off / 8;
-
-        let mut ptr = self.p_operand(op)?;
-        assert_eq!(
-            *self.opt.ty(self.opt.inst(ptr).tyidx(&*self.opt)),
-            hir::Ty::Ptr(0)
-        );
-        if byte_off > 0 {
-            ptr = self.opt.feed(
-                hir::PtrAdd {
-                    ptr,
-                    off: i32::try_from(byte_off).unwrap(),
-                    in_bounds: false,
-                    nusw: false,
-                    nuw: false,
+            Inst::Load { volatile, .. } => {
+                assert_eq!(indices.len(), 1, "extractvalue with nested indices");
+                let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
+                // LLVM struct fields are always byte-aligned.
+                assert_eq!(field_bit_off % 8, 0);
+                let byte_off = field_bit_off / 8;
+                let mut ptr = self.p_operand(op)?;
+                assert_eq!(
+                    *self.opt.ty(self.opt.inst(ptr).tyidx(&*self.opt)),
+                    hir::Ty::Ptr(0)
+                );
+                if byte_off > 0 {
+                    ptr = self.opt.feed(
+                        hir::PtrAdd {
+                            ptr,
+                            off: i32::try_from(byte_off).unwrap(),
+                            in_bounds: false,
+                            nusw: false,
+                            nuw: false,
+                        }
+                        .into(),
+                    )?;
                 }
-                .into(),
-            )?;
-        }
 
-        let res_tyidx = self.p_ty(self.am.type_(tyidx))?;
-        let Inst::Load { volatile, .. } = op.to_inst(self.am) else {
-            todo!()
-        };
-        self.push_inst_and_link_local(
-            iid,
-            hir::Load {
-                tyidx: res_tyidx,
-                ptr,
-                is_volatile: *volatile,
-            },
-        )
-        .map(|_| ())
+                let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
+                self.push_inst_and_link_local(
+                    iid,
+                    hir::Load {
+                        tyidx: res_tyidx,
+                        ptr,
+                        is_volatile: *volatile,
+                    },
+                )
+                .map(|_| ())
+            }
+            _ => panic!(),
+        }
     }
 
     fn p_loadarg(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
