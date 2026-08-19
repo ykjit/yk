@@ -51,9 +51,13 @@ impl PassT for StrengthFold {
             Inst::SExt(x) => opt_sext(opt, x),
             Inst::Shl(x) => opt_shl(opt, x),
             Inst::SIToFP(x) => opt_sitofp(opt, x),
+            Inst::SMax(x) => opt_smax(opt, x),
+            Inst::SMin(x) => opt_smin(opt, x),
             Inst::Sub(x) => opt_sub(opt, x),
             Inst::Trunc(x) => opt_trunc(opt, x),
             Inst::UDiv(x) => opt_udiv(opt, x),
+            Inst::UMax(x) => opt_umax(opt, x),
+            Inst::UMin(x) => opt_umin(opt, x),
             Inst::Xor(x) => opt_xor(opt, x),
             Inst::ZExt(x) => opt_zext(opt, x),
             _ => {
@@ -898,6 +902,55 @@ fn opt_sitofp(opt: &mut PassOpt, mut inst: SIToFP) -> OptOutcome {
     }
 }
 
+fn opt_smax(opt: &mut PassOpt, mut inst: SMax) -> OptOutcome {
+    inst.canonicalise(opt);
+    let SMax { tyidx, lhs, rhs } = inst.clone();
+    opt_minmax(opt, inst.into(), tyidx, lhs, rhs, |lhs_c, rhs_c| {
+        if lhs_c.to_sign_ext_i64() >= rhs_c.to_sign_ext_i64() {
+            lhs_c
+        } else {
+            rhs_c
+        }
+    })
+}
+
+fn opt_smin(opt: &mut PassOpt, mut inst: SMin) -> OptOutcome {
+    inst.canonicalise(opt);
+    let SMin { tyidx, lhs, rhs } = inst.clone();
+    opt_minmax(opt, inst.into(), tyidx, lhs, rhs, |lhs_c, rhs_c| {
+        if lhs_c.to_sign_ext_i64() <= rhs_c.to_sign_ext_i64() {
+            lhs_c
+        } else {
+            rhs_c
+        }
+    })
+}
+
+fn opt_minmax<F>(
+    opt: &mut PassOpt,
+    inst: Inst,
+    tyidx: TyIdx,
+    lhs: InstIdx,
+    rhs: InstIdx,
+    f: F,
+) -> OptOutcome
+where
+    F: FnOnce(ArbBitInt, ArbBitInt) -> ArbBitInt,
+{
+    if lhs == rhs {
+        return OptOutcome::Equiv(lhs);
+    }
+    if let (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) =
+        (opt.as_constkind(lhs), opt.as_constkind(rhs))
+    {
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(f(lhs_c, rhs_c)),
+        }));
+    }
+    OptOutcome::Rewritten(inst)
+}
+
 fn opt_sub(opt: &mut PassOpt, mut inst: Sub) -> OptOutcome {
     inst.canonicalise(opt);
     let Sub {
@@ -999,6 +1052,30 @@ fn opt_udiv(opt: &mut PassOpt, mut inst: UDiv) -> OptOutcome {
         (_, _) => (),
     }
     OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_umax(opt: &mut PassOpt, mut inst: UMax) -> OptOutcome {
+    inst.canonicalise(opt);
+    let UMax { tyidx, lhs, rhs } = inst.clone();
+    opt_minmax(opt, inst.into(), tyidx, lhs, rhs, |lhs_c, rhs_c| {
+        if lhs_c.to_zero_ext_u64() >= rhs_c.to_zero_ext_u64() {
+            lhs_c
+        } else {
+            rhs_c
+        }
+    })
+}
+
+fn opt_umin(opt: &mut PassOpt, mut inst: UMin) -> OptOutcome {
+    inst.canonicalise(opt);
+    let UMin { tyidx, lhs, rhs } = inst.clone();
+    opt_minmax(opt, inst.into(), tyidx, lhs, rhs, |lhs_c, rhs_c| {
+        if lhs_c.to_zero_ext_u64() <= rhs_c.to_zero_ext_u64() {
+            lhs_c
+        } else {
+            rhs_c
+        }
+    })
 }
 
 fn opt_xor(opt: &mut PassOpt, mut inst: Xor) -> OptOutcome {
@@ -3224,6 +3301,66 @@ mod test {
     }
 
     #[test]
+    fn opt_smax() {
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = smax %0, %0
+          term [%1]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          term [%0]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = 1
+          %1: i8 = 255
+          %2: i8 = smax %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 1
+          blackbox %2
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_smin() {
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = smin %0, %0
+          term [%1]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          term [%0]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = 1
+          %1: i8 = 255
+          %2: i8 = smin %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 255
+          blackbox %2
+        ",
+        );
+    }
+
+    #[test]
     fn opt_sub() {
         // Simple constant folding e.g `1 - 2`.
         test_sf(
@@ -3372,6 +3509,66 @@ mod test {
           %2: i8 = 2
           %3: i8 = lshr %0, %2
           term [%3]
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_umax() {
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = umax %0, %0
+          term [%1]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          term [%0]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = 1
+          %1: i8 = 255
+          %2: i8 = umax %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 255
+          blackbox %2
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_umin() {
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = umin %0, %0
+          term [%1]
+        ",
+            "
+          ...
+          %0: i8 = arg
+          term [%0]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = 1
+          %1: i8 = 255
+          %2: i8 = umin %0, %1
+          blackbox %2
+        ",
+            "
+          ...
+          %2: i8 = 1
+          blackbox %2
         ",
         );
     }
