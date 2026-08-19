@@ -9,6 +9,7 @@ use std::{
 use ykbuild::ykllvm_bin;
 
 const TEMPDIR_SUBST: &str = "%%TEMPDIR%%";
+
 pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
 
@@ -108,13 +109,23 @@ impl<'a> ExtraLinkage<'a> {
 // Determine the "full" cargo profile name, as it appears as an argument to `--profile` (not just
 // "debug" or "release", which is all cargo's `PROFILE` environment` can report).
 pub fn full_cargo_profile() -> String {
-    let out_dir = std::env::var("OUT_DIR").unwrap();
-    Path::new(&out_dir)
-        .components()
-        .nth_back(3)
-        .map(|x| x.as_os_str().to_str().unwrap())
+    ykbuild::target_dir()
+        .file_name()
+        .unwrap()
+        .to_str()
         .unwrap()
         .to_owned()
+}
+
+/// Find `filename` (e.g. "libykcapi.so") under given `root`.
+/// If more than one match exists (e.g. a stale artifact left over from an earlier build), the
+/// most recently modified one wins.
+pub fn artifact_path_under(root: &Path, filename: &str) -> PathBuf {
+    glob::glob(&format!("{}/**/{}", root.display(), filename))
+        .expect("invalid glob pattern")
+        .filter_map(Result::ok)
+        .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
+        .unwrap_or_else(|| panic!("couldn't find {filename} under {}", root.display()))
 }
 
 /// Make a compiler command that compiles `src` to `exe`.
@@ -144,6 +155,7 @@ pub fn mk_compiler(
     let profile = full_cargo_profile();
     let mut yk_config = Command::new(yk_config);
     yk_config.args([&profile, "--cflags", "--cppflags", "--ldflags", "--libs"]);
+    yk_config.env("YKCAPI_DIR", env!("YKCAPI_DIR"));
     if let Some(extra_env) = extra_env {
         yk_config.envs(extra_env);
     }

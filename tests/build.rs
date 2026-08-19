@@ -2,6 +2,9 @@ use rerun_except::rerun_except;
 use std::env;
 
 pub fn main() {
+    let ykcapi_dir = env::var("CARGO_CDYLIB_DIR_YKCAPI").unwrap();
+    println!("cargo::rustc-env=YKCAPI_DIR={ykcapi_dir}");
+
     // Don't rebuild the whole crate when only test inputs change.
     rerun_except(&[
         "c",
