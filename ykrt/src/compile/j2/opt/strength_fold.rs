@@ -773,7 +773,7 @@ fn opt_or(opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
             if rhs_c == ArbBitInt::all_bits_set(rhs_c.bitw()) {
                 // Reduce `x | y` to `y` if `y` is a constant that has all the necessary bits set
                 // for this integer type.
-                return OptOutcome::Equiv(lhs);
+                return OptOutcome::Equiv(rhs);
             }
         }
         _ => (),
@@ -2928,13 +2928,13 @@ mod test {
         ",
         );
 
-        // Strength reduction of `y & 0b1111111` (i.e. all bits set in the appropriate type).
+        // Strength reduction of `y | 0b11111111` (i.e. all bits set in the appropriate type).
         test_sf(
             "
           %0: i8 = arg [ reg ]
           %1: i8 = 255
           %2: i8 = or %0, %1
-          term [%1]
+          term [%2]
         ",
             "
           ...
