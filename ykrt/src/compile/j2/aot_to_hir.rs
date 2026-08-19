@@ -1611,6 +1611,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.opt.feed_void(hinst.into()).map(|_| ())
             }
+            "prefetch" => Ok(()),
             "smax" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let fty = self.opt.func_ty(ftyidx);
