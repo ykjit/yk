@@ -30,7 +30,7 @@
 //     --- End aot ---
 //     --- Begin hir ---
 //     ...
-//     %{{call}}: i64 = call %{{_}}() ; @make_struct
+//     %{{call}}: i8 = call %{{_}}() ; @make_struct
 //     %{{s1_a}}: i8 = extractval %{{call}} [0]
 //     %{{s1_b}}: i64 = extractval %{{call}} [64]
 //     ...

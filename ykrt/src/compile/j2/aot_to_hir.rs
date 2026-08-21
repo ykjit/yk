@@ -1257,14 +1257,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Ty::Struct(struct_ty) => {
                     // Every HIR instruction produces exactly one value living in a single
                     // register, so a call can't return the struct type directly.
-                    // This is a hack: we give the call the type covering its first field or,
-                    // if it only has one field, the struct itself.
-                    let offs = struct_ty.field_bit_offs();
-                    let end = offs
-                        .get(1)
-                        .map(|x| u32::try_from(*x).unwrap())
-                        .unwrap_or_else(|| u32::try_from(struct_ty.bit_size()).unwrap());
-                    self.opt.push_ty(hir::Ty::Int(end))?
+                    // This is a hack: we give the call the type of its first field.
+                    let field_ty = self.am.type_(struct_ty.field_tyidxs()[0]);
+                    self.opt.push_ty(hir::Ty::Int(field_ty.bitw(self.am)))?
                 }
                 _ => self.p_ty(aot_rtn_ty)?,
             };
