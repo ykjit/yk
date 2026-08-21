@@ -2,9 +2,6 @@
 
 set -eu
 
-# FIXME: Hack for https://github.com/rust-lang/cargo/issues/17287
-export CARGO_UNSTABLE_BUILD_DIR_NEW_LAYOUT=false
-
 ROOT_DIR=$(realpath $(pwd))
 
 # What git commit hash of yklua & ykcbf will we test in buildbot?

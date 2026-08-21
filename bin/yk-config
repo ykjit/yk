@@ -12,6 +12,29 @@ fi
 
 OUTPUT=""
 
+# Find the directory containing `libykcapi.so` under `target/<profile>`.
+#
+# Cargo only guarantees the top-level location when `ykcapi` is built directly; if it's only a
+# dependency of whatever's being built (e.g. a plain `cargo test`), the `.so` can end up nested
+# under `build/ykcapi-<hash>/out/` instead.
+libykcapi_dir() {
+    if [ -n "${YKCAPI_DIR}" ]; then
+        echo "${YKCAPI_DIR}"
+        return
+    fi
+    profile_dir=`realpath ${DIR}/../target/${1}`
+    # Not ideal: a search can't tell us whether the match it finds was built with the features
+    # the caller actually needs, and it's the reason $YKCAPI_DIR exists as a way to skip this.
+    # But this script has no better option here. This is the last-resort fallback for
+    # callers that don't (or can't) supply $YKCAPI_DIR.
+    found=$(find "${profile_dir}/deps" "${profile_dir}/build/"ykcapi* -name libykcapi.so -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -n1 | cut -d' ' -f2)
+    if [ -z "${found}" ]; then
+        1>&2 echo "error: couldn't find libykcapi.so under ${profile_dir}"
+        exit 1
+    fi
+    dirname "${found}"
+}
+
 usage() {
     echo "Generate C compiler flags for building against the yk JIT.\n"
     echo "Usage:"
@@ -120,14 +143,15 @@ handle_arg() {
             OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-no-vectorize"
 
             # Linkage to yk as a library.
-            OUTPUT="${OUTPUT} -L${DIR}/../target/${profile}/deps"
+            ykcapi_dir=`libykcapi_dir ${profile}`
+            OUTPUT="${OUTPUT} -L${ykcapi_dir}"
 
             # Encode an rpath so that we don't have to set LD_LIBRARY_PATH.
             #
             # FIXME: Adding rpaths should probably be behind a flag. It's kind
             # of rude to add local rpaths to interpreter binaries that
             # downstreams may want to distribute.
-            OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../target/${profile}/deps"
+            OUTPUT="${OUTPUT} -Wl,-rpath=${ykcapi_dir}"
             OUTPUT="${OUTPUT} -Wl,-rpath=$(${ykllvm_bin_dir}/llvm-config --link-shared --libdir)"
             # Add a proper RPATH, not a RUNPATH:
             # https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1737608

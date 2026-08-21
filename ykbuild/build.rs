@@ -6,7 +6,7 @@ use std::{
     collections::HashMap,
     env,
     fs::{File, canonicalize, create_dir_all, read_to_string, write},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
 };
 use which::which;
@@ -50,15 +50,30 @@ fn main() {
     rerun_except(&[]).unwrap();
 
     // Build ykllvm in "target/<cargo-profile>". Note that the directory used here *must* be
-    // exactly the same as that produced by `ykbuild/src/lib.rs:llvm_bin_dir` and yk-config.
-    let mut ykllvm_build_dir = Path::new(&env::var("OUT_DIR").unwrap())
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_owned();
+    // exactly the same as that produced by `ykbuild/src/lib.rs:target_dir` and yk-config.
+    let target_dir = cargo_metadata::MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .expect("failed to run `cargo metadata`")
+        .target_directory
+        .into_std_path_buf();
+    // OUT_DIR is `<target_dir>/[<triple>/]<profile>/build/<pkg>-<hash>/out`. The `<triple>/`
+    // component is only present when cargo was invoked with an explicit `--target`, so we can't
+    // assume a fixed depth for `<profile>`.
+    let out_dir = env::var("OUT_DIR").unwrap();
+    let out_dir = Path::new(&out_dir)
+        .strip_prefix(&target_dir)
+        .expect("OUT_DIR is not inside cargo's target directory");
+    let build_dir_idx = out_dir
+        .components()
+        .position(|c| c.as_os_str() == "build")
+        .expect("couldn't find `build` component in OUT_DIR");
+    let profile = out_dir
+        .components()
+        .take(build_dir_idx)
+        .collect::<PathBuf>();
+    let mut ykllvm_build_dir = target_dir.join(profile);
+    assert!(ykllvm_build_dir.is_dir());
     ykllvm_build_dir.push("ykllvm");
     create_dir_all(&ykllvm_build_dir).unwrap();
 

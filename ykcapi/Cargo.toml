@@ -18,4 +18,4 @@ ykbuild = { path = "../ykbuild" }
 
 [features]
 yk_testing = ["ykrt/yk_testing"]
-ykd = []
+ykd = ["ykrt/ykd"]

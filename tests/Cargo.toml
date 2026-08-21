@@ -26,12 +26,15 @@ harness = false
 [dependencies]
 clap = { features = ["derive"], version = "4.4" }
 fs4 = { version="0.13.1", features=["sync"] }
+glob = "0.3.1"
 memmap2 = "0.9.4"
 num_cpus = "1.13.1"
 regex = "1.9"
 tempfile = "3.9.0"
 ykbuild = { path = "../ykbuild" }
 ykrt = { path = "../ykrt", features = ["yk_testing", "ykd"] }
+# This exists purely so that a plain `cargo build`/`cargo test` also
+# builds `ykcapi` with these features, for the sake of `bin/yk-config` consumers.
 ykcapi = { path = "../ykcapi", features = ["yk_testing", "ykd"] }
 
 [dev-dependencies]
@@ -41,6 +44,9 @@ lang_tester = "0.9"
 [build-dependencies]
 rerun_except = "1.0.0"
 ykbuild = { path = "../ykbuild" }
+# This exists purely so that a plain `cargo build`/`cargo test` also
+# builds `ykcapi` with these features, for the sake of `bin/yk-config` consumers.
+ykcapi = { path = "../ykcapi", features = ["yk_testing", "ykd"], artifact = "cdylib" }
 
 [[bench]]
 name = "promote"
