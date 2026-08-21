@@ -2051,7 +2051,10 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         else {
             panic!()
         };
-        let tyidx = self.p_ty(inst.def_type(self.am).unwrap())?;
+        let tyidx = match inst.def_type(self.am).unwrap() {
+            Ty::Func(_) => self.opt.push_ty(hir::Ty::Ptr(0))?,
+            ty => self.p_ty(ty)?,
+        };
         let cond = self.p_operand(cond)?;
         let truev = self.p_operand(trueval)?;
         let falsev = self.p_operand(falseval)?;
