@@ -36,10 +36,7 @@ fn main() {
             let mut compiler = Command::new(ykllvm_bin("clang"));
             let md = env::var("CARGO_MANIFEST_DIR").unwrap();
             let profile = full_cargo_profile();
-            let ykcapi_path = [&md, "..", "target", &profile, "deps"]
-                .iter()
-                .collect::<PathBuf>();
-            let ykcapi_linkdir = format!("-L{}", ykcapi_path.to_str().unwrap());
+            let ykcapi_linkdir = format!("-L{}", env!("YKCAPI_DIR"));
             compiler.args([
                 "-flto",
                 "-fuse-ld=lld",

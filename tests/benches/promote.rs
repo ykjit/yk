@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 use tempfile::TempDir;
-use tests::{check_output, mk_compiler};
+use tests::{artifact_path_under, check_output, full_cargo_profile, mk_compiler};
 use ykbuild::ykllvm_bin;
 
 const SAMPLE_SIZE: usize = 30;
@@ -26,6 +26,13 @@ fn compile_bench(tempdir: &TempDir, promote: bool) -> PathBuf {
     exe.push(src.file_stem().unwrap());
 
     let mut compiler = mk_compiler(&ykllvm_bin("clang"), &exe, &src, &[], true, None);
+    let root = ykbuild::cargo_target_dir().join(full_cargo_profile());
+    let tests_dir = artifact_path_under(&root, "libtests.so")
+        .parent()
+        .unwrap()
+        .to_owned();
+    compiler.arg(format!("-L{}", tests_dir.display()));
+    compiler.arg(format!("-Wl,-rpath={}", tests_dir.display()));
     compiler.arg("-ltests");
     if promote {
         compiler.arg("-DDO_PROMOTE");
