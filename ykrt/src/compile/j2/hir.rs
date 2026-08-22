@@ -1909,7 +1909,7 @@ impl InstT for DynPtrAdd {
 #[derive(Clone, Debug)]
 pub(super) struct ExtractVal {
     pub val: InstIdx,
-    /// Offset relative to the start of `val`
+    /// Offset in bits relative to the start of `val`
     pub off: u32,
     pub tyidx: TyIdx,
 }
