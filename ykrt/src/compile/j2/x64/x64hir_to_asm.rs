@@ -2332,14 +2332,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_extractval(
         &mut self,
         ra: &mut RegAlloc<Self>,
-        b: &Block,
         iidx: InstIdx,
-        ExtractVal { val, off, tyidx }: &ExtractVal,
+        ExtractVal { val: _, off, tyidx }: &ExtractVal,
     ) -> Result<(), CompilationError> {
-        // We only support extracting from a struct returned directly by a call.
-        if !matches!(b.inst(*val), Inst::Call(_)) {
-            panic!();
-        }
         // Expecting struct across at most two 64-bit GP registers (RAX and RDX).
         assert!(self.m.ty(*tyidx).bitw() <= 64);
         if *off == 0 {

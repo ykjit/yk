@@ -1397,6 +1397,25 @@ impl InstT for Call {
                 "%{iidx:?}: argument {i} has wrong type"
             )
         }
+
+        // Validate that extractval ranges are not overlapping.
+        let mut extractval_ranges: Vec<(u32, u32)> = Vec::new();
+        for i in 0..b.insts_len() {
+            let other_iidx: InstIdx = InstIdx::from_raw_index(i);
+            if let Inst::ExtractVal(ev) = b.inst(other_iidx)
+                && ev.val == iidx
+            {
+                extractval_ranges.push((ev.off, ev.off + m.ty(ev.tyidx).bitw()));
+            }
+        }
+        for (i, (start1, end1)) in extractval_ranges.iter().enumerate() {
+            for (start2, end2) in extractval_ranges.iter().skip(i + 1) {
+                assert!(
+                    end1 <= start2 || start1 >= end2,
+                    "%{iidx:?}: extractvals of this call overlap"
+                );
+            }
+        }
     }
 
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
@@ -1896,8 +1915,16 @@ pub(super) struct ExtractVal {
 }
 
 impl InstT for ExtractVal {
-    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, _iidx: InstIdx) {
-        assert!(self.off + m.ty(self.tyidx).bitw() <= b.inst_bitw(m, self.val));
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_matches!(
+            b.inst(self.val),
+            Inst::Call(_),
+            "%{iidx:?}: extractval operand is not a call"
+        );
+        assert!(
+            self.off + m.ty(self.tyidx).bitw() <= b.inst_bitw(m, self.val),
+            "%{iidx:?}: extractval range exceeds value width"
+        );
     }
 
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
@@ -5680,31 +5707,62 @@ mod test {
     fn extractval_in_bounds() {
         str_to_mod::<DummyReg>(
             "
-          %0: i128 = arg [reg]
-          %1: i64 = extractval %0 [0]
-          %2: i64 = extractval %0 [64]
+          extern f() -> i128;
+          %0: ptr = arg [reg]
+          %1: i128 = call f %0()
+          %2: i64 = extractval %1 [0]
+          %3: i64 = extractval %1 [64]
         ",
         );
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "%2: extractval range exceeds value width")]
     fn extractval_out_of_bounds() {
         str_to_mod::<DummyReg>(
             "
-          %0: i64 = arg [reg]
-          %1: i64 = extractval %0 [64]
+          extern f() -> i64;
+          %0: ptr = arg [reg]
+          %1: i64 = call f %0()
+          %2: i64 = extractval %1 [64]
         ",
         );
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "%2: extractval range exceeds value width")]
     fn extractval_too_wide() {
         str_to_mod::<DummyReg>(
             "
+          extern f() -> i64;
+          %0: ptr = arg [reg]
+          %1: i64 = call f %0()
+          %2: i128 = extractval %1 [0]
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: extractval operand is not a call")]
+    fn extractval_val_not_a_call() {
+        str_to_mod::<DummyReg>(
+            "
           %0: i64 = arg [reg]
-          %1: i128 = extractval %0 [0]
+          %1: i64 = extractval %0 [0]
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: extractvals of this call overlap")]
+    fn extractval_overlap() {
+        str_to_mod::<DummyReg>(
+            "
+          extern f() -> i128;
+          %0: ptr = arg [reg]
+          %1: i128 = call f %0()
+          %2: i64 = extractval %1 [0]
+          %3: i64 = extractval %1 [32]
         ",
         );
     }
