@@ -2337,28 +2337,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     ) -> Result<(), CompilationError> {
         // Expecting struct across at most two 64-bit GP registers (RAX and RDX).
         assert!(self.m.ty(*tyidx).bitw() <= 64);
-        if *off == 0 {
-            let [_] = ra.alloc(
-                self,
-                iidx,
-                [RegCnstr::Output {
-                    out_fill: RegCnstrFill::Undefined,
-                    regs: &[Reg::RAX],
-                    can_be_same_as_input: false,
-                }],
-            )?;
-        } else {
-            assert_eq!(*off, 64);
-            let [_] = ra.alloc(
-                self,
-                iidx,
-                [RegCnstr::Output {
-                    out_fill: RegCnstrFill::Undefined,
-                    regs: &[Reg::RDX],
-                    can_be_same_as_input: false,
-                }],
-            )?;
-        }
+        let reg = match *off {
+            0 => Reg::RAX,
+            64 => Reg::RDX,
+            _ => panic!("extractval offset {off} is not register aligned"),
+        };
+        let [_] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Output {
+                out_fill: RegCnstrFill::Undefined,
+                regs: &[reg],
+                can_be_same_as_input: false,
+            }],
+        )?;
         Ok(())
     }
 
