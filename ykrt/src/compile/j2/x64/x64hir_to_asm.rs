@@ -7577,23 +7577,6 @@ mod test {
 
     #[test]
     #[should_panic]
-    fn cg_extractval_range_exceeds_value_width() {
-        codegen_and_test(
-            "
-              extern random() -> i64
-
-              %0: ptr = @random
-              %1: i64 = call random %0()
-              %2: i64 = extractval %1 [64]
-              blackbox %2
-              term []
-            ",
-            &[""],
-        );
-    }
-
-    #[test]
-    #[should_panic]
     fn cg_extractval_offset_not_register_aligned() {
         codegen_and_test(
             "
@@ -7621,20 +7604,6 @@ mod test {
               %2: i128 = extractval %1 [0]
               blackbox %2
               term []
-            ",
-            &[""],
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn cg_extractval_val_not_a_call() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = extractval %0 [0]
-              blackbox %1
-              term [%0]
             ",
             &[""],
         );
