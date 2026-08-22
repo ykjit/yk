@@ -2329,6 +2329,31 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_extractval(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        iidx: InstIdx,
+        ExtractVal { val: _, off, tyidx }: &ExtractVal,
+    ) -> Result<(), CompilationError> {
+        // Expecting struct across at most two 64-bit GP registers (RAX and RDX).
+        assert!(self.m.ty(*tyidx).bitw() <= 64);
+        let reg = match *off {
+            0 => Reg::RAX,
+            64 => Reg::RDX,
+            _ => panic!("extractval offset {off} is not register aligned"),
+        };
+        let [_] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Output {
+                out_fill: RegCnstrFill::Undefined,
+                regs: &[reg],
+                can_be_same_as_input: false,
+            }],
+        )?;
+        Ok(())
+    }
+
     fn i_copysign(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -7489,6 +7514,90 @@ mod test {
               sete r.8._
               ...
             "],
+        );
+    }
+
+    #[test]
+    fn cg_extractval() {
+        codegen_and_test(
+            "
+              extern random() -> i128
+
+              %0: ptr = @random
+              %1: i128 = call random %0()
+              %2: i64 = extractval %1 [0]
+              %3: i64 = extractval %1 [64]
+              blackbox %2
+              blackbox %3
+              term []
+            ",
+            &[r#"
+              ...
+              ; %1: i128 = call %0()
+              call {{addr}}
+              ...
+              ; %2: i64 = extractval %1 [0]
+              ...
+              ; %3: i64 = extractval %1 [64]
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              extern random() -> i128
+
+              %0: ptr = @random
+              %1: i128 = call random %0()
+              %2: i64 = extractval %1 [0]
+              %3: i8 = trunc %2
+              blackbox %3
+              term []
+            ",
+            &[r#"
+              ...
+              ; %1: i128 = call %0()
+              call {{addr}}
+              ...
+              ; %2: i64 = extractval %1 [0]
+              ...
+              ; %3: i8 = trunc %2
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_extractval_offset_not_register_aligned() {
+        codegen_and_test(
+            "
+              extern random() -> i128
+
+              %0: ptr = @random
+              %1: i128 = call random %0()
+              %2: i64 = extractval %1 [32]
+              blackbox %2
+              term []
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_extractval_chunk_wider_than_one_register() {
+        codegen_and_test(
+            "
+              extern random() -> i128
+
+              %0: ptr = @random
+              %1: i128 = call random %0()
+              %2: i128 = extractval %1 [0]
+              blackbox %2
+              term []
+            ",
+            &[""],
         );
     }
 
