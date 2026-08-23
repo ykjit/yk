@@ -4753,7 +4753,6 @@ mod test {
         let hl = Arc::new(Mutex::new(HotLocation {
             kind: HotLocationKind::Tracing(mt.next_trace_id()),
             tracecompilation_errors: 0,
-            #[cfg(feature = "ykd")]
             debug_str: None,
         }));
         let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), true);

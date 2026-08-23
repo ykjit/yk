@@ -2588,7 +2588,6 @@ pub(crate) mod test {
         let hl = Arc::new(Mutex::new(HotLocation {
             kind: HotLocationKind::Tracing(TraceId::testing()),
             tracecompilation_errors: 0,
-            #[cfg(feature = "ykd")]
             debug_str: None,
         }));
 
@@ -2640,7 +2639,6 @@ pub(crate) mod test {
         let hl = Arc::new(Mutex::new(HotLocation {
             kind: HotLocationKind::Tracing(TraceId::testing()),
             tracecompilation_errors: 0,
-            #[cfg(feature = "ykd")]
             debug_str: None,
         }));
 
