@@ -969,6 +969,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_dynptradd(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::ExtractVal(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_extractval(&mut ra, iidx, x)?;
+                    }
+                }
                 Inst::FAdd(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fadd(&mut ra, b, iidx, x)?;
@@ -1591,6 +1596,13 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &DynPtrAdd,
+    ) -> Result<(), CompilationError>;
+
+    fn i_extractval(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        iidx: InstIdx,
+        inst: &ExtractVal,
     ) -> Result<(), CompilationError>;
 
     fn i_fadd(

@@ -98,6 +98,8 @@ pub(super) struct AotToHir<'a, Reg: RegT> {
     frames: Vec<Frame>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
     addr_name_map: Option<HashMap<usize, Option<String>>>,
+    /// Mapping of struct-returning Calls to its ExtractVals per struct field instructions.
+    call_extractvals: HashMap<hir::InstIdx, Vec<hir::InstIdx>>,
     /// The JIT IR this struct builds.
     phantom: PhantomData<Reg>,
 }
@@ -151,6 +153,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             opt,
             frames: Vec::new(),
             addr_name_map: should_log_any_ir().then_some(HashMap::new()),
+            call_extractvals: HashMap::new(),
             phantom: PhantomData,
         }
     }
@@ -1215,10 +1218,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             //      (which could be zero, or many, and may include recursive calls) until that
             //      function returns.
 
-            let ftyidx = self.p_ty(self.am.type_(func.tyidx()))?;
-
             // Handle LLVM intrinsics.
             if func.name().starts_with("llvm.") {
+                let ftyidx = self.p_ty(self.am.type_(func.tyidx()))?;
                 self.p_llvm_intrinsic(iid, ftyidx, func.name(), jargs)?;
                 return Ok(CallProcessedKind::Outlined);
             }
@@ -1246,20 +1248,63 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 FuncMemory::ReadWrite => hir::CallEffects::ReadWrite,
             };
 
+            // Build this call's HIR function type.
+            let Ty::Func(aot_fty) = self.am.type_(func.tyidx()) else {
+                panic!()
+            };
+            let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
+            let rtn_tyidx = match aot_rtn_ty {
+                Ty::Struct(struct_ty) => {
+                    // Every HIR instruction produces exactly one value living in a single
+                    // register, so a call can't return the struct type directly.
+                    // This is a hack: we give the call the type of its first field.
+                    let field_ty = self.am.type_(struct_ty.field_tyidxs()[0]);
+                    self.opt.push_ty(hir::Ty::Int(field_ty.bitw(self.am)))?
+                }
+                _ => self.p_ty(aot_rtn_ty)?,
+            };
+            let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
+            for arg_ty in aot_fty.arg_tyidxs() {
+                args_tyidxs.push(self.p_ty(self.am.type_(*arg_ty))?);
+            }
+            let fty = hir::FuncTy {
+                rtn_tyidx,
+                args_tyidxs,
+                has_varargs: aot_fty.is_vararg(),
+            };
+            let func_tyidx = self.opt.push_ty(hir::Ty::Func(Box::new(fty)))?;
             let inst = hir::Call {
                 tgt: tgt_iidx,
-                func_tyidx: ftyidx,
+                func_tyidx,
                 args: jargs,
                 effects,
             }
             .into();
-            let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
-                panic!()
-            };
-            if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
+            if *self.opt.ty(rtn_tyidx) == hir::Ty::Void {
                 self.opt.feed_void(inst)?;
             } else {
-                self.push_inst_and_link_local(iid.clone(), inst)?;
+                // Emit ExtractVal instructions immediately after the call.
+                let call_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
+                if let Ty::Struct(struct_ty) = aot_rtn_ty {
+                    let offs = struct_ty.field_bit_offs();
+                    let field_tyidxs = struct_ty.field_tyidxs();
+                    let mut extractvals = Vec::with_capacity(field_tyidxs.len());
+                    for (off, field_tyidx) in offs.iter().zip(field_tyidxs.iter()) {
+                        let off = u32::try_from(*off).unwrap();
+                        let tyidx = self.p_ty(self.am.type_(*field_tyidx))?;
+                        extractvals.push(
+                            self.opt.feed(
+                                hir::ExtractVal {
+                                    val: call_iidx,
+                                    off,
+                                    tyidx,
+                                }
+                                .into(),
+                            )?,
+                        );
+                    }
+                    self.call_extractvals.insert(call_iidx, extractvals);
+                }
             }
             match self.outline_until(bid)? {
                 OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
@@ -1848,44 +1893,53 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let Ty::Struct(struct_ty) = op.type_(self.am) else {
             panic!()
         };
-        let Inst::Load { volatile, .. } = op.to_inst(self.am) else {
-            todo!()
-        };
 
-        assert_eq!(indices.len(), 1, "extractvalue with nested indices");
-        let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
-        // LLVM struct fields are always byte-aligned.
-        assert_eq!(field_bit_off % 8, 0);
-        let byte_off = field_bit_off / 8;
-
-        let mut ptr = self.p_operand(op)?;
-        assert_eq!(
-            *self.opt.ty(self.opt.inst(ptr).tyidx(&*self.opt)),
-            hir::Ty::Ptr(0)
-        );
-        if byte_off > 0 {
-            ptr = self.opt.feed(
-                hir::PtrAdd {
-                    ptr,
-                    off: i32::try_from(byte_off).unwrap(),
-                    in_bounds: false,
-                    nusw: false,
-                    nuw: false,
+        match op.to_inst(self.am) {
+            Inst::Call { .. } => {
+                assert_eq!(indices.len(), 1);
+                let aot_iid = op.to_inst_id();
+                let val_iidx = self.frames.last().unwrap().get_local(&*self.opt, &aot_iid);
+                let ev_iidx = self.call_extractvals[&val_iidx][indices[0]];
+                self.frames.last_mut().unwrap().set_local(iid, ev_iidx);
+                Ok(())
+            }
+            Inst::Load { volatile, .. } => {
+                assert_eq!(indices.len(), 1, "extractvalue with nested indices");
+                let field_bit_off = struct_ty.field_bit_offs()[indices[0]];
+                // LLVM struct fields are always byte-aligned.
+                assert_eq!(field_bit_off % 8, 0);
+                let byte_off = field_bit_off / 8;
+                let mut ptr = self.p_operand(op)?;
+                assert_eq!(
+                    *self.opt.ty(self.opt.inst(ptr).tyidx(&*self.opt)),
+                    hir::Ty::Ptr(0)
+                );
+                if byte_off > 0 {
+                    ptr = self.opt.feed(
+                        hir::PtrAdd {
+                            ptr,
+                            off: i32::try_from(byte_off).unwrap(),
+                            in_bounds: false,
+                            nusw: false,
+                            nuw: false,
+                        }
+                        .into(),
+                    )?;
                 }
-                .into(),
-            )?;
-        }
 
-        let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
-        self.push_inst_and_link_local(
-            iid,
-            hir::Load {
-                tyidx: res_tyidx,
-                ptr,
-                is_volatile: *volatile,
-            },
-        )
-        .map(|_| ())
+                let res_tyidx = self.p_ty(self.am.type_(*tyidx))?;
+                self.push_inst_and_link_local(
+                    iid,
+                    hir::Load {
+                        tyidx: res_tyidx,
+                        ptr,
+                        is_volatile: *volatile,
+                    },
+                )
+                .map(|_| ())
+            }
+            _ => panic!(),
+        }
     }
 
     fn p_loadarg(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
@@ -2051,7 +2105,10 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         else {
             panic!()
         };
-        let tyidx = self.p_ty(inst.def_type(self.am).unwrap())?;
+        let tyidx = match inst.def_type(self.am).unwrap() {
+            Ty::Func(_) => self.opt.push_ty(hir::Ty::Ptr(0))?,
+            ty => self.p_ty(ty)?,
+        };
         let cond = self.p_operand(cond)?;
         let truev = self.p_operand(trueval)?;
         let falsev = self.p_operand(falseval)?;
