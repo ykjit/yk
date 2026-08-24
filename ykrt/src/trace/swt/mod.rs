@@ -4,7 +4,12 @@ use super::{
     AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorder, TraceRecorderError, Tracer,
 };
 use crate::mt::MTThread;
-use std::{cell::UnsafeCell, error::Error, mem, sync::Arc};
+use std::{
+    cell::UnsafeCell,
+    error::Error,
+    mem::{self, MaybeUninit},
+    sync::Arc,
+};
 
 /// Traces with more than this many items will be turned into [TraceRecorderError::TraceTooLong].
 static TRACE_TOO_LONG: usize = 15000;
@@ -18,7 +23,7 @@ struct TracingBBlock {
 thread_local! {
     // Collection of traced basic blocks. Because this is only accessed in this module, it's
     // relatively easy for us to reason about the safety of the [UnsafeCell].
-    static BASIC_BLOCKS: UnsafeCell<Vec<TracingBBlock>> = const { UnsafeCell::new(vec![]) };
+    static BASIC_BLOCKS: UnsafeCell<BasicBlocks> = UnsafeCell::new(BasicBlocks::new());
 }
 
 /// Records the specified basic block into the software tracing buffer.
@@ -33,12 +38,9 @@ thread_local! {
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_trace_basicblock(block_id: u32) {
     debug_assert!(MTThread::is_tracing());
-    BASIC_BLOCKS.with(|v| {
-        let v = unsafe { &mut *v.get() };
-        v.push(TracingBBlock {
-            function_index: u16::try_from(block_id >> 16).unwrap(),
-            block_index: u16::try_from(block_id & 0xffff).unwrap(),
-        });
+    BASIC_BLOCKS.with(|bbs| {
+        let bbs = unsafe { &mut *bbs.get() };
+        bbs.push(block_id);
     })
 }
 
@@ -63,18 +65,14 @@ struct SWTTraceRecorder {}
 impl TraceRecorder for SWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError> {
         let bbs = BASIC_BLOCKS.with(|tb| {
-            let tb = unsafe { &mut *tb.get() };
-            mem::replace(tb, Vec::new())
+            unsafe { &mut *tb.get() }.extract()
         });
-        if bbs.is_empty() {
-            // FIXME: who should handle an empty trace?
-            panic!();
-        } else {
-            if bbs.len() > TRACE_TOO_LONG {
-                Err(TraceRecorderError::TraceTooLong)
-            } else {
-                Ok(Box::new(SWTraceIterator::new(bbs)))
+        match bbs {
+            Some(x) => {
+                assert!(!x.is_empty()); // FIXME: who should handle an empty trace?
+                Ok(Box::new(SWTraceIterator::new(x)))
             }
+            None => Err(TraceRecorderError::TraceTooLong),
         }
     }
 }
@@ -105,3 +103,60 @@ impl Iterator for SWTraceIterator {
 }
 
 impl AOTTraceIterator for SWTraceIterator {}
+
+/// A thread-local buffer of basic blocks being gathered during tracing. Internally this reuses the
+/// same buffer for each trace in a given thread, so no allocation is needed to start tracing,
+/// no resizing happens during tracing, and at completion a single allocation of a "perfectly
+/// sized" [Vec] can be made.
+struct BasicBlocks {
+    len: usize,
+    /// The safety property we use on this allocation is that we never write elements when `len >=
+    /// TRACE_TOO_LONG` (indeed, we cap `len` at `TRACE_TOO_LONG`).
+    data: Box<[MaybeUninit<u32>]>,
+}
+
+impl BasicBlocks {
+    fn new() -> Self {
+        Self {
+            len: 0,
+            data: Box::new_uninit_slice(TRACE_TOO_LONG),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Push a [TracingBBlock] if there is capacity for it.
+    fn push(&mut self, value: u32) {
+        if self.len < TRACE_TOO_LONG {
+            unsafe {
+                self.data
+                    .as_mut_ptr()
+                    .add(self.len)
+                    .write(MaybeUninit::new(value));
+            }
+            self.len += 1;
+        }
+    }
+
+    /// Return the blocks recorded as a `Vec` or `None` if the trace was too long.
+    fn extract(&mut self) -> Option<Vec<TracingBBlock>> {
+        let len = mem::replace(&mut self.len, 0);
+        if len < TRACE_TOO_LONG {
+            let mut v = Vec::with_capacity(len);
+            let slice =
+                unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<u32>(), len) };
+            v.extend(slice.iter().map(|block_id| {
+                let block_id = *block_id;
+                TracingBBlock {
+                    function_index: u16::try_from(block_id >> 16).unwrap(),
+                    block_index: u16::try_from(block_id & 0xffff).unwrap(),
+                }
+            }));
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
