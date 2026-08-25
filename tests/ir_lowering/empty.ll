@@ -4,7 +4,7 @@
 ;     # Num funcs: 3
 ;     # Num consts: 0
 ;     # Num global decls: 0
-;     # Num types: 4
+;     # Num types: ...
 ;
 ;     func main() {
 ;       bb0:

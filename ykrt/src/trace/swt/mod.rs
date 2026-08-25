@@ -3,41 +3,37 @@
 use super::{
     AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorder, TraceRecorderError, Tracer,
 };
-use crate::mt::MTThread;
-use std::{cell::RefCell, error::Error, sync::Arc};
+use std::{
+    cell::UnsafeCell,
+    error::Error,
+    mem::{self, MaybeUninit},
+    ptr,
+    sync::Arc,
+};
 
 /// Traces with more than this many items will be turned into [TraceRecorderError::TraceTooLong].
 static TRACE_TOO_LONG: usize = 15000;
+
+// This is no_mangle because its name is relied upon by ykllvm (see `BasicBlockTracer.cpp`), and
+// it needs to survive linking.
+#[allow(non_upper_case_globals)]
+#[unsafe(no_mangle)]
+#[thread_local]
+static mut __yk_trace_buffer: TraceBuffer = TraceBuffer {
+    cursor: ptr::null_mut(),
+    end: ptr::null_mut(),
+};
+
+thread_local! {
+    // Collection of traced basic blocks. Because this is only accessed in this module, it's
+    // relatively easy for us to reason about the safety of the [UnsafeCell].
+    static BASIC_BLOCKS: UnsafeCell<BasicBlocks> = UnsafeCell::new(BasicBlocks::new());
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBBlock {
     function_index: u16,
     block_index: u16,
-}
-
-thread_local! {
-    // Collection of traced basic blocks.
-    static BASIC_BLOCKS: RefCell<Vec<TracingBBlock>> = const { RefCell::new(vec![]) };
-}
-
-/// Records the specified basic block into the software tracing buffer.
-///
-/// This must only be called if the current thread is tracing.
-///
-/// # Arguments
-///
-/// * `block_id` specifies the block to be recorded. The upper 16-bits are the function index, the
-///   lower 16-bits are the basic block index.
-#[cfg(tracer_swt)]
-#[unsafe(no_mangle)]
-pub extern "C" fn __yk_trace_basicblock(block_id: u32) {
-    debug_assert!(MTThread::is_tracing());
-    BASIC_BLOCKS.with(|v| {
-        v.borrow_mut().push(TracingBBlock {
-            function_index: u16::try_from(block_id >> 16).unwrap(),
-            block_index: u16::try_from(block_id & 0xffff).unwrap(),
-        });
-    })
 }
 
 pub(crate) struct SWTracer {}
@@ -50,7 +46,16 @@ impl SWTracer {
 
 impl Tracer for SWTracer {
     fn start_recorder(self: Arc<Self>) -> Result<Box<dyn TraceRecorder>, Box<dyn Error>> {
-        debug_assert!(BASIC_BLOCKS.with(|bbs| bbs.borrow().is_empty()));
+        BASIC_BLOCKS.with(|bbs| {
+            let bbs = unsafe { &mut *bbs.get() };
+            let tb = &raw mut __yk_trace_buffer;
+            unsafe {
+                let start = bbs.data.as_mut_ptr().cast::<u32>();
+                debug_assert!((*tb).cursor.is_null() || (*tb).cursor == start);
+                (*tb).cursor = start;
+                (*tb).end = start.add(TRACE_TOO_LONG);
+            }
+        });
         Ok(Box::new(SWTTraceRecorder {}))
     }
 }
@@ -60,16 +65,13 @@ struct SWTTraceRecorder {}
 
 impl TraceRecorder for SWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError> {
-        let bbs = BASIC_BLOCKS.with(|tb| tb.replace(Vec::new()));
-        if bbs.is_empty() {
-            // FIXME: who should handle an empty trace?
-            panic!();
-        } else {
-            if bbs.len() > TRACE_TOO_LONG {
-                Err(TraceRecorderError::TraceTooLong)
-            } else {
-                Ok(Box::new(SWTraceIterator::new(bbs)))
+        let bbs = BASIC_BLOCKS.with(|bbs| unsafe { &*bbs.get() }.extract());
+        match bbs {
+            Some(x) => {
+                assert!(!x.is_empty()); // FIXME: who should handle an empty trace?
+                Ok(Box::new(SWTraceIterator::new(x)))
             }
+            None => Err(TraceRecorderError::TraceTooLong),
         }
     }
 }
@@ -100,3 +102,52 @@ impl Iterator for SWTraceIterator {
 }
 
 impl AOTTraceIterator for SWTraceIterator {}
+
+/// The struct shared with ykllvm in `BasicBlockTracer.h`.
+#[repr(C)]
+struct TraceBuffer {
+    cursor: *mut u32,
+    end: *mut u32,
+}
+
+/// A thread-local buffer of basic blocks being gathered during tracing. Internally this reuses the
+/// same buffer for each trace in a given thread, so no allocation is needed to start tracing,
+/// no resizing happens during tracing, and at completion a single allocation of a "perfectly
+/// sized" [Vec] can be made.
+struct BasicBlocks {
+    /// The safety property we use on this allocation is that the trace-buffer TLS cursor never
+    /// advances beyond the end of this allocation.
+    data: Box<[MaybeUninit<u32>]>,
+}
+
+impl BasicBlocks {
+    fn new() -> Self {
+        Self {
+            data: Box::new_uninit_slice(TRACE_TOO_LONG),
+        }
+    }
+
+    /// Return the blocks recorded as a `Vec` or `None` if the trace was too long.
+    fn extract(&self) -> Option<Vec<TracingBBlock>> {
+        let tb = &raw mut __yk_trace_buffer;
+        // We continually reuse the same allocation, so put `cursor` back to the start.
+        let start = self.data.as_ptr().cast::<u32>().cast_mut();
+        let cursor = unsafe { mem::replace(&mut (*tb).cursor, start) };
+        let len = unsafe { cursor.offset_from(start) as usize };
+        if cursor != unsafe { (*tb).end } {
+            let mut v = Vec::with_capacity(len);
+            let slice =
+                unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<u32>(), len) };
+            v.extend(slice.iter().map(|block_id| {
+                let block_id = *block_id;
+                TracingBBlock {
+                    function_index: u16::try_from(block_id >> 16).unwrap(),
+                    block_index: u16::try_from(block_id & 0xffff).unwrap(),
+                }
+            }));
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
