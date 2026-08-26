@@ -861,6 +861,7 @@ pub(super) enum Inst {
     FSub,
     FPToSI,
     Freeze,
+    Fshl,
     Guard,
     ICmp,
     IntToPtr,
@@ -1783,6 +1784,92 @@ impl InstT for CtTz {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!("cttz %{}", self.val.to_raw_index())
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct Fshl {
+    pub tyidx: TyIdx,
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+    pub shift: InstIdx,
+}
+
+impl InstT for Fshl {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            self.tyidx,
+            b.inst(self.lhs).tyidx(m),
+            "%{iidx:?}: inconsistent return lhs type"
+        );
+        assert_eq!(
+            self.tyidx,
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent return rhs type"
+        );
+        assert_eq!(
+            self.tyidx,
+            b.inst(self.shift).tyidx(m),
+            "%{iidx:?}: inconsistent return shift type"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+        self.shift = opt.equiv_iidx(self.shift);
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::Fshl(Fshl {
+            tyidx,
+            lhs,
+            rhs,
+            shift,
+        }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+            && opt.equiv_iidx(self.shift) == *shift
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::three(b, self.lhs, self.rhs, self.shift)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+        self.shift = iidx_map(self.shift);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "fshl %{}, %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index(),
+            self.shift.to_raw_index()
+        )
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -5677,6 +5764,60 @@ mod test {
           %0: i8 = arg [reg]
           %1: i16 = ctpop %0
         ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return lhs type")]
+    fn fshl_lhs_type_consistency() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i32 = arg [reg]
+          %1: i64 = arg [reg]
+          %2: i64 = fshl %0, %1, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return rhs type")]
+    fn fshl_rhs_type_consistency() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          %1: i32 = arg [reg]
+          %2: i64 = fshl %0, %1, %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent return shift type")]
+    fn fshl_shift_type_consistency() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          %1: i32 = arg [reg]
+          %2: i64 = fshl %0, %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    fn fshl_to_string() {
+        let m = str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          %1: i64 = arg [reg]
+          %2: i64 = fshl %0, %0, %1
+        ",
+        );
+        let TraceEnd::Test { block, .. } = &m.trace_end else {
+            panic!()
+        };
+        assert_eq!(
+            block.inst(InstIdx::from_raw_index(2)).to_string(&m, block),
+            "fshl %0, %0, %1"
         );
     }
 
