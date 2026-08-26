@@ -1380,7 +1380,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             args: jargs,
             effects: hir::CallEffects::ReadWrite,
         };
-        let hir::Ty::Func(box hir::FuncTy { rtn_tyidx, .. }) = self.opt.ty(ftyidx) else {
+        let hir::Ty::Func(deref!(hir::FuncTy { rtn_tyidx, .. })) = self.opt.ty(ftyidx) else {
             panic!()
         };
         if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {

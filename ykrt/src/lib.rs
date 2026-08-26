@@ -1,7 +1,7 @@
 //! Interpreter-facing API to the Yk meta-tracer.
 
 #![cfg_attr(test, feature(test))]
-#![feature(box_patterns)]
+#![feature(deref_patterns)]
 #![feature(int_roundings)]
 #![cfg_attr(test, feature(trim_prefix_suffix))]
 #![feature(thread_local)]
