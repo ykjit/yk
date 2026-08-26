@@ -1567,6 +1567,17 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
+            "fshl" => {
+                let [lhs, rhs, shift]: [hir::InstIdx; 3] = jargs.into_vec().try_into().unwrap();
+                let fty = self.opt.func_ty(ftyidx);
+                let hinst = hir::Fshl {
+                    tyidx: fty.rtn_tyidx,
+                    lhs,
+                    rhs,
+                    shift,
+                };
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
+            }
             "is" if parts[2] == "fpclass" => {
                 let [val, test]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let test = if let hir::Inst::Const(hir::Const {

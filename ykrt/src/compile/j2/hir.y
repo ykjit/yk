@@ -137,6 +137,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "FREEZE" "LOCAL" {
       Ok(AstInst::Freeze { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FSHL" "LOCAL" "," "LOCAL" "," "LOCAL" {
+      Ok(AstInst::Fshl { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span(), shift: $10?.span() })
+    }
   | "LOCAL" ":" Ty "=" "GLOBAL" {
       Ok(AstInst::Global { local: $1?.span(), ty: $3?, name: $5?.span() })
     }

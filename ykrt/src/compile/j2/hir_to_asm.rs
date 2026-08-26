@@ -1029,6 +1029,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_freeze(&mut ra, iidx, x)?;
                     }
                 }
+                Inst::Fshl(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fshl(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::Guard(x @ Guard { geidx, .. }) => {
                     let gextra = b.gextra(*geidx);
 
@@ -1690,6 +1695,14 @@ pub(super) trait HirToAsmBackend {
         ra: &mut RegAlloc<Self>,
         iidx: InstIdx,
         inst: &Freeze,
+    ) -> Result<(), CompilationError>;
+
+    fn i_fshl(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &Fshl,
     ) -> Result<(), CompilationError>;
 
     /// The instruction should use [super::regalloc::RegCnstr::KeepAlive] for the values in

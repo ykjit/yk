@@ -3062,6 +3062,108 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    /// Lowers HIR `fshl` to x64 `shld`.
+    fn i_fshl(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Fshl {
+            tyidx: _,
+            lhs,
+            rhs,
+            shift,
+        }: &Fshl,
+    ) -> Result<(), CompilationError> {
+        // `fshl` is a funnel shift, which means that undefined bits are
+        // problematic. For now we solve this by only implementing types
+        // which round to equally-sized registers in x64 (16/32/64 bits)
+        // where we don't have to worry about undefined bits.
+        let bitw = b.inst_bitw(self.m, *lhs);
+        if let Some(imm) = self.zero_ext_op_for_imm8(b, *shift) {
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                32 => IcedInst::with3(
+                    Code::Shld_rm32_r32_imm8,
+                    lhsr.to_reg32(),
+                    rhsr.to_reg32(),
+                    imm,
+                ),
+                64 => IcedInst::with3(
+                    Code::Shld_rm64_r64_imm8,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                    imm,
+                ),
+                x => todo!("{x}"),
+            });
+        } else {
+            let [lhsr, rhsr, clr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *shift,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &[Reg::RCX],
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                16 => IcedInst::with3(
+                    Code::Shld_rm16_r16_CL,
+                    lhsr.to_reg16(),
+                    rhsr.to_reg16(),
+                    clr.to_reg8(),
+                ),
+                32 => IcedInst::with3(
+                    Code::Shld_rm32_r32_CL,
+                    lhsr.to_reg32(),
+                    rhsr.to_reg32(),
+                    clr.to_reg8(),
+                ),
+                64 => IcedInst::with3(
+                    Code::Shld_rm64_r64_CL,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                    clr.to_reg8(),
+                ),
+                x => todo!("{x}"),
+            });
+        }
+        Ok(())
+    }
+
     fn i_guard(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -6412,6 +6514,59 @@ mod test {
               ; %1: i64 = ctpop %0
               popcnt r.64._, r.64.x
               ; term [%1]
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_fshl() {
+        // i64 - constant shift
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 42
+              %2: i64 = fshl %0, %0, %1
+              blackbox %2
+              term [%0]
+            ",
+            &["
+              ...
+              ; %2: i64 = fshl %0, %0, %1
+              shld r.64.x, r.64.y, 0x2A
+              ...
+            "],
+        );
+
+        // i64 - varible shift
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = fshl %0, %0, %1
+              term [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i64 = fshl %0, %0, %1
+              shld r.64.x, r.64.y, cl
+              ...
+            "],
+        );
+
+        // i16 - distinct operands, variable shift
+        codegen_and_test(
+            "
+              %0: i16 = arg [reg]
+              %1: i16 = arg [reg]
+              %2: i16 = arg [reg]
+              %3: i16 = fshl %0, %1, %2
+              term [%0, %1, %3]
+            ",
+            &["
+              ...
+              ; %3: i16 = fshl %0, %1, %2
+              shld r.16.x, r.16.y, cl
+              ...
             "],
         );
     }
