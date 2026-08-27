@@ -58,7 +58,7 @@ io.stderr:write("exit\n")
 --     ;   "start": {
 --     ;     "kind": "Guard",
 --     ;     "src_trid": "0",
---     ;     "gidx": "78"
+--     ;     "gidx": "${{_}}"
 --     ;   },
 --     ;   "end": {
 --     ;     "kind": "Coupler",
