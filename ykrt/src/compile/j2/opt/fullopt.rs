@@ -696,13 +696,27 @@ impl PassOpt<'_> {
     /// is equivalent to an existing instruction. However, that cannot be guaranteed, and must not
     /// be relied upon in any way.undefined behaviour.
     pub(super) fn push_pre_inst(&mut self, preinst: Inst) -> InstIdx {
-        if let Inst::Const(c) = &preinst
-            && let Some(x) = self
+        if let Inst::Const(c) = &preinst {
+            // Try and find a match in the overall trace.
+            if let Some(x) = self
                 .optinternal
                 .consts_map
                 .get(&HashableConst(c.to_owned()))
-        {
-            return *x;
+            {
+                return *x;
+            }
+            if !self.inner.pre_insts.is_empty() {
+                // Do a linear search through the preinsts for a match. This is potentially quite
+                // slow, though in practise there tend to be zero pre_insts so we don't even hit
+                // this branch.
+                let ch = HashableConst(c.to_owned());
+                if let Some(x) = self.inner.pre_insts.iter().position(|x| match x {
+                    Inst::Const(c) => HashableConst(c.to_owned()) == ch,
+                    _ => false,
+                }) {
+                    return InstIdx::from_raw_index(self.optinternal.insts.len_usize() + x);
+                }
+            }
         }
         let iidx = InstIdx::from_raw_index(
             self.optinternal.insts.len_usize() + self.inner.pre_insts.len(),
