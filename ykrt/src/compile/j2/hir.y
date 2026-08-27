@@ -146,6 +146,24 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ICMP" IPred "LOCAL" "," "LOCAL" {
       Ok(AstInst::ICmp{ local: $1?.span(), ty: $3?, pred: $6?, lhs: $7?.span(), rhs: $9?.span() })
     }
+  | "LOCAL" ":" Ty "=" "UADD_OVERFLOW" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::UAddOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
+  | "LOCAL" ":" Ty "=" "SADD_OVERFLOW" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::SAddOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
+  | "LOCAL" ":" Ty "=" "USUB_OVERFLOW" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::USubOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
+  | "LOCAL" ":" Ty "=" "SSUB_OVERFLOW" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::SSubOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
+  | "LOCAL" ":" Ty "=" "UMUL_OVERFLOW" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::UMulOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
+  | "LOCAL" ":" Ty "=" "SMUL_OVERFLOW" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::SMulOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
   | "LOCAL" ":" Ty "=" "LOAD" Volatile "LOCAL" {
       Ok(AstInst::Load { local: $1?.span(), ty: $3?, is_volatile: $6?, ptr: $7?.span() })
     }

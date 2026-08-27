@@ -3304,6 +3304,261 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_uaddoverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        UAddOverflow { lhs, rhs }: &UAddOverflow,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, *lhs);
+        assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
+        let [lhsr, rhsr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+        self.asm
+            .push_inst(IcedInst::with1(Code::Setb_rm8, outr.to_reg8()));
+        self.asm.push_inst(match bitw {
+            32 => IcedInst::with2(Code::Add_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+            64 => IcedInst::with2(Code::Add_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
+    fn i_saddoverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        SAddOverflow { lhs, rhs }: &SAddOverflow,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, *lhs);
+        assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
+        let [lhsr, rhsr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+        self.asm
+            .push_inst(IcedInst::with1(Code::Seto_rm8, outr.to_reg8()));
+        self.asm.push_inst(match bitw {
+            32 => IcedInst::with2(Code::Add_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+            64 => IcedInst::with2(Code::Add_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
+    fn i_usuboverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        USubOverflow { lhs, rhs }: &USubOverflow,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, *lhs);
+        assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
+        let [lhsr, rhsr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+        self.asm
+            .push_inst(IcedInst::with1(Code::Setb_rm8, outr.to_reg8()));
+        self.asm.push_inst(match bitw {
+            32 => IcedInst::with2(Code::Sub_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+            64 => IcedInst::with2(Code::Sub_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
+    fn i_ssuboverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        SSubOverflow { lhs, rhs }: &SSubOverflow,
+    ) -> Result<(), CompilationError> {
+        let bitw: u32 = b.inst_bitw(self.m, *lhs);
+        assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
+        let [lhsr, rhsr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+        self.asm
+            .push_inst(IcedInst::with1(Code::Seto_rm8, outr.to_reg8()));
+        self.asm.push_inst(match bitw {
+            32 => IcedInst::with2(Code::Sub_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+            64 => IcedInst::with2(Code::Sub_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
+    fn i_umuloverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        UMulOverflow { lhs, rhs }: &UMulOverflow,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, *lhs);
+        assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
+        let [_lhsr, rhsr, _rdx, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &[Reg::RAX],
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Clobber { reg: Reg::RDX },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+        assert_ne!(rhsr, Reg::RAX);
+        assert_ne!(rhsr, Reg::RDX);
+        self.asm
+            .push_inst(IcedInst::with1(Code::Setb_rm8, outr.to_reg8()));
+        self.asm.push_inst(match bitw {
+            32 => IcedInst::with1(Code::Mul_rm32, rhsr.to_reg32()),
+            64 => IcedInst::with1(Code::Mul_rm64, rhsr.to_reg64()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
+    fn i_smuloverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        SMulOverflow { lhs, rhs }: &SMulOverflow,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, *lhs);
+        assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
+        let [lhsr, rhsr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: true,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Signed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+        self.asm
+            .push_inst(IcedInst::with1(Code::Seto_rm8, outr.to_reg8()));
+        self.asm.push_inst(match bitw {
+            32 => IcedInst::with2(Code::Imul_r32_rm32, lhsr.to_reg32(), rhsr.to_reg32()),
+            64 => IcedInst::with2(Code::Imul_r64_rm64, lhsr.to_reg64(), rhsr.to_reg64()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
     fn i_inttoptr(
         &mut self,
         ra: &mut RegAlloc<Self>,

@@ -633,6 +633,84 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
+                AstInst::UAddOverflow {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    assert_eq!(&self.tys[tyidx], &Ty::Int(1));
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(UAddOverflow { lhs, rhs }.into());
+                }
+                AstInst::SAddOverflow {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    assert_eq!(&self.tys[tyidx], &Ty::Int(1));
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(SAddOverflow { lhs, rhs }.into());
+                }
+                AstInst::USubOverflow {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    assert_eq!(&self.tys[tyidx], &Ty::Int(1));
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(USubOverflow { lhs, rhs }.into());
+                }
+                AstInst::SSubOverflow {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    assert_eq!(&self.tys[tyidx], &Ty::Int(1));
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(SSubOverflow { lhs, rhs }.into());
+                }
+                AstInst::UMulOverflow {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    assert_eq!(&self.tys[tyidx], &Ty::Int(1));
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(UMulOverflow { lhs, rhs }.into());
+                }
+                AstInst::SMulOverflow {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    assert_eq!(&self.tys[tyidx], &Ty::Int(1));
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(SMulOverflow { lhs, rhs }.into());
+                }
                 AstInst::IntToPtr { local, ty, val } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -1323,6 +1401,42 @@ enum AstInst {
         int_min_poison: bool,
     },
     Add {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    UAddOverflow {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    SAddOverflow {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    USubOverflow {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    SSubOverflow {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    UMulOverflow {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    SMulOverflow {
         local: Span,
         ty: AstTy,
         lhs: Span,

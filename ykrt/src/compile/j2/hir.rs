@@ -873,6 +873,7 @@ pub(super) enum Inst {
     Or,
     PtrAdd,
     PtrToInt,
+    SAddOverflow,
     SDiv,
     Select,
     SExt,
@@ -880,17 +881,22 @@ pub(super) enum Inst {
     SIToFP,
     SMax,
     SMin,
+    SMulOverflow,
     SRem,
+    SSubOverflow,
     Store,
     Sub,
     Term,
     ThreadLocal,
     Trunc,
+    UAddOverflow,
     UDiv,
     UIToFP,
     UMax,
     UMin,
+    UMulOverflow,
     URem,
+    USubOverflow,
     Xor,
     ZExt,
 }
@@ -3090,6 +3096,426 @@ impl IPred {
             IPred::Slt => "slt",
             IPred::Sle => "sle",
         }
+    }
+}
+
+/// Whether `lhs + rhs` overflows, interpreted as unsigned. Same semantics as the `i1` result of
+/// LLVM's `llvm.uadd.with.overflow`.
+#[derive(Clone, Debug)]
+pub(super) struct UAddOverflow {
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+}
+
+impl InstT for UAddOverflow {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    /// Canonicalise to favour references to constants on the RHS.
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::UAddOverflow(UAddOverflow { lhs, rhs }) = other
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "uadd_overflow %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
+    }
+}
+
+/// Whether `lhs + rhs` overflows, interpreted as signed. Same semantics as the `i1` result of
+/// LLVM's `llvm.sadd.with.overflow`.
+#[derive(Clone, Debug)]
+pub(super) struct SAddOverflow {
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+}
+
+impl InstT for SAddOverflow {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    /// Canonicalise to favour references to constants on the RHS.
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::SAddOverflow(SAddOverflow { lhs, rhs }) = other
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "sadd_overflow %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
+    }
+}
+
+/// Whether `lhs - rhs` overflows, interpreted as unsigned (i.e. `lhs < rhs`). Same semantics as
+/// the `i1` result of LLVM's `llvm.usub.with.overflow`.
+#[derive(Clone, Debug)]
+pub(super) struct USubOverflow {
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+}
+
+impl InstT for USubOverflow {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::USubOverflow(USubOverflow { lhs, rhs }) = other
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "usub_overflow %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
+    }
+}
+
+/// Whether `lhs - rhs` overflows, interpreted as signed. Same semantics as the `i1` result of
+/// LLVM's `llvm.ssub.with.overflow`.
+#[derive(Clone, Debug)]
+pub(super) struct SSubOverflow {
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+}
+
+impl InstT for SSubOverflow {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::SSubOverflow(SSubOverflow { lhs, rhs }) = other
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "ssub_overflow %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
+    }
+}
+
+/// Whether `lhs * rhs` overflows, interpreted as unsigned. Same semantics as the `i1` result of
+/// LLVM's `llvm.umul.with.overflow`.
+#[derive(Clone, Debug)]
+pub(super) struct UMulOverflow {
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+}
+
+impl InstT for UMulOverflow {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    /// Canonicalise to favour references to constants on the RHS.
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::UMulOverflow(UMulOverflow { lhs, rhs }) = other
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "umul_overflow %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
+    }
+}
+
+/// Whether `lhs * rhs` overflows, interpreted as signed. Same semantics as the `i1` result of
+/// LLVM's `llvm.smul.with.overflow`.
+#[derive(Clone, Debug)]
+pub(super) struct SMulOverflow {
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+}
+
+impl InstT for SMulOverflow {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    /// Canonicalise to favour references to constants on the RHS.
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::SMulOverflow(SMulOverflow { lhs, rhs }) = other
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "smul_overflow %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
     }
 }
 
@@ -6056,6 +6482,78 @@ mod test {
           %0: i8 = arg [reg]
           %1: i16 = arg [reg]
           %2: i1 = icmp eq %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent lhs / rhs types")]
+    fn uadd_overflow_inconsistent_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i1 = uadd_overflow %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent lhs / rhs types")]
+    fn sadd_overflow_inconsistent_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i1 = sadd_overflow %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent lhs / rhs types")]
+    fn usub_overflow_inconsistent_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i1 = usub_overflow %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent lhs / rhs types")]
+    fn ssub_overflow_inconsistent_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i1 = ssub_overflow %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent lhs / rhs types")]
+    fn umul_overflow_inconsistent_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i1 = umul_overflow %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent lhs / rhs types")]
+    fn smul_overflow_inconsistent_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i1 = smul_overflow %0, %1
         ",
         );
     }

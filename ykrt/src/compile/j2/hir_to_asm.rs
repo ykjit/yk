@@ -1193,6 +1193,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_sitofp(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::SAddOverflow(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_saddoverflow(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::SMax(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_smax(&mut ra, b, iidx, x)?;
@@ -1203,9 +1208,19 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_smin(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::SMulOverflow(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_smuloverflow(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::SRem(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_srem(&mut ra, b, iidx, x)?;
+                    }
+                }
+                Inst::SSubOverflow(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_ssuboverflow(&mut ra, b, iidx, x)?;
                     }
                 }
                 Inst::Store(x) => self.be.i_store(&mut ra, b, iidx, x)?,
@@ -1224,6 +1239,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 Inst::Trunc(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_trunc(&mut ra, b, iidx, x)?;
+                    }
+                }
+                Inst::UAddOverflow(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_uaddoverflow(&mut ra, b, iidx, x)?;
                     }
                 }
                 Inst::UDiv(x) => {
@@ -1246,9 +1266,19 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_umin(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::UMulOverflow(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_umuloverflow(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::URem(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_urem(&mut ra, b, iidx, x)?;
+                    }
+                }
+                Inst::USubOverflow(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_usuboverflow(&mut ra, b, iidx, x)?;
                     }
                 }
                 Inst::Xor(x) => {
@@ -1838,6 +1868,14 @@ pub(super) trait HirToAsmBackend {
         inst: &SIToFP,
     ) -> Result<(), CompilationError>;
 
+    fn i_saddoverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &SAddOverflow,
+    ) -> Result<(), CompilationError>;
+
     fn i_smax(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -1854,12 +1892,28 @@ pub(super) trait HirToAsmBackend {
         inst: &SMin,
     ) -> Result<(), CompilationError>;
 
+    fn i_smuloverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &SMulOverflow,
+    ) -> Result<(), CompilationError>;
+
     fn i_srem(
         &mut self,
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
         inst: &SRem,
+    ) -> Result<(), CompilationError>;
+
+    fn i_ssuboverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &SSubOverflow,
     ) -> Result<(), CompilationError>;
 
     fn i_store(
@@ -1894,6 +1948,14 @@ pub(super) trait HirToAsmBackend {
         inst: &Trunc,
     ) -> Result<(), CompilationError>;
 
+    fn i_uaddoverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &UAddOverflow,
+    ) -> Result<(), CompilationError>;
+
     fn i_udiv(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -1926,12 +1988,28 @@ pub(super) trait HirToAsmBackend {
         inst: &UMin,
     ) -> Result<(), CompilationError>;
 
+    fn i_umuloverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &UMulOverflow,
+    ) -> Result<(), CompilationError>;
+
     fn i_urem(
         &mut self,
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
         inst: &URem,
+    ) -> Result<(), CompilationError>;
+
+    fn i_usuboverflow(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &USubOverflow,
     ) -> Result<(), CompilationError>;
 
     fn i_xor(
