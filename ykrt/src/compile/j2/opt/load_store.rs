@@ -196,8 +196,8 @@ impl PassT for LoadStore {
     }
 
     fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
-        // FIXME: This is of a hack until `prepare_for_peel` can properly determine equivalences.
-        // At that point, there's no need for this method to do anything.
+        // FIXME: This is a hack until `prepare_for_peel` can properly determine equivalences. At
+        // that point, there's no need for this method to do anything.
         for hv_val in self.hv.values_mut() {
             if *hv_val == equiv1 {
                 *hv_val = equiv2;
@@ -802,6 +802,29 @@ mod test {
           %0: ptr = arg
           %1: i8 = 2
           store %1, %0
+          term [%0]
+          ; peel
+          %0: ptr = arg
+          term [%0]
+        ",
+        );
+
+        // Ensure that constants are properly deduplicated across the peel.
+        full_opt_test(
+            r#"
+          %0: ptr = arg [reg("GPR0", undefined)]
+          %1: ptr = ptradd %0, 8
+          %2: i8 = 3
+          store %2, %0
+          store %2, %1
+          term [%0]
+        "#,
+            "
+          %0: ptr = arg
+          %1: ptr = ptradd %0, 8
+          %2: i8 = 3
+          store %2, %0
+          store %2, %1
           term [%0]
           ; peel
           %0: ptr = arg
