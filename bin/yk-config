@@ -75,6 +75,8 @@ handle_arg() {
             OUTPUT="${OUTPUT} -mllvm -yk-patch-control-point"
             # Disable vectorization, as yk can't handle this yet.
             OUTPUT="${OUTPUT} -mllvm -yk-no-vectorize"
+            # yk doesn't yet support the structs overflow intrinsics use.
+            OUTPUT="${OUTPUT} -mllvm -yk-no-overflow-intrinsics"
             ;;
         --cppflags)
             # Path to yk.h
@@ -141,6 +143,9 @@ handle_arg() {
 
             # Disable vectorization, as yk can't handle this yet.
             OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-no-vectorize"
+
+            # yk doesn't yet support the structs overflow intrinsics use.
+            OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-no-overflow-intrinsics"
 
             # Linkage to yk as a library.
             ykcapi_dir=`libykcapi_dir ${profile}`
