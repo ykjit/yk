@@ -344,9 +344,16 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         }
                     }
                     VarLoc::Reg(reg, fill) => {
-                        assert!(!self.rstates.iidxs(*reg).contains(iidx));
-                        self.rstates.set_fill(*reg, *fill);
-                        self.rstates.iidxs_mut(*reg).push(*iidx);
+                        if !self.rstates.iidxs(*reg).contains(iidx) {
+                            self.rstates.set_fill(*reg, *fill);
+                            self.rstates.iidxs_mut(*reg).push(*iidx);
+                        } else {
+                            assert!(
+                                self.rstates.fill(*reg) == *fill
+                                    || *fill == RegFill::Undefined
+                                    || self.rstates.fill(*reg) == RegFill::Undefined
+                            );
+                        }
                     }
                     VarLoc::Const(_) => (),
                 }
