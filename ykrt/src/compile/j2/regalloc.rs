@@ -2469,7 +2469,7 @@ pub(crate) mod test {
             ra: &mut RegAlloc<Self>,
             _b: &Block,
             iidx: InstIdx,
-            UAddOverflow { lhs, rhs }: &UAddOverflow,
+            UAddOverflow { tyidx: _, lhs, rhs }: &UAddOverflow,
         ) -> Result<(), CompilationError> {
             let [lhsr, rhsr, outr] = ra.alloc(
                 self,

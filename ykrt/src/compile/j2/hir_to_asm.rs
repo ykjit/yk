@@ -971,7 +971,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
                 Inst::ExtractVal(x) => {
                     if ra.is_used(iidx) {
-                        self.be.i_extractval(&mut ra, iidx, x)?;
+                        self.be.i_extractval(&mut ra, b.inst(x.val), iidx, x)?;
                     }
                 }
                 Inst::FAdd(x) => {
@@ -1611,6 +1611,7 @@ pub(super) trait HirToAsmBackend {
     fn i_extractval(
         &mut self,
         ra: &mut RegAlloc<Self>,
+        val_inst: &Inst,
         iidx: InstIdx,
         inst: &ExtractVal,
     ) -> Result<(), CompilationError>;

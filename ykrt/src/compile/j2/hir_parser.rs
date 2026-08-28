@@ -641,10 +641,9 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                 } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
-                    assert_eq!(&self.tys[tyidx], &Ty::Int(1));
                     let lhs = self.p_local(lhs);
                     let rhs = self.p_local(rhs);
-                    self.insts.push(UAddOverflow { lhs, rhs }.into());
+                    self.insts.push(UAddOverflow { tyidx, lhs, rhs }.into());
                 }
                 AstInst::IntToPtr { local, ty, val } => {
                     self.p_def_local(local);

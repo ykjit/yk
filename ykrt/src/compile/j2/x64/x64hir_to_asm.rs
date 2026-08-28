@@ -2340,30 +2340,54 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_extractval(
         &mut self,
         ra: &mut RegAlloc<Self>,
+        val_inst: &Inst,
         iidx: InstIdx,
-        ExtractVal { val: _, off, tyidx }: &ExtractVal,
+        ExtractVal { val, off, tyidx }: &ExtractVal,
     ) -> Result<(), CompilationError> {
-        // Expecting struct across at most two 64-bit GP registers (RAX and RDX).
         let bitw = self.m.ty(*tyidx).bitw();
         assert!(
             bitw <= 64,
             "extractval chunk is {bitw} bits wide, expected <= 64"
         );
-        let reg = match *off {
-            0 => Reg::RAX,
-            64 => Reg::RDX,
-            _ => panic!("extractval offset {off} is not register aligned"),
-        };
-        let [_] = ra.alloc(
-            self,
-            iidx,
-            [RegCnstr::Output {
-                out_fill: RegCnstrFill::Undefined,
-                regs: &[reg],
-                can_be_same_as_input: false,
-            }],
-        )?;
-        Ok(())
+        match val_inst {
+            Inst::Call(_) => {
+                let reg = match *off {
+                    0 => Reg::RAX,
+                    64 => Reg::RDX,
+                    _ => panic!("extractval offset {off} is not register aligned"),
+                };
+                ra.alloc(
+                    self,
+                    iidx,
+                    [RegCnstr::Output {
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &[reg],
+                        can_be_same_as_input: false,
+                    }],
+                )?;
+                Ok(())
+            }
+            Inst::UAddOverflow(_) => {
+                let [outr] = ra.alloc(
+                    self,
+                    iidx,
+                    [RegCnstr::Cast {
+                        in_iidx: *val,
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                    }],
+                )?;
+                if *off != 0 {
+                    // UAddOverflow only ever packs a flag at bit 32 - any other non-zero offset
+                    // would mean a producer this shift logic wasn't written for.
+                    assert_eq!(*off, 32, "extractval offset {off} is not 0 or 32");
+                    self.asm
+                        .push_inst(IcedInst::with2(Code::Shr_rm64_imm8, outr.to_reg64(), *off));
+                }
+                Ok(())
+            }
+            _ => panic!("extractval operand is not a call or uadd_overflow"),
+        }
     }
 
     fn i_copysign(
@@ -4346,24 +4370,36 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    /// Compute both the wrapped sum and the overflow flag of `lhs + rhs`, packed into a single
+    /// 64-bit register: the sum in bits `0..32`, the flag in bit `32`. Extracted later via
+    /// [Self::i_extractval] (offsets `0` and `32` respectively).
+    ///
+    /// 64-bit `lhs`/`rhs` aren't handled: a 64-bit sum plus a flag bit can't fit in one 64-bit
+    /// register the way the 32-bit case does (that would need the two-register `RAX`/`RDX`
+    /// scheme `i_extractval` already supports at offsets `0`/`64`, which this instruction
+    /// doesn't produce).
     fn i_uaddoverflow(
         &mut self,
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        UAddOverflow { lhs, rhs }: &UAddOverflow,
+        UAddOverflow { tyidx: _, lhs, rhs }: &UAddOverflow,
     ) -> Result<(), CompilationError> {
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
-        let [lhsr, rhsr, outr] = ra.alloc(
+        assert_eq!(
+            bitw, 32,
+            "uadd_overflow: only 32-bit operands are supported"
+        );
+        let [lhsr, rhsr, tempr] = ra.alloc(
             self,
             iidx,
             [
-                RegCnstr::Input {
+                RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Zeroed,
+                    out_fill: RegCnstrFill::Undefined,
                     regs: &NORMAL_GP_REGS,
-                    clobber: true,
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
@@ -4371,20 +4407,35 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
-                RegCnstr::Output {
-                    out_fill: RegCnstrFill::Undefined,
+                RegCnstr::Temp {
                     regs: &NORMAL_GP_REGS,
-                    can_be_same_as_input: true,
                 },
             ],
         )?;
+        // Execution order (pushed in reverse): zero `tempr`; add (sets CF); copy CF into
+        // `tempr`'s low byte; shift it up to bit 32; OR it into the packed result.
+        self.asm.push_inst(IcedInst::with2(
+            Code::Or_rm64_r64,
+            lhsr.to_reg64(),
+            tempr.to_reg64(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Shl_rm64_imm8,
+            tempr.to_reg64(),
+            32u32,
+        ));
         self.asm
-            .push_inst(IcedInst::with1(Code::Setb_rm8, outr.to_reg8()));
-        self.asm.push_inst(match bitw {
-            32 => IcedInst::with2(Code::Add_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-            64 => IcedInst::with2(Code::Add_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-            x => todo!("{x}"),
-        });
+            .push_inst(IcedInst::with1(Code::Setb_rm8, tempr.to_reg8()));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Add_rm32_r32,
+            lhsr.to_reg32(),
+            rhsr.to_reg32(),
+        ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Xor_rm32_r32,
+            tempr.to_reg32(),
+            tempr.to_reg32(),
+        ));
         Ok(())
     }
 

@@ -2006,8 +2006,8 @@ impl InstT for ExtractVal {
     fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
         assert_matches!(
             b.inst(self.val),
-            Inst::Call(_),
-            "%{iidx:?}: extractval operand is not a call"
+            Inst::Call(_) | Inst::UAddOverflow(_),
+            "%{iidx:?}: extractval operand is not a call or uadd_overflow"
         );
         assert!(
             self.off + m.ty(self.tyidx).bitw() <= b.inst_bitw(m, self.val),
@@ -3096,6 +3096,7 @@ impl IPred {
 
 #[derive(Clone, Debug)]
 pub(super) struct UAddOverflow {
+    pub tyidx: TyIdx,
     pub lhs: InstIdx,
     pub rhs: InstIdx,
 }
@@ -3121,7 +3122,8 @@ impl InstT for UAddOverflow {
     }
 
     fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
-        if let Inst::UAddOverflow(UAddOverflow { lhs, rhs }) = other
+        if let Inst::UAddOverflow(UAddOverflow { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
             && opt.equiv_iidx(self.rhs) == *rhs
         {
@@ -3159,8 +3161,8 @@ impl InstT for UAddOverflow {
         )
     }
 
-    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
-        m.tyidx_int1()
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -6138,7 +6140,7 @@ mod test {
             "
           %0: i8 = arg [reg]
           %1: i16 = arg [reg]
-          %2: i1 = uadd_overflow %0, %1
+          %2: i64 = uadd_overflow %0, %1
         ",
         );
     }

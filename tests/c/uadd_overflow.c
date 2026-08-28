@@ -22,8 +22,9 @@
 //     --- End aot ---
 //     --- Begin hir ---
 //     ...
-//     %{{h_uadd_r}}: i32 = add %{{h_lhs}}, %{{h_rhs}}
-//     %{{h_uadd_ov}}: i1 = uadd_overflow %{{h_lhs}}, %{{h_rhs}}
+//     %{{h_packed}}: i64 = uadd_overflow %{{h_lhs}}, %{{h_rhs}}
+//     %{{h_uadd_r}}: i32 = extractval %{{h_packed}} [0]
+//     %{{h_uadd_ov}}: i1 = extractval %{{h_packed}} [32]
 //     %{{h_stderr}}: ptr = 0x{{_}} ; @stderr
 //     %{{h_stream}}: ptr = load %{{h_stderr}}
 //     %{{h_i}}: i32 = load %1
