@@ -2378,8 +2378,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     }],
                 )?;
                 if *off != 0 {
-                    // UAddOverflow only ever packs a flag at bit 32 - any other non-zero offset
-                    // would mean a producer this shift logic wasn't written for.
                     assert_eq!(*off, 32, "extractval offset {off} is not 0 or 32");
                     self.asm
                         .push_inst(IcedInst::with2(Code::Shr_rm64_imm8, outr.to_reg64(), *off));
