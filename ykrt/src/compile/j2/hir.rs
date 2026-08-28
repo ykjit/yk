@@ -886,6 +886,7 @@ pub(super) enum Inst {
     Term,
     ThreadLocal,
     Trunc,
+    UAddOverflow,
     UDiv,
     UIToFP,
     UMax,
@@ -3090,6 +3091,76 @@ impl IPred {
             IPred::Slt => "slt",
             IPred::Sle => "sle",
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct UAddOverflow {
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+}
+
+impl InstT for UAddOverflow {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    /// Canonicalise to favour references to constants on the RHS.
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::UAddOverflow(UAddOverflow { lhs, rhs }) = other
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "uadd_overflow %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_int1()
     }
 }
 
@@ -6056,6 +6127,18 @@ mod test {
           %0: i8 = arg [reg]
           %1: i16 = arg [reg]
           %2: i1 = icmp eq %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent lhs / rhs types")]
+    fn uadd_overflow_inconsistent_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i1 = uadd_overflow %0, %1
         ",
         );
     }

@@ -2464,6 +2464,41 @@ pub(crate) mod test {
             Ok(())
         }
 
+        fn i_uaddoverflow(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            UAddOverflow { lhs, rhs }: &UAddOverflow,
+        ) -> Result<(), CompilationError> {
+            let [lhsr, rhsr, outr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
+            )?;
+            self.ra_log
+                .push(format!("alloc %{iidx:?} {lhsr:?} {rhsr:?} {outr:?}"));
+            Ok(())
+        }
+
         fn i_shl(
             &mut self,
             ra: &mut RegAlloc<Self>,
