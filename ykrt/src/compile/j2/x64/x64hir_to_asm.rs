@@ -71,6 +71,9 @@ pub(in crate::compile::j2) struct X64HirToAsm<'a> {
     /// The data section: we map any given (align, byte sequence) pair to [LabelIdx]s, which will
     /// eventually be output as their own pseudo-block.
     data_sec: HashMap<Vec<u8>, (u32, LabelIdx)>,
+    /// A pair (patch_label, deopt_label): each guard, at address `patch_label`, has an 8 byte
+    /// pointer which initially points to `deopt_label`.
+    guard_targets: Vec<(LabelIdx, LabelIdx)>,
 }
 
 impl<'a> X64HirToAsm<'a> {
@@ -103,6 +106,7 @@ impl<'a> X64HirToAsm<'a> {
             entry_label,
             reg_hints: TypedVec::new(),
             data_sec: HashMap::new(),
+            guard_targets: Vec::new(),
         }
     }
 
@@ -1102,6 +1106,18 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         mut self,
         labels: &[Self::Label],
     ) -> Result<(ExeCodeBuf, Option<String>, Vec<usize>), CompilationError> {
+        // We put all the guard jump targets at the end. We assume the start of each block is
+        // aligned, and we know -- because each jump target is 8 bytes -- that the block will end
+        // aligned to 8 bytes.
+        for (patch, deopt) in self.guard_targets.drain(..) {
+            self.asm.align(8);
+            self.asm.push_reloc(
+                IcedInst::with_declare_qword(&[0]),
+                RelocKind::AbsoluteWithLabel(deopt),
+            );
+            self.asm.attach_label(patch);
+        }
+
         // Push the data section as its own block. This rests on the assumption that the start of
         // each block is aligned.
         for (data, (align, lidx)) in self.data_sec.into_iter() {
@@ -1667,7 +1683,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         gidx: CompiledGuardIdx,
         _vlocs: &[VarLocs<Self::Reg>],
     ) -> Result<LabelIdx, CompilationError> {
-        // For both the call to `__yk_j2_deopt` and the patchable jump, we use `RAX`.
+        // The call to `__yk_j2_deopt` uses `RAX`.
         self.asm
             .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
         self.asm.push_inst(IcedInst::with2(
@@ -1692,29 +1708,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RBP,
         ));
 
-        // This is the "dummy" jump that we will modify if a side-trace is created.
+        // Guards end with a `JMP [rip+...]` where `...` is `patch_label`. Initially the pointer
+        // stored at this address will be `deopt_label`. If/when a side-trace is created, the
+        // pointer stored will be updated and point to the start of the side-trace.
+        let deopt_label = self.asm.mk_label();
+        self.asm.attach_label(deopt_label);
         let patch_label = self.asm.mk_label();
-        let dummy_label = self.asm.mk_label();
-        self.asm.attach_label(dummy_label);
-        self.asm
-            .push_inst(IcedInst::with1(Code::Jmp_rm64, IcedReg::RAX));
-        // mov r64, imm64 is 10 bytes long, of which the immediate is the last 8 bytes. We need
-        // those entire 10 bytes to sit within a naturally aligned 16 byte block (which by
-        // definition cannot span a cache line).
-        let off = self.asm.buf_end_off() - 10;
-        let mut align = (off + 2) % 8;
-        if (off + 2 - align).is_multiple_of(16) {
-            align += 8
-        }
-        self.asm.push_nops(align);
         self.asm.push_reloc(
-            IcedInst::with2(Code::Mov_r64_imm64, IcedReg::RAX, 0),
-            RelocKind::AbsoluteWithLabel(dummy_label),
+            IcedInst::with1(
+                Code::Jmp_rm64,
+                MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+            ),
+            RelocKind::NearWithLabel(patch_label),
         );
-        // Check that we've aligned the immediate to 8 bytes...
-        assert_eq!((self.asm.buf_end_off() + 2) % 8, 0);
-        assert_eq!((self.asm.buf_end_off() + 2) % 16, 8);
-        self.asm.attach_label(patch_label);
+        self.guard_targets.push((patch_label, deopt_label));
 
         Ok(patch_label)
     }
@@ -7298,15 +7305,14 @@ mod test {
               term [%0]
             ",
             &["
+              ; l{{3}}
+              dq l{{2}}
               ; gidx 0
               ; l{{1}}
               sub rsp, 0x80
               ; term []
+              jmp qword l{{3}}
               ; l{{2}}
-              mov r.64.x, l{{3}}
-              ...
-              jmp r.64.x
-              ; l{{3}}
               mov rdi, rbp
               mov rsi, 0
               mov edx, 0
@@ -7327,15 +7333,14 @@ mod test {
               term [%0]
             ",
             &["
+              ; l{{3}}
+              dq l{{2}}
               ; gidx 0
               ; l{{1}}
               sub rsp, 0x80
               ; term []
+              jmp qword l{{3}}
               ; l{{2}}
-              mov r.64.x, l{{3}}
-              ...
-              jmp r.64.x
-              ; l{{3}}
               mov rdi, rbp
               mov rsi, 0
               mov edx, 0
