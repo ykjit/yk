@@ -4368,14 +4368,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    /// Compute both the wrapped sum and the overflow flag of `lhs + rhs`, packed into a single
-    /// 64-bit register: the sum in bits `0..32`, the flag in bit `32`. Extracted later via
-    /// [Self::i_extractval] (offsets `0` and `32` respectively).
-    ///
-    /// 64-bit `lhs`/`rhs` aren't handled: a 64-bit sum plus a flag bit can't fit in one 64-bit
-    /// register the way the 32-bit case does (that would need the two-register `RAX`/`RDX`
-    /// scheme `i_extractval` already supports at offsets `0`/`64`, which this instruction
-    /// doesn't produce).
     fn i_uaddoverflow(
         &mut self,
         ra: &mut RegAlloc<Self>,
