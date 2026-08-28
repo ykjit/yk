@@ -312,10 +312,15 @@ impl PartialEq for DeoptFrame {
     }
 }
 
+/// The variables recorded on entry to a guard.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct DeoptVar<Reg: RegT> {
     pub bitw: u32,
-    pub fromvlocs: VarLocs<Reg>,
+    /// The variable locations relevant to a coupler. Some of these might be only in registers.
+    pub coupler_fromvlocs: VarLocs<Reg>,
+    /// The variable locations relevant to deopt. None of these will be [VarLoc::Reg] only: they
+    /// will contain at least one `Const`, `Stack`, or `StackOff`.
+    pub deopt_fromvlocs: VarLocs<Reg>,
     pub tovlocs: VarLocs<Reg>,
 }
 

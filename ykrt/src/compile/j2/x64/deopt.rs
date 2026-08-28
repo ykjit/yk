@@ -340,10 +340,12 @@ fn reconstruct(
 ) {
     for DeoptVar {
         bitw,
-        fromvlocs,
+        deopt_fromvlocs,
         tovlocs,
+        ..
     } in varlocs.iter().filter(|x| !x.tovlocs.is_empty())
     {
+        let fromvlocs = deopt_fromvlocs;
         // FIXME: For now, we only deal with 1 fromvloc.
         assert_eq!(fromvlocs.len(), 1, "{fromvlocs:?}");
         let fromvloc = fromvlocs.iter().next().unwrap();

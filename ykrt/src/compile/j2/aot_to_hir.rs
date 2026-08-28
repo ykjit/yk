@@ -705,23 +705,28 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let mut deopt_vars_off = 0;
         for DeoptFrame { pc, pc_statepoint } in &guard.deopt_frames {
             let mut locals = HashMap::with_capacity(pc_statepoint.lives.len());
-            for (iid, DeoptVar { fromvlocs, .. }) in
+            for (
+                iid,
+                DeoptVar {
+                    coupler_fromvlocs, ..
+                },
+            ) in
                 pc_statepoint.lives.iter().map(|x| x.to_inst_id()).zip(
                     &guard.deopt_vars[deopt_vars_off..deopt_vars_off + pc_statepoint.lives.len()],
                 )
             {
                 let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
-                let iidx = if fromvlocs
+                let iidx = if coupler_fromvlocs
                     .iter()
                     .any(|vloc| matches!(vloc, VarLoc::Const(_)))
                 {
-                    assert_eq!(fromvlocs.len(), 1);
-                    self.vloc_arg_to_const(fromvlocs.iter().nth(0).unwrap())?
+                    assert_eq!(coupler_fromvlocs.len(), 1);
+                    self.vloc_arg_to_const(coupler_fromvlocs.iter().nth(0).unwrap())?
                 } else {
                     self.opt.feed_arg(hir::Arg { tyidx }.into())?
                 };
                 locals.insert(iid.clone(), iidx);
-                entry_vars.push(fromvlocs.clone());
+                entry_vars.push(coupler_fromvlocs.clone());
             }
             self.frames.push(Frame {
                 // aot_ir::Arg instructions come at the start of functions; by definition any frame

@@ -703,7 +703,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     let tovlocs = smap_loc.clone();
                     deopt_vars.push(DeoptVar {
                         bitw: gblock.inst_bitw(self.m, *term_iidx),
-                        fromvlocs,
+                        coupler_fromvlocs: VarLocs::new(),
+                        deopt_fromvlocs: fromvlocs,
                         tovlocs,
                     });
                 }
@@ -733,9 +734,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 // the latter from scratch); and `Const` / `Reg` `StackOff` / `Const`s are no-ops
                 // everywhere.
                 for deopt_var in frame_deopt_vars {
-                    if deopt_var.fromvlocs == deopt_var.tovlocs
+                    if deopt_var.deopt_fromvlocs == deopt_var.tovlocs
                         && (frame_idx == 0
-                            || deopt_var.fromvlocs.iter().all(|vloc| {
+                            || deopt_var.deopt_fromvlocs.iter().all(|vloc| {
                                 matches!(
                                     vloc,
                                     VarLoc::Const(_) | VarLoc::Reg(_, _) | VarLoc::StackOff(_)
@@ -756,6 +757,26 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             assert!(deopt_term_iter.next().is_none());
             assert!(!gblock.insts.is_empty());
 
+            // All values passed to deopt must be spillable (or just a const), but for values
+            // passed to another coupler trace they can be register only. `coupler_vlocs` is thus
+            // the same length as `from_vlocs` but doesn't force everything to be spilled.
+            let coupler_vlocs = gextra
+                .deopt_vars
+                .iter()
+                .zip(&mut deopt_vars)
+                .map(|(iidx, deopt_var)| {
+                    let vlocs = if let Inst::Const(Const { kind, .. }) = gexit.block.inst(*iidx) {
+                        varlocs![VarLoc::Const(kind.clone())]
+                    } else if let Ok(i) = gexit.exit_vars.binary_search(iidx) {
+                        gexit.exit_vlocs[i].clone()
+                    } else {
+                        deopt_var.deopt_fromvlocs.clone()
+                    };
+                    deopt_var.coupler_fromvlocs = vlocs.clone();
+                    vlocs
+                })
+                .collect::<Vec<_>>();
+
             let mut merged = false;
             let mut gidx = gbodies.len();
             for (cnd_gidx, gbody) in gbodies.iter_mut_enumerated() {
@@ -774,9 +795,16 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
             let vlocs = deopt_vars
                 .iter()
-                .map(|x| x.fromvlocs.clone())
+                .map(|x| x.deopt_fromvlocs.clone())
                 .collect::<Vec<_>>();
             let patch_label = self.be.guard_end(self.m.trid, gidx, &vlocs)?;
+            ra.set_term_vlocs(
+                &mut self.be,
+                &gblock,
+                false,
+                &gexit.exit_vlocs,
+                &coupler_vlocs,
+            )?;
             ra.keep_alive_at_term(
                 InstIdx::from_raw_index(gblock.insts.len_usize() - 1),
                 gblock.term_vars(),
@@ -1286,18 +1314,17 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     }
 }
 
-/// Are the "from" deopt vars in `cnd` compatible with those in `with`? Note: this relationship is
-/// not necessarily symmetric.
+/// Are the `deopt_fromvlocs` vars in `cnd` compatible with those in `with`? Note: this
+/// relationship is not necessarily symmetric.
 fn deopt_vars_compatible<Reg: RegT>(cnd: &[DeoptVar<Reg>], with: &[DeoptVar<Reg>]) -> bool {
     if cnd.len() != with.len() {
         return false;
     }
-    cnd.iter().zip(with.iter()).all(|(x, y)| {
-        x.bitw == y.bitw
-            && x.fromvlocs.len() == y.fromvlocs.len()
-            && x.fromvlocs
-                .iter()
-                .zip(y.fromvlocs.iter())
+
+    fn is_compatible<Reg: RegT>(x: &VarLocs<Reg>, y: &VarLocs<Reg>) -> bool {
+        x.len() == y.len()
+            && x.iter()
+                .zip(y.iter())
                 // OPT: We could do this unsorted, but then we have to do the checks in both
                 // directions. It's unclear if that's worth it, when the common case is "both sides
                 // have 1 entry".
@@ -1313,6 +1340,12 @@ fn deopt_vars_compatible<Reg: RegT>(cnd: &[DeoptVar<Reg>], with: &[DeoptVar<Reg>
                     (VarLoc::Const(lhs), VarLoc::Const(rhs)) => lhs == rhs,
                     _ => false,
                 })
+    }
+
+    cnd.iter().zip(with.iter()).all(|(x, y)| {
+        x.bitw == y.bitw
+            && is_compatible(&x.coupler_fromvlocs, &y.coupler_fromvlocs)
+            && is_compatible(&x.deopt_fromvlocs, &y.deopt_fromvlocs)
     })
 }
 
@@ -2011,7 +2044,8 @@ mod test {
     fn deopt_vars_compatibility() {
         let x = vec![DeoptVar {
             bitw: 64,
-            fromvlocs: varlocs![
+            coupler_fromvlocs: VarLocs::new(),
+            deopt_fromvlocs: varlocs![
                 VarLoc::Stack(8),
                 VarLoc::Reg(TestReg::R0, RegFill::Undefined)
             ],
@@ -2019,7 +2053,8 @@ mod test {
         }];
         let y = vec![DeoptVar {
             bitw: 64,
-            fromvlocs: varlocs![
+            coupler_fromvlocs: VarLocs::new(),
+            deopt_fromvlocs: varlocs![
                 VarLoc::Stack(8),
                 VarLoc::Reg(TestReg::R0, RegFill::Undefined)
             ],
@@ -2027,7 +2062,8 @@ mod test {
         }];
         let z = vec![DeoptVar {
             bitw: 64,
-            fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Zeroed)],
+            coupler_fromvlocs: VarLocs::new(),
+            deopt_fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Zeroed)],
             tovlocs: VarLocs::new(),
         }];
 
@@ -2040,7 +2076,8 @@ mod test {
 
         let sgn = vec![DeoptVar {
             bitw: 64,
-            fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Signed)],
+            coupler_fromvlocs: VarLocs::new(),
+            deopt_fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Signed)],
             tovlocs: VarLocs::new(),
         }];
         assert!(!deopt_vars_compatible(&z, &sgn));
@@ -2313,7 +2350,7 @@ mod test {
                     .iter()
                     .map(|x| format!(
                         "  fromvlocs=[{}]\n  tovlocs=[{}]",
-                        x.fromvlocs
+                        x.deopt_fromvlocs
                             .iter()
                             .map(|x| format!("{x:?}"))
                             .collect::<Vec<_>>()
