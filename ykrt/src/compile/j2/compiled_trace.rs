@@ -17,7 +17,6 @@ use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::{
     any::Any,
-    assert_matches,
     ffi::c_void,
     sync::{Arc, Weak},
 };
@@ -180,10 +179,8 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
         let gidx = CompiledGuardIdx::from_raw_index(usize::from(gid));
         for patch_off in &self.guards[gidx].patch_offs {
             let patch_off = usize::try_from(*patch_off).unwrap();
-            self.codebuf.patch(patch_off, 10, |patch_addr| {
-                // We can only patch `mov r64, imm64`.
-                assert_matches!(unsafe { patch_addr.read() }, 0x48 | 0x49);
-                let patch_addr = unsafe { patch_addr.byte_add(2) };
+            self.codebuf.patch(patch_off, 8, |patch_addr| {
+                assert_eq!(patch_addr.addr() % 8, 0);
                 unsafe {
                     (patch_addr as *mut u64).write(u64::try_from(tgt.addr()).unwrap());
                 }
