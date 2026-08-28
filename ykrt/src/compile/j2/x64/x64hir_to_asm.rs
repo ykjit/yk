@@ -4410,8 +4410,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 },
             ],
         )?;
-        // Execution order (pushed in reverse): zero `tempr`; add (sets CF); copy CF into
-        // `tempr`'s low byte; shift it up to bit 32; OR it into the packed result.
         self.asm.push_inst(IcedInst::with2(
             Code::Or_rm64_r64,
             lhsr.to_reg64(),
