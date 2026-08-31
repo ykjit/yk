@@ -112,6 +112,7 @@ use crate::{
 };
 use index_type::{IndexType, vec::TypedVec};
 use parking_lot::Mutex;
+use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
 use std::{ffi::c_void, sync::Arc};
 use test_stubs::test_stubs;
@@ -590,6 +591,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         let gexits = std::mem::take(&mut self.gexits);
         let mut gbodies: TypedVec<CompiledGuardIdx, GuardBody<AB>> =
             TypedVec::with_capacity(gexits.len());
+        // This map is an optimisation that allows us to only scan possible candidates for merging,
+        // rather than a linear scan through all guards.
+        let mut gbodies_map: FxHashMap<aot_ir::BBlockId, SmallVec<[CompiledGuardIdx; 5]>> =
+            FxHashMap::default();
         for gexit in gexits.into_iter() {
             let gextra = gexit.block.gextra(gexit.geidx);
 
@@ -789,7 +794,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
             let mut merged = false;
             let mut gidx = gbodies.len();
-            for (cnd_gidx, gbody) in gbodies.iter_mut_enumerated() {
+            for &cnd_gidx in gbodies_map.get(&gextra.bid).into_iter().flatten() {
+                let gbody = &mut gbodies[cnd_gidx];
                 // NOTE: at this point we don't know what the `extra_stack_len` of the
                 // about-to-be-created sidetrace is, so we can't factor that into our comparison.
                 if gextra.bid == gbody.bid
@@ -852,6 +858,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     extra_stack_len,
                     switch: gextra.switch.clone(),
                 });
+                gbodies_map.entry(gextra.bid).or_default().push(gidx);
             }
             if self.log {
                 self.be.log(format!("gidx {}", gidx.to_raw_index()));

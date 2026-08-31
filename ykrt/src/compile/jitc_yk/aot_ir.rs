@@ -541,7 +541,7 @@ impl InstId {
 }
 
 /// Uniquely identifies a basic block within a [Module].
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BBlockId {
     funcidx: FuncIdx,
     bbidx: BBlockIdx,
