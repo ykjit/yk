@@ -133,10 +133,10 @@ use crate::compile::{
     },
 };
 use index_type::{IndexType, typed_vec, vec::TypedVec};
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     assert_matches,
-    collections::HashMap,
     hash::{Hash, Hasher},
     mem,
 };
@@ -154,7 +154,7 @@ pub(in crate::compile::j2) struct FullOpt {
 impl FullOpt {
     pub(in crate::compile::j2) fn new() -> Self {
         let mut tys = TypedVec::new();
-        let mut ty_map = HashMap::new();
+        let mut ty_map = FxHashMap::default();
         let tyidx_void = tys.push(Ty::Void);
         ty_map.insert(Ty::Void, tyidx_void);
         let tyidx_ptr0 = tys.push(Ty::Ptr(0));
@@ -170,7 +170,7 @@ impl FullOpt {
             ],
             inner: OptInternal {
                 insts: TypedVec::new(),
-                consts_map: HashMap::new(),
+                consts_map: FxHashMap::default(),
                 guard_extras: TypedVec::new(),
                 tys,
                 tyidx_int1,
@@ -183,7 +183,7 @@ impl FullOpt {
 
     #[cfg(test)]
     pub(in crate::compile::j2) fn new_testing(tys: TypedVec<TyIdx, Ty>) -> Self {
-        let ty_map = HashMap::from_iter(
+        let ty_map = FxHashMap::from_iter(
             tys.iter()
                 .enumerate()
                 .map(|(x, y)| (y.to_owned(), TyIdx::from_raw_index(x))),
@@ -200,7 +200,7 @@ impl FullOpt {
             ],
             inner: OptInternal {
                 insts: TypedVec::new(),
-                consts_map: HashMap::new(),
+                consts_map: FxHashMap::default(),
                 guard_extras: TypedVec::new(),
                 tys,
                 tyidx_int1,
@@ -529,7 +529,7 @@ struct OptInternal {
     /// A map allowing us to deduplicate constants. Note the use of [HashableConst]: constant
     /// deduplication is "best effort" because of the difficulties imposed by floating point
     /// numbers.
-    consts_map: HashMap<HashableConst, InstIdx>,
+    consts_map: FxHashMap<HashableConst, InstIdx>,
     guard_extras: TypedVec<GuardExtraIdx, GuardExtra>,
     tys: TypedVec<TyIdx, Ty>,
     /// The [TyIdx] for [Ty::Int(1)].
@@ -540,7 +540,7 @@ struct OptInternal {
     tyidx_void: TyIdx,
     /// A map allowing us to deduplicate types. This guarantees that a given [Ty] appears exactly
     /// once in a module.
-    ty_map: HashMap<Ty, TyIdx>,
+    ty_map: FxHashMap<Ty, TyIdx>,
 }
 
 impl OptInternal {

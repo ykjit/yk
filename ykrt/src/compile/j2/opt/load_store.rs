@@ -29,17 +29,20 @@ use crate::compile::j2::{
     },
 };
 use index_type::vec::TypedVec;
-use std::{collections::HashMap, mem};
+use rustc_hash::FxHashMap;
+use std::mem;
 
 /// Load/Store elimination
 pub(super) struct LoadStore {
     /// A map telling us what value we know is currently stored at a given [Address].
-    hv: HashMap<Address, InstIdx>,
+    hv: FxHashMap<Address, InstIdx>,
 }
 
 impl LoadStore {
     pub(super) fn new() -> Self {
-        Self { hv: HashMap::new() }
+        Self {
+            hv: FxHashMap::default(),
+        }
     }
 }
 
@@ -211,7 +214,7 @@ impl PassT for LoadStore {
         entry: &Block,
         map: &TypedVec<InstIdx, InstIdx>,
     ) {
-        let mut new_hv = HashMap::new();
+        let mut new_hv = FxHashMap::default();
 
         for (hv_addr, hv_val) in mem::take(&mut self.hv) {
             let new_addr = match hv_addr {
