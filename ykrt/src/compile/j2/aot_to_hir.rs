@@ -675,7 +675,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         assert!(self.frames.is_empty());
         self.frames.push(Frame {
             args: SmallVec::new(),
-            locals: FxHashMap::default(),
+            locals: FxHashMap::with_capacity_and_hasher(statepoint.lives.len(), Default::default()),
             pc: Some(InstId::new(cp_bid.funcidx(), cp_bid.bbidx(), cp_iidx)),
             pc_statepoint: None,
             prev_pc: None,
