@@ -29,7 +29,7 @@ tempfile = "3.8"
 test_stubs = { git = "https://github.com/ykjit/test_stubs" }
 thiserror = "2.0.12"
 typed-index-collections = "3.1.0"
-vob = "3.0.6"
+vob = "4.0.1"
 ykaddr = { path = "../ykaddr" }
 yksmp = { path = "../yksmp" }
 zydis = "4.1.0"
