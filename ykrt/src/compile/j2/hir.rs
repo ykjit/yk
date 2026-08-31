@@ -181,11 +181,11 @@ use crate::{
 };
 use enum_dispatch::enum_dispatch;
 use index_type::{IndexType, vec::TypedVec};
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     assert_matches,
     cmp::min,
-    collections::HashMap,
     ffi::c_void,
     fmt::{Display, Formatter},
     mem,
@@ -288,7 +288,7 @@ pub(super) struct Mod<Reg: RegT> {
     /// The [TyIdx] for [Ty::Void].
     pub tyidx_void: TyIdx,
     /// A map of names to pointers. Will be `None` if logging was disabled.
-    pub addr_name_map: Option<HashMap<usize, Option<String>>>,
+    pub addr_name_map: Option<FxHashMap<usize, Option<String>>>,
     #[cfg(test)]
     pub smaps: TypedVec<StackMapIdx, Vec<VarLocs<Reg>>>,
 }

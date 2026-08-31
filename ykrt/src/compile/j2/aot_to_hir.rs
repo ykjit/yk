@@ -40,10 +40,10 @@ use index_type::IndexType;
 #[cfg(test)]
 use index_type::vec::TypedVec;
 use parking_lot::Mutex;
+use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
 use std::{
     assert_matches,
-    collections::HashMap,
     ffi::CString,
     iter::Peekable,
     marker::PhantomData,
@@ -97,9 +97,9 @@ pub(super) struct AotToHir<'a, Reg: RegT> {
     /// Initially set to `None` until we find the locations for this trace's arguments.
     frames: Vec<Frame>,
     /// If logging is enabled, create a map of addresses -> names to make IR printing nicer.
-    addr_name_map: Option<HashMap<usize, Option<String>>>,
+    addr_name_map: Option<FxHashMap<usize, Option<String>>>,
     /// Mapping of struct-returning Calls to its ExtractVals per struct field instructions.
-    call_extractvals: HashMap<hir::InstIdx, Vec<hir::InstIdx>>,
+    call_extractvals: FxHashMap<hir::InstIdx, Vec<hir::InstIdx>>,
     /// The JIT IR this struct builds.
     phantom: PhantomData<Reg>,
 }
@@ -152,8 +152,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             globals,
             opt,
             frames: Vec::new(),
-            addr_name_map: should_log_any_ir().then_some(HashMap::new()),
-            call_extractvals: HashMap::new(),
+            addr_name_map: should_log_any_ir().then_some(FxHashMap::default()),
+            call_extractvals: FxHashMap::default(),
             phantom: PhantomData,
         }
     }
@@ -675,7 +675,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         assert!(self.frames.is_empty());
         self.frames.push(Frame {
             args: SmallVec::new(),
-            locals: HashMap::new(),
+            locals: FxHashMap::default(),
             pc: Some(InstId::new(cp_bid.funcidx(), cp_bid.bbidx(), cp_iidx)),
             pc_statepoint: None,
             prev_pc: None,
@@ -704,7 +704,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let mut entry_vars = Vec::with_capacity(guard.deopt_vars.len());
         let mut deopt_vars_off = 0;
         for DeoptFrame { pc, pc_statepoint } in &guard.deopt_frames {
-            let mut locals = HashMap::with_capacity(pc_statepoint.lives.len());
+            let mut locals =
+                FxHashMap::with_capacity_and_hasher(pc_statepoint.lives.len(), Default::default());
             for (
                 iid,
                 DeoptVar {
@@ -1198,7 +1199,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             self.frames.last_mut().unwrap().pc_statepoint = Some(statepoint.as_ref().unwrap());
             self.frames.push(Frame {
                 args: jargs,
-                locals: HashMap::new(),
+                locals: FxHashMap::default(),
                 pc: Some(InstId::new(
                     callee,
                     BBlockIdx::new(0),
@@ -2327,7 +2328,7 @@ enum BuildModKind<Reg: RegT> {
 struct Frame {
     /// This frame's arguments. This is not mutated after frame creation.
     args: SmallVec<[hir::InstIdx; 1]>,
-    locals: HashMap<InstId, hir::InstIdx>,
+    locals: FxHashMap<InstId, hir::InstIdx>,
     pc: Option<InstId>,
     /// The current statepoint for this frame. This has no initial value at frame entry, and is
     /// updated at every call site.
