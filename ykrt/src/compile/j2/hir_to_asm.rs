@@ -651,6 +651,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             let mut deopt_term_iter = gextra.deopt_vars.iter().zip(gblock.term_vars().iter());
             for (frame_idx, frame) in gextra.deopt_frames.iter().enumerate() {
                 let frame_deopt_vars_off = deopt_vars.len();
+                // `max_bitw` is an optimisation that allows us to skip "is there a wider value?"
+                // checks later.
+                let mut max_bitw = 0;
                 #[cfg(not(test))]
                 let smap_lives_iter = aot_smaps
                     .get(frame.pc_statepoint.smapidx)
@@ -701,8 +704,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     let tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
                     #[cfg(test)]
                     let tovlocs = smap_loc.clone();
+                    let bitw = gblock.inst_bitw(self.m, *term_iidx);
+                    max_bitw = max_bitw.max(bitw);
                     deopt_vars.push(DeoptVar {
-                        bitw: gblock.inst_bitw(self.m, *term_iidx),
+                        bitw,
                         coupler_fromvlocs: VarLocs::new(),
                         deopt_fromvlocs: fromvlocs,
                         tovlocs,
@@ -716,6 +721,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 for i in 0..frame_deopt_vars.len() {
                     let (before, from_i) = frame_deopt_vars.split_at_mut(i);
                     let (deopt_var, after) = from_i.split_first_mut().unwrap();
+                    if deopt_var.bitw == max_bitw {
+                        // If value is the maxmimum bitwidth, there is no need to check for a wider
+                        // value, allowing us to skip the (somewhat expensive) check below.
+                        continue;
+                    }
                     deopt_var.tovlocs.retain(|vloc| {
                         !before.iter().chain(after.iter()).any(|other| {
                             other.bitw > deopt_var.bitw
