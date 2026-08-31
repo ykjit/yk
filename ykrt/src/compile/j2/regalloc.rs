@@ -1425,10 +1425,21 @@ impl<Reg: RegT> RStates<Reg> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct RState {
     fill: RegFill,
     iidxs: SmallVec<[InstIdx; 2]>,
+}
+
+impl Clone for RState {
+    fn clone(&self) -> Self {
+        // We only implement `clone` because `SmallVec::clone` is inefficient (until rustc
+        // stabilises specialisation) but `SmallVec::from_slice` is efficient.
+        Self {
+            fill: self.fill,
+            iidxs: SmallVec::from_slice(self.iidxs.as_slice()),
+        }
+    }
 }
 
 impl Default for RState {
