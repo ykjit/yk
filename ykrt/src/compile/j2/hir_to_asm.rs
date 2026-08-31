@@ -974,7 +974,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
                 Inst::Call(x) => self.be.i_call(&mut ra, b, iidx, x)?,
                 Inst::Const(_) => {
-                    ra.alloc_const(&mut self.be, iidx)?;
+                    if ra.is_used(iidx) {
+                        ra.alloc_const(&mut self.be, iidx)?;
+                    }
                 }
                 Inst::CopySign(x) => {
                     if ra.is_used(iidx) {
