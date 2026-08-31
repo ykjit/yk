@@ -64,7 +64,7 @@ use crate::compile::{
 use index_type::{IndexType, typed_vec, vec::TypedVec};
 use smallvec::{SmallVec, smallvec};
 use std::{
-    assert_matches,
+    array, assert_matches,
     fmt::{Debug, Display, Formatter},
 };
 use test_stubs::test_stubs;
@@ -725,12 +725,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // 2.1: Update for the state immediately after the instruction has produced outputs and
         // work out what fill this constraint should have.
         let mut output_reg = None; // Needed when outputs can end up in multiple registers.
-        let mut rtn_fills = Vec::with_capacity(N);
-        for (reg, cnstr) in allocs.iter().cloned().zip(cnstrs.iter_mut()) {
+        let mut rtn_fills = [RegFill::Undefined; N];
+        for (i, (reg, cnstr)) in allocs.iter().cloned().zip(cnstrs.iter_mut()).enumerate() {
             match cnstr {
                 RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } => {
                     n_out.set_fill_iidxs(reg, RegFill::Undefined, smallvec![]);
-                    rtn_fills.push(RegFill::Undefined);
+                    rtn_fills[i] = RegFill::Undefined;
                 }
                 RegCnstr::Input {
                     in_iidx,
@@ -740,14 +740,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 } => {
                     if *clobber {
                         n_out.set_fill_iidxs(reg, RegFill::Undefined, smallvec![]);
-                        rtn_fills.push(RegFill::Undefined);
+                        rtn_fills[i] = RegFill::Undefined;
                     } else {
                         let mut in_fill = RegFill::from_regcnstrfill(in_fill);
                         if in_fill == RegFill::Undefined && n_out.iidxs(reg).contains(in_iidx) {
                             in_fill = n_out.fill(reg);
                         }
                         n_out.set_fill_iidxs(reg, in_fill, smallvec![*in_iidx]);
-                        rtn_fills.push(in_fill);
+                        rtn_fills[i] = in_fill;
                     }
                 }
                 RegCnstr::InputOutput { out_fill, .. } | RegCnstr::Output { out_fill, .. } => {
@@ -766,7 +766,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     }
                     let out_fill = RegFill::from_regcnstrfill(out_fill);
                     n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
-                    rtn_fills.push(out_fill);
+                    rtn_fills[i] = out_fill;
                     output_reg = Some(reg);
                 }
                 RegCnstr::Cast {
@@ -780,7 +780,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             || out_fill == RegFill::Undefined
                         {
                             n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
-                            rtn_fills.push(out_fill);
+                            rtn_fills[i] = out_fill;
                             output_reg = Some(reg);
                         } else {
                             todo!()
@@ -793,19 +793,19 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         {
                             n_out.iidxs_mut(reg).push(iidx);
                             n_out.set_fill(reg, out_fill);
-                            rtn_fills.push(out_fill);
+                            rtn_fills[i] = out_fill;
                             output_reg = Some(reg);
                         } else {
                             todo!()
                         }
                     } else {
                         n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
-                        rtn_fills.push(out_fill);
+                        rtn_fills[i] = out_fill;
                         output_reg = Some(reg);
                     }
                 }
                 RegCnstr::KeepAlive { .. } => {
-                    rtn_fills.push(RegFill::Undefined);
+                    rtn_fills[i] = RegFill::Undefined;
                 }
             }
         }
@@ -996,13 +996,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
-        assert_eq!(allocs.len(), rtn_fills.len());
-        Ok(allocs
-            .into_iter()
-            .zip(rtn_fills)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap())
+        Ok(array::from_fn(|i| (allocs[i], rtn_fills[i])))
     }
 
     /// For [Inst::Const] instructions only, allocate registers. This function should only be
