@@ -607,6 +607,20 @@ fn opt_icmp(opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
             tyidx,
             kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
         }));
+    } else if let IPred::Eq | IPred::Ne = pred
+        && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+        && let Some(rhs_c) = rhs_c.to_zero_ext_u8()
+    {
+        if opt.inst_bitw(opt, lhs) == 1
+            && ((pred == IPred::Eq && rhs_c == 1) || (pred == IPred::Ne && rhs_c == 0))
+        {
+            return OptOutcome::Equiv(lhs);
+        } else if let Inst::ZExt(ZExt { val, .. }) = opt.inst(lhs)
+            && opt.inst_bitw(opt, *val) == 1
+            && ((pred == IPred::Eq && rhs_c == 1) || (pred == IPred::Ne && rhs_c == 0))
+        {
+            return OptOutcome::Equiv(*val);
+        }
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -2950,6 +2964,49 @@ mod test {
           blackbox %2
           %4: i1 = icmp sge %0, %1
           blackbox %4
+        ",
+        );
+
+        // Comparing to i1 constants
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = 1
+          %2: i1 = icmp eq %0, %1
+          blackbox %2
+          %4: i32 = zext %0
+          %5: i32 = 1
+          %6: i1 = icmp eq %4, %5
+          blackbox %6
+        ",
+            "
+          %0: i1 = arg
+          %1: i1 = 1
+          blackbox %0
+          %3: i32 = zext %0
+          %4: i32 = 1
+          blackbox %0
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = 0
+          %2: i1 = icmp ne %0, %1
+          blackbox %2
+          %4: i32 = zext %0
+          %5: i32 = 0
+          %6: i1 = icmp ne %4, %5
+          blackbox %6
+        ",
+            "
+          %0: i1 = arg
+          %1: i1 = 0
+          blackbox %0
+          %3: i32 = zext %0
+          %4: i32 = 0
+          blackbox %0
         ",
         );
     }
