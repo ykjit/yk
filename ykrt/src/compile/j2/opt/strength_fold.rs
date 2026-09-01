@@ -607,52 +607,19 @@ fn opt_icmp(opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
             tyidx,
             kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
         }));
-    } else if let IPred::Eq | IPred::Ne = pred {
-        match opt.as_constkind(rhs) {
-            Some(ConstKind::Int(rhs_c)) => {
-                if let Some(rhs_c) = rhs_c.to_zero_ext_u8() {
-                    if opt.inst_bitw(opt, lhs) == 1
-                        && ((pred == IPred::Eq && rhs_c == 1) || (pred == IPred::Ne && rhs_c == 0))
-                    {
-                        return OptOutcome::Equiv(lhs);
-                    } else if let Inst::ZExt(ZExt { val, .. }) = opt.inst(lhs)
-                        && opt.inst_bitw(opt, *val) == 1
-                        && ((pred == IPred::Eq && rhs_c == 1) || (pred == IPred::Ne && rhs_c == 0))
-                    {
-                        return OptOutcome::Equiv(*val);
-                    }
-                }
-            }
-            Some(ConstKind::Ptr(rhs_c)) => {
-                if let Inst::PtrAdd(PtrAdd {
-                    ptr,
-                    off,
-                    in_bounds: false,
-                    nusw: false,
-                    nuw: false,
-                }) = opt.inst(lhs).to_owned()
-                {
-                    // `ptr + x == y` is equivalent to `ptr == y - x` so we can rewrite the
-                    // constant `ptradd` in a way that bypasses the `ptradd`.
-                    let tyidx = opt.push_ty(Ty::Ptr(0)).unwrap();
-                    let rhs = opt.push_pre_inst(Inst::Const(Const {
-                        tyidx,
-                        kind: ConstKind::Ptr(
-                            rhs_c.wrapping_add_signed(-isize::try_from(off).unwrap()),
-                        ),
-                    }));
-                    return OptOutcome::Rewritten(
-                        ICmp {
-                            pred,
-                            lhs: ptr,
-                            rhs,
-                            samesign: false,
-                        }
-                        .into(),
-                    );
-                }
-            }
-            _ => (),
+    } else if let IPred::Eq | IPred::Ne = pred
+        && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+        && let Some(rhs_c) = rhs_c.to_zero_ext_u8()
+    {
+        if opt.inst_bitw(opt, lhs) == 1
+            && ((pred == IPred::Eq && rhs_c == 1) || (pred == IPred::Ne && rhs_c == 0))
+        {
+            return OptOutcome::Equiv(lhs);
+        } else if let Inst::ZExt(ZExt { val, .. }) = opt.inst(lhs)
+            && opt.inst_bitw(opt, *val) == 1
+            && ((pred == IPred::Eq && rhs_c == 1) || (pred == IPred::Ne && rhs_c == 0))
+        {
+            return OptOutcome::Equiv(*val);
         }
     }
 
@@ -3040,25 +3007,6 @@ mod test {
           %3: i32 = zext %0
           %4: i32 = 0
           blackbox %0
-        ",
-        );
-
-        // Comparisons of ptradds
-        test_sf(
-            "
-          %0: ptr = arg [reg]
-          %1: ptr = ptradd %0, 8
-          %2: ptr = 0x1000
-          %3: i1 = icmp eq %1, %2
-          blackbox %3
-        ",
-            "
-          %0: ptr = arg
-          %1: ptr = ptradd %0, 8
-          %2: ptr = 0x1000
-          %3: ptr = 0xFF8
-          %4: i1 = icmp eq %0, %3
-          blackbox %4
         ",
         );
     }
