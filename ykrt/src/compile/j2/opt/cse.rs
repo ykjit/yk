@@ -77,8 +77,15 @@ impl PassT for CSE {
             .unwrap_or(InstIdx::from_raw_index(0));
         let mut cur = self.heads[InstDiscriminants::from(&inst) as usize];
         while cur != InstIdx::MAX_INDEX && cur >= max_ref {
+            // We deliberately match against `cur` rather than `equiv_iidx(cur)`, because this can
+            // help us identify other equivalences.
             let equiv = opt.equiv_iidx(cur);
-            if equiv >= max_ref && opt.inst(equiv).cse_eq(opt, &inst) {
+            if opt.inst(cur).cse_eq(opt, &inst) {
+                return OptOutcome::Equiv(equiv);
+            }
+            // If `cur` is equivalent to an instruction before `max_ref`, we need to explicitly
+            // check it (the overall `while` loop will terminate before reaching it).
+            if equiv < max_ref && opt.inst(equiv).cse_eq(opt, &inst) {
                 return OptOutcome::Equiv(equiv);
             }
             cur = self.predecessors[(cur).to_raw_index()];
@@ -237,6 +244,63 @@ mod test {
           blackbox %2
           term [%0, %0]
           ...
+        ",
+        );
+
+        // Test that CSE isn't blinded by instruction equivalence: it needs to check against the
+        // first `and` rather than the (equivalent) `4` in order to identify the second `and` as
+        // CSEable.
+        test_cse(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = and %0, %1
+          %3: i8 = 4
+          %4: i1 = icmp eq %2, %3
+          guard true, %4, []
+          %6: i8 = and %0, %1
+          blackbox %6
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = and %0, %1
+          %3: i8 = 4
+          %4: i1 = icmp eq %2, %3
+          guard true, %4, []
+          blackbox %3
+        ",
+        );
+
+        test_cse(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = arg [reg]
+          %3: i8 = arg [reg]
+          %4: i8 = and %0, %1
+          %5: i8 = add %0, %2
+          %6: i1 = icmp eq %5, %0
+          guard true, %6, []
+          %8: i8 = and %2, %3
+          %9: i1 = icmp eq %4, %8
+          guard true, %9, []
+          %11: i8 = and %5, %1
+          blackbox %11
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = arg
+          %3: i8 = arg
+          %4: i8 = and %0, %1
+          %5: i8 = add %0, %2
+          %6: i1 = icmp eq %5, %0
+          guard true, %6, []
+          %8: i8 = and %2, %3
+          %9: i1 = icmp eq %4, %8
+          guard true, %9, []
+          blackbox %4
         ",
         );
     }
