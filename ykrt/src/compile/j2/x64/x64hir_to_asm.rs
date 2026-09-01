@@ -354,6 +354,90 @@ impl<'a> X64HirToAsm<'a> {
         Ok(())
     }
 
+    /// Generate code for a guard whose `cond` directly refers to an [FCmp].
+    ///
+    /// Returns `Ok(None)` for predicates which cannot be tested with a single
+    /// conditional branch.
+    fn i_fcmp_guard(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Guard { expect, cond, .. }: &Guard,
+        exit_vars: &[InstIdx],
+    ) -> Result<Option<LabelIdx>, CompilationError> {
+        let Inst::FCmp(FCmp { pred, lhs, rhs }) = b.inst(*cond) else {
+            panic!()
+        };
+
+        // The following predicates can't be expressed directly, but if we swap LHS and RHS, we can
+        // do so.
+        let (pred, lhs, rhs) = match pred {
+            FPred::Ugt => (FPred::Ult, rhs, lhs),
+            FPred::Uge => (FPred::Ule, rhs, lhs),
+            FPred::Olt => (FPred::Ogt, rhs, lhs),
+            FPred::Ole => (FPred::Oge, rhs, lhs),
+            _ => (*pred, lhs, rhs),
+        };
+        let c = if *expect {
+            match pred {
+                FPred::One => Code::Je_rel32_64,
+                FPred::Oge => Code::Jb_rel32_64,
+                FPred::Ogt => Code::Jbe_rel32_64,
+                FPred::Ord => Code::Jp_rel32_64,
+                FPred::Ueq => Code::Jne_rel32_64,
+                FPred::Ult => Code::Jae_rel32_64,
+                FPred::Ule => Code::Ja_rel32_64,
+                FPred::Uno => Code::Jnp_rel32_64,
+                FPred::False | FPred::Oeq | FPred::Une | FPred::True => return Ok(None),
+                _ => unreachable!(),
+            }
+        } else {
+            match pred {
+                FPred::One => Code::Jne_rel32_64,
+                FPred::Oge => Code::Jae_rel32_64,
+                FPred::Ogt => Code::Ja_rel32_64,
+                FPred::Ord => Code::Jnp_rel32_64,
+                FPred::Ueq => Code::Je_rel32_64,
+                FPred::Ult => Code::Jb_rel32_64,
+                FPred::Ule => Code::Jbe_rel32_64,
+                FPred::Uno => Code::Jp_rel32_64,
+                FPred::False | FPred::Oeq | FPred::Une | FPred::True => return Ok(None),
+                _ => unreachable!(),
+            }
+        };
+
+        let [lhsr, rhsr, _] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Input {
+                    in_iidx: *rhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                    clobber: false,
+                },
+                RegCnstr::KeepAlive { iidxs: exit_vars },
+            ],
+        )?;
+
+        let label = self.asm.mk_label();
+        self.asm
+            .push_reloc(IcedInst::with_branch(c, 0), RelocKind::NearWithLabel(label));
+        self.asm.push_inst(match b.inst_bitw(self.m, *lhs) {
+            64 => IcedInst::with2(Code::Ucomisd_xmm_xmmm64, lhsr.to_xmm(), rhsr.to_xmm()),
+            32 => IcedInst::with2(Code::Ucomiss_xmm_xmmm32, lhsr.to_xmm(), rhsr.to_xmm()),
+            x => todo!("{x}"),
+        });
+        Ok(Some(label))
+    }
+
     /// Generate code for a guard whose `cond` directly refers to an [ICmp].
     ///
     /// # Panics
@@ -3181,6 +3265,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     ) -> Result<Self::Label, CompilationError> {
         if let Inst::ICmp(ICmp { .. }) = b.inst(*cond) {
             return self.i_icmp_guard(ra, b, iidx, ginst, exit_vars);
+        } else if let Inst::FCmp(FCmp { .. }) = b.inst(*cond)
+            && let Some(label) = self.i_fcmp_guard(ra, b, iidx, ginst, exit_vars)?
+        {
+            return Ok(label);
         }
 
         let [cndr, _] = ra.alloc(
@@ -7351,6 +7439,25 @@ mod test {
               bt r.32._, 0
               jb l{{1}}
               ; term [%0]
+            "],
+        );
+
+        // FCmp optimisation
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: double = arg [reg]
+              %2: i1 = fcmp olt %0, %1
+              guard true, %2, []
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; %2: i1 = fcmp olt %0, %1
+              ; guard true, %2, []
+              ucomisd fp.128.y, fp.128.x
+              jbe l{{1}}
+              ; term [%0, %1]
             "],
         );
 
