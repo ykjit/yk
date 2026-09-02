@@ -1226,8 +1226,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
             // Handle LLVM intrinsics.
             if func.name().starts_with("llvm.") {
-                let ftyidx = self.p_ty(self.am.type_(func.tyidx()))?;
-                self.p_llvm_intrinsic(iid, ftyidx, func.name(), jargs)?;
+                self.p_llvm_intrinsic(iid, func.tyidx(), func.name(), jargs)?;
                 return Ok(CallProcessedKind::Outlined);
             }
 
@@ -1505,13 +1504,48 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     fn p_llvm_intrinsic(
         &mut self,
         iid: InstId,
-        ftyidx: hir::TyIdx,
+        func_tyidx: TyIdx,
         name: &str,
         jargs: SmallVec<[hir::InstIdx; 1]>,
     ) -> Result<(), CompilationError> {
         let parts = name.split(".").collect::<Vec<&str>>();
         assert_eq!(parts[0], "llvm");
         match parts[1] {
+            "uadd" if parts[2] == "with" && parts[3] == "overflow" => {
+                let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let tyidx = self.opt.inst(lhs).tyidx(&*self.opt);
+                assert_eq!(tyidx, self.opt.inst(rhs).tyidx(&*self.opt));
+                let rtn_tyidx = self.opt.push_ty(hir::Ty::Int(64))?;
+                let call_iidx = self.push_inst_and_link_local(
+                    iid,
+                    hir::UAddOverflow {
+                        tyidx: rtn_tyidx,
+                        lhs,
+                        rhs,
+                    },
+                )?;
+                let sum_iidx = self.opt.feed(
+                    hir::ExtractVal {
+                        val: call_iidx,
+                        off: 0,
+                        tyidx,
+                    }
+                    .into(),
+                )?;
+                let i1_tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
+                let overflow_iidx = self.opt.feed(
+                    hir::ExtractVal {
+                        val: call_iidx,
+                        off: 32,
+                        tyidx: i1_tyidx,
+                    }
+                    .into(),
+                )?;
+                let call_iidx = self.opt.equiv_iidx(call_iidx);
+                self.call_extractvals
+                    .insert(call_iidx, vec![sum_iidx, overflow_iidx]);
+                Ok(())
+            }
             "abs" => {
                 let [src, int_min_poison]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let int_min_poison = if let hir::Inst::Const(hir::Const {
@@ -1523,6 +1557,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 } else {
                     panic!()
                 };
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::Abs {
                     tyidx: fty.rtn_tyidx,
@@ -1534,6 +1569,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             "assume" => Ok(()),
             "copysign" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::CopySign {
                     tyidx: fty.rtn_tyidx,
@@ -1544,6 +1580,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             "ctpop" => {
                 let [src]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::CtPop {
                     tyidx: fty.rtn_tyidx,
@@ -1557,6 +1594,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 // value.
                 let [src, _is_zero_poison]: [hir::InstIdx; 2] =
                     jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::CtTz {
                     tyidx: fty.rtn_tyidx,
@@ -1566,6 +1604,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             "floor" => {
                 let [src]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::Floor {
                     tyidx: fty.rtn_tyidx,
@@ -1575,6 +1614,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             "fshl" => {
                 let [lhs, rhs, shift]: [hir::InstIdx; 3] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::Fshl {
                     tyidx: fty.rtn_tyidx,
@@ -1596,6 +1636,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 } else {
                     panic!()
                 };
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::FPClass {
                     tyidx: fty.rtn_tyidx,
@@ -1650,6 +1691,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             "prefetch" => Ok(()),
             "smax" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::SMax {
                     tyidx: fty.rtn_tyidx,
@@ -1660,6 +1702,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             "smin" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::SMin {
                     tyidx: fty.rtn_tyidx,
@@ -1670,6 +1713,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             "umax" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::UMax {
                     tyidx: fty.rtn_tyidx,
@@ -1680,6 +1724,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             "umin" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
                 let fty = self.opt.func_ty(ftyidx);
                 let hinst = hir::UMin {
                     tyidx: fty.rtn_tyidx,

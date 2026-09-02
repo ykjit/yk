@@ -2431,30 +2431,106 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_extractval(
         &mut self,
         ra: &mut RegAlloc<Self>,
+        val_inst: &Inst,
         iidx: InstIdx,
-        ExtractVal { val: _, off, tyidx }: &ExtractVal,
+        ExtractVal { off, tyidx, .. }: &ExtractVal,
     ) -> Result<(), CompilationError> {
-        // Expecting struct across at most two 64-bit GP registers (RAX and RDX).
         let bitw = self.m.ty(*tyidx).bitw();
         assert!(
             bitw <= 64,
             "extractval chunk is {bitw} bits wide, expected <= 64"
         );
-        let reg = match *off {
-            0 => Reg::RAX,
-            64 => Reg::RDX,
-            _ => panic!("extractval offset {off} is not register aligned"),
-        };
-        let [_] = ra.alloc(
-            self,
-            iidx,
-            [RegCnstr::Output {
-                out_fill: RegCnstrFill::Undefined,
-                regs: &[reg],
-                can_be_same_as_input: false,
-            }],
-        )?;
-        Ok(())
+        match val_inst {
+            Inst::Call(_) => {
+                let reg = match *off {
+                    0 => Reg::RAX,
+                    64 => Reg::RDX,
+                    _ => panic!("extractval offset {off} is not register aligned"),
+                };
+                ra.alloc(
+                    self,
+                    iidx,
+                    [RegCnstr::Output {
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &[reg],
+                        can_be_same_as_input: false,
+                    }],
+                )?;
+                Ok(())
+            }
+            Inst::UAddOverflow(UAddOverflow { lhs, rhs, .. }) => {
+                // uadd_overflow sum and carry are two independent values. Codegen for both
+                // is emitted here rather than at the uadd_overflow instruction, which has
+                // no single register that could hold both results. Codegen is emitted at the
+                // carry extractval, so the sum extractval early-returns if it sees the carry
+                // is also used.
+                let (sum_iidx, carry_iidx) = match *off {
+                    0 => (iidx, InstIdx::from_raw_index(iidx.to_raw_index() + 1)),
+                    32 => (InstIdx::from_raw_index(iidx.to_raw_index() - 1), iidx),
+                    _ => panic!("uadd_overflow extractval offset {off} must be 0 or 32"),
+                };
+                match *off {
+                    0 if ra.is_used(carry_iidx) => return Ok(()),
+                    0 => todo!(),
+                    32 if !ra.is_used(sum_iidx) => {
+                        todo!()
+                    }
+                    _ => (),
+                }
+                assert_eq!(bitw, if *off == 0 { 32 } else { 1 });
+                let [_lhsr, _rhsr, i1_outr] = ra.alloc(
+                    self,
+                    carry_iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: *rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            can_be_same_as_input: false,
+                        },
+                    ],
+                )?;
+                let [lhsr, rhsr, _] = ra.alloc(
+                    self,
+                    sum_iidx,
+                    [
+                        RegCnstr::InputOutput {
+                            in_iidx: *lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            out_fill: RegCnstrFill::Zeroed,
+                            regs: &NORMAL_GP_REGS,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: *rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Clobber { reg: i1_outr },
+                    ],
+                )?;
+                self.asm
+                    .push_inst(IcedInst::with1(Code::Setb_rm8, i1_outr.to_reg8()));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Add_rm32_r32,
+                    lhsr.to_reg32(),
+                    rhsr.to_reg32(),
+                ));
+                Ok(())
+            }
+            _ => panic!("extractval operand is not a call or uadd_overflow"),
+        }
     }
 
     fn i_copysign(
@@ -4987,7 +5063,6 @@ mod test {
         let hl = Arc::new(Mutex::new(HotLocation {
             kind: HotLocationKind::Tracing(mt.next_trace_id()),
             tracecompilation_errors: 0,
-            #[cfg(feature = "ykd")]
             debug_str: None,
         }));
         let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), true);
@@ -7852,6 +7927,63 @@ mod test {
               %2: i128 = extractval %1 [0]
               blackbox %2
               term []
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    fn cg_uadd_overflow() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = uadd_overflow %0, %1
+              %3: i32 = extractval %2 [0]
+              %4: i1 = extractval %2 [32]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = uadd_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [32]
+              add r.32._, r.32._
+              setb r.8._
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn cg_uadd_overflow_sum_only() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = uadd_overflow %0, %1
+              %3: i32 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn cg_uadd_overflow_carry_only() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = uadd_overflow %0, %1
+              %3: i1 = extractval %2 [32]
+              blackbox %3
+              term [%0, %1]
             ",
             &[""],
         );
