@@ -645,6 +645,18 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let rhs = self.p_local(rhs);
                     self.insts.push(UAddOverflow { tyidx, lhs, rhs }.into());
                 }
+                AstInst::USubOverflow {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(USubOverflow { tyidx, lhs, rhs }.into());
+                }
                 AstInst::IntToPtr { local, ty, val } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -1491,6 +1503,12 @@ enum AstInst {
         rhs: Span,
     },
     UAddOverflow {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    USubOverflow {
         local: Span,
         ty: AstTy,
         lhs: Span,
