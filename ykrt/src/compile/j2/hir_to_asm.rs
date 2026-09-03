@@ -1215,6 +1215,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_ptrtoint(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::SAddOverflow(_) => (),
                 Inst::SDiv(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_sdiv(&mut ra, b, iidx, x)?;

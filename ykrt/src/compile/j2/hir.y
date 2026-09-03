@@ -146,6 +146,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ICMP" IPred "LOCAL" "," "LOCAL" {
       Ok(AstInst::ICmp{ local: $1?.span(), ty: $3?, pred: $6?, lhs: $7?.span(), rhs: $9?.span() })
     }
+  | "LOCAL" ":" Ty "=" "SADD_OVERFLOW" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::SAddOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
   | "LOCAL" ":" Ty "=" "UADD_OVERFLOW" "LOCAL" "," "LOCAL" {
       Ok(AstInst::UAddOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }

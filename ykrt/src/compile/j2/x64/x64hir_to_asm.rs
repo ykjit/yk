@@ -267,13 +267,13 @@ impl<'a> X64HirToAsm<'a> {
         lhs: InstIdx,
         rhs: InstIdx,
         op_code: Code,
+        set_code: Code,
         name: &str,
     ) -> Result<(), CompilationError> {
         // The wrapped result and the overflow flag are two independent values. Codegen for
-        // both is emitted here rather than at the uadd_overflow/usub_overflow instruction,
-        // which has no single register that could hold both results. Codegen is emitted at
-        // the flag extractval, so the result extractval early-returns if it sees the flag is
-        // also used.
+        // both is emitted here rather than at the {sadd, uadd, usub}_overflow instruction, which
+        // has no single register that could hold both results. Codegen is emitted at the flag
+        // extractval, so the result extractval early-returns if it sees the flag is also used.
         let (res_iidx, flag_iidx) = match off {
             0 => (iidx, InstIdx::from_raw_index(iidx.to_raw_index() + 1)),
             32 => (InstIdx::from_raw_index(iidx.to_raw_index() - 1), iidx),
@@ -329,7 +329,7 @@ impl<'a> X64HirToAsm<'a> {
             ],
         )?;
         self.asm
-            .push_inst(IcedInst::with1(Code::Setb_rm8, i1_outr.to_reg8()));
+            .push_inst(IcedInst::with1(set_code, i1_outr.to_reg8()));
         self.asm
             .push_inst(IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()));
         Ok(())
@@ -2536,6 +2536,17 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 )?;
                 Ok(())
             }
+            Inst::SAddOverflow(SAddOverflow { lhs, rhs, .. }) => self.i_overflow(
+                ra,
+                iidx,
+                *off,
+                bitw,
+                *lhs,
+                *rhs,
+                Code::Add_rm32_r32,
+                Code::Seto_rm8,
+                "sadd_overflow",
+            ),
             Inst::UAddOverflow(UAddOverflow { lhs, rhs, .. }) => self.i_overflow(
                 ra,
                 iidx,
@@ -2544,6 +2555,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 *lhs,
                 *rhs,
                 Code::Add_rm32_r32,
+                Code::Setb_rm8,
                 "uadd_overflow",
             ),
             Inst::USubOverflow(USubOverflow { lhs, rhs, .. }) => self.i_overflow(
@@ -2554,9 +2566,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 *lhs,
                 *rhs,
                 Code::Sub_rm32_r32,
+                Code::Setb_rm8,
                 "usub_overflow",
             ),
-            _ => panic!("extractval operand is not a call, uadd_overflow or usub_overflow"),
+            _ => panic!("extractval operand is not a call or {{sadd, uadd, usub}}_overflow"),
         }
     }
 
@@ -7954,6 +7967,63 @@ mod test {
               %2: i128 = extractval %1 [0]
               blackbox %2
               term []
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    fn cg_sadd_overflow() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = sadd_overflow %0, %1
+              %3: i32 = extractval %2 [0]
+              %4: i1 = extractval %2 [32]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = sadd_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [32]
+              add r.32._, r.32._
+              seto r.8._
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn cg_sadd_overflow_sum_only() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = sadd_overflow %0, %1
+              %3: i32 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn cg_sadd_overflow_overflow_only() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = sadd_overflow %0, %1
+              %3: i1 = extractval %2 [32]
+              blackbox %3
+              term [%0, %1]
             ",
             &[""],
         );
