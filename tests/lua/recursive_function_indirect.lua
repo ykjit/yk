@@ -51,27 +51,10 @@ io.stderr:write("exit\n")
 --     recursive_function_indirect.lua:9: TAILCALL
 --     --- End debugstrs ---
 --     4
---     yk-tracing: start-tracing: recursive_function_indirect.lua:9: GETTABUP
---     yk-tracing: stop-tracing: recursive_function_indirect.lua:9: GETTABUP
---     --- Begin debugstrs: recursive_function_indirect.lua:9: GETTABUP ---
---     ; {
---     ;   "trid": "1",
---     ;   "start": {
---     ;     "kind": "ControlPoint"
---     ;   },
---     ;   "end": {
---     ;     "kind": "Coupler",
---     ;     "tgt_trid": "0"
---     ;   }
---     ; }
---     recursive_function_indirect.lua:9: GETTABUP
---     recursive_function_indirect.lua:9: MOVE
---     recursive_function_indirect.lua:9: TAILCALL
---     --- End debugstrs ---
+--     yk-execution: enter-jit-code {"trid": "0"}: recursive_function_indirect.lua:2: GETTABUP
 --     3
---     yk-execution: enter-jit-code {"trid": "1"}: recursive_function_indirect.lua:9: GETTABUP
 --     2
 --     1
 --     0
---     yk-execution: deoptimise ...
+--     yk-execution: deoptimise {"trid": "0", ...
 --     exit
