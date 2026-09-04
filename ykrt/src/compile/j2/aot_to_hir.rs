@@ -1511,7 +1511,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let parts = name.split(".").collect::<Vec<&str>>();
         assert_eq!(parts[0], "llvm");
         match parts[1] {
-            "sadd" | "uadd" | "usub" if parts[2] == "with" && parts[3] == "overflow" => {
+            "sadd" | "uadd" | "usub" | "ssub" if parts[2] == "with" && parts[3] == "overflow" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let tyidx = self.opt.inst(lhs).tyidx(&*self.opt);
                 assert_eq!(tyidx, self.opt.inst(rhs).tyidx(&*self.opt));
@@ -1530,6 +1530,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     }
                     .into(),
                     "usub" => hir::USubOverflow {
+                        tyidx: rtn_tyidx,
+                        lhs,
+                        rhs,
+                    }
+                    .into(),
+                    "ssub" => hir::SSubOverflow {
                         tyidx: rtn_tyidx,
                         lhs,
                         rhs,

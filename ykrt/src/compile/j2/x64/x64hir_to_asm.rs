@@ -271,7 +271,7 @@ impl<'a> X64HirToAsm<'a> {
         name: &str,
     ) -> Result<(), CompilationError> {
         // The wrapped result and the overflow flag are two independent values. Codegen for
-        // both is emitted here rather than at the {sadd, uadd, usub}_overflow instruction, which
+        // both is emitted here rather than at the {sadd, uadd, usub, ssub}_overflow instruction, which
         // has no single register that could hold both results. Codegen is emitted at the flag
         // extractval, so the result extractval early-returns if it sees the flag is also used.
         let (res_iidx, flag_iidx) = match off {
@@ -2569,7 +2569,18 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 Code::Setb_rm8,
                 "usub_overflow",
             ),
-            _ => panic!("extractval operand is not a call or {{sadd, uadd, usub}}_overflow"),
+            Inst::SSubOverflow(SSubOverflow { lhs, rhs, .. }) => self.i_overflow(
+                ra,
+                iidx,
+                *off,
+                bitw,
+                *lhs,
+                *rhs,
+                Code::Sub_rm32_r32,
+                Code::Seto_rm8,
+                "ssub_overflow",
+            ),
+            _ => panic!("extractval operand is not a call or {{sadd, uadd, usub, ssub}}_overflow"),
         }
     }
 
@@ -8135,6 +8146,63 @@ mod test {
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
               %2: i64 = usub_overflow %0, %1
+              %3: i1 = extractval %2 [32]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    fn cg_ssub_overflow() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = ssub_overflow %0, %1
+              %3: i32 = extractval %2 [0]
+              %4: i1 = extractval %2 [32]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = ssub_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [32]
+              sub r.32._, r.32._
+              seto r.8._
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn cg_ssub_overflow_diff_only() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = ssub_overflow %0, %1
+              %3: i32 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn cg_ssub_overflow_overflow_only() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = ssub_overflow %0, %1
               %3: i1 = extractval %2 [32]
               blackbox %3
               term [%0, %1]
