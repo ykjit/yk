@@ -17,7 +17,7 @@
 ;         %{{_}}: ?ty<<4 x i32>> = unimplemented <<  %{{15}} = add <4 x i32> %{{44}}, %{{44}}>>
 ;         br bb{{_}}
 ;      bb{{_}}:
-;         %{{_}}: i32 = unimplemented <<  %{{17}} = call i32 @f(i32 swiftself 5), !yk-swt-bb-purpose !4 <note: swiftself param attr>>>
+;         %{{_}}: i32 = unimplemented <<  %{{17}} = call i32 @f(i32 swiftself 5), !yk-swt-bb-purpose !{{_}} <note: swiftself param attr>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{18}} = call inreg i32 @f(i32 5) <note: inreg ret attr>>>
 ;         %{{_}}: i32 = unimplemented <<  %{{19}} = call i32 @f(i32 5) #{{0}} <note: alignstack(8) fn attr>>>
 ;         %{{_}}: float = unimplemented <<  %{{20}} = call nsz float @g() <note: fastmath>>>
