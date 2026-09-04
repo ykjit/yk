@@ -1256,6 +1256,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_srem(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::SSubOverflow(_) => (),
                 Inst::Store(x) => self.be.i_store(&mut ra, b, iidx, x)?,
                 Inst::Sub(x) => {
                     if ra.is_used(iidx) {
