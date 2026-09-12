@@ -70,6 +70,10 @@ use std::{
 use test_stubs::test_stubs;
 use vob::Vob;
 
+/// How many term variables should we keep alive in registers instead of encoding as stack-to-stack
+/// moves?
+const MAX_TERM_MOVES_TO_REGS: usize = 3;
+
 pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
     m: &'a Mod<AB::Reg>,
     b: &'a Block,
@@ -301,7 +305,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         let mut moves = Vec::new();
-        for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()) {
+        // Since stack-to-stack spills are expensive, we try to keep at least some spills as
+        // register-to-stack spills. There is no perfect, fast, heuristic here: as a tolerable
+        // heuristic we use the last `MAX_TERM_MOVES_TO_REGS` term variables (hence the `rev` in
+        // the `for` loop below) on the basis that they are most likely to naturally be available
+        // in registers anyway.
+        let mut direct_spills: SmallVec<[_; MAX_TERM_MOVES_TO_REGS]> = SmallVec::new();
+        for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()).rev() {
             if let Inst::Const(_) = self.b.inst(*iidx) {
                 // We handled these above.
                 continue;
@@ -329,11 +339,14 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         }
 
                         if self.istates[*iidx] == IState::None {
-                            let tmp_stack_off = be.align_spill(self.stack_off, bitw);
-                            self.stack_off = tmp_stack_off;
-                            assert_eq!(self.istates[*iidx], IState::None);
-                            self.istates[*iidx] = IState::Stack(tmp_stack_off);
-                            moves.push((bitw, tmp_stack_off, *to_stack_off));
+                            if direct_spills.len() < MAX_TERM_MOVES_TO_REGS {
+                                direct_spills.push((*iidx, bitw, *to_stack_off));
+                            } else {
+                                let tmp_stack_off = be.align_spill(self.stack_off, bitw);
+                                self.stack_off = tmp_stack_off;
+                                self.istates[*iidx] = IState::Stack(tmp_stack_off);
+                                moves.push((bitw, tmp_stack_off, *to_stack_off));
+                            }
                         }
                     }
                     VarLoc::StackOff(stack_off) => {
@@ -358,6 +371,22 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     VarLoc::Const(_) => (),
                 }
             }
+        }
+
+        for (iidx, bitw, stack_off) in direct_spills {
+            let reg = self
+                .iter_reg_for(iidx)
+                .next()
+                .or_else(|| {
+                    be.iter_possible_regs(b, iidx)
+                        .find(|reg| *reg != find_tmp_reg() && self.rstates.iidxs(*reg).is_empty())
+                })
+                .unwrap();
+            if self.rstates.iidxs(reg).is_empty() {
+                self.rstates
+                    .set_fill_iidxs(reg, RegFill::Undefined, smallvec![iidx]);
+            }
+            be.spill(reg, self.rstates.fill(reg), stack_off, bitw)?;
         }
 
         moves.sort_unstable_by_key(|x| x.1);
@@ -3088,7 +3117,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn move_without_overwriting() {
+    fn avoid_term_spills() {
         build_and_test_loop(
             r#"
           %0: i8 = arg [reg ("GPR0", undefined)]
@@ -3098,34 +3127,14 @@ pub(crate) mod test {
           %4: i8 = add %2, %2
           term [%0, %3, %4]
         "#,
-            |_| true,
+            |s| s.starts_with("controlpoint") || s.starts_with("spill"),
             &["
           controlpoint_loop_end
-          move_stack_val bitw=8 src_stack_off=8 dst_stack_off=1 tmp_reg=GPR1
-          move_stack_val bitw=8 src_stack_off=16 dst_stack_off=2 tmp_reg=GPR1
-          spill GPR1 Undefined stack_off=16 bitw=8
-          alloc %4 GPR1 GPR2
-          unspill stack_off=24 GPR0 Undefined bitw=8
-          spill GPR0 Undefined stack_off=8 bitw=8
-          alloc %3 GPR0 GPR3
-          unspill stack_off=1 GPR3 Zeroed bitw=8
-          unspill stack_off=2 GPR2 Zeroed bitw=8
-          unspill stack_off=2 GPR1 Zeroed bitw=8
-          arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
-          spill GPR0 Undefined stack_off=24 bitw=8
+          spill GPR2 Undefined stack_off=2 bitw=8
+          spill GPR3 Undefined stack_off=1 bitw=8
           controlpoint_peel_start 1
-          move_stack_val bitw=8 src_stack_off=32 dst_stack_off=1 tmp_reg=GPR1
-          move_stack_val bitw=8 src_stack_off=40 dst_stack_off=2 tmp_reg=GPR1
-          spill GPR3 Undefined stack_off=40 bitw=8
-          alloc %4 GPR3 GPR1
-          unspill stack_off=48 GPR0 Undefined bitw=8
-          spill GPR0 Undefined stack_off=32 bitw=8
-          alloc %3 GPR0 GPR2
-          copy_reg: src_reg=GPR3, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
-          arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
-          arrange_fill GPR2 from=Undefined dst_bitw=8 to=Zeroed
-          arrange_fill GPR3 from=Undefined dst_bitw=8 to=Zeroed
-          spill GPR0 Undefined stack_off=48 bitw=8
+          spill GPR2 Undefined stack_off=2 bitw=8
+          spill GPR3 Undefined stack_off=1 bitw=8
         "],
         );
     }
