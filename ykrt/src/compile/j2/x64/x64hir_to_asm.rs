@@ -223,39 +223,105 @@ impl<'a> X64HirToAsm<'a> {
                         .interferes(Effects::all().minus_guard())
                 })
             {
-                return self.flatten_ptradd_chain(b, *ptr);
+                return Some(self.flatten_ptradd_chain(b, *ptr));
             }
         }
         None
     }
 
     /// If `ptr` is a [PtrAdd], follow the possible chain of [PtrAdd] instructions it refers to,
-    /// giving a "base" pointer and offset.
-    ///
-    /// For example given this trace:
-    ///
-    /// ```text
-    /// %0: ptr = arg
-    /// %1: ptradd %0, 1
-    /// %2: i8 = load %1
-    /// %3: ptradd %0, 1
-    /// %4: i8 = load %1
-    /// ```
-    ///
-    /// for the pointer at instruction 2, this will return `(%1, 1)` and for the pointer at
-    /// instruction 4 it will return `(%1, 2)`.
-    fn flatten_ptradd_chain(&self, b: &Block, mut ptr: InstIdx) -> Option<(InstIdx, i64)> {
-        let mut off = 0;
+    /// returning a base pointer and an offset that fits an x64 signed 32-bit displacement.
+    fn flatten_ptradd_chain(&self, b: &Block, mut ptr: InstIdx) -> (InstIdx, i64) {
+        let mut off: i32 = 0;
         while let Inst::PtrAdd(PtrAdd {
-            ptr: cnd_ptr,
             off: cnd_off,
+            ptr: cnd_ptr,
             ..
         }) = b.inst(ptr)
         {
-            off += *cnd_off;
-            ptr = *cnd_ptr;
+            match off.checked_add(*cnd_off) {
+                Some(x) => {
+                    off = x;
+                    ptr = *cnd_ptr;
+                }
+                None => break,
+            }
         }
-        Some((ptr, i64::from(off)))
+        (ptr, i64::from(off))
+    }
+
+    /// This is a specialist register allocation instruction intended for loads/stores. At
+    /// allocates at least two registers: one for `ptr` and another for `reg_cnstr`. It folds
+    /// together [PtrAdd]s and [DynPtrAdd]s where possible.
+    fn alloc_mem_op_with_reg(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        ptr: InstIdx,
+        reg_cnstr: RegCnstr<Reg>,
+    ) -> Result<(MemoryOperand, Reg, RegFill), CompilationError> {
+        let (ptr, disp) = self.flatten_ptradd_chain(b, ptr);
+        let (memop, reg) = if let Inst::DynPtrAdd(DynPtrAdd {
+            ptr,
+            num_elems: index,
+            elem_size: scale @ (1 | 2 | 4 | 8),
+        }) = b.inst(ptr)
+        {
+            let (base, base_disp) = self.flatten_ptradd_chain(b, *ptr);
+            let (base, disp) = match i32::try_from(disp + base_disp) {
+                Ok(disp) => (base, i64::from(disp)),
+                Err(_) => (*ptr, disp), // Overflow
+            };
+            let [base, index, reg] = ra.alloc_with_fills(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: base,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *index,
+                        in_fill: RegCnstrFill::Signed,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    reg_cnstr,
+                ],
+            )?;
+            (
+                MemoryOperand::with_base_index_scale_displ_size(
+                    base.0.to_reg64(),
+                    index.0.to_reg64(),
+                    *scale,
+                    disp,
+                    u32::from(disp != 0),
+                ),
+                reg,
+            )
+        } else {
+            let [ptr, reg] = ra.alloc_with_fills(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: ptr,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    reg_cnstr,
+                ],
+            )?;
+            (
+                MemoryOperand::with_base_displ_size(ptr.0.to_reg64(), disp, u32::from(disp != 0)),
+                reg,
+            )
+        };
+        Ok((memop, reg.0, reg.1))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -763,7 +829,7 @@ impl<'a> X64HirToAsm<'a> {
     ) -> Result<(), CompilationError> {
         assert_matches!(self.m.ty(*tyidx), Ty::Double | Ty::Float);
 
-        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
+        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr);
         let [ptrr, outr] = ra.alloc(
             self,
             iidx,
@@ -807,34 +873,22 @@ impl<'a> X64HirToAsm<'a> {
         }: &Load,
     ) -> Result<(), CompilationError> {
         assert_matches!(self.m.ty(*tyidx), Ty::Int(_) | Ty::Ptr(0));
-        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
-        let [(ptrr, _), (outr, out_fill)] = ra.alloc_with_fills(
-            self,
+        let (memop, outr, out_fill) = self.alloc_mem_op_with_reg(
+            ra,
+            b,
             iidx,
-            [
-                RegCnstr::Input {
-                    in_iidx: ptr,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-                RegCnstr::Output {
-                    out_fill: RegCnstrFill::AnyOf(
-                        AnyOfFill::new()
-                            .with_undefined()
-                            .with_signed()
-                            .with_zeroed(),
-                    ),
-                    regs: &NORMAL_GP_REGS,
-                    can_be_same_as_input: true,
-                },
-            ],
+            *ptr,
+            RegCnstr::Output {
+                out_fill: RegCnstrFill::AnyOf(
+                    AnyOfFill::new()
+                        .with_undefined()
+                        .with_signed()
+                        .with_zeroed(),
+                ),
+                regs: &NORMAL_GP_REGS,
+                can_be_same_as_input: true,
+            },
         )?;
-        let memop = if off == 0 {
-            MemoryOperand::with_base(ptrr.to_reg64())
-        } else {
-            MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
-        };
 
         self.asm.push_inst(match self.m.ty(*tyidx) {
             Ty::Int(bitw) => match bitw {
@@ -883,7 +937,7 @@ impl<'a> X64HirToAsm<'a> {
         }: &Store,
     ) -> Result<(), CompilationError> {
         assert_matches!(b.inst_ty(self.m, *val), Ty::Double | Ty::Float);
-        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
+        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr);
         let [ptrr, valr] = ra.alloc(
             self,
             iidx,
@@ -931,7 +985,8 @@ impl<'a> X64HirToAsm<'a> {
         assert_matches!(b.inst_ty(self.m, *val), Ty::Int(_) | Ty::Ptr(0));
 
         let val_bitw = b.inst_bitw(self.m, *val);
-        let (ptr, off) = self.flatten_ptradd_chain(b, *ptr).unwrap_or((*ptr, 0));
+        let addr = *ptr;
+        let (ptr, off) = self.flatten_ptradd_chain(b, addr);
 
         // Try to optimise load-add-const-store sequences such as:
         // ```
@@ -948,9 +1003,7 @@ impl<'a> X64HirToAsm<'a> {
                 ..
             }) = b.inst(*lhs)
         {
-            let (load_ptr, load_off) = self
-                .flatten_ptradd_chain(b, *load_ptr)
-                .unwrap_or((*load_ptr, 0));
+            let (load_ptr, load_off) = self.flatten_ptradd_chain(b, *load_ptr);
             if (ptr, off) == (load_ptr, load_off)
                 && b.insts_iter(lhs.checked_add_scalar(1).unwrap()..iidx)
                     .all(|(_, inst)| {
@@ -1012,29 +1065,18 @@ impl<'a> X64HirToAsm<'a> {
                 x => todo!("{x}"),
             });
         } else {
-            let [ptrr, valr] = ra.alloc(
-                self,
+            let (memop, valr, _) = self.alloc_mem_op_with_reg(
+                ra,
+                b,
                 iidx,
-                [
-                    RegCnstr::Input {
-                        in_iidx: ptr,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                    RegCnstr::Input {
-                        in_iidx: *val,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                ],
+                addr,
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
             )?;
-            let memop = if off == 0 {
-                MemoryOperand::with_base(ptrr.to_reg64())
-            } else {
-                MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
-            };
 
             self.asm.push_inst(match val_bitw {
                 1..=8 => IcedInst::with2(Code::Mov_rm8_r8, memop, valr.to_reg8()),
@@ -8369,6 +8411,49 @@ mod test {
               ...
               ; %2: i8 = load %1
               movzx r.32._, byte [r.64._+8]
+              ...
+            "],
+        );
+
+        // dynptradd optimisation
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = ptradd %0, 4
+              %3: ptr = dynptradd %2, %1, 8
+              %4: ptr = ptradd %3, 16
+              %5: i64 = load %4
+              store %5, %4
+              term [%0, %1]
+            ",
+            &["
+              ...
+              ; %5: i64 = load %4
+              mov r.64._, [r.64._+r.64._*8+0x14]
+              ...
+              ; store %5, %4
+              mov [r.64._+r.64._*8+0x14], r.64._
+              ...
+            "],
+        );
+
+        // sign extending narrow integer index types
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i8 = arg [reg]
+              %2: ptr = dynptradd %0, %1, 8
+              %3: i64 = load %2
+              blackbox %3
+              term [%0, %1]
+            ",
+            &["
+              ...
+              movsx r.64.index, r.8._
+              ...
+              ; %3: i64 = load %2
+              mov r.64._, [r.64._+r.64.index*8]
               ...
             "],
         );
