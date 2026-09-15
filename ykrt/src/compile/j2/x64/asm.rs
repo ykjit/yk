@@ -62,6 +62,7 @@ impl Asm {
             fmtr.options_mut().set_rip_relative_addresses(true);
             fmtr.options_mut().set_show_branch_size(false);
             fmtr.options_mut().set_space_after_operand_separator(true);
+            fmtr.options_mut().set_use_pseudo_ops(false);
             Some(fmtr)
         } else {
             None

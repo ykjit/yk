@@ -3800,29 +3800,64 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             32 | 64 => RegCnstrFill::Zeroed,
             _ => RegCnstrFill::Undefined,
         };
-        let [lhsr, rhsr] = ra.alloc(
-            self,
-            iidx,
-            [
-                RegCnstr::InputOutput {
-                    in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Zeroed,
-                    out_fill,
-                    regs: &NORMAL_GP_REGS,
-                },
-                RegCnstr::Input {
-                    in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Zeroed,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-            ],
-        )?;
-        self.asm.push_inst(match bitw {
-            1..=32 => IcedInst::with2(Code::Imul_r32_rm32, lhsr.to_reg32(), rhsr.to_reg32()),
-            64 => IcedInst::with2(Code::Imul_r64_rm64, lhsr.to_reg64(), rhsr.to_reg64()),
-            x => todo!("{x}"),
-        });
+        if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
+            let [inr, outr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill,
+                        regs: &NORMAL_GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with3(
+                    Code::Imul_r32_rm32_imm32,
+                    outr.to_reg32(),
+                    inr.to_reg32(),
+                    imm,
+                ),
+                64 => IcedInst::with3(
+                    Code::Imul_r64_rm64_imm32,
+                    outr.to_reg64(),
+                    inr.to_reg64(),
+                    imm,
+                ),
+                x => todo!("{x}"),
+            });
+        } else {
+            let [lhsr, rhsr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        out_fill,
+                        regs: &NORMAL_GP_REGS,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Imul_r32_rm32, lhsr.to_reg32(), rhsr.to_reg32()),
+                64 => IcedInst::with2(Code::Imul_r64_rm64, lhsr.to_reg64(), rhsr.to_reg64()),
+                x => todo!("{x}"),
+            });
+        }
 
         Ok(())
     }
@@ -6927,11 +6962,11 @@ mod test {
             &["
               ...
               ; %2: ptr = dynptradd %0, %1, 3
-              imul r.64.x, 3
+              imul r.64.x, r.64.x, 3
               add r.64.x, r.64.y
               mov r.64.x, ...
               ; %3: ptr = dynptradd %0, %1, 17
-              imul r.64._, 0x11
+              imul r.64._, r.64._, 0x11
               add r.64._, r.64._
               mov r.64._, ...
               ; blackbox %2
@@ -8786,6 +8821,21 @@ mod test {
             "],
         );
 
+        codegen_and_test(
+            r#"
+              %0: i8 = arg [reg ("R8", undefined)]
+              %1: i8 = 32
+              %2: i8 = mul %0, %1
+              term [%2]
+            "#,
+            &["
+              ...
+              ; %2: i8 = mul %0, %1
+              imul r.32._, r.32._, 0x20
+              ...
+            "],
+        );
+
         // i32
         codegen_and_test(
             "
@@ -8802,6 +8852,36 @@ mod test {
             "],
         );
 
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 32
+              %2: i32 = mul %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i32 = mul %0, %1
+              imul r.32._, r.32._, 0x20
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 0xFFFFFFFF
+              %2: i32 = mul %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i32 = mul %0, %1
+              imul r.32._, r.32._, 0xFFFFFFFF
+              ...
+            "],
+        );
+
         // i64
         codegen_and_test(
             "
@@ -8814,6 +8894,68 @@ mod test {
               ...
               ; %2: i64 = mul %0, %1
               imul r.64._, r.64._
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 32
+              %2: i64 = mul %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = mul %0, %1
+              imul r.64._, r.64._, 0x20
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 0xFFFFFFFF
+              %2: i64 = mul %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              mov r.32.x, 0xFFFFFFFF
+              ; %2: i64 = mul %0, %1
+              imul r.64._, r.64.x
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 0xFFFFFFAB
+              %2: i64 = mul %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              mov r.32.x, 0xFFFFFFAB
+              ; %2: i64 = mul %0, %1
+              imul r.64._, r.64.x
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 0xFFFFFFFFFFFFFFFF
+              %2: i64 = mul %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = mul %0, %1
+              imul r.64._, r.64._, 0xFFFFFFFFFFFFFFFF
               ...
             "],
         );
