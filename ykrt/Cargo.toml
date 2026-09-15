@@ -47,6 +47,7 @@ cfgrammar = "0.13"
 lrlex = "0.13"
 lrpar = "0.13"
 regex = "1.9"
+ykbuild = { path = "../ykbuild" }
 which = "8.0.0"
 
 [features]
