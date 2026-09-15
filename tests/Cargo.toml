@@ -5,6 +5,9 @@ authors = ["The Yk Developers"]
 edition = "2024"
 license = "Apache-2.0 OR MIT"
 
+[lints.cargo]
+non_kebab_case_bins = "allow"
+
 [lib]
 crate-type = ["lib", "cdylib"]
 
@@ -43,7 +46,6 @@ lang_tester = "0.9"
 
 [build-dependencies]
 rerun_except = "1.0.0"
-ykbuild = { path = "../ykbuild" }
 # This exists purely so that a plain `cargo build`/`cargo test` also
 # builds `ykcapi` with these features, for the sake of `bin/yk-config` consumers.
 ykcapi = { path = "../ykcapi", features = ["yk_testing", "ykd"], artifact = "cdylib" }

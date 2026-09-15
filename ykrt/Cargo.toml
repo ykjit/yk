@@ -5,6 +5,9 @@ authors = ["The Yk Developers"]
 edition = "2024"
 license = "Apache-2.0 OR MIT"
 
+[lints.cargo]
+non_kebab_case_bins = "allow"
+
 [dependencies]
 array-concat = "0.5.5"
 byteorder = "1.4.3"
@@ -44,7 +47,6 @@ cfgrammar = "0.13"
 lrlex = "0.13"
 lrpar = "0.13"
 regex = "1.9"
-ykbuild = { path = "../ykbuild" }
 which = "8.0.0"
 
 [features]
