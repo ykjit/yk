@@ -620,6 +620,24 @@ fn opt_icmp(opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
             && ((pred == IPred::Eq && rhs_c == 1) || (pred == IPred::Ne && rhs_c == 0))
         {
             return OptOutcome::Equiv(*val);
+        } else if let Inst::ZExt(ZExt { val, .. }) = opt.inst(lhs)
+            && opt.inst_bitw(opt, *val) == 1
+            && ((pred == IPred::Eq && rhs_c == 0) || (pred == IPred::Ne && rhs_c == 1))
+        {
+            let val = *val;
+            let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
+            let one = opt.push_pre_inst(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(ArbBitInt::from_u64(1, 1)),
+            }));
+            return OptOutcome::Rewritten(
+                Xor {
+                    tyidx,
+                    lhs: val,
+                    rhs: one,
+                }
+                .into(),
+            );
         }
     }
 
@@ -3008,6 +3026,28 @@ mod test {
           %4: i32 = 0
           blackbox %0
         ",
+        );
+
+        test_sf(
+            "
+          %0: i64 = arg [reg]
+          %1: i64 = 4
+          %2: i1 = icmp slt %0, %1
+          %3: i32 = zext %2
+          %4: i32 = 0
+          %5: i1 = icmp eq %3, %4
+          blackbox %5
+          term [%0]
+        ",
+            "
+          %0: i64 = arg
+          %1: i64 = 4
+          %2: i1 = icmp slt %0, %1
+          %5: i1 = 1
+          %6: i1 = xor %2, %5
+          blackbox %6
+          term [%0]
+              ",
         );
     }
 
