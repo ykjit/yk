@@ -839,14 +839,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         self.const_to_iidx(tyidx, hir::ConstKind::Double(v))
                     }
                     Ty::Float(FloatTy::Float) => {
-                        // FIXME: Floats are currently stored in AOT as doubles
-                        // https://github.com/ykjit/yk/issues/1876
-                        debug_assert_eq!(bytes.len(), 8);
-                        let v = f64::from_ne_bytes([
-                            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
-                            bytes[7],
-                        ]);
-                        let v = v as f32;
+                        debug_assert_eq!(bytes.len(), 4);
+                        let v = f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
                         let tyidx = self.opt.push_ty(hir::Ty::Float)?;
                         self.const_to_iidx(tyidx, hir::ConstKind::Float(v))
                     }
