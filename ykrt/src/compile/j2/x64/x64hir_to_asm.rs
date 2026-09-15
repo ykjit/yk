@@ -1018,7 +1018,6 @@ impl<'a> X64HirToAsm<'a> {
 
         let val_bitw = b.inst_bitw(self.m, *val);
         let addr = *ptr;
-        let (ptr, off) = self.flatten_ptradd_chain(b, addr);
 
         // Try to optimise load-add-const-store sequences such as:
         // ```
@@ -1035,6 +1034,7 @@ impl<'a> X64HirToAsm<'a> {
                 ..
             }) = b.inst(*lhs)
         {
+            let (ptr, off) = self.flatten_ptradd_chain(b, addr);
             let (load_ptr, load_off) = self.flatten_ptradd_chain(b, *load_ptr);
             if (ptr, off) == (load_ptr, load_off)
                 && b.insts_iter(lhs.checked_add_scalar(1).unwrap()..iidx)
@@ -1073,21 +1073,8 @@ impl<'a> X64HirToAsm<'a> {
         }
 
         if let Some(imm) = self.sign_ext_op_for_imm32(b, *val) {
-            let [ptrr] = ra.alloc(
-                self,
-                iidx,
-                [RegCnstr::Input {
-                    in_iidx: ptr,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                }],
-            )?;
-            let memop = if off == 0 {
-                MemoryOperand::with_base(ptrr.to_reg64())
-            } else {
-                MemoryOperand::with_base_displ(ptrr.to_reg64(), off)
-            };
+            let (memop, _, _) =
+                self.alloc_mem_op_with_reg(ra, b, iidx, addr, RegCnstr::KeepAlive { iidxs: &[] })?;
 
             self.asm.push_inst(match val_bitw {
                 8 => IcedInst::with2(Code::Mov_rm8_imm8, memop, imm),
@@ -10023,6 +10010,69 @@ mod test {
               mov [r.64.x+8], r.8.y
               ...
             "],
+        );
+
+        // dynptradd optimisation
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = dynptradd %0, %1, 8
+              %3: i64 = 32
+              store %3, %2
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              ...
+              ; store %3, %2
+              mov qword [r.64.x+r.64.y*8], 0x20
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = dynptradd %0, %1, 8
+              %3: i64 = -1
+              store %3, %2
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              ...
+              ; store %3, %2
+              mov qword [r.64.x+r.64.y*8], 0xFFFFFFFFFFFFFFFF
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = dynptradd %0, %1, 8
+              %3: i64 = 0xFFFFFFFF
+              store %3, %2
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              ...
+              ; %3: i64 = 4294967295
+              mov r.32.z, 0xFFFFFFFF
+              ; store %3, %2
+              mov [r.64.x+r.64.y*8], r.64.z
+              ...
+            "#],
         );
     }
 

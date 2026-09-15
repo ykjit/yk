@@ -1720,7 +1720,7 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
     /// A temporary register drawn from `regs` that the instruction will clobber.
     Temp { regs: &'a [Reg] },
     /// Keep alive the values in `InstIdx` but do not allocate a register for them. Returns
-    /// `Reg::Undefined`. Intended only for guards.
+    /// `Reg::Undefined`. Intended only for guards or as a no-op when `iidxs` is empty.
     KeepAlive { iidxs: &'a [InstIdx] },
 }
 
