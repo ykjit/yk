@@ -250,7 +250,7 @@ impl<'a> X64HirToAsm<'a> {
         (ptr, i64::from(off))
     }
 
-    /// This is a specialist register allocation instruction intended for loads/stores. At
+    /// This is a specialist register allocation instruction intended for loads/ptradds/stores. At
     /// allocates at least two registers: one for `ptr` and another for `reg_cnstr`. It folds
     /// together [PtrAdd]s and [DynPtrAdd]s where possible.
     fn alloc_mem_op_with_reg(
@@ -3954,39 +3954,29 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn i_ptradd(
         &mut self,
         ra: &mut RegAlloc<Self>,
-        _b: &Block,
+        b: &Block,
         iidx: InstIdx,
         PtrAdd {
-            ptr,
-            off,
             in_bounds,
             nusw,
             nuw,
+            ..
         }: &PtrAdd,
     ) -> Result<(), CompilationError> {
         assert!(!in_bounds && !nusw && !nuw);
-        let [ptrr, outr] = ra.alloc(
-            self,
+        let (memop, outr, _) = self.alloc_mem_op_with_reg(
+            ra,
+            b,
             iidx,
-            [
-                RegCnstr::Input {
-                    in_iidx: *ptr,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-                RegCnstr::Output {
-                    out_fill: RegCnstrFill::Zeroed,
-                    regs: &NORMAL_GP_REGS,
-                    can_be_same_as_input: true,
-                },
-            ],
+            iidx,
+            RegCnstr::Output {
+                out_fill: RegCnstrFill::Zeroed,
+                regs: &NORMAL_GP_REGS,
+                can_be_same_as_input: true,
+            },
         )?;
-        self.asm.push_inst(IcedInst::with2(
-            Code::Lea_r64_m,
-            outr.to_reg64(),
-            MemoryOperand::with_base_displ(ptrr.to_reg64(), i64::from(*off)),
-        ));
+        self.asm
+            .push_inst(IcedInst::with2(Code::Lea_r64_m, outr.to_reg64(), memop));
         Ok(())
     }
 
@@ -9126,6 +9116,25 @@ mod test {
               lea r.64._, [r.64.x+1]
               ...
             "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = dynptradd %0, %1, 4
+              %3: ptr = ptradd %2, 16
+              term [%3, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              ...
+              ; %3: ptr = ptradd %2, 16
+              lea r.64._, [r.64.x+r.64.y*4+0x10]
+              ...
+            "#],
         );
     }
 
