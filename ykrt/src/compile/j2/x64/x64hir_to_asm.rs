@@ -1235,6 +1235,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 | Inst::FMul(FMul { lhs, .. })
                 | Inst::FSub(FSub { lhs, .. })
                 | Inst::LShr(LShr { lhs, .. })
+                | Inst::Mul(Mul { lhs, .. })
                 | Inst::Or(Or { lhs, .. })
                 | Inst::Shl(Shl { lhs, .. })
                 | Inst::SMax(SMax { lhs, .. })
@@ -1281,7 +1282,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 // hint is probably a win overall.
                 Inst::DynPtrAdd(DynPtrAdd { ptr, .. }) | Inst::PtrAdd(PtrAdd { ptr, .. }) => *ptr,
 
-                Inst::Mul(_) | Inst::SDiv(_) | Inst::UDiv(_) => {
+                Inst::SDiv(_) | Inst::UDiv(_) => {
                     self.reg_hints.push(Reg::RAX);
                     continue;
                 }
@@ -3799,7 +3800,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             32 | 64 => RegCnstrFill::Zeroed,
             _ => RegCnstrFill::Undefined,
         };
-        let [_lhsr, rhsr, _] = ra.alloc(
+        let [lhsr, rhsr] = ra.alloc(
             self,
             iidx,
             [
@@ -3807,7 +3808,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Zeroed,
                     out_fill,
-                    regs: &[Reg::RAX],
+                    regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
@@ -3815,14 +3816,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
-                // Because we're dealing with unchecked multiply, the higher-order part of the
-                // result in RDX is ignored.
-                RegCnstr::Clobber { reg: Reg::RDX },
             ],
         )?;
         self.asm.push_inst(match bitw {
-            1..=32 => IcedInst::with1(Code::Mul_rm32, rhsr.to_reg32()),
-            64 => IcedInst::with1(Code::Mul_rm64, rhsr.to_reg64()),
+            1..=32 => IcedInst::with2(Code::Imul_r32_rm32, lhsr.to_reg32(), rhsr.to_reg32()),
+            64 => IcedInst::with2(Code::Imul_r64_rm64, lhsr.to_reg64(), rhsr.to_reg64()),
             x => todo!("{x}"),
         });
 
@@ -8782,10 +8780,8 @@ mod test {
             "#,
             &["
               ...
-              mov rax, r8
-              ...
               ; %2: i8 = mul %0, %1
-              mul r.32._
+              imul r.32._, r.32._
               ...
             "],
         );
@@ -8801,7 +8797,7 @@ mod test {
             &["
               ...
               ; %2: i32 = mul %0, %1
-              mul r.32._
+              imul r.32._, r.32._
               ...
             "],
         );
@@ -8817,7 +8813,7 @@ mod test {
             &["
               ...
               ; %2: i64 = mul %0, %1
-              mul r.64._
+              imul r.64._, r.64._
               ...
             "],
         );
