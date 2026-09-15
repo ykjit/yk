@@ -28,7 +28,7 @@ use crate::compile::{
 };
 use iced_x86::{Encoder, Formatter, Instruction as Op, NasmFormatter};
 use index_type::{IndexType, typed_vec, vec::TypedVec};
-use std::slice;
+use std::{arch::x86_64::__cpuid, slice};
 
 pub(super) struct Asm {
     buf: CodeBufInProgress,
@@ -78,6 +78,49 @@ impl Asm {
     }
 
     pub(super) fn block_completed(&mut self) {}
+
+    /// Align the entire buffer to an appropriate value.
+    ///
+    /// WARNING: This is not yet a very general function, and is really only intended to align
+    /// the peeled portion of loops.
+    pub(super) fn align_buffer(&mut self) {
+        // Exactly what the right alignment requirements are boils down to some combination of CPU
+        // vendor, the specific CPU generation, and the phase of the moon. After some
+        // experimentation on the CPUs I have available to me the easiest summary is: for tight
+        // loops on AMD align to the end of a cache line (which we do naturally); for tight loops
+        // on Intel align to the start of a cache line. How far this generalises to other CPUs is
+        // difficult to know, but this is all I have to go on.
+        if cpu_vendor() == "GenuineIntel" {
+            let old_start = self.buf_end_off;
+            // Since we started writing from the end of a cache-line-aligned block, `% 64` is
+            // enough to shift things down to the start of the current cache line.
+            let shift = old_start % 64;
+            let new_start = old_start - shift;
+            if shift != 0 {
+                let len = self.buf.len() - usize::try_from(self.buf_end_off).unwrap();
+                unsafe {
+                    let src = self
+                        .buf
+                        .as_ptr()
+                        .byte_add(usize::try_from(self.buf_end_off).unwrap());
+                    let dst = self
+                        .buf
+                        .as_ptr()
+                        .byte_add(usize::try_from(self.buf_end_off - shift).unwrap());
+                    src.copy_to(dst, len);
+                }
+                for off in self
+                    .labels
+                    .iter_mut()
+                    .flatten()
+                    .chain(self.relocs.iter_mut().map(|x| &mut x.0))
+                {
+                    *off -= shift;
+                }
+                self.buf_end_off = new_start;
+            }
+        }
+    }
 
     pub(super) fn log(&mut self, s: String) {
         if let Some(x) = &mut self.log {
@@ -309,3 +352,14 @@ struct OpIdx(u32);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
 pub(in crate::compile::j2) struct LabelIdx(u32);
+
+fn cpu_vendor() -> String {
+    let x = __cpuid(0);
+    let bytes = [
+        x.ebx.to_le_bytes(),
+        x.edx.to_le_bytes(),
+        x.ecx.to_le_bytes(),
+    ]
+    .concat();
+    String::from_utf8(bytes).unwrap()
+}

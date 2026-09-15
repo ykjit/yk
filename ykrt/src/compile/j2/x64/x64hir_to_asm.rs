@@ -1719,6 +1719,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     }
 
     fn controlpoint_peel_start(&mut self, peel_label: Self::Label) -> Self::Label {
+        self.asm.align_buffer();
         self.asm.attach_label(peel_label);
         self.asm.mk_label()
     }
