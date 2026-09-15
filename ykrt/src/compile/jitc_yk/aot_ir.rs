@@ -2045,15 +2045,16 @@ impl Ty {
                 // FIXME: write a stringifier for constant structs.
                 "const_struct".to_owned()
             }
-            Self::Float(ft) => {
-                // Note that floats are stored at rest as a doubles for now.
-                // unwrap safe: constant malformed if there are too few bytes for a chunk.
-                let dval = f64::from_ne_bytes(*c.bytes().first_chunk().unwrap());
-                match ft {
-                    FloatTy::Float => format!("{}float", dval as f32),
-                    FloatTy::Double => format!("{dval}double"),
+            Self::Float(ft) => match ft {
+                FloatTy::Float => {
+                    let fval = f32::from_ne_bytes(*c.bytes().first_chunk().unwrap());
+                    format!("{fval}float")
                 }
-            }
+                FloatTy::Double => {
+                    let dval = f64::from_ne_bytes(*c.bytes().first_chunk().unwrap());
+                    format!("{dval}double")
+                }
+            },
             Self::Unimplemented(s) => format!("?cst<{s}>"),
         }
     }
@@ -2514,6 +2515,27 @@ mod tests {
             bytes: ptr_val.to_ne_bytes().to_vec(),
         };
         assert_eq!(format!("{}", cp.display(&m)), format!("{:#x}", ptr_val));
+    }
+
+    #[test]
+    fn stringify_const_float() {
+        let mut m = Module::default();
+        m.types.push(Ty::Float(FloatTy::Float));
+        m.types.push(Ty::Float(FloatTy::Double));
+        let float_tyidx = TyIdx(0);
+        let double_tyidx = TyIdx(1);
+
+        let cf = ConstVal {
+            tyidx: float_tyidx,
+            bytes: 1.5f32.to_ne_bytes().to_vec(),
+        };
+        assert_eq!(format!("{}", cf.display(&m)), "1.5float");
+
+        let cd = ConstVal {
+            tyidx: double_tyidx,
+            bytes: 1.5f64.to_ne_bytes().to_vec(),
+        };
+        assert_eq!(format!("{}", cd.display(&m)), "1.5double");
     }
 
     #[test]
