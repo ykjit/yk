@@ -5,6 +5,9 @@ authors = ["The Yk Developers"]
 edition = "2024"
 license = "Apache-2.0 OR MIT"
 
+[lints.cargo]
+non_kebab_case_bins = "allow"
+
 [dependencies]
 array-concat = "0.5.5"
 byteorder = "1.4.3"

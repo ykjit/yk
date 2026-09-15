@@ -5,6 +5,9 @@ authors = ["The Yk Developers"]
 edition = "2024"
 license = "Apache-2.0 OR MIT"
 
+[lints.cargo]
+non_kebab_case_bins = "allow"
+
 [lib]
 crate-type = ["lib", "cdylib"]
 
