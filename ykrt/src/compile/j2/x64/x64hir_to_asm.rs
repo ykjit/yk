@@ -646,7 +646,39 @@ impl<'a> X64HirToAsm<'a> {
                 IPred::Sle => Code::Jle_rel32_64,
             }
         };
-        if let Some(imm) = imm {
+        if imm == Some(0)
+            && matches!(pred, IPred::Eq | IPred::Ne)
+            && let Inst::And(And {
+                lhs: and_lhs,
+                rhs: and_rhs,
+                ..
+            }) = b.inst(*lhs)
+            && !ra.is_used(*lhs)
+            && let Some(and_rhs) = self.zero_ext_op_for_imm32(b, bitw, *and_rhs)
+        {
+            let [and_lhsr, _] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *and_lhs,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::KeepAlive { iidxs: exit_vars },
+                ],
+            )?;
+            let label = self.asm.mk_label();
+            self.asm
+                .push_reloc(IcedInst::with_branch(c, 0), RelocKind::NearWithLabel(label));
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Test_rm32_imm32, and_lhsr.to_reg32(), and_rhs),
+                64 => IcedInst::with2(Code::Test_rm64_imm32, and_lhsr.to_reg64(), and_rhs),
+                x => todo!("{x}"),
+            });
+            Ok(label)
+        } else if let Some(imm) = imm {
             let rmop = if let Some((load_iidx, off)) = self.try_load_to_mem_op(b, iidx, *lhs) {
                 let [lhsr, _] = ra.alloc(
                     self,
@@ -7669,6 +7701,32 @@ mod test {
               jbe l{{1}}
               ; term [%0, %1]
             "],
+        );
+
+        // Comparison of 0 with result of an `and`
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 64
+              %2: i8 = and %0, %1
+              %3: i8 = 0
+              %4: i1 = icmp eq %2, %3
+              guard true, %4, []
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i8 = arg [Reg("r.64.x", Undefined)]
+              and r.32.x, 0xFF
+              ; %1: i8 = 64
+              ; %2: i8 = and %0, %1
+              ; %3: i8 = 0
+              ; %4: i1 = icmp eq %2, %3
+              ; guard true, %4, []
+              test r.32.x, 0x40
+              jne l{{1}}
+              ; term [%0]
+            "#],
         );
 
         // ICmp optimisation
