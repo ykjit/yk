@@ -8,9 +8,10 @@
 //     yk-tracing: stop-tracing
 //     --- Begin hir ---
 //     ...
-//     %{{17}}: i64 = 50
-//     %{{18}}: i1 = icmp eq %{{_}}, %{{17}}
-//     guard true, %{{18}}, ...
+//     %{{11}}: i64 = 25
+//     ...
+//     %{{14}}: i1 = icmp eq %{{_}}, %{{11}}
+//     guard true, %{{14}}, ...
 //     ...
 //     --- End hir ---
 //     y=100
@@ -21,10 +22,6 @@
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 
 // Check that expression promotion works in traces.
-//
-// FIXME: at the time of writing, there's a guard for the promoted value, but
-// the promoted value sadly isn't forwarded to printf. Looks like the shadow
-// stack is in the way?
 
 #include <assert.h>
 #include <inttypes.h>
