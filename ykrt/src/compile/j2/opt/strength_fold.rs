@@ -349,12 +349,12 @@ fn opt_dynptradd(opt: &mut PassOpt, mut inst: DynPtrAdd) -> OptOutcome {
         num_elems,
         elem_size,
     } = inst;
+
     if let Some(ConstKind::Int(c)) = opt.as_constkind(num_elems) {
-        // LLVM IR semantics are such that GEP indices are sign-extended or truncated to the
-        // "pointer index size" (which for address space zero is a pointer-sized integer). First
-        // make sure we will be operating on that type.
+        // ykllvm forces `num_elems` to be pointer index sized, so we can safely convert to
+        // `isize`.
         let v = c.to_sign_ext_isize().unwrap();
-        // In LLVM slient two's compliment wrapping is permitted, but in Rust a `unchecked_mul()`
+        // In LLVM silent two's compliment wrapping is permitted, but in Rust a `unchecked_mul()`
         // that wraps is UB. It seems unlikely that the overflow case will actually happen, so we
         // can cross that bridge if we come to it.
         let off = v.checked_mul(isize::try_from(elem_size).unwrap()).unwrap();
@@ -375,6 +375,24 @@ fn opt_dynptradd(opt: &mut PassOpt, mut inst: DynPtrAdd) -> OptOutcome {
                 },
             );
         }
+    } else if let Inst::Sub(Sub {
+        lhs,
+        rhs,
+        nuw: false,
+        nsw: false,
+        ..
+    }) = opt.inst(num_elems)
+        && matches!(opt.as_constkind(*lhs), Some(ConstKind::Int(x)) if x.to_zero_ext_u8() == Some(0))
+        && let Inst::DynPtrAdd(DynPtrAdd {
+            ptr,
+            num_elems: inner_num_elems,
+            elem_size: inner_elem_size,
+        }) = opt.inst(ptr)
+        && *inner_num_elems == *rhs
+        && *inner_elem_size == elem_size
+    {
+        // (ptr + num_elems * elem_size) + (0 - num_elems) * elem_size == ptr
+        return OptOutcome::Equiv(*ptr);
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -1865,6 +1883,27 @@ mod test {
           %2: i32 = 10
           %3: ptr = ptradd %0, 44
           blackbox %3
+        ",
+        );
+
+        // `(ptr + num_elems * elem_size) + (0 - num_elems) * elem_size == ptr
+        test_sf(
+            "
+          %0: ptr = arg [reg]
+          %1: i64 = arg [reg]
+          %2: ptr = dynptradd %0, %1, 16
+          %3: i64 = 0
+          %4: i64 = sub %3, %1
+          %5: ptr = dynptradd %2, %4, 16
+          blackbox %5
+        ",
+            "
+          %0: ptr = arg
+          %1: i64 = arg
+          %2: ptr = dynptradd %0, %1, 16
+          %3: i64 = 0
+          %4: i64 = sub %3, %1
+          blackbox %0
         ",
         );
     }
