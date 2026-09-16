@@ -609,6 +609,56 @@ fn opt_icmp(opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
         }));
     } else if let IPred::Eq | IPred::Ne = pred
         && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+        && let Inst::Add(Add {
+            tyidx,
+            lhs: add_lhs,
+            rhs: add_rhs,
+            nuw: false,
+            nsw: false,
+        }) = opt.inst(lhs).to_owned()
+        && let Some(ConstKind::Int(add_rhs_c)) = opt.as_constkind(add_rhs)
+    {
+        // Rewrite `x + y == z` where `y` and `z` are constant to `x == z - y`.
+        let cmp_rhs = opt.push_pre_inst(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(rhs_c.wrapping_sub(&add_rhs_c)),
+        }));
+        return OptOutcome::Rewritten(
+            ICmp {
+                pred,
+                lhs: add_lhs,
+                rhs: cmp_rhs,
+                samesign: false,
+            }
+            .into(),
+        );
+    } else if let IPred::Eq | IPred::Ne = pred
+        && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+        && let Inst::Sub(Sub {
+            tyidx,
+            lhs: sub_lhs,
+            rhs: sub_rhs,
+            nuw: false,
+            nsw: false,
+        }) = opt.inst(lhs).to_owned()
+        && let Some(ConstKind::Int(sub_rhs_c)) = opt.as_constkind(sub_rhs)
+    {
+        // Rewrite `x - y == z` where `y` and `z` are constant to `x == z + y`.
+        let cmp_rhs = opt.push_pre_inst(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(rhs_c.wrapping_add(&sub_rhs_c)),
+        }));
+        return OptOutcome::Rewritten(
+            ICmp {
+                pred,
+                lhs: sub_lhs,
+                rhs: cmp_rhs,
+                samesign: false,
+            }
+            .into(),
+        );
+    } else if let IPred::Eq | IPred::Ne = pred
+        && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
         && let Some(rhs_c) = rhs_c.to_zero_ext_u8()
     {
         if opt.inst_bitw(opt, lhs) == 1
@@ -3048,6 +3098,94 @@ mod test {
           blackbox %6
           term [%0]
               ",
+        );
+
+        // `x + y == z` where `y` and `z` are constant to `x == z - y`
+
+        // eq
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 255
+          %2: i8 = add %0, %1
+          %3: i8 = 0
+          %4: i1 = icmp eq %2, %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 255
+          %2: i8 = add %0, %1
+          %3: i8 = 0
+          %4: i8 = 1
+          %5: i1 = icmp eq %0, %4
+          blackbox %5
+        ",
+        );
+
+        // ne
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 3
+          %2: i8 = add %0, %1
+          %3: i8 = 10
+          %4: i1 = icmp ne %2, %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 3
+          %2: i8 = add %0, %1
+          %3: i8 = 10
+          %4: i8 = 7
+          %5: i1 = icmp ne %0, %4
+          blackbox %5
+        ",
+        );
+
+        // `x - y == z` where `y` and `z` are constant to `x == z + y`
+
+        // eq
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 255
+          %2: i8 = sub %0, %1
+          %3: i8 = 2
+          %4: i1 = icmp eq %2, %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 255
+          %2: i8 = sub %0, %1
+          %3: i8 = 2
+          %4: i8 = 1
+          %5: i1 = icmp eq %0, %4
+          blackbox %5
+        ",
+        );
+
+        // ne
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 3
+          %2: i8 = sub %0, %1
+          %3: i8 = 10
+          %4: i1 = icmp ne %2, %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 3
+          %2: i8 = sub %0, %1
+          %3: i8 = 10
+          %4: i8 = 13
+          %5: i1 = icmp ne %0, %4
+          blackbox %5
+        ",
         );
     }
 
