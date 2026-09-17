@@ -1006,12 +1006,18 @@ impl InstT for Add {
         );
     }
 
-    /// Canonicalise to favour references to constants on the RHS.
+    /// Canonicalise to favour references to constants on the RHS and loads on the LHS.
     fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
         self.lhs = opt.equiv_iidx(self.lhs);
         self.rhs = opt.equiv_iidx(self.rhs);
         if matches!(opt.inst(self.lhs), Inst::Const(_))
             && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+
+        if !matches!(opt.inst(self.lhs), Inst::Load(_))
+            && matches!(opt.inst(self.rhs), Inst::Load(_))
         {
             mem::swap(&mut self.lhs, &mut self.rhs);
         }
