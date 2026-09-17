@@ -1787,14 +1787,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             ));
         }
         self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
+            Code::Lea_r64_m,
             IcedReg::RSP,
-            i32::try_from(csrs.len() * 8).unwrap(),
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_r64_rm64,
-            IcedReg::RSP,
-            IcedReg::RBP,
+            MemoryOperand::with_base_displ(IcedReg::RBP, -i64::try_from(csrs.len() * 8).unwrap()),
         ));
 
         if ret_val.is_some() {
@@ -1886,14 +1881,12 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             ));
         }
         self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
+            Code::Lea_r64_m,
             IcedReg::RSP,
-            i32::try_from(ctr.entry_stack_off().next_multiple_of(16)).unwrap(),
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_r64_rm64,
-            IcedReg::RSP,
-            IcedReg::RBP,
+            MemoryOperand::with_base_displ(
+                IcedReg::RBP,
+                -i64::from(ctr.entry_stack_off().next_multiple_of(16)),
+            ),
         ));
         Ok(())
     }
@@ -5755,8 +5748,7 @@ mod test {
               ...
               mov r.64.call, {{_}}
               call r.64.call
-              mov rsp, rbp
-              sub rsp, 0x28
+              lea rsp, [rbp-0x28]
               pop rbx
               pop r12
               pop r13
