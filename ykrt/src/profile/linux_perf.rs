@@ -135,6 +135,7 @@ impl JitDump {
         &mut self,
         ctr: &Arc<dyn CompiledTrace>,
     ) -> Result<(), Box<dyn Error>> {
+        let code = ctr.code();
         let pos_before = self.jitdump.stream_position()?;
         // Write record header
         //
@@ -156,13 +157,13 @@ impl JitDump {
             .write_u32::<NativeEndian>(unsafe { u32::try_from(libc::gettid()).unwrap() })?;
         // uint64_t vma: virtual address of jitted code start
         #[cfg(target_pointer_width = "64")]
-        let code_start = ctr.entry() as u64;
+        let code_start = code.as_ptr() as u64;
         self.jitdump.write_u64::<NativeEndian>(code_start)?;
         // uint64_t code_addr
         self.jitdump.write_u64::<NativeEndian>(code_start)?;
         // uint64_t code_size: size in bytes of the generated jitted code
         self.jitdump
-            .write_u64::<NativeEndian>(u64::try_from(ctr.code().len()).unwrap())?;
+            .write_u64::<NativeEndian>(u64::try_from(code.len()).unwrap())?;
         // uint64_t code_index
         self.jitdump
             .write_u64::<NativeEndian>(ctr.ctrid().as_u64())?;
@@ -170,7 +171,7 @@ impl JitDump {
         self.jitdump.write_all(ctr.name().as_bytes())?;
         self.jitdump.write_u8(0)?;
         // native code.
-        self.jitdump.write_all(ctr.code())?;
+        self.jitdump.write_all(code)?;
 
         // patch in the record size.
         let rh_size = self.jitdump.stream_position()? - pos_before;

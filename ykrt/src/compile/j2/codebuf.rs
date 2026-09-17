@@ -114,15 +114,19 @@ impl ExeCodeBuf {
         self.entry.0
     }
 
+    /// Return this executable buffer as a slice.
+    pub fn as_slice(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(
+                self.buf.0.byte_add(self.start_off),
+                self.len - self.start_off,
+            )
+        }
+    }
+
     /// Get a raw pointer to the start of the executable code buffer.
     pub fn sidetrace_entry(&self, sidetrace_off: usize) -> *const u8 {
         unsafe { self.buf.0.byte_add(self.start_off + sidetrace_off) }
-    }
-
-    /// Return the size of this buffer in bytes.
-    #[allow(unused)]
-    pub fn len(&self) -> usize {
-        self.len
     }
 
     /// Patch part of the executable code. The address `patch_off...patch_off + len` bytes from the
