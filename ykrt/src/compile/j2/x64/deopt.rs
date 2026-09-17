@@ -474,7 +474,7 @@ fn reconstruct(
                             assert_eq!(*fill, RegFill::Zeroed);
                             gp_regs[DeoptGpReg::try_from(*reg).unwrap().idx()] = u64::from(v)
                         }
-                        VarLoc::Const(_const_kind) => todo!(),
+                        VarLoc::Const(_) => (),
                     }
                 }
             }
