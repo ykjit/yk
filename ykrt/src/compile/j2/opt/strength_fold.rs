@@ -518,7 +518,26 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
     }
 
     let mut cond_inst = opt.inst(cond).to_owned();
-    if (expect
+    if let Inst::ICmp(ICmp {
+        pred,
+        lhs,
+        rhs,
+        samesign: false,
+    }) = &cond_inst
+        && opt.inst_bitw(opt, *lhs) == 1
+        && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(*rhs)
+        && let Some(c) = rhs_c.to_zero_ext_u8()
+        && ((*pred == IPred::Eq && c == 0) || (*pred == IPred::Ne && c == 1))
+    {
+        // Reduce a guard referencing an icmp against a constant boolean to the lhs of the icmp.
+        inst.expect = !expect;
+        inst.cond = *lhs;
+        inst.canonicalise(opt);
+        if (expect && *pred == IPred::Eq) || (!expect && *pred == IPred::Ne) {
+            opt.push_equiv(*lhs, *rhs);
+        }
+        return OptOutcome::Rewritten(inst.into());
+    } else if (expect
         && matches!(
             cond_inst,
             Inst::ICmp(ICmp {
@@ -2303,6 +2322,75 @@ mod test {
             "
           %0: i8 = arg
           term [%0]
+        ",
+        );
+
+        // Guard referencing an ICmp against a constant
+
+        // eq
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = 0
+          %2: i1 = icmp eq %0, %1
+          guard false, %2, []
+          term [%0]
+        ",
+            "
+          %0: i1 = arg
+          guard true, %0, []
+          term [%0]
+        ",
+        );
+        // ne
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = 1
+          %2: i1 = icmp ne %0, %1
+          guard true, %2, []
+          term [%0]
+        ",
+            "
+          %0: i1 = arg
+          guard false, %0, []
+          term [%0]
+        ",
+        );
+
+        // Guard referencing an ICmp against a constant where we can also determine equivalency
+
+        // eq
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = 0
+          %2: i1 = icmp eq %0, %1
+          guard true, %2, []
+          term [%0]
+        ",
+            "
+          %0: i1 = arg
+          %1: i1 = 0
+          guard false, %0, []
+          term [%1]
+        ",
+        );
+
+        // ne
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = 1
+          %2: i1 = icmp ne %0, %1
+          guard false, %2, []
+          term [%0]
+        ",
+            "
+          %0: i1 = arg
+          %1: i1 = 1
+          guard true, %0, []
+          term [%1]
         ",
         );
 
