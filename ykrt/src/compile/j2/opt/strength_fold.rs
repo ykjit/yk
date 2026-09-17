@@ -738,6 +738,23 @@ fn opt_icmp(opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
                 .into(),
             );
         }
+    } else if let IPred::Ugt | IPred::Ule = pred
+        && matches!(opt.as_constkind(rhs), Some(ConstKind::Int(x)) if x.to_zero_ext_u8() == Some(0))
+    {
+        // For unsigned comparisons: x > 0 ≡ x != 0; and x <= 0 ≡ x == 0.
+        return OptOutcome::Rewritten(
+            ICmp {
+                pred: match pred {
+                    IPred::Ugt => IPred::Ne,
+                    IPred::Ule => IPred::Eq,
+                    _ => unreachable!(),
+                },
+                lhs,
+                rhs,
+                samesign: false,
+            }
+            .into(),
+        );
     }
 
     OptOutcome::Rewritten(inst.into())
@@ -3249,6 +3266,26 @@ mod test {
           %4: i8 = 13
           %5: i1 = icmp ne %0, %4
           blackbox %5
+        ",
+        );
+
+        // Convert >/<= to =!/== when possible.
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i1 = icmp ugt %0, %1
+          blackbox %2
+          %4: i1 = icmp ule %0, %1
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          %2: i1 = icmp ne %0, %1
+          blackbox %2
+          %4: i1 = icmp eq %0, %1
+          blackbox %4
         ",
         );
     }
