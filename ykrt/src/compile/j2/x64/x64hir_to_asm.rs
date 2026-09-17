@@ -1027,7 +1027,6 @@ impl<'a> X64HirToAsm<'a> {
         // store %88, %44
         // ```
         if let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
-            && let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs)
             && let Inst::Load(Load {
                 ptr: load_ptr,
                 is_volatile: false,
@@ -1044,31 +1043,33 @@ impl<'a> X64HirToAsm<'a> {
                             .interferes(Effects::all().minus_guard())
                     })
             {
-                let [ptrr] = ra.alloc(
-                    self,
-                    iidx,
-                    [RegCnstr::Input {
-                        in_iidx: ptr,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    }],
-                )?;
-                let memop = MemoryOperand::with_base_displ(ptrr.to_reg64(), off);
-                self.asm.push_inst(match val_bitw {
-                    8 => {
-                        assert_eq!(i32::from(i8::try_from(imm).unwrap()), imm);
-                        IcedInst::with2(Code::Add_rm8_imm8, memop, imm)
-                    }
-                    16 => {
-                        assert_eq!(i32::from(i16::try_from(imm).unwrap()), imm);
-                        IcedInst::with2(Code::Add_rm16_imm16, memop, imm)
-                    }
-                    32 => IcedInst::with2(Code::Add_rm32_imm32, memop, imm),
-                    64 => IcedInst::with2(Code::Add_rm64_imm32, memop, imm),
-                    x => todo!("{x}"),
-                });
-                return Ok(());
+                if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
+                    let [ptrr] = ra.alloc(
+                        self,
+                        iidx,
+                        [RegCnstr::Input {
+                            in_iidx: ptr,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        }],
+                    )?;
+                    let memop = MemoryOperand::with_base_displ(ptrr.to_reg64(), off);
+                    self.asm.push_inst(match val_bitw {
+                        8 => {
+                            assert_eq!(i32::from(i8::try_from(imm).unwrap()), imm);
+                            IcedInst::with2(Code::Add_rm8_imm8, memop, imm)
+                        }
+                        16 => {
+                            assert_eq!(i32::from(i16::try_from(imm).unwrap()), imm);
+                            IcedInst::with2(Code::Add_rm16_imm16, memop, imm)
+                        }
+                        32 => IcedInst::with2(Code::Add_rm32_imm32, memop, imm),
+                        64 => IcedInst::with2(Code::Add_rm64_imm32, memop, imm),
+                        x => todo!("{x}"),
+                    });
+                    return Ok(());
+                }
             }
         }
 
