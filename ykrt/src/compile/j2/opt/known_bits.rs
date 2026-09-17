@@ -198,8 +198,7 @@ impl KnownBits {
                 return OptOutcome::Rewritten(inst.into());
             }
             return OptOutcome::NotNeeded;
-        }
-        if expect
+        } else if expect
             && let cond_inst @ Inst::ICmp(ICmp {
                 pred: IPred::Eq, ..
             }) = opt.inst(cond)
@@ -236,6 +235,19 @@ impl KnownBits {
                 self.knownbits_set(lhs, union.clone());
                 self.knownbits_set(rhs, union);
             }
+        } else if expect
+            && let Inst::ICmp(ICmp { pred, lhs, rhs, .. }) = opt.inst(cond).to_owned()
+            && matches!(pred, IPred::Sgt | IPred::Sge)
+            && let Some(ConstKind::Int(rhs)) = opt.as_constkind(rhs)
+            && rhs.to_sign_ext_i64().is_some_and(|rhs| {
+                (pred == IPred::Sgt && rhs >= -1) || (pred == IPred::Sge && rhs >= 0)
+            })
+            && let Some(mut lhs_b) = self.as_knownbits(opt, lhs)
+        {
+            // When we guard against `sge`/`sgt`, we implicitly learn what the value's sign bit is.
+            let sign = ArbBitInt::from_u64(lhs_b.bitw(), 1 << (lhs_b.bitw() - 1));
+            lhs_b.unknowns = lhs_b.unknowns.bitand(&sign.bitneg());
+            self.knownbits_set(lhs, lhs_b);
         }
 
         self.knownbits_set(
@@ -1076,6 +1088,26 @@ mod test {
           %4: i16 = 32768
           %5: i16 = 0
           blackbox %5
+        ",
+        );
+
+        // Deducing sign bits
+        test_known_bits(
+            "
+          %0: i32 = arg [reg]
+          %1: i32 = 0
+          %2: i1 = icmp sgt %0, %1
+          guard true, %2, []
+          %4: i64 = sext %0
+          blackbox %4
+        ",
+            "
+          %0: i32 = arg
+          %1: i32 = 0
+          %2: i1 = icmp sgt %0, %1
+          guard true, %2, []
+          %4: i64 = zext %0
+          blackbox %4
         ",
         );
     }
