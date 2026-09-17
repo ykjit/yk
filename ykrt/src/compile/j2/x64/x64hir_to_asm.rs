@@ -780,7 +780,7 @@ impl<'a> X64HirToAsm<'a> {
             });
         } else {
             self.asm.push_inst(match bitw {
-                8 => match rmop {
+                1..=8 => match rmop {
                     RegOrMemOp::Reg(reg) => {
                         IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
                     }
@@ -7726,6 +7726,35 @@ mod test {
         );
 
         // Icmp-const optimisation
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i1 = 0
+              %2: i1 = icmp eq %0, %1
+              guard true, %2, []
+              %4: i1 = 1
+              %5: i1 = icmp eq %0, %4
+              guard true, %5, []
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i1 = arg [Reg("r.64.x", Undefined)]
+              and r.32.x, 1
+              ; %1: i1 = 0
+              ; %2: i1 = icmp eq %0, %1
+              ; guard true, %2, []
+              test r15d, r15d
+              jne l2
+              ; %4: i1 = 1
+              ; %5: i1 = icmp eq %0, %4
+              ; guard true, %5, []
+              cmp r15d, 1
+              jne l{{1}}
+              ...
+            "#],
+        );
+
         codegen_and_test(
             "
               %0: i16 = arg [reg]

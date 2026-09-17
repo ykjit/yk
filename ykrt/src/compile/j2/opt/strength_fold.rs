@@ -625,6 +625,37 @@ fn opt_icmp(opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
             tyidx,
             kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
         }));
+    } else if let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
+        && let Inst::ZExt(ZExt { val, .. }) = opt.inst(lhs).to_owned()
+        && let src_tyidx = opt.inst(val).tyidx(opt)
+        && let src_bitw = opt.ty(src_tyidx).bitw()
+        && rhs_c.truncate(src_bitw).zero_extend(rhs_c.bitw()) == rhs_c
+    {
+        // Comparing a constant against a zext value where the constant is small enough to be
+        // compared against the narrower (i.e. non-zero-extended value).
+        let rhs = opt.push_pre_inst(Inst::Const(Const {
+            tyidx: src_tyidx,
+            kind: ConstKind::Int(rhs_c.truncate(src_bitw)),
+        }));
+        // Because we're now bypassing the `zext`, signed comparisons would give the wrong result:
+        // fortunately, by definition we've found a case where in two's complement the constant
+        // cannot do the wrong thing when compared with an unsigned equivalent.
+        let pred = match pred {
+            IPred::Sgt => IPred::Ugt,
+            IPred::Sge => IPred::Uge,
+            IPred::Slt => IPred::Ult,
+            IPred::Sle => IPred::Ule,
+            pred => pred,
+        };
+        return OptOutcome::Rewritten(
+            ICmp {
+                pred,
+                lhs: val,
+                rhs,
+                samesign: false,
+            }
+            .into(),
+        );
     } else if let IPred::Eq | IPred::Ne = pred
         && let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
         && let Inst::Add(Add {
@@ -3081,17 +3112,10 @@ mod test {
           %1: i1 = 1
           %2: i1 = icmp eq %0, %1
           blackbox %2
-          %4: i32 = zext %0
-          %5: i32 = 1
-          %6: i1 = icmp eq %4, %5
-          blackbox %6
         ",
             "
           %0: i1 = arg
           %1: i1 = 1
-          blackbox %0
-          %3: i32 = zext %0
-          %4: i32 = 1
           blackbox %0
         ",
         );
@@ -3102,41 +3126,42 @@ mod test {
           %1: i1 = 0
           %2: i1 = icmp ne %0, %1
           blackbox %2
-          %4: i32 = zext %0
-          %5: i32 = 0
-          %6: i1 = icmp ne %4, %5
-          blackbox %6
         ",
             "
           %0: i1 = arg
           %1: i1 = 0
           blackbox %0
-          %3: i32 = zext %0
-          %4: i32 = 0
-          blackbox %0
         ",
         );
 
+        // Comparing constants against zero-extended values.
         test_sf(
             "
-          %0: i64 = arg [reg]
-          %1: i64 = 4
-          %2: i1 = icmp slt %0, %1
-          %3: i32 = zext %2
-          %4: i32 = 0
-          %5: i1 = icmp eq %3, %4
-          blackbox %5
-          term [%0]
+          %0: i8 = arg [reg]
+          %1: i16 = zext %0
+          %2: i16 = 8
+          %3: i1 = icmp eq %1, %2
+          blackbox %3
+          %5: i16 = 512
+          %6: i1 = icmp ne %1, %5
+          blackbox %6
+          %8: i1 = icmp slt %1, %2
+          blackbox %8
         ",
             "
-          %0: i64 = arg
-          %1: i64 = 4
-          %2: i1 = icmp slt %0, %1
-          %5: i1 = 1
-          %6: i1 = xor %2, %5
-          blackbox %6
-          term [%0]
-              ",
+          %0: i8 = arg
+          %1: i16 = zext %0
+          %2: i16 = 8
+          %3: i8 = 8
+          %4: i1 = icmp eq %0, %3
+          blackbox %4
+          %6: i16 = 512
+          %7: i1 = icmp ne %1, %6
+          blackbox %7
+          %9: i8 = 8
+          %10: i1 = icmp ult %0, %9
+          blackbox %10
+        ",
         );
 
         // `x + y == z` where `y` and `z` are constant to `x == z - y`
