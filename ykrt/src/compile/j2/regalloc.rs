@@ -875,12 +875,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // We now have an [RegActions] which we can directly generate code from.
         self.asm_ractions(be, &ractions)?;
 
-        // Before we can get the output fills in the correct states, we need to discount anything
-        // we'd immediately unspill on top of.
-        for RegUnspill { reg, .. } in &ractions.unspills {
-            n_out.set_fill_iidxs(*reg, RegFill::Undefined, smallvec![]);
-        }
-
         // Phase 3.2: Spill outputs if they will need to be unspilled later.
         //
         // This also turns out to be a convenient place to calculate which instructions' values are
@@ -925,6 +919,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 }
                 RegCnstr::KeepAlive { .. } => (),
             }
+        }
+
+        // Check that we haven't lost track of values.
+        for copy in &ractions.distinct_copies {
+            assert_eq!(n_out.iidxs(copy.src_reg), self.rstates.iidxs(copy.dst_reg));
+            assert_eq!(n_out.fill(copy.src_reg), copy.src_fill);
         }
 
         // Phase 4. Calculate rstate *n:in* from *n:out* and *regs_in*.
