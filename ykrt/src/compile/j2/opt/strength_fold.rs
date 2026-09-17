@@ -924,6 +924,28 @@ fn opt_ptradd(opt: &mut PassOpt, mut inst: PtrAdd) -> OptOutcome {
         } else if off == 0 {
             // Reduce `ptr + 0` to `x`.
             return OptOutcome::Equiv(ptr);
+        } else if let Inst::DynPtrAdd(DynPtrAdd {
+            ptr: dpa_ptr,
+            num_elems,
+            elem_size,
+        }) = opt.inst(ptr).to_owned()
+            && let Some(ConstKind::Ptr(addr)) = opt.as_constkind(dpa_ptr)
+        {
+            // Reduce a `dynptradd` of a constant address followed by `ptradd` to a new constant
+            // address and a `dynptradd` (i.e. removing the `ptradd`).
+            let tyidx = opt.push_ty(Ty::Ptr(0)).unwrap();
+            let base = opt.push_pre_inst(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Ptr(addr.wrapping_add_signed(off)),
+            }));
+            return OptOutcome::Rewritten(
+                DynPtrAdd {
+                    ptr: base,
+                    num_elems,
+                    elem_size,
+                }
+                .into(),
+            );
         } else {
             let inst = PtrAdd {
                 ptr,
@@ -3696,6 +3718,23 @@ mod test {
           %0: ptr = arg
           %1: ptr = ptradd %0, 4
           blackbox %0
+        ",
+        );
+
+        // dynptradd + ptradd -> dynptradd
+        test_sf(
+            "
+          %0: i64 = arg [reg]
+          %1: ptr = 0x1234
+          %2: ptr = dynptradd %1, %0, 8
+          %3: ptr = ptradd %2, 4
+          blackbox %3
+        ",
+            "
+          ...
+          %3: ptr = 0x1238
+          %4: ptr = dynptradd %3, %0, 8
+          blackbox %4
         ",
         );
     }
