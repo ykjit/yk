@@ -339,6 +339,14 @@ impl KnownBits {
             let dst_bitw = opt.ty(tyidx).bitw();
             let res = val_b.sign_extend(dst_bitw);
             self.set_pending(res.clone());
+
+            let sign = ArbBitInt::from_u64(val_b.bitw(), 1 << (val_b.bitw() - 1));
+            if val_b.zeroes().bitand(&sign) == sign {
+                // Canonicalise `sext` to `zext` when we know the value must be positive: in
+                // general, `zext` leads to more efficient code, and the fewer times we mix `sext`
+                // and `zext` the better.
+                return OptOutcome::Rewritten(ZExt { tyidx, val }.into());
+            }
         }
         OptOutcome::Rewritten(inst.into())
     }
@@ -1049,6 +1057,7 @@ mod test {
         ",
         );
 
+        // sext -> zext canonicalisation
         test_known_bits(
             "
           %0: i8 = arg [reg]
@@ -1063,7 +1072,7 @@ mod test {
           %0: i8 = arg
           %1: i8 = 1
           %2: i8 = and %0, %1
-          %3: i16 = sext %2
+          %3: i16 = zext %2
           %4: i16 = 32768
           %5: i16 = 0
           blackbox %5
