@@ -197,7 +197,7 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     }
 
     fn code(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.codebuf.entry_ptr(), self.codebuf.len()) }
+        self.codebuf.as_slice()
     }
 
     fn name(&self) -> String {
