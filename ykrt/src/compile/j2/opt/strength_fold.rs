@@ -305,6 +305,14 @@ fn opt_bitcast(opt: &mut PassOpt, mut inst: BitCast) -> OptOutcome {
             tyidx,
             kind: ConstKind::Float(f32::from_bits(x.to_zero_ext_u32().unwrap())),
         })),
+        (Some(ConstKind::Double(x)), Ty::Int(64)) => OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(64, x.to_bits())),
+        })),
+        (Some(ConstKind::Float(x)), Ty::Int(32)) => OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(32, u64::from(x.to_bits()))),
+        })),
         (Some(x), y) => todo!("{x:?} {y:?}"),
         _ => OptOutcome::Rewritten(inst.into()),
     }
@@ -1882,6 +1890,34 @@ mod test {
             "
           %0: i32 = 1069547520
           %1: float = 1.5
+          blackbox %1
+        ",
+        );
+
+        // double -> i64
+        test_sf(
+            "
+          %0: double = 1.5double
+          %1: i64 = bitcast %0
+          blackbox %1
+        ",
+            "
+          %0: double = 1.5
+          %1: i64 = 4609434218613702656
+          blackbox %1
+        ",
+        );
+
+        // float -> i32
+        test_sf(
+            "
+          %0: float = 1.5float
+          %1: i32 = bitcast %0
+          blackbox %1
+        ",
+            "
+          %0: float = 1.5
+          %1: i32 = 1069547520
           blackbox %1
         ",
         );
