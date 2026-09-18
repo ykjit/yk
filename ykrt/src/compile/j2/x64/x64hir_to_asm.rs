@@ -330,6 +330,9 @@ impl<'a> X64HirToAsm<'a> {
         Ok((memop, reg.0, reg.1))
     }
 
+    /// Generate code for the extractval of a `{sadd, uadd, usub, ssub}_overflow` instruction's
+    /// result or overflow flag. `op_code` is the x64 add/sub instruction; `set_code` is the x64
+    /// `set*` instruction (e.g. `seto`, `setb`) that reads its flags into a register.
     #[allow(clippy::too_many_arguments)]
     fn i_overflow(
         &mut self,
@@ -341,71 +344,131 @@ impl<'a> X64HirToAsm<'a> {
         rhs: InstIdx,
         op_code: Code,
         set_code: Code,
-        name: &str,
     ) -> Result<(), CompilationError> {
-        // The wrapped result and the overflow flag are two independent values. Codegen for
-        // both is emitted here rather than at the {sadd, uadd, usub, ssub}_overflow instruction, which
-        // has no single register that could hold both results. Codegen is emitted at the flag
-        // extractval, so the result extractval early-returns if it sees the flag is also used.
+        // {s,u}{add,sub}_overflow returns a struct, so `off` (the bit offset the extractval is
+        // reading) is always 0 for the result.
         let (res_iidx, flag_iidx) = match off {
             0 => (iidx, InstIdx::from_raw_index(iidx.to_raw_index() + 1)),
             32 => (InstIdx::from_raw_index(iidx.to_raw_index() - 1), iidx),
-            _ => panic!("{name} extractval offset {off} must be 0 or 32"),
+            _ => panic!(),
         };
-        match off {
-            0 if ra.is_used(flag_iidx) => return Ok(()),
-            0 => todo!(),
-            32 if !ra.is_used(res_iidx) => todo!(),
-            _ => (),
+        // Identify the liveness of both values of the overflow instruction and perform dead
+        // code elimination here rather than at the {s,u}{add,sub}_overflow instruction: when
+        // both are used, the sum's extractval defers to the flag's, so codegen isn't emitted
+        // twice.
+        let sum_used = ra.is_used(res_iidx);
+        let flag_used = ra.is_used(flag_iidx);
+        match (off, sum_used, flag_used) {
+            // Defer to the flag's extractval, which emits codegen for both.
+            (0, _, true) => Ok(()),
+            // Case 1: only the sum is used, the flag is dead. Just do the add/sub.
+            (0, _, false) => {
+                assert_eq!(bitw, 32);
+                let [lhsr, rhsr] = ra.alloc(
+                    self,
+                    res_iidx,
+                    [
+                        RegCnstr::InputOutput {
+                            in_iidx: lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            out_fill: RegCnstrFill::Zeroed,
+                            regs: &NORMAL_GP_REGS,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                    ],
+                )?;
+                self.asm
+                    .push_inst(IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()));
+                Ok(())
+            }
+            // Case 2: only the flag is used, the sum is dead. Do the add/sub purely to set the
+            // flag, discarding its result.
+            (_, false, _) => {
+                let [lhsr, rhsr, i1_outr] = ra.alloc(
+                    self,
+                    flag_iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: true,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            can_be_same_as_input: false,
+                        },
+                    ],
+                )?;
+                self.asm
+                    .push_inst(IcedInst::with1(set_code, i1_outr.to_reg8()));
+                self.asm
+                    .push_inst(IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()));
+                Ok(())
+            }
+            // Case 3: both the sum and the flag are used.
+            (_, true, _) => {
+                let [_lhsr, _rhsr, i1_outr] = ra.alloc(
+                    self,
+                    flag_iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            can_be_same_as_input: false,
+                        },
+                    ],
+                )?;
+                let [lhsr, rhsr, _] = ra.alloc(
+                    self,
+                    res_iidx,
+                    [
+                        RegCnstr::InputOutput {
+                            in_iidx: lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            out_fill: RegCnstrFill::Zeroed,
+                            regs: &NORMAL_GP_REGS,
+                        },
+                        RegCnstr::Input {
+                            in_iidx: rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Clobber { reg: i1_outr },
+                    ],
+                )?;
+                self.asm
+                    .push_inst(IcedInst::with1(set_code, i1_outr.to_reg8()));
+                self.asm
+                    .push_inst(IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()));
+                Ok(())
+            }
         }
-        assert_eq!(bitw, if off == 0 { 32 } else { 1 });
-        let [_lhsr, _rhsr, i1_outr] = ra.alloc(
-            self,
-            flag_iidx,
-            [
-                RegCnstr::Input {
-                    in_iidx: lhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-                RegCnstr::Input {
-                    in_iidx: rhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-                RegCnstr::Output {
-                    out_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    can_be_same_as_input: false,
-                },
-            ],
-        )?;
-        let [lhsr, rhsr, _] = ra.alloc(
-            self,
-            res_iidx,
-            [
-                RegCnstr::InputOutput {
-                    in_iidx: lhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    out_fill: RegCnstrFill::Zeroed,
-                    regs: &NORMAL_GP_REGS,
-                },
-                RegCnstr::Input {
-                    in_iidx: rhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &NORMAL_GP_REGS,
-                    clobber: false,
-                },
-                RegCnstr::Clobber { reg: i1_outr },
-            ],
-        )?;
-        self.asm
-            .push_inst(IcedInst::with1(set_code, i1_outr.to_reg8()));
-        self.asm
-            .push_inst(IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()));
-        Ok(())
     }
 
     /// Generate code for fadd/fdiv/fmul/fsub: `double_code` is the instruction to generate for
@@ -2693,7 +2756,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 *rhs,
                 Code::Add_rm32_r32,
                 Code::Seto_rm8,
-                "sadd_overflow",
             ),
             Inst::UAddOverflow(UAddOverflow { lhs, rhs, .. }) => self.i_overflow(
                 ra,
@@ -2704,7 +2766,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 *rhs,
                 Code::Add_rm32_r32,
                 Code::Setb_rm8,
-                "uadd_overflow",
             ),
             Inst::USubOverflow(USubOverflow { lhs, rhs, .. }) => self.i_overflow(
                 ra,
@@ -2715,7 +2776,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 *rhs,
                 Code::Sub_rm32_r32,
                 Code::Setb_rm8,
-                "usub_overflow",
             ),
             Inst::SSubOverflow(SSubOverflow { lhs, rhs, .. }) => self.i_overflow(
                 ra,
@@ -2726,7 +2786,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 *rhs,
                 Code::Sub_rm32_r32,
                 Code::Seto_rm8,
-                "ssub_overflow",
             ),
             _ => panic!("extractval operand is not a call or {{sadd, uadd, usub, ssub}}_overflow"),
         }
@@ -8225,7 +8284,7 @@ mod test {
               ; %2: i64 = sadd_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               ; %4: i1 = extractval %2 [32]
-              add r.32._, r.32._
+              add r.32.x, r.32.y
               seto r.8._
               ...
             "#],
@@ -8233,8 +8292,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn cg_sadd_overflow_sum_only() {
+    fn cg_sadd_overflow_result_only() {
         codegen_and_test(
             "
               %0: i32 = arg [reg]
@@ -8244,12 +8302,17 @@ mod test {
               blackbox %3
               term [%0, %1]
             ",
-            &[""],
+            &[r#"
+              ...
+              ; %2: i64 = sadd_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              add r.32.x, r.32.y
+              ...
+            "#],
         );
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
     fn cg_sadd_overflow_overflow_only() {
         codegen_and_test(
             "
@@ -8257,6 +8320,29 @@ mod test {
               %1: i32 = arg [reg]
               %2: i64 = sadd_overflow %0, %1
               %3: i1 = extractval %2 [32]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = sadd_overflow %0, %1
+              ; %3: i1 = extractval %2 [32]
+              add r.32.x, r.32.y
+              seto r.8._
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_sadd_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = sadd_overflow %0, %1
+              %3: i8 = extractval %2 [8]
               blackbox %3
               term [%0, %1]
             ",
@@ -8282,7 +8368,7 @@ mod test {
               ; %2: i64 = uadd_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               ; %4: i1 = extractval %2 [32]
-              add r.32._, r.32._
+              add r.32.x, r.32.y
               setb r.8._
               ...
             "#],
@@ -8290,8 +8376,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn cg_uadd_overflow_sum_only() {
+    fn cg_uadd_overflow_result_only() {
         codegen_and_test(
             "
               %0: i32 = arg [reg]
@@ -8301,19 +8386,47 @@ mod test {
               blackbox %3
               term [%0, %1]
             ",
-            &[""],
+            &[r#"
+              ...
+              ; %2: i64 = uadd_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              add r.32.x, r.32.y
+              ...
+            "#],
         );
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn cg_uadd_overflow_carry_only() {
+    fn cg_uadd_overflow_overflow_only() {
         codegen_and_test(
             "
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
               %2: i64 = uadd_overflow %0, %1
               %3: i1 = extractval %2 [32]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = uadd_overflow %0, %1
+              ; %3: i1 = extractval %2 [32]
+              add r.32.x, r.32.y
+              setb r.8._
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_uadd_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = uadd_overflow %0, %1
+              %3: i8 = extractval %2 [8]
               blackbox %3
               term [%0, %1]
             ",
@@ -8339,7 +8452,7 @@ mod test {
               ; %2: i64 = usub_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               ; %4: i1 = extractval %2 [32]
-              sub r.32._, r.32._
+              sub r.32.x, r.32.y
               setb r.8._
               ...
             "#],
@@ -8347,8 +8460,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn cg_usub_overflow_diff_only() {
+    fn cg_usub_overflow_result_only() {
         codegen_and_test(
             "
               %0: i32 = arg [reg]
@@ -8358,19 +8470,47 @@ mod test {
               blackbox %3
               term [%0, %1]
             ",
-            &[""],
+            &[r#"
+              ...
+              ; %2: i64 = usub_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              sub r.32.x, r.32.y
+              ...
+            "#],
         );
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn cg_usub_overflow_borrow_only() {
+    fn cg_usub_overflow_overflow_only() {
         codegen_and_test(
             "
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
               %2: i64 = usub_overflow %0, %1
               %3: i1 = extractval %2 [32]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = usub_overflow %0, %1
+              ; %3: i1 = extractval %2 [32]
+              sub r.32.x, r.32.y
+              setb r.8._
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_usub_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = usub_overflow %0, %1
+              %3: i8 = extractval %2 [8]
               blackbox %3
               term [%0, %1]
             ",
@@ -8396,7 +8536,7 @@ mod test {
               ; %2: i64 = ssub_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               ; %4: i1 = extractval %2 [32]
-              sub r.32._, r.32._
+              sub r.32.x, r.32.y
               seto r.8._
               ...
             "#],
@@ -8404,8 +8544,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn cg_ssub_overflow_diff_only() {
+    fn cg_ssub_overflow_result_only() {
         codegen_and_test(
             "
               %0: i32 = arg [reg]
@@ -8415,12 +8554,17 @@ mod test {
               blackbox %3
               term [%0, %1]
             ",
-            &[""],
+            &[r#"
+              ...
+              ; %2: i64 = ssub_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              sub r.32.x, r.32.y
+              ...
+            "#],
         );
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
     fn cg_ssub_overflow_overflow_only() {
         codegen_and_test(
             "
@@ -8428,6 +8572,29 @@ mod test {
               %1: i32 = arg [reg]
               %2: i64 = ssub_overflow %0, %1
               %3: i1 = extractval %2 [32]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = ssub_overflow %0, %1
+              ; %3: i1 = extractval %2 [32]
+              sub r.32.x, r.32.y
+              seto r.8._
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_ssub_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = ssub_overflow %0, %1
+              %3: i8 = extractval %2 [8]
               blackbox %3
               term [%0, %1]
             ",
