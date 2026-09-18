@@ -1092,6 +1092,70 @@ impl<'a> X64HirToAsm<'a> {
             }
         }
 
+        // Try to optimise load-sub-store sequences.
+        if let Inst::Sub(Sub { lhs, rhs, .. }) = b.inst(*val)
+            && let Inst::Load(Load {
+                ptr: load_ptr,
+                is_volatile: false,
+                ..
+            }) = b.inst(*lhs)
+        {
+            let (ptr, off) = self.flatten_ptradd_chain(b, addr);
+            if (ptr, off) == self.flatten_ptradd_chain(b, *load_ptr)
+                && b.insts_iter(lhs.checked_add_scalar(1).unwrap()..iidx)
+                    .all(|(_, inst)| {
+                        !inst
+                            .write_effects()
+                            .interferes(Effects::all().minus_guard())
+                    })
+            {
+                if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
+                    let (memop, _, _) = self.alloc_mem_op_with_reg(
+                        ra,
+                        b,
+                        iidx,
+                        addr,
+                        RegCnstr::KeepAlive { iidxs: &[] },
+                    )?;
+                    self.asm.push_inst(match val_bitw {
+                        8 => {
+                            assert_eq!(i32::from(i8::try_from(imm).unwrap()), imm);
+                            IcedInst::with2(Code::Sub_rm8_imm8, memop, imm)
+                        }
+                        16 => {
+                            assert_eq!(i32::from(i16::try_from(imm).unwrap()), imm);
+                            IcedInst::with2(Code::Sub_rm16_imm16, memop, imm)
+                        }
+                        32 => IcedInst::with2(Code::Sub_rm32_imm32, memop, imm),
+                        64 => IcedInst::with2(Code::Sub_rm64_imm32, memop, imm),
+                        x => todo!("{x}"),
+                    });
+                    return Ok(());
+                } else {
+                    let (memop, rhsr, _) = self.alloc_mem_op_with_reg(
+                        ra,
+                        b,
+                        iidx,
+                        addr,
+                        RegCnstr::Input {
+                            in_iidx: *rhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                    )?;
+                    self.asm.push_inst(match val_bitw {
+                        1..=8 => IcedInst::with2(Code::Sub_rm8_r8, memop, rhsr.to_reg8()),
+                        16 => IcedInst::with2(Code::Sub_rm16_r16, memop, rhsr.to_reg16()),
+                        32 => IcedInst::with2(Code::Sub_rm32_r32, memop, rhsr.to_reg32()),
+                        64 => IcedInst::with2(Code::Sub_rm64_r64, memop, rhsr.to_reg64()),
+                        x => todo!("{x}"),
+                    });
+                    return Ok(());
+                }
+            }
+        }
+
         if let Some(imm) = self.sign_ext_op_for_imm32(b, *val) {
             let (memop, _, _) =
                 self.alloc_mem_op_with_reg(ra, b, iidx, addr, RegCnstr::KeepAlive { iidxs: &[] })?;
@@ -10499,6 +10563,28 @@ mod test {
               ; %3: i64 = add %2, %1
               ; store %3, %0
               add [r.64.x], r.64.y
+              ; term [%0, %1]
+            "#],
+        );
+
+        // load-sub-store optimisation
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = load %0
+              %3: i64 = sub %2, %1
+              store %3, %0
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              ; %2: i64 = load %0
+              ; %3: i64 = sub %2, %1
+              ; store %3, %0
+              sub [r.64.x], r.64.y
               ; term [%0, %1]
             "#],
         );
