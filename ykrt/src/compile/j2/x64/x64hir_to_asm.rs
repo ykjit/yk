@@ -262,7 +262,13 @@ impl<'a> X64HirToAsm<'a> {
         reg_cnstr: RegCnstr<Reg>,
     ) -> Result<(MemoryOperand, Reg, RegFill), CompilationError> {
         let (ptr, disp) = self.flatten_ptradd_chain(b, ptr);
-        let (memop, reg) = if let Inst::DynPtrAdd(DynPtrAdd {
+        let (memop, reg) = if let Some(addr) = self
+            .sign_ext_op_for_imm32(b, ptr)
+            .and_then(|ptr| i32::try_from(i64::from(ptr) + disp).ok())
+        {
+            let [reg] = ra.alloc_with_fills(self, iidx, [reg_cnstr])?;
+            (MemoryOperand::with_displ(addr as u64, 4), reg)
+        } else if let Inst::DynPtrAdd(DynPtrAdd {
             ptr,
             num_elems: index,
             elem_size: scale @ (1 | 2 | 4 | 8),
@@ -8683,6 +8689,22 @@ mod test {
         );
 
         // There is no i64 case because LLVM IR does not allow `sext` to/from the same bit size.
+
+        // Constant address
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: ptr = 0x1234
+              %2: i64 = load %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = load %1
+              mov r.64._, [0x1234]
+              ; term [%2]
+            "],
+        );
     }
 
     #[test]
@@ -10117,6 +10139,23 @@ mod test {
               mov [r.64.x+r.64.y*8], r.64.z
               ...
             "#],
+        );
+
+        // Constant address
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: ptr = 0x1234
+              %2: i64 = 0x5678
+              store %2, %1
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %2, %1
+              mov qword [0x1234], 0x5678
+              ; term [%0]
+            "],
         );
     }
 

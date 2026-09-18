@@ -3,7 +3,6 @@
 #![cfg_attr(test, feature(test))]
 #![feature(deref_patterns)]
 #![feature(int_roundings)]
-#![cfg_attr(test, feature(trim_prefix_suffix))]
 #![feature(thread_local)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
