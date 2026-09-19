@@ -8317,6 +8317,28 @@ mod test {
               ...
             "#],
         );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = sadd_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = sadd_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              add r.64.x, r.64.y
+              seto r.8.flag
+              ...
+            "#],
+        );
     }
 
     #[test]
@@ -8335,6 +8357,24 @@ mod test {
               ; %2: i64 = sadd_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               add r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = sadd_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = sadd_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              add r.64.x, r.64.y
               ...
             "#],
         );
@@ -8360,72 +8400,7 @@ mod test {
               ...
             "#],
         );
-    }
 
-    #[test]
-    #[should_panic]
-    fn cg_sadd_overflow_bad_offset() {
-        codegen_and_test(
-            "
-              %0: i32 = arg [reg]
-              %1: i32 = arg [reg]
-              %2: i64 = sadd_overflow %0, %1
-              %3: i8 = extractval %2 [8]
-              blackbox %3
-              term [%0, %1]
-            ",
-            &[""],
-        );
-    }
-
-    #[test]
-    fn cg_sadd_overflow_64() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i65 = sadd_overflow %0, %1
-              %3: i64 = extractval %2 [0]
-              %4: i1 = extractval %2 [64]
-              blackbox %3
-              blackbox %4
-              term [%0, %1]
-            ",
-            &[r#"
-              ...
-              ; %2: i65 = sadd_overflow %0, %1
-              ; %3: i64 = extractval %2 [0]
-              ; %4: i1 = extractval %2 [64]
-              add r.64.x, r.64.y
-              seto r.8.flag
-              ...
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_sadd_overflow_64_result_only() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i65 = sadd_overflow %0, %1
-              %3: i64 = extractval %2 [0]
-              blackbox %3
-              term [%0, %1]
-            ",
-            &[r#"
-              ...
-              ; %2: i65 = sadd_overflow %0, %1
-              ; %3: i64 = extractval %2 [0]
-              add r.64.x, r.64.y
-              ...
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_sadd_overflow_64_overflow_only() {
         codegen_and_test(
             "
               %0: i64 = arg [reg]
@@ -8443,6 +8418,22 @@ mod test {
               seto r.8.flag
               ...
             "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_sadd_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = sadd_overflow %0, %1
+              %3: i8 = extractval %2 [8]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
         );
     }
 
@@ -8469,6 +8460,28 @@ mod test {
               ...
             "#],
         );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = uadd_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = uadd_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              add r.64.x, r.64.y
+              setb r.8.flag
+              ...
+            "#],
+        );
     }
 
     #[test]
@@ -8487,6 +8500,24 @@ mod test {
               ; %2: i64 = uadd_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               add r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = uadd_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = uadd_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              add r.64.x, r.64.y
               ...
             "#],
         );
@@ -8512,72 +8543,7 @@ mod test {
               ...
             "#],
         );
-    }
 
-    #[test]
-    #[should_panic]
-    fn cg_uadd_overflow_bad_offset() {
-        codegen_and_test(
-            "
-              %0: i32 = arg [reg]
-              %1: i32 = arg [reg]
-              %2: i64 = uadd_overflow %0, %1
-              %3: i8 = extractval %2 [8]
-              blackbox %3
-              term [%0, %1]
-            ",
-            &[""],
-        );
-    }
-
-    #[test]
-    fn cg_uadd_overflow_64() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i65 = uadd_overflow %0, %1
-              %3: i64 = extractval %2 [0]
-              %4: i1 = extractval %2 [64]
-              blackbox %3
-              blackbox %4
-              term [%0, %1]
-            ",
-            &[r#"
-              ...
-              ; %2: i65 = uadd_overflow %0, %1
-              ; %3: i64 = extractval %2 [0]
-              ; %4: i1 = extractval %2 [64]
-              add r.64.x, r.64.y
-              setb r.8.flag
-              ...
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_uadd_overflow_64_result_only() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i65 = uadd_overflow %0, %1
-              %3: i64 = extractval %2 [0]
-              blackbox %3
-              term [%0, %1]
-            ",
-            &[r#"
-              ...
-              ; %2: i65 = uadd_overflow %0, %1
-              ; %3: i64 = extractval %2 [0]
-              add r.64.x, r.64.y
-              ...
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_uadd_overflow_64_overflow_only() {
         codegen_and_test(
             "
               %0: i64 = arg [reg]
@@ -8595,6 +8561,22 @@ mod test {
               setb r.8.flag
               ...
             "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_uadd_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = uadd_overflow %0, %1
+              %3: i8 = extractval %2 [8]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
         );
     }
 
@@ -8621,6 +8603,28 @@ mod test {
               ...
             "#],
         );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = usub_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = usub_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              sub r.64.x, r.64.y
+              setb r.8.flag
+              ...
+            "#],
+        );
     }
 
     #[test]
@@ -8639,6 +8643,24 @@ mod test {
               ; %2: i64 = usub_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               sub r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = usub_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = usub_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              sub r.64.x, r.64.y
               ...
             "#],
         );
@@ -8664,72 +8686,7 @@ mod test {
               ...
             "#],
         );
-    }
 
-    #[test]
-    #[should_panic]
-    fn cg_usub_overflow_bad_offset() {
-        codegen_and_test(
-            "
-              %0: i32 = arg [reg]
-              %1: i32 = arg [reg]
-              %2: i64 = usub_overflow %0, %1
-              %3: i8 = extractval %2 [8]
-              blackbox %3
-              term [%0, %1]
-            ",
-            &[""],
-        );
-    }
-
-    #[test]
-    fn cg_usub_overflow_64() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i65 = usub_overflow %0, %1
-              %3: i64 = extractval %2 [0]
-              %4: i1 = extractval %2 [64]
-              blackbox %3
-              blackbox %4
-              term [%0, %1]
-            ",
-            &[r#"
-              ...
-              ; %2: i65 = usub_overflow %0, %1
-              ; %3: i64 = extractval %2 [0]
-              ; %4: i1 = extractval %2 [64]
-              sub r.64.x, r.64.y
-              setb r.8.flag
-              ...
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_usub_overflow_64_result_only() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i65 = usub_overflow %0, %1
-              %3: i64 = extractval %2 [0]
-              blackbox %3
-              term [%0, %1]
-            ",
-            &[r#"
-              ...
-              ; %2: i65 = usub_overflow %0, %1
-              ; %3: i64 = extractval %2 [0]
-              sub r.64.x, r.64.y
-              ...
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_usub_overflow_64_overflow_only() {
         codegen_and_test(
             "
               %0: i64 = arg [reg]
@@ -8747,6 +8704,22 @@ mod test {
               setb r.8.flag
               ...
             "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_usub_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = usub_overflow %0, %1
+              %3: i8 = extractval %2 [8]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
         );
     }
 
@@ -8773,6 +8746,28 @@ mod test {
               ...
             "#],
         );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = ssub_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = ssub_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              sub r.64.x, r.64.y
+              seto r.8.flag
+              ...
+            "#],
+        );
     }
 
     #[test]
@@ -8791,6 +8786,24 @@ mod test {
               ; %2: i64 = ssub_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               sub r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = ssub_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = ssub_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              sub r.64.x, r.64.y
               ...
             "#],
         );
@@ -8816,72 +8829,7 @@ mod test {
               ...
             "#],
         );
-    }
 
-    #[test]
-    #[should_panic]
-    fn cg_ssub_overflow_bad_offset() {
-        codegen_and_test(
-            "
-              %0: i32 = arg [reg]
-              %1: i32 = arg [reg]
-              %2: i64 = ssub_overflow %0, %1
-              %3: i8 = extractval %2 [8]
-              blackbox %3
-              term [%0, %1]
-            ",
-            &[""],
-        );
-    }
-
-    #[test]
-    fn cg_ssub_overflow_64() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i65 = ssub_overflow %0, %1
-              %3: i64 = extractval %2 [0]
-              %4: i1 = extractval %2 [64]
-              blackbox %3
-              blackbox %4
-              term [%0, %1]
-            ",
-            &[r#"
-              ...
-              ; %2: i65 = ssub_overflow %0, %1
-              ; %3: i64 = extractval %2 [0]
-              ; %4: i1 = extractval %2 [64]
-              sub r.64.x, r.64.y
-              seto r.8.flag
-              ...
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_ssub_overflow_64_result_only() {
-        codegen_and_test(
-            "
-              %0: i64 = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i65 = ssub_overflow %0, %1
-              %3: i64 = extractval %2 [0]
-              blackbox %3
-              term [%0, %1]
-            ",
-            &[r#"
-              ...
-              ; %2: i65 = ssub_overflow %0, %1
-              ; %3: i64 = extractval %2 [0]
-              sub r.64.x, r.64.y
-              ...
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_ssub_overflow_64_overflow_only() {
         codegen_and_test(
             "
               %0: i64 = arg [reg]
@@ -8899,6 +8847,22 @@ mod test {
               seto r.8.flag
               ...
             "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_ssub_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = ssub_overflow %0, %1
+              %3: i8 = extractval %2 [8]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
         );
     }
 
