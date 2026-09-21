@@ -331,8 +331,8 @@ impl<'a> X64HirToAsm<'a> {
     }
 
     /// Generate code for the extractval of a `{sadd, uadd, usub, ssub}_overflow` instruction's
-    /// result or overflow flag. `op_code` is the x64 add/sub instruction; `set_code` is the x64
-    /// `set*` instruction (e.g. `seto`, `setb`) that reads its flags into a register.
+    /// result or overflow flag. `arith` selects add vs sub; `set_code` is the x64 `set*`
+    /// instruction (e.g. `seto`, `setb`) that reads its flags into a register.
     #[allow(clippy::too_many_arguments)]
     fn i_overflow(
         &mut self,
@@ -342,14 +342,27 @@ impl<'a> X64HirToAsm<'a> {
         bitw: u32,
         lhs: InstIdx,
         rhs: InstIdx,
-        op_code: Code,
+        arith: OverflowArith,
         set_code: Code,
     ) -> Result<(), CompilationError> {
         // {s,u}{add,sub}_overflow returns a struct, so `off` (the bit offset the extractval is
         // reading) is always 0 for the result.
+        let operand_bitw = if off == 0 {
+            bitw
+        } else {
+            assert_eq!(bitw, 1);
+            off
+        };
+        let op_code = match (arith, operand_bitw) {
+            (OverflowArith::Add, 32) => Code::Add_rm32_r32,
+            (OverflowArith::Add, 64) => Code::Add_rm64_r64,
+            (OverflowArith::Sub, 32) => Code::Sub_rm32_r32,
+            (OverflowArith::Sub, 64) => Code::Sub_rm64_r64,
+            _ => todo!(),
+        };
         let (res_iidx, flag_iidx) = match off {
             0 => (iidx, InstIdx::from_raw_index(iidx.to_raw_index() + 1)),
-            32 => (InstIdx::from_raw_index(iidx.to_raw_index() - 1), iidx),
+            32 | 64 => (InstIdx::from_raw_index(iidx.to_raw_index() - 1), iidx),
             _ => panic!(),
         };
         // Identify the liveness of both values of the overflow instruction and perform dead
@@ -363,7 +376,6 @@ impl<'a> X64HirToAsm<'a> {
             (0, _, true) => Ok(()),
             // Case 1: only the sum is used, the flag is dead. Just do the add/sub.
             (0, _, false) => {
-                assert_eq!(bitw, 32);
                 let [lhsr, rhsr] = ra.alloc(
                     self,
                     res_iidx,
@@ -382,8 +394,11 @@ impl<'a> X64HirToAsm<'a> {
                         },
                     ],
                 )?;
-                self.asm
-                    .push_inst(IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()));
+                self.asm.push_inst(match operand_bitw {
+                    32 => IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()),
+                    64 => IcedInst::with2(op_code, lhsr.to_reg64(), rhsr.to_reg64()),
+                    _ => todo!(),
+                });
                 Ok(())
             }
             // Case 2: only the flag is used, the sum is dead. Do the add/sub purely to set the
@@ -414,8 +429,11 @@ impl<'a> X64HirToAsm<'a> {
                 )?;
                 self.asm
                     .push_inst(IcedInst::with1(set_code, i1_outr.to_reg8()));
-                self.asm
-                    .push_inst(IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()));
+                self.asm.push_inst(match operand_bitw {
+                    32 => IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()),
+                    64 => IcedInst::with2(op_code, lhsr.to_reg64(), rhsr.to_reg64()),
+                    _ => todo!(),
+                });
                 Ok(())
             }
             // Case 3: both the sum and the flag are used.
@@ -464,8 +482,11 @@ impl<'a> X64HirToAsm<'a> {
                 )?;
                 self.asm
                     .push_inst(IcedInst::with1(set_code, i1_outr.to_reg8()));
-                self.asm
-                    .push_inst(IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()));
+                self.asm.push_inst(match operand_bitw {
+                    32 => IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()),
+                    64 => IcedInst::with2(op_code, lhsr.to_reg64(), rhsr.to_reg64()),
+                    _ => todo!(),
+                });
                 Ok(())
             }
         }
@@ -2754,7 +2775,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 bitw,
                 *lhs,
                 *rhs,
-                Code::Add_rm32_r32,
+                OverflowArith::Add,
                 Code::Seto_rm8,
             ),
             Inst::UAddOverflow(UAddOverflow { lhs, rhs, .. }) => self.i_overflow(
@@ -2764,7 +2785,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 bitw,
                 *lhs,
                 *rhs,
-                Code::Add_rm32_r32,
+                OverflowArith::Add,
                 Code::Setb_rm8,
             ),
             Inst::USubOverflow(USubOverflow { lhs, rhs, .. }) => self.i_overflow(
@@ -2774,7 +2795,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 bitw,
                 *lhs,
                 *rhs,
-                Code::Sub_rm32_r32,
+                OverflowArith::Sub,
                 Code::Setb_rm8,
             ),
             Inst::SSubOverflow(SSubOverflow { lhs, rhs, .. }) => self.i_overflow(
@@ -2784,7 +2805,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 bitw,
                 *lhs,
                 *rhs,
-                Code::Sub_rm32_r32,
+                OverflowArith::Sub,
                 Code::Seto_rm8,
             ),
             _ => panic!("extractval operand is not a call or {{sadd, uadd, usub, ssub}}_overflow"),
@@ -5132,6 +5153,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 enum RegOrMemOp {
     Reg(Reg),
     MemOp(Reg, i64),
+}
+
+/// The arithmetic of a `{sadd, uadd, usub, ssub}_overflow` instruction.
+#[derive(Clone, Copy, Debug)]
+enum OverflowArith {
+    Add,
+    Sub,
 }
 
 /// x64 tests. These use an unusual form of pattern matching. Instead of using concrete register
@@ -8289,6 +8317,28 @@ mod test {
               ...
             "#],
         );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = sadd_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = sadd_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              add r.64.x, r.64.y
+              seto r.8.flag
+              ...
+            "#],
+        );
     }
 
     #[test]
@@ -8307,6 +8357,24 @@ mod test {
               ; %2: i64 = sadd_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               add r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = sadd_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = sadd_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              add r.64.x, r.64.y
               ...
             "#],
         );
@@ -8329,6 +8397,25 @@ mod test {
               ; %3: i1 = extractval %2 [32]
               add r.32.x, r.32.y
               seto r.8._
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = sadd_overflow %0, %1
+              %3: i1 = extractval %2 [64]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = sadd_overflow %0, %1
+              ; %3: i1 = extractval %2 [64]
+              add r.64.x, r.64.y
+              seto r.8.flag
               ...
             "#],
         );
@@ -8373,6 +8460,28 @@ mod test {
               ...
             "#],
         );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = uadd_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = uadd_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              add r.64.x, r.64.y
+              setb r.8.flag
+              ...
+            "#],
+        );
     }
 
     #[test]
@@ -8391,6 +8500,24 @@ mod test {
               ; %2: i64 = uadd_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               add r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = uadd_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = uadd_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              add r.64.x, r.64.y
               ...
             "#],
         );
@@ -8413,6 +8540,25 @@ mod test {
               ; %3: i1 = extractval %2 [32]
               add r.32.x, r.32.y
               setb r.8._
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = uadd_overflow %0, %1
+              %3: i1 = extractval %2 [64]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = uadd_overflow %0, %1
+              ; %3: i1 = extractval %2 [64]
+              add r.64.x, r.64.y
+              setb r.8.flag
               ...
             "#],
         );
@@ -8457,6 +8603,28 @@ mod test {
               ...
             "#],
         );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = usub_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = usub_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              sub r.64.x, r.64.y
+              setb r.8.flag
+              ...
+            "#],
+        );
     }
 
     #[test]
@@ -8475,6 +8643,24 @@ mod test {
               ; %2: i64 = usub_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               sub r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = usub_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = usub_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              sub r.64.x, r.64.y
               ...
             "#],
         );
@@ -8497,6 +8683,25 @@ mod test {
               ; %3: i1 = extractval %2 [32]
               sub r.32.x, r.32.y
               setb r.8._
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = usub_overflow %0, %1
+              %3: i1 = extractval %2 [64]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = usub_overflow %0, %1
+              ; %3: i1 = extractval %2 [64]
+              sub r.64.x, r.64.y
+              setb r.8.flag
               ...
             "#],
         );
@@ -8541,6 +8746,28 @@ mod test {
               ...
             "#],
         );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = ssub_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = ssub_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              sub r.64.x, r.64.y
+              seto r.8.flag
+              ...
+            "#],
+        );
     }
 
     #[test]
@@ -8559,6 +8786,24 @@ mod test {
               ; %2: i64 = ssub_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
               sub r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = ssub_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = ssub_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              sub r.64.x, r.64.y
               ...
             "#],
         );
@@ -8581,6 +8826,25 @@ mod test {
               ; %3: i1 = extractval %2 [32]
               sub r.32.x, r.32.y
               seto r.8._
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = ssub_overflow %0, %1
+              %3: i1 = extractval %2 [64]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = ssub_overflow %0, %1
+              ; %3: i1 = extractval %2 [64]
+              sub r.64.x, r.64.y
+              seto r.8.flag
               ...
             "#],
         );
