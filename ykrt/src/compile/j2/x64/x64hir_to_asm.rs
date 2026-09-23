@@ -330,6 +330,48 @@ impl<'a> X64HirToAsm<'a> {
         Ok((memop, reg.0, reg.1))
     }
 
+    /// A generic function for binary operations (add/sub/etc). `nonload` is a function which must
+    /// return the [IcedInst] when `rhs` is not a load.
+    ///
+    /// Note: this function can't, and doesn't try to, handle every permutation of x64: there are
+    /// some binary operations that aren't a good fit for it.
+    fn i_binop<F, G>(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        lhs: InstIdx,
+        rhs: InstIdx,
+        out_fill: F,
+        rhs_nonload: G,
+    ) -> Result<(), CompilationError>
+    where
+        F: Fn(u32) -> RegCnstrFill,
+        G: Fn(u32, Reg, Reg) -> Result<IcedInst, iced_x86::IcedError>,
+    {
+        let bitw = b.inst_bitw(self.m, lhs);
+        let [lhsr, rhsr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: out_fill(bitw),
+                    regs: &NORMAL_GP_REGS,
+                },
+                RegCnstr::Input {
+                    in_iidx: rhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+            ],
+        )?;
+        self.asm.push_inst(rhs_nonload(bitw, lhsr, rhsr));
+        Ok(())
+    }
+
     /// Generate code for the extractval of a `{sadd, uadd, usub, ssub}_overflow` instruction's
     /// result or overflow flag. `arith` selects add vs sub; `set_code` is the x64 `set*`
     /// instruction (e.g. `seto`, `setb`) that reads its flags into a register.
@@ -2220,7 +2262,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
-        let out_fill = match bitw {
+        let out_fill = |bitw| match bitw {
             32 | 64 => RegCnstrFill::Zeroed,
             _ => RegCnstrFill::Undefined,
         };
@@ -2231,7 +2273,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Undefined,
-                    out_fill,
+                    out_fill: out_fill(bitw),
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
@@ -2241,29 +2283,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 x => todo!("{x}"),
             });
         } else {
-            let [lhsr, rhsr] = ra.alloc(
-                self,
+            self.i_binop(
+                ra,
+                b,
                 iidx,
-                [
-                    RegCnstr::InputOutput {
-                        in_iidx: *lhs,
-                        in_fill: RegCnstrFill::Undefined,
-                        out_fill,
-                        regs: &NORMAL_GP_REGS,
-                    },
-                    RegCnstr::Input {
-                        in_iidx: *rhs,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                ],
+                *lhs,
+                *rhs,
+                out_fill,
+                |bitw, lhsr, rhsr| match bitw {
+                    1..=32 => IcedInst::with2(Code::Add_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                    64 => IcedInst::with2(Code::Add_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+                    x => todo!("{x}"),
+                },
             )?;
-            self.asm.push_inst(match bitw {
-                1..=32 => IcedInst::with2(Code::Add_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-                64 => IcedInst::with2(Code::Add_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-                x => todo!("{x}"),
-            });
         }
 
         Ok(())
@@ -2317,34 +2349,25 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 c.cast_signed(),
             ));
         } else {
-            let out_fill = if bitw == 32 || bitw == 64 {
-                RegCnstrFill::Zeroed
-            } else {
-                RegCnstrFill::Undefined
-            };
-            let [lhsr, rhsr] = ra.alloc(
-                self,
+            self.i_binop(
+                ra,
+                b,
                 iidx,
-                [
-                    RegCnstr::InputOutput {
-                        in_iidx: *lhs,
-                        in_fill: RegCnstrFill::Undefined,
-                        out_fill,
-                        regs: &NORMAL_GP_REGS,
-                    },
-                    RegCnstr::Input {
-                        in_iidx: *rhs,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                ],
+                *lhs,
+                *rhs,
+                |bitw| {
+                    if bitw == 32 || bitw == 64 {
+                        RegCnstrFill::Zeroed
+                    } else {
+                        RegCnstrFill::Undefined
+                    }
+                },
+                |bitw, lhsr, rhsr| match bitw {
+                    1..=32 => IcedInst::with2(Code::And_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                    64 => IcedInst::with2(Code::And_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+                    x => todo!("{x}"),
+                },
             )?;
-            self.asm.push_inst(match bitw {
-                1..=32 => IcedInst::with2(Code::And_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-                64 => IcedInst::with2(Code::And_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-                x => todo!("{x}"),
-            });
         }
 
         Ok(())
@@ -4097,33 +4120,25 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 x => todo!("{x}"),
             });
         } else {
-            let out_fill = match bitw {
-                32 | 64 => RegCnstrFill::Zeroed,
-                _ => RegCnstrFill::Undefined,
-            };
-            let [lhsr, rhsr] = ra.alloc(
-                self,
+            self.i_binop(
+                ra,
+                b,
                 iidx,
-                [
-                    RegCnstr::InputOutput {
-                        in_iidx: *lhs,
-                        in_fill: RegCnstrFill::Undefined,
-                        out_fill,
-                        regs: &NORMAL_GP_REGS,
-                    },
-                    RegCnstr::Input {
-                        in_iidx: *rhs,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                ],
+                *lhs,
+                *rhs,
+                |bitw| {
+                    if bitw == 32 || bitw == 64 {
+                        RegCnstrFill::Zeroed
+                    } else {
+                        RegCnstrFill::Undefined
+                    }
+                },
+                |bitw, lhsr, rhsr| match bitw {
+                    1..=32 => IcedInst::with2(Code::Or_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                    64 => IcedInst::with2(Code::Or_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+                    x => todo!("{x}"),
+                },
             )?;
-            self.asm.push_inst(match bitw {
-                1..=32 => IcedInst::with2(Code::Or_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-                64 => IcedInst::with2(Code::Or_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-                x => todo!("{x}"),
-            });
         }
 
         Ok(())
@@ -4773,38 +4788,25 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 x => todo!("{x}"),
             }
         } else {
-            let [lhsr, rhsr] = ra.alloc(
-                self,
+            self.i_binop(
+                ra,
+                b,
                 iidx,
-                [
-                    RegCnstr::InputOutput {
-                        in_iidx: *lhs,
-                        in_fill: in_fill.clone(),
-                        out_fill: RegCnstrFill::Zeroed,
-                        regs: &NORMAL_GP_REGS,
-                    },
-                    RegCnstr::Input {
-                        in_iidx: *rhs,
-                        in_fill,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                ],
+                *lhs,
+                *rhs,
+                |bitw| {
+                    if bitw == 32 || bitw == 64 {
+                        RegCnstrFill::Zeroed
+                    } else {
+                        RegCnstrFill::Undefined
+                    }
+                },
+                |bitw, lhsr, rhsr| match bitw {
+                    32 => IcedInst::with2(Code::Sub_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                    64 => IcedInst::with2(Code::Sub_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+                    x => todo!("{x}"),
+                },
             )?;
-
-            match bitw {
-                64 => self.asm.push_inst(IcedInst::with2(
-                    Code::Sub_rm64_r64,
-                    lhsr.to_reg64(),
-                    rhsr.to_reg64(),
-                )),
-                32 => self.asm.push_inst(IcedInst::with2(
-                    Code::Sub_rm32_r32,
-                    lhsr.to_reg32(),
-                    rhsr.to_reg32(),
-                )),
-                x => todo!("{x}"),
-            }
         }
         Ok(())
     }
@@ -5126,7 +5128,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     ) -> Result<(), CompilationError> {
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
-        let out_fill = match bitw {
+        let out_fill = |bitw| match bitw {
             32 | 64 => RegCnstrFill::Zeroed,
             _ => RegCnstrFill::Undefined,
         };
@@ -5137,7 +5139,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Undefined,
-                    out_fill,
+                    out_fill: out_fill(bitw),
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
@@ -5147,29 +5149,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 x => todo!("{x}"),
             });
         } else {
-            let [lhsr, rhsr] = ra.alloc(
-                self,
+            self.i_binop(
+                ra,
+                b,
                 iidx,
-                [
-                    RegCnstr::InputOutput {
-                        in_iidx: *lhs,
-                        in_fill: RegCnstrFill::Undefined,
-                        out_fill,
-                        regs: &NORMAL_GP_REGS,
-                    },
-                    RegCnstr::Input {
-                        in_iidx: *rhs,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    },
-                ],
+                *lhs,
+                *rhs,
+                out_fill,
+                |bitw, lhsr, rhsr| match bitw {
+                    1..=32 => IcedInst::with2(Code::Xor_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                    64 => IcedInst::with2(Code::Xor_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
+                    x => todo!("{x}"),
+                },
             )?;
-            self.asm.push_inst(match bitw {
-                1..=32 => IcedInst::with2(Code::Xor_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-                64 => IcedInst::with2(Code::Xor_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-                x => todo!("{x}"),
-            });
         }
 
         Ok(())
