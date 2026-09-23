@@ -5143,7 +5143,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     clobber: false,
                 },
                 RegCnstr::Output {
-                    out_fill: RegCnstrFill::Signed,
+                    out_fill: RegCnstrFill::Zeroed,
                     regs: &[Reg::RDX],
                     can_be_same_as_input: false,
                 },
