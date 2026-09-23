@@ -4714,13 +4714,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *rhs,
                     in_fill,
-                    out_fill: RegCnstrFill::Signed,
+                    out_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
 
-            self.asm
-                .push_inst(IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64()));
+            match bitw {
+                64 => self
+                    .asm
+                    .push_inst(IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64())),
+                32 => self
+                    .asm
+                    .push_inst(IcedInst::with1(Code::Neg_rm32, rhsr.to_reg32())),
+                x => todo!("{x}"),
+            }
         } else if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
             let [lhsr] = ra.alloc(
                 self,
@@ -4728,13 +4735,22 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill,
-                    out_fill: RegCnstrFill::Signed,
+                    out_fill: RegCnstrFill::Zeroed,
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
 
-            self.asm
-                .push_inst(IcedInst::with2(Code::Sub_rm64_imm32, lhsr.to_reg64(), imm));
+            match bitw {
+                64 => {
+                    self.asm
+                        .push_inst(IcedInst::with2(Code::Sub_rm64_imm32, lhsr.to_reg64(), imm))
+                }
+                32 => {
+                    self.asm
+                        .push_inst(IcedInst::with2(Code::Sub_rm32_imm32, lhsr.to_reg32(), imm))
+                }
+                x => todo!("{x}"),
+            }
         } else {
             let [lhsr, rhsr] = ra.alloc(
                 self,
@@ -4743,7 +4759,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
                         in_fill: in_fill.clone(),
-                        out_fill: RegCnstrFill::Signed,
+                        out_fill: RegCnstrFill::Zeroed,
                         regs: &NORMAL_GP_REGS,
                     },
                     RegCnstr::Input {
@@ -4755,11 +4771,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 ],
             )?;
 
-            self.asm.push_inst(IcedInst::with2(
-                Code::Sub_rm64_r64,
-                lhsr.to_reg64(),
-                rhsr.to_reg64(),
-            ));
+            match bitw {
+                64 => self.asm.push_inst(IcedInst::with2(
+                    Code::Sub_rm64_r64,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                )),
+                32 => self.asm.push_inst(IcedInst::with2(
+                    Code::Sub_rm32_r32,
+                    lhsr.to_reg32(),
+                    rhsr.to_reg32(),
+                )),
+                x => todo!("{x}"),
+            }
         }
         Ok(())
     }
@@ -11034,7 +11058,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.64.x, r.64.y
+              sub r.32.x, r.32.y
               ...
             "],
         );
@@ -11049,7 +11073,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %1, %0
-              neg r.64._
+              neg r.32._
               ...
             "],
         );
@@ -11064,7 +11088,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.64.x, 0x20
+              sub r.32.x, 0x20
               ...
             "],
         );
@@ -11079,7 +11103,7 @@ mod test {
             &["
               ...
               ; %2: i32 = sub %0, %1
-              sub r.64.x, 0xFFFFFFFFFFFFFFFF
+              sub r.32.x, 0xFFFFFFFF
               ...
             "],
         );
