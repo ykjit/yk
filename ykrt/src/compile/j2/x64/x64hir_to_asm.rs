@@ -560,6 +560,27 @@ impl<'a> X64HirToAsm<'a> {
                 Ty::Float => IcedInst::with2(float_code, lhsr.to_xmm(), lhsr.to_xmm()),
                 _ => panic!(),
             });
+        } else if !ra.is_used(rhs)
+            && self.try_load_to_mem_op(b, iidx, rhs).is_some()
+            && let Inst::Load(Load { ptr, .. }) = b.inst(rhs)
+        {
+            let (memop, lhsr, _) = self.alloc_mem_op_with_reg(
+                ra,
+                b,
+                iidx,
+                *ptr,
+                RegCnstr::InputOutput {
+                    in_iidx: lhs,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                },
+            )?;
+            self.asm.push_inst(match self.m.ty(tyidx) {
+                Ty::Double => IcedInst::with2(double_code, lhsr.to_xmm(), memop),
+                Ty::Float => IcedInst::with2(float_code, lhsr.to_xmm(), memop),
+                _ => unreachable!(),
+            });
         } else {
             let [lhsr, rhsr] = ra.alloc(
                 self,
@@ -6992,6 +7013,33 @@ mod test {
               popcnt r.64._, r.64.x
               ; term [%1]
             "],
+        );
+    }
+
+    #[test]
+    fn cg_fop() {
+        // Since i_fop covers multiple FP operations, testing one of them here is enough to get us
+        // coverage of multiple operations.
+
+        // Fold otherwise unused loads
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: ptr = arg [reg]
+              %2: double = load %1
+              %3: double = fadd %0, %2
+              term [%3, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: double = arg [Reg("fp.128.x", Undefined)]
+              ; %1: ptr = arg [Reg("r.64.y", Undefined)]
+              ; %2: double = load %1
+              ; %3: double = fadd %0, %2
+              addsd fp.128.x, [r.64.y]
+              ; term [%3, %1]
+              ...
+            "#],
         );
     }
 
