@@ -793,9 +793,24 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     fn p_operand(&mut self, op: &Operand) -> Result<hir::InstIdx, CompilationError> {
         match op {
             Operand::Const(cidx) => {
-                let c = self.am.const_(*cidx).constval(self.am);
-                let bytes = c.bytes();
-                match self.am.type_(c.tyidx()) {
+                // LLVM allows any bit pattern to be substituted for poison (using it is undefined
+                // behaviour), so we arbitrarily pick `0xdeadbeef` repeated.
+                let (tyidx, bytes) = match self.am.const_(*cidx) {
+                    Const::Poison(tyidx) => {
+                        let bytes = 0xdeadbeef_u32
+                            .to_ne_bytes()
+                            .into_iter()
+                            .cycle()
+                            .take(usize::try_from(self.am.type_(*tyidx).bytew()).unwrap())
+                            .collect::<Vec<_>>();
+                        (*tyidx, bytes)
+                    }
+                    c => {
+                        let c = c.constval(self.am);
+                        (c.tyidx(), c.bytes().to_vec())
+                    }
+                };
+                match self.am.type_(tyidx) {
                     Ty::Integer(x) => {
                         // FIXME: It would be better if the AOT IR had converted these integers in advance
                         // rather than doing this dance here.
