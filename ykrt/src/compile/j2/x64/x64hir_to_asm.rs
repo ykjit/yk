@@ -1202,12 +1202,23 @@ impl<'a> X64HirToAsm<'a> {
         // %88: i64 = add %_, %87
         // store %88, %44
         // ```
+        //
+        // Because add is commutative, we can use this optimisation even if the storeable pointer
+        // is on the RHS (which is what the `find_map` horror below does).
         if let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
-            && let Inst::Load(Load {
-                ptr: load_ptr,
-                is_volatile: false,
-                ..
-            }) = b.inst(*lhs)
+            && let Some((lhs, rhs, load_ptr)) =
+                [(lhs, rhs), (rhs, lhs)].into_iter().find_map(|(lhs, rhs)| {
+                    let Inst::Load(Load {
+                        ptr,
+                        is_volatile: false,
+                        ..
+                    }) = b.inst(*lhs)
+                    else {
+                        return None;
+                    };
+                    (self.flatten_ptradd_chain(b, *ptr) == self.flatten_ptradd_chain(b, addr))
+                        .then_some((lhs, rhs, ptr))
+                })
         {
             let (ptr, off) = self.flatten_ptradd_chain(b, addr);
             let (load_ptr, load_off) = self.flatten_ptradd_chain(b, *load_ptr);
@@ -11145,6 +11156,31 @@ mod test {
               ; %3: i64 = add %2, %1
               ; store %3, %0
               add [r.64.x], r.64.y
+              ; term [%0, %1]
+            "#],
+        );
+
+        // Since add is commutative we can use
+        codegen_and_test(
+            r#"
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i64 = load %0
+              %3: i64 = load %1
+              %4: i64 = add %3, %2
+              store %4, %0
+              term [%0, %1]
+            "#,
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: ptr = arg [Reg("r.64.y", Undefined)]
+              ; %2: i64 = load %0
+              ; %3: i64 = load %1
+              mov r.64.z, [r.64.y]
+              ; %4: i64 = add %3, %2
+              ; store %4, %0
+              add [r.64.x], r.64.z
               ; term [%0, %1]
             "#],
         );
