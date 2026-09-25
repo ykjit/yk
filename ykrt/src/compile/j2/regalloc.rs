@@ -631,6 +631,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         self.stack_off
     }
 
+    /// Force the value `iidx` to be marked as used at `cur_iidx`. Must only be used for testing purposes.
+    #[cfg(test)]
+    pub(super) fn blackbox(&mut self, _cur_iidx: InstIdx, iidx: InstIdx) {
+        self.is_used.set(iidx.to_raw_index(), true);
+    }
+
     /// Has the instruction `iidx` been used thus far?
     ///
     /// Note: being used in a guard's entry_vars counts as "being used".
@@ -638,10 +644,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         self.is_used[iidx.to_raw_index()]
     }
 
-    /// Force the value `iidx` to be marked as used at `cur_iidx`. Must only be used for testing purposes.
-    #[cfg(test)]
-    pub(super) fn blackbox(&mut self, _cur_iidx: InstIdx, iidx: InstIdx) {
-        self.is_used.set(iidx.to_raw_index(), true);
+    /// Is the value for `iidx` in one or more registers?
+    ///
+    /// Conceptually this is a faster version of `Self::iter_reg_for(iidx).count() > 0`.
+    pub(super) fn is_in_reg(&self, iidx: InstIdx) -> bool {
+        self.rstates
+            .iter()
+            .any(move |(_, rstate)| rstate.iidxs.contains(&iidx))
     }
 
     /// Return an iterator which will produce all the registers in which `iidx` is contained.
