@@ -345,7 +345,16 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                                 let tmp_stack_off = be.align_spill(self.stack_off, bitw);
                                 self.stack_off = tmp_stack_off;
                                 self.istates[*iidx] = IState::Stack(tmp_stack_off);
-                                moves.push((bitw, tmp_stack_off, *to_stack_off));
+                                if let Some(VarLoc::Reg(reg, fill)) = term_vlocs
+                                    .iter()
+                                    .find(|vloc| matches!(vloc, VarLoc::Reg(_, _)))
+                                {
+                                    // The value we need to spill will be in a register so we have
+                                    // no need to do a full move: we can spill directly.
+                                    be.spill(*reg, *fill, *to_stack_off, bitw)?;
+                                } else {
+                                    moves.push((bitw, tmp_stack_off, *to_stack_off));
+                                }
                             }
                         }
                     }
