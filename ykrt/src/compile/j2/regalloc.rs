@@ -70,10 +70,6 @@ use std::{
 use test_stubs::test_stubs;
 use vob::Vob;
 
-/// How many term variables should we keep alive in registers instead of encoding as stack-to-stack
-/// moves?
-const MAX_TERM_MOVES_TO_REGS: usize = 3;
-
 pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
     m: &'a Mod<AB::Reg>,
     b: &'a Block,
@@ -305,12 +301,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         let mut moves = Vec::new();
-        // Since stack-to-stack spills are expensive, we try to keep at least some spills as
-        // register-to-stack spills. There is no perfect, fast, heuristic here: as a tolerable
-        // heuristic we use the last `MAX_TERM_MOVES_TO_REGS` term variables (hence the `rev` in
-        // the `for` loop below) on the basis that they are most likely to naturally be available
-        // in registers anyway.
-        let mut direct_spills: SmallVec<[_; MAX_TERM_MOVES_TO_REGS]> = SmallVec::new();
+        // Where a value could plausibly be in a register, we give it a chance of being a
+        // register-to-stack spill (rather than guaranteeing it will be stack-to-stack).
+        let mut direct_spills = Vec::new();
         for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()).rev() {
             if let Inst::Const(_) = self.b.inst(*iidx) {
                 // We handled these above.
@@ -339,23 +332,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         }
 
                         if self.istates[*iidx] == IState::None {
-                            if direct_spills.len() < MAX_TERM_MOVES_TO_REGS {
-                                direct_spills.push((*iidx, bitw, *to_stack_off));
-                            } else {
-                                let tmp_stack_off = be.align_spill(self.stack_off, bitw);
-                                self.stack_off = tmp_stack_off;
-                                self.istates[*iidx] = IState::Stack(tmp_stack_off);
-                                if let Some(VarLoc::Reg(reg, fill)) = term_vlocs
-                                    .iter()
-                                    .find(|vloc| matches!(vloc, VarLoc::Reg(_, _)))
-                                {
-                                    // The value we need to spill will be in a register so we have
-                                    // no need to do a full move: we can spill directly.
-                                    be.spill(*reg, *fill, *to_stack_off, bitw)?;
-                                } else {
-                                    moves.push((bitw, tmp_stack_off, *to_stack_off));
-                                }
-                            }
+                            direct_spills.push((*iidx, bitw, *to_stack_off));
                         }
                     }
                     VarLoc::StackOff(stack_off) => {
@@ -382,20 +359,35 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
+        // For as long as we have spare registers, try using them for direct spills: if/when we run
+        // out we'll make them normal `move`s.
         for (iidx, bitw, stack_off) in direct_spills {
-            let reg = self
-                .iter_reg_for(iidx)
-                .next()
-                .or_else(|| {
-                    be.iter_possible_regs(b, iidx)
-                        .find(|reg| *reg != find_tmp_reg() && self.rstates.iidxs(*reg).is_empty())
-                })
-                .unwrap();
-            if self.rstates.iidxs(reg).is_empty() {
-                self.rstates
-                    .set_fill_iidxs(reg, RegFill::Undefined, smallvec![iidx]);
+            let reg = self.iter_reg_for(iidx).next().or_else(|| {
+                be.iter_possible_regs(b, iidx)
+                    .find(|reg| *reg != find_tmp_reg() && self.rstates.iidxs(*reg).is_empty())
+            });
+            if let Some(reg) = reg {
+                if self.rstates.iidxs(reg).is_empty() {
+                    self.rstates
+                        .set_fill_iidxs(reg, RegFill::Undefined, smallvec![iidx]);
+                }
+                be.spill(reg, self.rstates.fill(reg), stack_off, bitw)?;
+            } else {
+                // We've run out of registers so we need to do a normal `move`. That means that we
+                // might not yet have a spill location from the preceding `for` loop: if so we'll
+                // need to create one now.
+                let tmp_stack_off = match self.istates[iidx] {
+                    IState::Stack(off) => off,
+                    IState::None => {
+                        let off = be.align_spill(self.stack_off, bitw);
+                        self.stack_off = off;
+                        self.istates[iidx] = IState::Stack(off);
+                        off
+                    }
+                    IState::StackOff(_) => unreachable!(),
+                };
+                moves.push((bitw, tmp_stack_off, stack_off));
             }
-            be.spill(reg, self.rstates.fill(reg), stack_off, bitw)?;
         }
 
         moves.sort_unstable_by_key(|x| x.1);
@@ -639,6 +631,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         self.stack_off
     }
 
+    /// Force the value `iidx` to be marked as used at `cur_iidx`. Must only be used for testing purposes.
+    #[cfg(test)]
+    pub(super) fn blackbox(&mut self, _cur_iidx: InstIdx, iidx: InstIdx) {
+        self.is_used.set(iidx.to_raw_index(), true);
+    }
+
     /// Has the instruction `iidx` been used thus far?
     ///
     /// Note: being used in a guard's entry_vars counts as "being used".
@@ -646,10 +644,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         self.is_used[iidx.to_raw_index()]
     }
 
-    /// Force the value `iidx` to be marked as used at `cur_iidx`. Must only be used for testing purposes.
-    #[cfg(test)]
-    pub(super) fn blackbox(&mut self, _cur_iidx: InstIdx, iidx: InstIdx) {
-        self.is_used.set(iidx.to_raw_index(), true);
+    /// Is the value for `iidx` in one or more registers?
+    ///
+    /// Conceptually this is a faster version of `Self::iter_reg_for(iidx).count() > 0`.
+    pub(super) fn is_in_reg(&self, iidx: InstIdx) -> bool {
+        self.rstates
+            .iter()
+            .any(move |(_, rstate)| rstate.iidxs.contains(&iidx))
     }
 
     /// Return an iterator which will produce all the registers in which `iidx` is contained.
@@ -3174,6 +3175,35 @@ pub(crate) mod test {
           spill GPR2 Undefined stack_off=2 bitw=8
           spill GPR3 Undefined stack_off=1 bitw=8
         "],
+        );
+    }
+
+    #[test]
+    fn repeated_term_spill_uses_one_temporary_slot() {
+        build_and_test(
+            r#"
+          %0: i8 = arg [stack (80)]
+          %1: i8 = arg [stack (88)]
+          %2: i8 = arg [stack (96)]
+          %3: i8 = arg [stack (104)]
+          %4: i8 = arg [stack (112)]
+          %5: i8 = add %0, %0
+          %6: i8 = add %1, %1
+          %7: i8 = add %2, %2
+          %8: i8 = add %3, %3
+          term [%8, %8, %5, %6, %7]
+        "#,
+            |s| s.starts_with("move_stack_val"),
+            &[
+                "
+          move_stack_val bitw=8 src_stack_off=8 dst_stack_off=80 tmp_reg=GPR0
+          move_stack_val bitw=8 src_stack_off=8 dst_stack_off=88 tmp_reg=GPR0
+        ",
+                "
+          move_stack_val bitw=8 src_stack_off=8 dst_stack_off=88 tmp_reg=GPR0
+          move_stack_val bitw=8 src_stack_off=8 dst_stack_off=80 tmp_reg=GPR0
+        ",
+            ],
         );
     }
 }

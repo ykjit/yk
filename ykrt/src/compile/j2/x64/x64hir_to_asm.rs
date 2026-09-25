@@ -198,21 +198,24 @@ impl<'a> X64HirToAsm<'a> {
 
     /// If, while processing `cur_iidx`, the operand at `op_iidx` is:
     ///
-    ///   1. A `Load` instruction (possibly indirectly reachable by `PtrAdd`s),
-    ///   2. and that `Load` cannot be effected by other operations,
+    ///   1. Not in a register,
+    ///   2. A `Load` instruction (possibly indirectly reachable by `PtrAdd`s),
+    ///   3. and that `Load` cannot be effected by other operations,
     ///
     /// then return the [InstIdx] of the `Load` plus its (x64-friendly) displacement.
     fn try_load_to_mem_op(
         &self,
+        ra: &mut RegAlloc<Self>,
         b: &Block,
         cur_iidx: InstIdx,
         op_iidx: InstIdx,
     ) -> Option<(InstIdx, i64)> {
-        if let Inst::Load(Load {
-            ptr,
-            is_volatile: false,
-            ..
-        }) = b.inst(op_iidx)
+        if !ra.is_in_reg(op_iidx)
+            && let Inst::Load(Load {
+                ptr,
+                is_volatile: false,
+                ..
+            }) = b.inst(op_iidx)
         {
             assert!(op_iidx < cur_iidx);
             if b.insts_iter(op_iidx.checked_add_scalar(1).unwrap()..cur_iidx)
@@ -353,8 +356,7 @@ impl<'a> X64HirToAsm<'a> {
         H: Fn(u32, Reg, MemoryOperand) -> Result<IcedInst, iced_x86::IcedError>,
     {
         let bitw = b.inst_bitw(self.m, lhs);
-        if !ra.is_used(rhs)
-            && self.try_load_to_mem_op(b, iidx, rhs).is_some()
+        if self.try_load_to_mem_op(ra, b, iidx, rhs).is_some()
             && let Inst::Load(Load { ptr, .. }) = b.inst(rhs)
         {
             let (memop, lhsr, _) = self.alloc_mem_op_with_reg(
@@ -624,8 +626,7 @@ impl<'a> X64HirToAsm<'a> {
                 Ty::Float => IcedInst::with2(float_code, lhsr.to_xmm(), lhsr.to_xmm()),
                 _ => panic!(),
             });
-        } else if !ra.is_used(rhs)
-            && self.try_load_to_mem_op(b, iidx, rhs).is_some()
+        } else if self.try_load_to_mem_op(ra, b, iidx, rhs).is_some()
             && let Inst::Load(Load { ptr, .. }) = b.inst(rhs)
         {
             let (memop, lhsr, _) = self.alloc_mem_op_with_reg(
@@ -821,14 +822,14 @@ impl<'a> X64HirToAsm<'a> {
                 IPred::Sle => Code::Jle_rel32_64,
             }
         };
-        if imm == Some(0)
+        if !ra.is_in_reg(*lhs)
+            && imm == Some(0)
             && matches!(pred, IPred::Eq | IPred::Ne)
             && let Inst::And(And {
                 lhs: and_lhs,
                 rhs: and_rhs,
                 ..
             }) = b.inst(*lhs)
-            && !ra.is_used(*lhs)
             && let Some(and_rhs) = self.zero_ext_op_for_imm32(b, bitw, *and_rhs)
         {
             let [and_lhsr, _] = ra.alloc(
@@ -854,7 +855,7 @@ impl<'a> X64HirToAsm<'a> {
             });
             Ok(label)
         } else if let Some(imm) = imm {
-            let rmop = if let Some((load_iidx, off)) = self.try_load_to_mem_op(b, iidx, *lhs) {
+            let rmop = if let Some((load_iidx, off)) = self.try_load_to_mem_op(ra, b, iidx, *lhs) {
                 let [lhsr, _] = ra.alloc(
                     self,
                     iidx,
@@ -893,7 +894,7 @@ impl<'a> X64HirToAsm<'a> {
             Ok(label)
         } else {
             let (rmop, rhsr) =
-                if let Some((load_iidx, off)) = self.try_load_to_mem_op(b, iidx, *lhs) {
+                if let Some((load_iidx, off)) = self.try_load_to_mem_op(ra, b, iidx, *lhs) {
                     let [lhsr, rhsr, _] = ra.alloc(
                         self,
                         iidx,
@@ -1204,7 +1205,8 @@ impl<'a> X64HirToAsm<'a> {
         //
         // Because add is commutative, we can use this optimisation even if the storeable pointer
         // is on the RHS (which is what the `find_map` horror below does).
-        if let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
+        if !ra.is_in_reg(*val)
+            && let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
             && let Some((lhs, rhs, load_ptr)) =
                 [(lhs, rhs), (rhs, lhs)].into_iter().find_map(|(lhs, rhs)| {
                     let Inst::Load(Load {
@@ -1273,7 +1275,8 @@ impl<'a> X64HirToAsm<'a> {
         }
 
         // Try to optimise load-sub-store sequences.
-        if let Inst::Sub(Sub { lhs, rhs, .. }) = b.inst(*val)
+        if !ra.is_in_reg(*val)
+            && let Inst::Sub(Sub { lhs, rhs, .. }) = b.inst(*val)
             && let Inst::Load(Load {
                 ptr: load_ptr,
                 is_volatile: false,
@@ -5749,37 +5752,78 @@ mod test {
             panic!()
         };
         let be = X64HirToAsm::new(&m, CodeBufInProgress::new_testing(), false);
+        let mut ra = RegAlloc::<X64HirToAsm>::new(&m, b, &[], 0);
 
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from_raw_index(3), InstIdx::from_raw_index(1)),
+            be.try_load_to_mem_op(
+                &mut ra,
+                b,
+                InstIdx::from_raw_index(3),
+                InstIdx::from_raw_index(1)
+            ),
             Some((InstIdx::from_raw_index(0), 0))
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from_raw_index(5), InstIdx::from_raw_index(1)),
+            be.try_load_to_mem_op(
+                &mut ra,
+                b,
+                InstIdx::from_raw_index(5),
+                InstIdx::from_raw_index(1)
+            ),
             Some((InstIdx::from_raw_index(0), 0))
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from_raw_index(6), InstIdx::from_raw_index(4)),
+            be.try_load_to_mem_op(
+                &mut ra,
+                b,
+                InstIdx::from_raw_index(6),
+                InstIdx::from_raw_index(4)
+            ),
             Some((InstIdx::from_raw_index(0), 0))
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from_raw_index(8), InstIdx::from_raw_index(4)),
+            be.try_load_to_mem_op(
+                &mut ra,
+                b,
+                InstIdx::from_raw_index(8),
+                InstIdx::from_raw_index(4)
+            ),
             None
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from_raw_index(10), InstIdx::from_raw_index(4)),
+            be.try_load_to_mem_op(
+                &mut ra,
+                b,
+                InstIdx::from_raw_index(10),
+                InstIdx::from_raw_index(4)
+            ),
             None
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from_raw_index(10), InstIdx::from_raw_index(9)),
+            be.try_load_to_mem_op(
+                &mut ra,
+                b,
+                InstIdx::from_raw_index(10),
+                InstIdx::from_raw_index(9)
+            ),
             Some((InstIdx::from_raw_index(0), 0))
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from_raw_index(14), InstIdx::from_raw_index(9)),
+            be.try_load_to_mem_op(
+                &mut ra,
+                b,
+                InstIdx::from_raw_index(14),
+                InstIdx::from_raw_index(9)
+            ),
             None
         );
         assert_eq!(
-            be.try_load_to_mem_op(b, InstIdx::from_raw_index(14), InstIdx::from_raw_index(13)),
+            be.try_load_to_mem_op(
+                &mut ra,
+                b,
+                InstIdx::from_raw_index(14),
+                InstIdx::from_raw_index(13)
+            ),
             Some((InstIdx::from_raw_index(0), 0))
         );
     }
