@@ -2659,25 +2659,26 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 }
                 Ty::Func(_) => todo!(),
                 Ty::Int(_) | Ty::Ptr(_) => {
-                    if let Some(gp_off) = gp_args_iter.next() {
-                        match &gp_cnstrs[*gp_off] {
-                            RegCnstr::Clobber { .. } => (),
-                            _ => panic!(),
-                        }
-                        gp_cnstrs[*gp_off] = RegCnstr::Input {
-                            in_iidx: *arg,
-                            in_fill: RegCnstrFill::Zeroed,
-                            regs: GP_CLOBBER_TMPS[*gp_off],
-                            clobber: true,
-                        };
-                    } else {
+                    let in_fill = match arg_ty {
+                        Ty::Double | Ty::Float | Ty::Func(_) | Ty::Void => unreachable!(),
+                        Ty::Int(_) | Ty::Ptr(_) => RegCnstrFill::Zeroed,
+                    };
+                    let Some(gp_off) = gp_args_iter.next() else {
                         stack_cnstrs.push(RegCnstr::Input {
                             in_iidx: *arg,
-                            in_fill: RegCnstrFill::Zeroed,
+                            in_fill,
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         });
-                    }
+                        continue;
+                    };
+                    debug_assert_matches!(gp_cnstrs[*gp_off], RegCnstr::Clobber { .. });
+                    gp_cnstrs[*gp_off] = RegCnstr::Input {
+                        in_iidx: *arg,
+                        in_fill,
+                        regs: GP_CLOBBER_TMPS[*gp_off],
+                        clobber: true,
+                    };
                 }
                 Ty::Void => unreachable!(),
             }
@@ -2804,10 +2805,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         cnstrs.extend(stack_cnstrs);
         let tgt_idx = tgt_cnstr.map(|tgt_cnstr| {
             assert!(fn_addr.is_none());
-            match tgt_cnstr {
-                RegCnstr::Input { .. } | RegCnstr::InputOutput { .. } => (),
-                _ => panic!(),
-            }
+            assert_matches!(
+                tgt_cnstr,
+                RegCnstr::Input { .. } | RegCnstr::InputOutput { .. }
+            );
             cnstrs.push(tgt_cnstr);
             cnstrs.len().checked_sub(1).unwrap()
         });
