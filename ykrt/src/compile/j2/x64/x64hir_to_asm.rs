@@ -2796,12 +2796,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             );
         }
 
-        // Phase 3: allocate registers and generate code. Code is generated backwards, so the
-        // instructions below are pushed in reverse execution order:
-        //
-        //   sub rsp, N; <store stack args>; [mov eax, #fp]; call; add rsp, N
-        //
-        // Spills are RBP-relative, so moving RSP around the call is safe.
+        // Phase 3: allocate registers and generate code.
         let n_stack_args = stack_cnstrs.len();
         let stack_start = GP_CLOBBERS.len() + ALL_XMM_REGS.len();
         let mut cnstrs = Vec::from(gp_cnstrs);
