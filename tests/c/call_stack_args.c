@@ -18,8 +18,6 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-// Weighted so that a value in the wrong slot changes the result. With the
-// arguments used below: 1 + 4 + 9 + 16 + 25 + 36 + 49 + 64 = 204.
 __attribute__((yk_outline)) long f(long a, long b, long c, long d, long e,
                                    long f, long g, long h) {
   return a * 1 + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8;
