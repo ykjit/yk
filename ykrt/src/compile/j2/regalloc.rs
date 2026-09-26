@@ -688,21 +688,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         Ok(self.alloc_with_fills(be, iidx, cnstrs)?.map(|(reg, _)| reg))
     }
 
-    /// Like [RegAlloc::alloc], but for a number of constraints only known at run-time. The
-    /// returned [Vec] has the same length as `cnstrs`.
-    pub(super) fn alloc_vec(
-        &mut self,
-        be: &mut AB,
-        iidx: InstIdx,
-        cnstrs: Vec<RegCnstr<AB::Reg>>,
-    ) -> Result<Vec<AB::Reg>, CompilationError> {
-        Ok(self
-            .alloc_with_fills_vec(be, iidx, cnstrs)?
-            .into_iter()
-            .map(|(reg, _)| reg)
-            .collect())
-    }
-
     /// Allocate registers and the required output [RegFill]s for the instruction at position
     /// `iidx`. Note: This function may leave CPU flags in an undefined state.
     ///

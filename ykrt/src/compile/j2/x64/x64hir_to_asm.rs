@@ -2811,7 +2811,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             cnstrs.push(tgt_cnstr);
             cnstrs.len().checked_sub(1).unwrap()
         });
-        let regs = ra.alloc_vec(self, iidx, cnstrs)?;
+        let regs = ra
+            .alloc_with_fills_vec(self, iidx, cnstrs)?
+            .into_iter()
+            .map(|(reg, _)| reg)
+            .collect::<Vec<_>>();
 
         let stack_sz = i32::try_from(n_stack_args.checked_mul(8).unwrap())
             .unwrap()
