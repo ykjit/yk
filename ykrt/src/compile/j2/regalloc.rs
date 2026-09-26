@@ -64,7 +64,7 @@ use crate::compile::{
 use index_type::{IndexType, typed_vec, vec::TypedVec};
 use smallvec::{SmallVec, smallvec};
 use std::{
-    array, assert_matches,
+    assert_matches,
     fmt::{Debug, Display, Formatter},
 };
 use test_stubs::test_stubs;
@@ -707,8 +707,22 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         &mut self,
         be: &mut AB,
         iidx: InstIdx,
-        mut cnstrs: [RegCnstr<AB::Reg>; N],
+        cnstrs: [RegCnstr<AB::Reg>; N],
     ) -> Result<[(AB::Reg, RegFill); N], CompilationError> {
+        Ok(self
+            .alloc_with_fills_vec(be, iidx, Vec::from(cnstrs))?
+            .try_into()
+            .unwrap())
+    }
+
+    /// Like [RegAlloc::alloc_with_fills], but for a number of constraints only known at run-time.
+    /// The returned [Vec] has the same length as `cnstrs`.
+    pub(super) fn alloc_with_fills_vec(
+        &mut self,
+        be: &mut AB,
+        iidx: InstIdx,
+        mut cnstrs: Vec<RegCnstr<AB::Reg>>,
+    ) -> Result<Vec<(AB::Reg, RegFill)>, CompilationError> {
         assert!(!matches!(self.b.inst(iidx), Inst::Const(_)));
         // Let us call `self.rstate` rstate *n+1:in* (i.e. the input for instruction *iidx+1*). What
         // we need to do here is multi-fold:
@@ -764,7 +778,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // 2.1: Update for the state immediately after the instruction has produced outputs and
         // work out what fill this constraint should have.
         let mut output_reg = None; // Needed when outputs can end up in multiple registers.
-        let mut rtn_fills = [RegFill::Undefined; N];
+        let mut rtn_fills = vec![RegFill::Undefined; cnstrs.len()];
         for (i, (reg, cnstr)) in allocs.iter().cloned().zip(cnstrs.iter_mut()).enumerate() {
             match cnstr {
                 RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } => {
@@ -1035,7 +1049,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
-        Ok(array::from_fn(|i| (allocs[i], rtn_fills[i])))
+        Ok(allocs.into_iter().zip(rtn_fills).collect())
     }
 
     /// For [Inst::Const] instructions only, allocate registers. This function should only be
@@ -1084,17 +1098,17 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     ///
     /// Note: `cnstrs` must contain at most one `Output`/`InputOutput`. Violating this will lead to
     /// undefined behaviour.
-    fn find_regs_for_constraints<const N: usize>(
+    fn find_regs_for_constraints(
         &self,
         be: &AB,
         iidx: InstIdx,
-        cnstrs: &[RegCnstr<AB::Reg>; N],
-    ) -> Result<[AB::Reg; N], CompilationError> {
+        cnstrs: &[RegCnstr<AB::Reg>],
+    ) -> Result<Vec<AB::Reg>, CompilationError> {
         // This is a somewhat simple minded approach to allocating registers. In particular, it
         // misses opportunities to merge together `Input`s into the same register (this allows us
         // to avoid worrying about things like incompatible fills).
 
-        let mut allocs = [None; N];
+        let mut allocs = vec![None; cnstrs.len()];
 
         // If the (sole!) output can be the same as an input, we need to a different dance at some
         // points below, so work out if this is the case now.
@@ -1136,7 +1150,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         // If values are already allocated to a register, and we aren't going to use that register
         // for anything else, keep the register as-is.
-        let find_alloc = |allocs: &mut [Option<AB::Reg>; N], i, regs: &[AB::Reg], find_iidx| {
+        let find_alloc = |allocs: &mut [Option<AB::Reg>], i, regs: &[AB::Reg], find_iidx| {
             if let Some(reg) = self
                 .iter_reg_for(find_iidx)
                 .find(|reg| regs.contains(reg) && !allocs.contains(&Some(*reg)))
@@ -1274,7 +1288,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
-        Ok(allocs.map(|x| x.unwrap()))
+        Ok(allocs.into_iter().map(|x| x.unwrap()).collect())
     }
 
     /// Given a new [RStates], produce a [RegActions] which is a diff telling us how to get from

@@ -56,7 +56,6 @@ use crate::{
     mt::TraceId,
     varlocs,
 };
-use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
 use index_type::{IndexType, vec::TypedVec};
 use smallvec::SmallVec;
@@ -2640,7 +2639,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         // fp_cnstrs[0] being `xmm0` for return values.
         let mut fp_cnstrs: [_; 16] = ALL_XMM_REGS.map(|x| RegCnstr::Clobber { reg: x });
 
-        // Phase 1: Deal with inputs.
+        // Phase 1: Deal with inputs. Integer/pointer arguments past the 6th are passed on the
+        // stack: the i'th entry of `stack_cnstrs` is stored at `[rsp + 8 * i]`.
+        let mut stack_cnstrs = Vec::new();
         let mut fp_args_off = 0;
         let mut gp_args_iter = GP_ARG_OFFS.iter();
         for arg in args {
@@ -2662,7 +2663,15 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         Ty::Double | Ty::Float | Ty::Func(_) | Ty::Void => unreachable!(),
                         Ty::Int(_) | Ty::Ptr(_) => RegCnstrFill::Zeroed,
                     };
-                    let gp_off = gp_args_iter.next().unwrap();
+                    let Some(gp_off) = gp_args_iter.next() else {
+                        stack_cnstrs.push(RegCnstr::Input {
+                            in_iidx: *arg,
+                            in_fill,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        });
+                        continue;
+                    };
                     debug_assert_matches!(gp_cnstrs[*gp_off], RegCnstr::Clobber { .. });
                     gp_cnstrs[*gp_off] = RegCnstr::Input {
                         in_iidx: *arg,
@@ -2789,33 +2798,43 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
 
         // Phase 3: allocate registers and generate code.
+        let n_stack_args = stack_cnstrs.len();
+        let stack_start = GP_CLOBBERS.len() + ALL_XMM_REGS.len();
+        let mut cnstrs = Vec::from(gp_cnstrs);
+        cnstrs.extend(fp_cnstrs);
+        cnstrs.extend(stack_cnstrs);
+        let tgt_idx = tgt_cnstr.map(|tgt_cnstr| {
+            assert!(fn_addr.is_none());
+            assert_matches!(
+                tgt_cnstr,
+                RegCnstr::Input { .. } | RegCnstr::InputOutput { .. }
+            );
+            cnstrs.push(tgt_cnstr);
+            cnstrs.len().checked_sub(1).unwrap()
+        });
+        let regs = ra
+            .alloc_with_fills_vec(self, iidx, cnstrs)?
+            .into_iter()
+            .map(|(reg, _)| reg)
+            .collect::<Vec<_>>();
+
+        let stack_sz = i32::try_from(n_stack_args.checked_mul(8).unwrap())
+            .unwrap()
+            .next_multiple_of(16);
+        if stack_sz != 0 {
+            self.asm.push_inst(IcedInst::with2(
+                Code::Add_rm64_imm32,
+                IcedReg::RSP,
+                stack_sz,
+            ));
+        }
         if let Some(fn_addr) = fn_addr {
-            assert!(tgt_cnstr.is_none());
-            let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len()] =
-                ra.alloc(self, iidx, concat_arrays!(gp_cnstrs, fp_cnstrs))?;
             self.asm.push_reloc(
                 IcedInst::with_branch(Code::Call_rel32_64, 0),
                 RelocKind::NearCallWithAddr(fn_addr),
             );
         } else {
-            assert!(fn_addr.is_none());
-            let callr = if let Some(tgt_cnstr) = tgt_cnstr {
-                assert_matches!(
-                    tgt_cnstr,
-                    RegCnstr::Input { .. } | RegCnstr::InputOutput { .. }
-                );
-                let [.., callr]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len() + 1] = ra.alloc(
-                    self,
-                    iidx,
-                    concat_arrays!(gp_cnstrs, fp_cnstrs, [tgt_cnstr]),
-                )?;
-                callr
-            } else {
-                assert!(tgt_cnstr.is_none());
-                let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len()] =
-                    ra.alloc(self, iidx, concat_arrays!(gp_cnstrs, fp_cnstrs))?;
-                Reg::RAX
-            };
+            let callr = tgt_idx.map_or(Reg::RAX, |i| regs[i]);
             self.asm
                 .push_inst(IcedInst::with1(Code::Call_rm64, callr.to_reg64()));
         }
@@ -2824,6 +2843,23 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 Code::Mov_r32_imm32,
                 IcedReg::EAX,
                 u32::try_from(fp_args_off).unwrap(),
+            ));
+        }
+        for i in (0..n_stack_args).rev() {
+            self.asm.push_inst(IcedInst::with2(
+                Code::Mov_rm64_r64,
+                MemoryOperand::with_base_displ(
+                    IcedReg::RSP,
+                    i64::try_from(i.checked_mul(8).unwrap()).unwrap(),
+                ),
+                regs[stack_start.checked_add(i).unwrap()].to_reg64(),
+            ));
+        }
+        if stack_sz != 0 {
+            self.asm.push_inst(IcedInst::with2(
+                Code::Sub_rm64_imm32,
+                IcedReg::RSP,
+                stack_sz,
             ));
         }
         Ok(())
@@ -6859,6 +6895,28 @@ mod test {
               ; %3: double = fadd %0, %2
               addsd xmm15, xmm0
               ; term [%3, %1]
+            "#],
+        );
+
+        // Arguments beyond the 6 register ones are passed on the stack.
+        codegen_and_test(
+            r#"
+              extern f(i64, i64, i64, i64, i64, i64, i64, i64) -> i64
+
+              %0: i64 = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i64 = call f %1(%0, %0, %0, %0, %0, %0, %0, %0)
+              blackbox %2
+              term [%0, %1]
+            "#,
+            &[r#"
+              ...
+              sub rsp, 0x10
+              mov [rsp], r.64._
+              mov [rsp+8], r.64._
+              call rax
+              add rsp, 0x10
+              ...
             "#],
         );
     }
