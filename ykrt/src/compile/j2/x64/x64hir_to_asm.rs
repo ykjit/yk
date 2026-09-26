@@ -2813,8 +2813,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         });
         let regs = ra.alloc_vec(self, iidx, cnstrs)?;
 
-        // Each stack argument takes 8 bytes. The SysV ABI requires RSP to be 16-byte aligned at
-        // the call.
         let stack_sz = i32::try_from(n_stack_args.checked_mul(8).unwrap())
             .unwrap()
             .next_multiple_of(16);
