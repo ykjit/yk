@@ -2167,7 +2167,7 @@ impl ConstExpr {
             }
             UnevalConstExpr::Cast {
                 val,
-                kind: CastKind::IntToPtr,
+                kind: CastKind::IntToPtr | CastKind::PtrToInt,
                 ..
             } => {
                 let intc = m.const_(val);
@@ -2218,6 +2218,12 @@ impl Display for DisplayableConstExpr<'_> {
                 val,
             } => {
                 write!(f, "const_inttoptr({})", self.m.const_(val).display(self.m))
+            }
+            UnevalConstExpr::Cast {
+                kind: CastKind::PtrToInt,
+                val,
+            } => {
+                write!(f, "const_ptrtoint({})", self.m.const_(val).display(self.m))
             }
             _ => todo!(),
         }
