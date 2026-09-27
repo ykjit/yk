@@ -1,19 +1,27 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=aot
+//   env-var: YKD_LOG_IR=hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
+//     yk-tracing: start-tracing
+//     yk-tracing: stop-tracing
+//     --- Begin hir ---
+//     ; {
+//     ;   "trid": "{{trid}}",
+//     ;   "start": {
+//     ;     "kind": "ControlPoint"
+//     ;   },
+//     ;   "end": {
+//     ;     "kind": "Loop"
+//     ;   }
+//     ; }
 //     ...
-//     --- Begin aot ---
+//     --- End hir ---
+//     yk-execution: enter-jit-code {"trid": "{{trid}}"}
 //     ...
-//     func trace(...
-//       ...
-//       %{{a}}: i64 = add %{{b}}, -1i64...
-//       ...
-//     }
+//     yk-execution: deoptimise {"trid": "{{trid}}", "gidx": "0"}
 //     ...
-//     --- End aot ---
-//     yk-execution: enter-jit-code {"trid": "0"}
+//     yk-tracing: start-side-tracing
 //     ...
 
 // Check that compiling and running traces in parallel works.
