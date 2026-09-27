@@ -63,6 +63,13 @@ impl PassT for LoadStore {
                     // We currently only allow the same number of bytes to lead to load
                     // elimination. We could relax this to allow <= the number of known bits.
                     if inst_ty.bitw() == hv_ty.bitw() {
+                        if let Inst::BitCast(BitCast { val, .. }) = opt.inst(hv_iidx) {
+                            // Bitcasts are an easy case of type punning.
+                            let orig = opt.equiv_iidx(*val);
+                            if opt.ty(opt.inst(orig).tyidx(opt)) == inst_ty {
+                                return OptOutcome::Equiv(orig);
+                            }
+                        }
                         match (hv_ty, inst_ty) {
                             (x, y) if x == y => {
                                 // No type punning has occurred: the easy case!
@@ -377,6 +384,27 @@ mod test {
           %1: ptr = arg
           store %0, %1
           blackbox %0
+        ",
+        );
+    }
+
+    #[test]
+    fn bitcast_equiv() {
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: double = arg [reg]
+          %2: i64 = bitcast %1
+          store %2, %0
+          %4: double = load %0
+          blackbox %4
+        ",
+            "
+          %0: ptr = arg
+          %1: double = arg
+          %2: i64 = bitcast %1
+          store %2, %0
+          blackbox %1
         ",
         );
     }
