@@ -235,6 +235,26 @@ impl KnownBits {
                 self.knownbits_set(lhs, union.clone());
                 self.knownbits_set(rhs, union);
             }
+
+            if let Inst::And(And {
+                lhs: and_lhs,
+                rhs: and_rhs,
+                ..
+            }) = opt.inst(lhs).to_owned()
+                && let Some(ConstKind::Int(mask)) = opt.as_constkind(and_rhs)
+                && let Some(ConstKind::Int(x)) = opt.as_constkind(rhs)
+                && x.bitand(&mask.bitneg()).to_zero_ext_u8() == Some(0)
+                && let Some(bits) = self.as_knownbits(opt, and_lhs)
+            {
+                // `(x & c1) == c2` gives us more information about `x`'s known bits.
+                self.knownbits_set(
+                    and_lhs,
+                    bits.union(&KnownBitValue {
+                        ones: x,
+                        unknowns: mask.bitneg(),
+                    }),
+                );
+            }
         } else if expect
             && let Inst::ICmp(ICmp { pred, lhs, rhs, .. }) = opt.inst(cond).to_owned()
             && matches!(pred, IPred::Sgt | IPred::Sge)
@@ -922,6 +942,33 @@ mod test {
           %9: i32 = 4294967295
           blackbox %9
           ...
+        ",
+        );
+
+        // Guards and `and`.
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 15
+          %2: i8 = and %0, %1
+          %3: i8 = 5
+          %4: i1 = icmp eq %2, %3
+          guard true, %4, []
+          %6: i8 = 7
+          %7: i8 = and %0, %6
+          blackbox %7
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 15
+          %2: i8 = and %0, %1
+          %3: i8 = 5
+          %4: i1 = icmp eq %2, %3
+          %5: i8 = 5
+          guard true, %4, []
+          %7: i8 = 7
+          %8: i8 = 5
+          blackbox %8
         ",
         );
     }
