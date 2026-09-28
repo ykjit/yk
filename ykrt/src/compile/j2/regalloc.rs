@@ -1879,7 +1879,7 @@ struct RegActions<Reg: RegT> {
     /// An unordered set of instructions .
     spills: Vec<RegSpill>,
     /// Which registers will be clobbered at the end of this instruction?
-    clobbers: Vec<Reg>,
+    clobbers: SmallVec<[Reg; 1]>,
 }
 
 impl<Reg: RegT> RegActions<Reg> {
@@ -1889,7 +1889,7 @@ impl<Reg: RegT> RegActions<Reg> {
             fill_changes: Vec::new(),
             distinct_copies: Vec::new(),
             spills: Vec::new(),
-            clobbers: Vec::new(),
+            clobbers: SmallVec::new(),
         }
     }
 }
@@ -2793,7 +2793,7 @@ pub(crate) mod test {
                 },
             ],
             spills: Vec::new(),
-            clobbers: Vec::new(),
+            clobbers: SmallVec::new(),
         };
         ra.toposort_distinct_copies(&mut ractions).unwrap();
         assert_eq!(ractions.spills.len(), 1);
@@ -2835,7 +2835,7 @@ pub(crate) mod test {
                 },
             ],
             spills: Vec::new(),
-            clobbers: Vec::new(),
+            clobbers: SmallVec::new(),
         };
         ra.toposort_distinct_copies(&mut ractions).unwrap();
         assert_eq!(ractions.spills.len(), 1);
@@ -2884,7 +2884,7 @@ pub(crate) mod test {
                 },
             ],
             spills: Vec::new(),
-            clobbers: Vec::new(),
+            clobbers: SmallVec::new(),
         };
         ra.toposort_distinct_copies(&mut ractions).unwrap();
         assert_eq!(ractions.spills.len(), 0);
