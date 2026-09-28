@@ -595,6 +595,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // rather than a linear scan through all guards.
         let mut gbodies_map: FxHashMap<aot_ir::BBlockId, SmallVec<[CompiledGuardIdx; 5]>> =
             FxHashMap::default();
+        let mut deopt_vars = Vec::new();
         for gexit in gexits.into_iter() {
             let gextra = gexit.block.gextra(gexit.geidx);
 
@@ -651,7 +652,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             let mut stack_off = gexit.stack_off;
             let mut ra = RegAlloc::<AB>::new(self.m, &gblock, &gexit.exit_vlocs, stack_off);
             let mut deopt_frames = SmallVec::with_capacity(gextra.deopt_frames.len());
-            let mut deopt_vars = Vec::with_capacity(gextra.deopt_vars.len());
+            deopt_vars.clear();
             assert_eq!(gextra.deopt_vars.len(), gblock.term_vars().len());
             let mut deopt_term_iter = gextra.deopt_vars.iter().zip(gblock.term_vars().iter());
             for (frame_idx, frame) in gextra.deopt_frames.iter().enumerate() {
@@ -854,7 +855,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     patch_labels: smallvec![patch_label],
                     bid: gextra.bid,
                     deopt_frames,
-                    deopt_vars,
+                    deopt_vars: deopt_vars.clone(),
                     extra_stack_len,
                     switch: gextra.switch.clone(),
                 });
