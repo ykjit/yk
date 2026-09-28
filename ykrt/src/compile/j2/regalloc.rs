@@ -1007,10 +1007,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         for (_, cnstr) in allocs.iter().cloned().zip(cnstrs.iter()) {
             if let RegCnstr::KeepAlive { iidxs } = cnstr {
                 for ka_iidx in iidxs.iter() {
-                    let reg = self.iter_reg_for(*ka_iidx).nth(0);
-                    if reg.is_none()
-                        && let IState::None = self.istates[*ka_iidx]
+                    if let IState::None = self.istates[*ka_iidx]
                         && !matches!(self.b.inst(*ka_iidx), Inst::Const(_))
+                        && self.iter_reg_for(*ka_iidx).next().is_none()
                     {
                         let mut found = false;
                         for reg in be.iter_possible_regs(self.b, *ka_iidx) {
