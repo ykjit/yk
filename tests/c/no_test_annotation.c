@@ -11,7 +11,7 @@
 //     --- End aot ---
 //     --- Begin hir ---
 //     ...
-//     call %{{_}}() ; @__yk_opt_call_me
+//     call %{{_}}() ; @call_me
 //     ...
 //     --- End hir ---
 //     Can't JIT this!
