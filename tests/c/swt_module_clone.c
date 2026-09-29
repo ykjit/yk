@@ -7,9 +7,6 @@
 //     --- Begin aot ---
 //     ...
 //     #[yk_outline]
-//     func add(%arg0: i32, %arg1: i32) -> i32;
-//     ...
-//     #[yk_outline]
 //     func dec(%arg0: i32) -> i32;
 //     ...
 //     #[yk_outline]
