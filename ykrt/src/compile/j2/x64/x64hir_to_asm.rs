@@ -2029,36 +2029,56 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         exit_statepoint: &'static Statepoint,
         ret_val: Option<InstIdx>,
     ) -> Result<(), CompilationError> {
-        #[cfg(not(test))]
-        let csrs = {
-            let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-            let (_, prologue) = aot_smaps.get(exit_statepoint.smapidx);
-            &prologue.csrs
-        };
-
-        #[cfg(test)]
-        let csrs = {
-            assert_eq!(
-                exit_statepoint.smapidx,
-                crate::StackMapIdx::from_raw_index(0)
-            );
-            [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
-        };
-
         self.asm.push_inst(Ok(IcedInst::with(Code::Retnq)));
         self.asm
             .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RBP));
-        for (reg, _) in csrs.iter().rev() {
-            self.asm.push_inst(IcedInst::with1(
-                Code::Pop_r64,
-                Reg::from_dwarf_reg(*reg).to_reg64(),
+
+        #[cfg(test)]
+        {
+            let csrs = {
+                assert_eq!(
+                    exit_statepoint.smapidx,
+                    crate::StackMapIdx::from_raw_index(0)
+                );
+                [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
+            };
+            for (reg, _) in csrs.iter().rev() {
+                self.asm.push_inst(IcedInst::with1(
+                    Code::Pop_r64,
+                    Reg::from_dwarf_reg(*reg).to_reg64(),
+                ));
+            }
+
+            self.asm.push_inst(IcedInst::with2(
+                Code::Lea_r64_m,
+                IcedReg::RSP,
+                MemoryOperand::with_base_displ(
+                    IcedReg::RBP,
+                    -i64::try_from(csrs.len() * 8).unwrap(),
+                ),
             ));
         }
-        self.asm.push_inst(IcedInst::with2(
-            Code::Lea_r64_m,
-            IcedReg::RSP,
-            MemoryOperand::with_base_displ(IcedReg::RBP, -i64::try_from(csrs.len() * 8).unwrap()),
-        ));
+
+        #[cfg(not(test))]
+        {
+            let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+            let (_, prologue) = aot_smaps.get(exit_statepoint.smapidx);
+            for (reg, _) in prologue.csrs.iter().rev() {
+                self.asm.push_inst(IcedInst::with1(
+                    Code::Pop_r64,
+                    Reg::from_dwarf_reg(*reg).to_reg64(),
+                ));
+            }
+
+            self.asm.push_inst(IcedInst::with2(
+                Code::Lea_r64_m,
+                IcedReg::RSP,
+                MemoryOperand::with_base_displ(
+                    IcedReg::RBP,
+                    -i64::try_from(prologue.csrs.len() * 8).unwrap(),
+                ),
+            ));
+        }
 
         if ret_val.is_some() {
             // trace_returned clobbers RAX so if we have `return X`, we need to push/pop that
@@ -2071,6 +2091,26 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RAX));
         }
 
+        self.asm
+            .push_inst(IcedInst::with2(Code::Add_rm64_imm8, IcedReg::RSP, 48));
+        // Restore the callee saved registers: this order must match that in
+        // `__ykrt_control_point`.
+        for (reg, off) in [
+            (IcedReg::RBX, 32),
+            (IcedReg::R12, 24),
+            (IcedReg::R13, 16),
+            (IcedReg::R14, 8),
+            (IcedReg::R15, 0),
+        ] {
+            self.asm.push_inst(IcedInst::with2(
+                Code::Mov_r64_rm64,
+                reg,
+                MemoryOperand::with_base_displ(IcedReg::RSP, off),
+            ));
+        }
+
+        // We can use any caller-saved register except RAX and RDI here.
+        let tempr = Reg::R11;
         let callr = if let Some(ret_val) = ret_val {
             match b.inst_ty(self.m, ret_val) {
                 Ty::Double => todo!(),
@@ -2083,9 +2123,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         self,
                         iidx,
                         [
-                            RegCnstr::Temp {
-                                regs: &NORMAL_GP_REGS,
-                            },
+                            RegCnstr::Temp { regs: &[tempr] },
                             RegCnstr::Input {
                                 in_iidx: ret_val,
                                 in_fill: RegCnstrFill::Zeroed,
@@ -2099,13 +2137,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 Ty::Void => unreachable!(),
             }
         } else {
-            ra.alloc(
-                self,
-                iidx,
-                [RegCnstr::Temp {
-                    regs: &NORMAL_GP_REGS,
-                }],
-            )?[0]
+            ra.alloc(self, iidx, [RegCnstr::Temp { regs: &[tempr] }])?[0]
         };
         self.asm
             .push_inst(IcedInst::with1(Code::Call_rm64, callr.to_reg64()));
@@ -2115,6 +2147,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             // This cast is fine on x64, and this module will only be compiled on that platform.
             MTThread::trace_returned as *const () as i64,
         ));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Lea_r64_m,
+            IcedReg::RDI,
+            MemoryOperand::with_base(IcedReg::RSP),
+        ));
+        self.asm
+            .push_inst(IcedInst::with2(Code::Sub_rm64_imm8, IcedReg::RSP, 48));
         if ret_val.is_some() {
             self.asm
                 .push_inst(IcedInst::with1(Code::Push_r64, IcedReg::RAX));
@@ -6041,8 +6080,16 @@ mod test {
           ...
           push rax
           push rax
+          sub rsp, 0x30
+          lea rdi, [rsp]
           mov r.64.call, {{_}}
           call r.64.call
+          mov r15, [rsp]
+          mov r14, [rsp+8]
+          mov r13, [rsp+0x10]
+          mov r12, [rsp+0x18]
+          mov rbx, [rsp+0x20]
+          add rsp, 0x30
           pop rax
           pop rax
           ...
@@ -6057,8 +6104,15 @@ mod test {
             "term []",
             &["
               ...
+              lea rdi, [rsp]
               mov r.64.call, {{_}}
               call r.64.call
+              mov r15, [rsp]
+              mov r14, [rsp+8]
+              mov r13, [rsp+0x10]
+              mov r12, [rsp+0x18]
+              mov rbx, [rsp+0x20]
+              add rsp, 0x30
               lea rsp, [rbp-0x28]
               pop rbx
               pop r12
