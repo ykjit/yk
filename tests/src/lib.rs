@@ -60,6 +60,24 @@ pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy
             ],
         )],
     );
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        map.insert(
+            "callee_saved_regs_x64.c",
+            vec![ExtraLinkage::new(
+                "%%TEMPDIR%%/call_check_csrs.o",
+                ykllvm_bin("clang").to_owned(),
+                &[
+                    "-c",
+                    "extra_linkage/call_check_csrs.s",
+                    "-o",
+                    "%%TEMPDIR%%/call_check_csrs.o",
+                ],
+            )],
+        );
+    }
+
     map
 });
 

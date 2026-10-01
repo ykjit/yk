@@ -160,7 +160,8 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         )
     });
 
-    mt.deopt();
+    let mut callee_saved_regs = [0u64; 5];
+    mt.deopt(callee_saved_regs.as_mut_ptr() as *mut c_void);
 
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
 
@@ -188,6 +189,19 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     // The values we will (eventually...) put into registers.
     let mut gp_regs = [0; DeoptGpReg::COUNT];
     let mut fp_regs = [0; DeoptFpReg::COUNT];
+
+    for (reg, value) in [
+        DeoptGpReg::R15,
+        DeoptGpReg::R14,
+        DeoptGpReg::R13,
+        DeoptGpReg::R12,
+        DeoptGpReg::RBX,
+    ]
+    .into_iter()
+    .zip(callee_saved_regs)
+    {
+        gp_regs[reg.idx()] = value;
+    }
 
     // The size of the buffer we'll need. To make the "is there enough space left?" calculation
     // below easier, we account for the size of the FP & GP registers here.
