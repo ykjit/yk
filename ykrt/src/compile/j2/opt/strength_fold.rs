@@ -525,6 +525,15 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         return OptOutcome::NotNeeded;
     }
 
+    fn push_equiv(opt: &mut PassOpt, cond: InstIdx, v: bool) {
+        let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
+        let constant = opt.push_pre_inst(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(1, u64::from(v))),
+        }));
+        opt.push_equiv(cond, constant);
+    }
+
     let mut cond_inst = opt.inst(cond).to_owned();
     if let Inst::ICmp(ICmp {
         pred,
@@ -587,16 +596,12 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         inst.expect = !expect;
         inst.cond = *lhs;
         inst.canonicalise(opt);
+        push_equiv(opt, inst.cond, inst.expect);
     } else {
         inst.canonicalise(opt);
     }
 
-    let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
-    let constant = opt.push_pre_inst(Inst::Const(Const {
-        tyidx,
-        kind: ConstKind::Int(ArbBitInt::from_u64(1, u64::from(expect))),
-    }));
-    opt.push_equiv(cond, constant);
+    push_equiv(opt, cond, expect);
 
     OptOutcome::Rewritten(inst.into())
 }
@@ -2610,8 +2615,9 @@ mod test {
         ",
             "
           %0: i1 = arg
+          %3: i1 = 0
           guard false, %0, []
-          term [%0]
+          term [%3]
         ",
         );
 
@@ -2633,6 +2639,26 @@ mod test {
           guard true, %0, []
           blackbox %1
           ",
+        );
+
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i64 = arg [reg]
+          %2: i64 = arg [reg]
+          %3: i1 = 1
+          %4: i1 = xor %0, %3
+          guard true, %4, []
+          term [%0, %1, %2]
+        ",
+            "
+          %0: i1 = arg
+          %1: i64 = arg
+          %2: i64 = arg
+          %5: i1 = 0
+          guard false, %0, []
+          term [%5, %1, %2]
+        ",
         );
     }
 
