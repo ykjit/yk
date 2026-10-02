@@ -214,9 +214,9 @@ mod test {
           %1: i8 = arg
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
-          %4: i8 = add %0, %0
-          blackbox %4
-          blackbox %4
+          %5: i8 = add %0, %0
+          blackbox %5
+          blackbox %5
           term [%0, %0]
           ...
         ",
@@ -267,6 +267,7 @@ mod test {
           %2: i8 = and %0, %1
           %3: i8 = 4
           %4: i1 = icmp eq %2, %3
+          %5: i1 = 1
           guard true, %4, []
           blackbox %3
         ",
@@ -296,10 +297,12 @@ mod test {
           %4: i8 = and %0, %1
           %5: i8 = add %0, %2
           %6: i1 = icmp eq %5, %0
+          %7: i1 = 1
           guard true, %6, []
-          %8: i8 = and %2, %3
-          %9: i1 = icmp eq %4, %8
-          guard true, %9, []
+          %9: i8 = and %2, %3
+          %10: i1 = icmp eq %4, %9
+          %11: i1 = 1
+          guard true, %10, []
           blackbox %4
         ",
         );
@@ -366,9 +369,9 @@ mod test {
         ",
             "
           %0: i1 = arg
+          %1: i1 = 1
           guard true, %0, []
-          guard true, %0, []
-          term [%0]
+          term [%1]
           ...
         ",
         );

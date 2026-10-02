@@ -591,6 +591,13 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         inst.canonicalise(opt);
     }
 
+    let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
+    let constant = opt.push_pre_inst(Inst::Const(Const {
+        tyidx,
+        kind: ConstKind::Int(ArbBitInt::from_u64(1, u64::from(expect))),
+    }));
+    opt.push_equiv(cond, constant);
+
     OptOutcome::Rewritten(inst.into())
 }
 
@@ -2606,6 +2613,26 @@ mod test {
           guard false, %0, []
           term [%0]
         ",
+        );
+
+        // A guard establishes than an `i1` is equivalent to a constant.
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i64 = arg [reg]
+          %2: i64 = arg [reg]
+          guard true, %0, []
+          %4: i64 = select %0, %1, %2
+          blackbox %4
+          ",
+            "
+          %0: i1 = arg
+          %1: i64 = arg
+          %2: i64 = arg
+          %3: i1 = 1
+          guard true, %0, []
+          blackbox %1
+          ",
         );
     }
 

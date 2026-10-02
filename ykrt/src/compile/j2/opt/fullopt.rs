@@ -1235,8 +1235,8 @@ pub(in crate::compile::j2) mod test {
           %1: i8 = 0
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
-          %5: i8 = 1
-          term [%5]
+          %{{5}}: i8 = 1
+          term [%{{5}}]
         ",
         );
     }

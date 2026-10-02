@@ -656,9 +656,9 @@ mod test {
           %1: i8 = 1
           %2: i1 = icmp ne %0, %1
           guard true, %2, []
-          %4: i8 = 254
-          %5: i8 = and %0, %4
-          term [%5]
+          %5: i8 = 254
+          %6: i8 = and %0, %5
+          term [%6]
           ; peel
           %0: i8 = arg
           term [%0]
@@ -866,9 +866,9 @@ mod test {
           %2: i8 = 1
           %3: i8 = or %1, %2
           %4: i1 = icmp eq %3, %0
+          %5: i1 = 1
           guard true, %4, []
           blackbox %3
-          ...
         ",
         );
 
@@ -885,6 +885,7 @@ mod test {
           %0: i8 = arg
           %1: i8 = arg
           %2: i1 = icmp eq %0, %1
+          %3: i1 = 0
           guard false, %2, []
           ...
         ",
@@ -907,11 +908,11 @@ mod test {
           %0: i8 = arg
           %1: i8 = arg
           %2: i1 = icmp eq %0, %1
+          %3: i1 = 1
           guard true, %2, []
-          %4: i8 = 1
-          %5: i8 = or %0, %4
-          %6: i1 = icmp eq %5, %5
-          ...
+          %5: i8 = 1
+          %6: i8 = or %0, %5
+          %7: i1 = icmp eq %6, %6
         ",
         );
 
@@ -938,10 +939,10 @@ mod test {
           %5: i8 = or %1, %3
           %6: i1 = icmp eq %4, %5
           %7: i8 = 255
+          %8: i1 = 1
           guard true, %6, []
-          %9: i32 = 4294967295
-          blackbox %9
-          ...
+          %10: i32 = 4294967295
+          blackbox %10
         ",
         );
 
@@ -965,10 +966,11 @@ mod test {
           %3: i8 = 5
           %4: i1 = icmp eq %2, %3
           %5: i8 = 5
+          %6: i1 = 1
           guard true, %4, []
-          %7: i8 = 7
-          %8: i8 = 5
-          blackbox %8
+          %8: i8 = 7
+          %9: i8 = 5
+          blackbox %9
         ",
         );
     }
@@ -1152,9 +1154,10 @@ mod test {
           %0: i32 = arg
           %1: i32 = 0
           %2: i1 = icmp sgt %0, %1
+          %3: i1 = 1
           guard true, %2, []
-          %4: i64 = zext %0
-          blackbox %4
+          %5: i64 = zext %0
+          blackbox %5
         ",
         );
     }

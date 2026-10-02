@@ -429,9 +429,9 @@ mod test {
           %1: ptr = arg
           %2: i1 = icmp eq %0, %1
           guard true, %2, []
-          %4: i8 = load %0
-          blackbox %4
-          blackbox %4
+          %5: i8 = load %0
+          blackbox %5
+          blackbox %5
           term [%0, %0]
           ...
         ",
@@ -883,8 +883,8 @@ mod test {
           %3: i1 = icmp eq %2, %1
           guard true, %3, []
           blackbox %2
-          %6: i8 = 2
-          term [%0, %6]
+          %{{7}}: i8 = 2
+          term [%0, %{{7}}]
           ; peel
           %0: ptr = arg
           %1: i8 = 2
