@@ -552,7 +552,10 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         inst.canonicalise(opt);
         if (expect && *pred == IPred::Eq) || (!expect && *pred == IPred::Ne) {
             opt.push_equiv(*lhs, *rhs);
+        } else {
+            push_equiv(opt, inst.cond, inst.expect);
         }
+        push_equiv(opt, cond, expect);
         return OptOutcome::Rewritten(inst.into());
     } else if (expect
         && matches!(
@@ -2386,8 +2389,9 @@ mod test {
         ",
             "
           %0: i1 = arg
+          %3: i1 = 1
           guard true, %0, []
-          term [%0]
+          term [%3]
         ",
         );
         // ne
@@ -2401,8 +2405,9 @@ mod test {
         ",
             "
           %0: i1 = arg
+          %3: i1 = 0
           guard false, %0, []
-          term [%0]
+          term [%3]
         ",
         );
 
@@ -2622,6 +2627,46 @@ mod test {
         );
 
         // A guard establishes than an `i1` is equivalent to a constant.
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i64 = arg [reg]
+          %2: i64 = arg [reg]
+          %3: i1 = 0
+          %4: i1 = icmp eq %0, %3
+          guard false, %4, []
+          term [%4, %1, %2]
+        ",
+            "
+          %0: i1 = arg
+          %1: i64 = arg
+          %2: i64 = arg
+          %6: i1 = 0
+          guard true, %0, []
+          term [%6, %1, %2]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i64 = arg [reg]
+          %2: i64 = arg [reg]
+          %3: i1 = 0
+          %4: i1 = icmp eq %0, %3
+          guard false, %4, []
+          term [%0, %1, %2]
+            ",
+            "
+          %0: i1 = arg
+          %1: i64 = arg
+          %2: i64 = arg
+          %5: i1 = 1
+          guard true, %0, []
+          term [%5, %1, %2]
+            ",
+        );
+
         test_sf(
             "
           %0: i1 = arg [reg]
