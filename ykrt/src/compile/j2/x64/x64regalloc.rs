@@ -447,13 +447,13 @@ pub(super) const NORMAL_GP_REGS: [Reg; 14] = [
     Reg::R14,
     Reg::R13,
     Reg::R12,
+    Reg::RBX,
     Reg::R11,
     Reg::R10,
     Reg::R9,
     Reg::R8,
     Reg::RDI,
     Reg::RSI,
-    Reg::RBX,
     Reg::RDX,
     Reg::RCX,
     Reg::RAX,
@@ -490,7 +490,7 @@ pub(super) const ALL_XMM_REGS: [Reg; 16] = [
 ///
 /// However that involves both non-stabilised and non-existent features, so we have to manually
 /// create and maintain this bitmask.
-const CALLEE_SAVED_MASK: u16 = 0b00010000001111;
+const CALLEE_SAVED_MASK: u16 = 0b00000000011111;
 
 pub struct PeelRegsBuilder<Reg: RegT> {
     /// A bit field with one bit set for each [NORMAL_GP_REGS] set.
