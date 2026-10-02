@@ -1242,7 +1242,7 @@ impl<'a> X64HirToAsm<'a> {
                     )?;
 
                     self.asm.push_inst(match val_bitw {
-                        8 => IcedInst::with2(Code::Add_rm8_imm8, memop, imm),
+                        1..=8 => IcedInst::with2(Code::Add_rm8_imm8, memop, imm),
                         16 => IcedInst::with2(Code::Add_rm16_imm16, memop, imm),
                         32 => IcedInst::with2(Code::Add_rm32_imm32, memop, imm),
                         64 => IcedInst::with2(Code::Add_rm64_imm32, memop, imm),
@@ -1302,7 +1302,7 @@ impl<'a> X64HirToAsm<'a> {
                         RegCnstr::KeepAlive { iidxs: &[] },
                     )?;
                     self.asm.push_inst(match val_bitw {
-                        8 => {
+                        1..=8 => {
                             assert_eq!(i32::from(i8::try_from(imm).unwrap()), imm);
                             IcedInst::with2(Code::Sub_rm8_imm8, memop, imm)
                         }
@@ -1340,12 +1340,17 @@ impl<'a> X64HirToAsm<'a> {
             }
         }
 
-        if let Some(imm) = self.sign_ext_op_for_imm32(b, *val) {
+        let imm = match val_bitw {
+            1..=32 => self.zero_ext_op_for_imm32(b, val_bitw, *val),
+            64 => self.sign_ext_op_for_imm32(b, *val),
+            x => todo!("{x}"),
+        };
+        if let Some(imm) = imm {
             let (memop, _, _) =
                 self.alloc_mem_op_with_reg(ra, b, iidx, addr, RegCnstr::KeepAlive { iidxs: &[] })?;
 
             self.asm.push_inst(match val_bitw {
-                8 => IcedInst::with2(Code::Mov_rm8_imm8, memop, imm),
+                1 | 8 => IcedInst::with2(Code::Mov_rm8_imm8, memop, imm),
                 16 => IcedInst::with2(Code::Mov_rm16_imm16, memop, imm),
                 32 => IcedInst::with2(Code::Mov_rm32_imm32, memop, imm),
                 64 => IcedInst::with2(Code::Mov_rm64_imm32, memop, imm),
@@ -10596,6 +10601,36 @@ mod test {
             "],
         );
 
+        // i1 const
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i1 = 1
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov byte [r.64.x], 1
+              ...
+            "],
+        );
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i1 = 0
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov byte [r.64.x], 0
+              ...
+            "],
+        );
+
         // i2
         codegen_and_test(
             "
@@ -10723,6 +10758,36 @@ mod test {
             "],
         );
 
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i8 = -1
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov byte [r.64.x], 0xFF
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i8 = 0x80
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov byte [r.64.x], 0x80
+              ...
+            "],
+        );
+
         // i16
         codegen_and_test(
             "
@@ -10750,6 +10815,21 @@ mod test {
               ...
               ; store %1, %0
               mov word [r.64.x], 0x200
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i16 = -1
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov word [r.64.x], 0xFFFF
               ...
             "],
         );
@@ -10785,6 +10865,36 @@ mod test {
             "],
         );
 
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = -1
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov dword [r.64.x], 0xFFFFFFFF
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = 0x80000000
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov dword [r.64.x], 0x80000000
+              ...
+            "],
+        );
+
         // i64
         codegen_and_test(
             "
@@ -10812,6 +10922,100 @@ mod test {
               ...
               ; store %1, %0
               mov qword [r.64.x], 0x20000
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = -1
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov qword [r.64.x], 0xFFFFFFFFFFFFFFFF
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = 0x7FFFFFFF
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov qword [r.64.x], 0x7FFFFFFF
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = -2147483648
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              ; store %1, %0
+              mov qword [r.64.x], 0xFFFFFFFF80000000
+              ...
+            "],
+        );
+
+        // doesn't fit a sign-extended imm32
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = 0x80000000
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              mov r.32.y, 0x80000000
+              ; store %1, %0
+              mov [r.64.x], r.64.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = 0xFFFFFFFF
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              mov r.32.y, 0xFFFFFFFF
+              ; store %1, %0
+              mov [r.64.x], r.64.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = 0x123456789ABCDEF0
+              store %1, %0
+              term [%0]
+            ",
+            &["
+              ...
+              mov r.64.y, 0x123456789ABCDEF0
+              ; store %1, %0
+              mov [r.64.x], r.64.y
               ...
             "],
         );
