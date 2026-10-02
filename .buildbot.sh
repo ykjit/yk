@@ -204,8 +204,7 @@ done
 
 # test yklua and yksompp in debug mode.
 PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug test_yklua
-#FIXME: Waiting for https://github.com/ykjit/yk/pull/2327
-#PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug test_yksompp
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=debug test_yksompp
 
 # Test with LLVM sanitisers
 rustup component add rust-src
@@ -253,8 +252,7 @@ for _ in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test --release
 done
 PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release test_yklua
-#FIXME: Waiting for https://github.com/ykjit/yk/pull/2327
-#PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release test_yksompp
+PATH=${ROOT_DIR}/bin:${PATH} YK_BUILD_TYPE=release test_yksompp
 
 # Do a quick run of the benchmark suite as a smoke test.
 pipx install rebench
