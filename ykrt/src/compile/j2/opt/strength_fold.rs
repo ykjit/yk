@@ -590,7 +590,21 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         }
         inst.canonicalise(opt);
         opt.push_equiv(lhs, rhs);
-    } else if let Inst::Or(Or { tyidx: _, lhs, rhs, disjoint: false }) = opt.inst(cond)
+    } else if let Inst::And(And { tyidx: _, lhs, rhs }) = opt.inst(cond)
+        && expect
+    {
+        // A `guard true` referencing `and x, y` means that both `x` and `y` must be true.
+        let lhs = opt.equiv_iidx(*lhs);
+        let rhs = opt.equiv_iidx(*rhs);
+        inst.canonicalise(opt);
+        push_equiv(opt, lhs, true);
+        push_equiv(opt, rhs, true);
+    } else if let Inst::Or(Or {
+        tyidx: _,
+        lhs,
+        rhs,
+        disjoint: false,
+    }) = opt.inst(cond)
         && !expect
     {
         // A `guard false` referencing `or x, y` means that both `x` and `y` must be false.
@@ -2615,6 +2629,25 @@ mod test {
           blackbox %2
           blackbox %2
           term [%2, %2]
+        ",
+        );
+
+        // `guard true` referencing `and`
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = arg [reg]
+          %2: i1 = and %0, %1
+          guard true, %2, []
+          term [%0, %1]
+        ",
+            "
+          %0: i1 = arg
+          %1: i1 = arg
+          %2: i1 = and %0, %1
+          %3: i1 = 1
+          guard true, %2, []
+          term [%3, %3]
         ",
         );
 
