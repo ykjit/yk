@@ -623,6 +623,15 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         inst.cond = *lhs;
         inst.canonicalise(opt);
         push_equiv(opt, inst.cond, inst.expect);
+    } else if let Inst::Xor(Xor { tyidx: _, lhs, rhs }) = opt.inst(cond)
+        && !expect
+    {
+        // If `guard false` references `xor x, y`, then `x` and `y` are equivalent henceforth and
+        // we can pick one or the other for equivalence.
+        let lhs = opt.equiv_iidx(*lhs);
+        let rhs = opt.equiv_iidx(*rhs);
+        inst.canonicalise(opt);
+        opt.push_equiv(lhs, rhs);
     } else {
         inst.canonicalise(opt);
     }
@@ -2684,6 +2693,24 @@ mod test {
           %3: i1 = 0
           guard false, %0, []
           term [%3]
+        ",
+        );
+
+        // `guard false` referencing `xor`
+        test_sf(
+            "
+          %0: i1 = arg [reg]
+          %1: i1 = arg [reg]
+          %2: i1 = xor %0, %1
+          guard false, %2, []
+          term [%0, %1]
+        ",
+            "
+          %0: i1 = arg
+          %1: i1 = arg
+          %2: i1 = xor %0, %1
+          guard false, %2, []
+          term [%0, %0]
         ",
         );
 
