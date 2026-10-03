@@ -1855,8 +1855,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             "{src_reg:?} {dst_reg:?}"
         );
         if src_reg.is_gp()
-            && src_fill == RegFill::Undefined
-            && dst_fill == RegFill::Zeroed
+            && let RegFill::Zeroed | RegFill::Undefined = dst_fill
             && dst_bitw == 32
         {
             self.asm.push_inst(IcedInst::with2(
@@ -10537,7 +10536,7 @@ mod test {
               cqo
               idiv r.64._
               ...
-              mov rdi, rdx
+              mov edi, edx
               ...
               ; call %2(%3)
               ...
@@ -11848,7 +11847,7 @@ mod test {
               xor edx, edx
               div r.64._
               ...
-              mov rdi, rax
+              mov edi, eax
               ...
               ; call %2(%3)
               ...
@@ -12079,7 +12078,7 @@ mod test {
               xor edx, edx
               div r.64._
               ...
-              mov rdi, rdx
+              mov edi, edx
               ...
               ; call %2(%3)
               ...
