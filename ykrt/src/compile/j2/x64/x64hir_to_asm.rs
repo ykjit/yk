@@ -1819,7 +1819,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             } else {
                 assert!(src_reg.is_fp());
                 self.asm.push_inst(IcedInst::with2(
-                    Code::Movsd_xmm_xmmm64,
+                    Code::Movaps_xmm_xmmm128,
                     dst_reg.to_xmm(),
                     src_reg.to_xmm(),
                 ));
@@ -2992,15 +2992,15 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     .push_inst(IcedInst::with2(Code::Psrlq_xmm_imm8, outr.to_xmm(), 1));
                 self.asm
                     .push_inst(IcedInst::with2(Code::Psllq_xmm_imm8, outr.to_xmm(), 1));
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Movapd_xmm_xmmm128,
-                    outr.to_xmm(),
-                    lhsr.to_xmm(),
-                ));
             }
             Ty::Float => todo!(),
             _ => panic!(),
         }
+        self.asm.push_inst(IcedInst::with2(
+            Code::Movaps_xmm_xmmm128,
+            outr.to_xmm(),
+            lhsr.to_xmm(),
+        ));
 
         Ok(())
     }
@@ -4370,28 +4370,19 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         },
                     ],
                 )?;
-                match self.m.ty(*tyidx) {
-                    Ty::Double => {
-                        let end_lidx = self.asm.mk_label();
-                        self.asm.attach_label(end_lidx);
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Movsd_xmmm64_xmm,
-                            outr.to_xmm(),
-                            falser.to_xmm(),
-                        ));
-                        self.asm.push_reloc(
-                            IcedInst::with_branch(Code::Jb_rel32_64, 0),
-                            RelocKind::NearWithLabel(end_lidx),
-                        );
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Bt_rm32_imm8,
-                            condr.to_reg32(),
-                            0,
-                        ));
-                    }
-                    Ty::Float => todo!(),
-                    _ => unreachable!(),
-                }
+                let end_lidx = self.asm.mk_label();
+                self.asm.attach_label(end_lidx);
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Movaps_xmmm128_xmm,
+                    outr.to_xmm(),
+                    falser.to_xmm(),
+                ));
+                self.asm.push_reloc(
+                    IcedInst::with_branch(Code::Jb_rel32_64, 0),
+                    RelocKind::NearWithLabel(end_lidx),
+                );
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, condr.to_reg32(), 0));
                 Ok(())
             }
             Ty::Func(_) => todo!(),
@@ -5062,7 +5053,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     tmpr.to_xmm(),
                 ));
                 self.asm.push_inst(IcedInst::with2(
-                    Code::Movapd_xmmm128_xmm,
+                    Code::Movaps_xmmm128_xmm,
                     tgtr.to_xmm(),
                     tmpr.to_xmm(),
                 ));
@@ -6794,8 +6785,8 @@ mod test {
               ; %1: float = arg [Reg("xmm15", Undefined)]
               ; %2: double = arg [Reg("xmm14", Undefined)]
               ...
-              movsd xmm1, xmm14
-              movsd xmm0, xmm15
+              movaps xmm1, xmm14
+              movaps xmm0, xmm15
               ; call %0(%1, %2)
               call rax
               ...
@@ -6837,7 +6828,7 @@ mod test {
             &[r#"
               ...
               mov rax, r15
-              movsd xmm0, xmm15
+              movaps xmm0, xmm15
               ; %2: double = call %1(%0)
               call rax
               movsd xmm15, [rbp-{{_}}]
@@ -6864,8 +6855,8 @@ mod test {
               ; %2: double = arg [Reg("xmm14", Undefined)]
               ...
               mov r.64.x, rax
-              movsd xmm1, xmm14
-              movsd xmm0, xmm15
+              movaps xmm1, xmm14
+              movaps xmm0, xmm15
               ; call %0(%1, %2)
               mov eax, 2
               call r.64.x
@@ -6910,7 +6901,7 @@ mod test {
             "#,
             &[r#"
               ...
-              movsd xmm0, xmm15
+              movaps xmm0, xmm15
               ; %2: double = call %1(%0)
               mov eax, 1
               call r.64._
@@ -7166,15 +7157,15 @@ mod test {
               ...
               ; %0: double = arg [Reg("fp.128.x", Undefined)]
               ; %1: double = arg [Reg("fp.128.y", Undefined)]
-              movsd fp.128.z, fp.128.x
+              movaps fp.128.z, fp.128.x
               ; %2: double = copysign %0, %1
-              movapd fp.128.x, fp.128.z
+              movaps fp.128.x, fp.128.z
               psllq fp.128.x, 1
               psrlq fp.128.x, 1
               psrlq fp.128.y, 0x3F
               psllq fp.128.y, 0x3F
               por fp.128.x, fp.128.y
-              movsd fp.128.y, fp.128.x
+              movaps fp.128.y, fp.128.x
               ; term [%2, %2]
             "#],
         );
@@ -10048,7 +10039,7 @@ mod test {
               ; %3: double = select %0, %1, %2
               bt r.32._, 0
               jb l{{2}}
-              movsd fp.128.x, fp.128._
+              movaps fp.128.x, fp.128._
               ; l{{2}}
               ...
             "#],
@@ -11816,7 +11807,7 @@ mod test {
               movq fp.128.x, r.64.x
               punpckldq fp.128.x, l{{1}}
               subpd fp.128.x, l{{2}}
-              movapd fp.128.y, fp.128.x
+              movaps fp.128.y, fp.128.x
               unpckhpd fp.128.y, fp.128.x
               addsd fp.128.y, fp.128.x
               ; blackbox %1
@@ -11833,7 +11824,7 @@ mod test {
               movq fp.128.x, r.64.x
               punpckldq fp.128.x, l{{1}}
               subpd fp.128.x, l{{2}}
-              movapd fp.128.y, fp.128.x
+              movaps fp.128.y, fp.128.x
               unpckhpd fp.128.y, fp.128.x
               addsd fp.128.y, fp.128.x
               ; blackbox %1
