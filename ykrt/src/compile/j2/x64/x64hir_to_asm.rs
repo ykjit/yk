@@ -1196,7 +1196,7 @@ impl<'a> X64HirToAsm<'a> {
         let val_bitw = b.inst_bitw(self.m, *val);
         let addr = *ptr;
 
-        // Try to optimise load-add-const-store sequences such as:
+        // Try to optimise load-{add,and,or,xor}-store sequences such as:
         // ```
         // %85: i64 = load %44
         // %87: i64 = 79
@@ -1204,10 +1204,18 @@ impl<'a> X64HirToAsm<'a> {
         // store %88, %44
         // ```
         //
-        // Because add is commutative, we can use this optimisation even if the storeable pointer
-        // is on the RHS (which is what the `find_map` horror below does).
+        // Because add/and/or/xor are commutative, we can use this optimisation even if the
+        // storeable pointer is on the RHS (which is what the `find_map` horror below does).
         if !ra.is_in_reg(*val)
-            && let Inst::Add(Add { lhs, rhs, .. }) = b.inst(*val)
+            && let Inst::Add(Add { lhs, rhs, .. })
+            | Inst::And(And { lhs, rhs, .. })
+            | Inst::Or(Or {
+                lhs,
+                rhs,
+                disjoint: false,
+                ..
+            })
+            | Inst::Xor(Xor { lhs, rhs, .. }) = b.inst(*val)
             && let Some((lhs, rhs, load_ptr)) =
                 [(lhs, rhs), (rhs, lhs)].into_iter().find_map(|(lhs, rhs)| {
                     let Inst::Load(Load {
@@ -1241,12 +1249,36 @@ impl<'a> X64HirToAsm<'a> {
                         RegCnstr::KeepAlive { iidxs: &[] },
                     )?;
 
-                    self.asm.push_inst(match val_bitw {
-                        1..=8 => IcedInst::with2(Code::Add_rm8_imm8, memop, imm),
-                        16 => IcedInst::with2(Code::Add_rm16_imm16, memop, imm),
-                        32 => IcedInst::with2(Code::Add_rm32_imm32, memop, imm),
-                        64 => IcedInst::with2(Code::Add_rm64_imm32, memop, imm),
-                        x => todo!("{x}"),
+                    self.asm.push_inst(match b.inst(*val) {
+                        Inst::Add(_) => match val_bitw {
+                            1..=8 => IcedInst::with2(Code::Add_rm8_imm8, memop, imm),
+                            16 => IcedInst::with2(Code::Add_rm16_imm16, memop, imm),
+                            32 => IcedInst::with2(Code::Add_rm32_imm32, memop, imm),
+                            64 => IcedInst::with2(Code::Add_rm64_imm32, memop, imm),
+                            x => todo!("{x}"),
+                        },
+                        Inst::And(_) => match val_bitw {
+                            1..=8 => IcedInst::with2(Code::And_rm8_imm8, memop, imm),
+                            16 => IcedInst::with2(Code::And_rm16_imm16, memop, imm),
+                            32 => IcedInst::with2(Code::And_rm32_imm32, memop, imm),
+                            64 => IcedInst::with2(Code::And_rm64_imm32, memop, imm),
+                            x => todo!("{x}"),
+                        },
+                        Inst::Or(_) => match val_bitw {
+                            1..=8 => IcedInst::with2(Code::Or_rm8_imm8, memop, imm),
+                            16 => IcedInst::with2(Code::Or_rm16_imm16, memop, imm),
+                            32 => IcedInst::with2(Code::Or_rm32_imm32, memop, imm),
+                            64 => IcedInst::with2(Code::Or_rm64_imm32, memop, imm),
+                            x => todo!("{x}"),
+                        },
+                        Inst::Xor(_) => match val_bitw {
+                            1..=8 => IcedInst::with2(Code::Xor_rm8_imm8, memop, imm),
+                            16 => IcedInst::with2(Code::Xor_rm16_imm16, memop, imm),
+                            32 => IcedInst::with2(Code::Xor_rm32_imm32, memop, imm),
+                            64 => IcedInst::with2(Code::Xor_rm64_imm32, memop, imm),
+                            x => todo!("{x}"),
+                        },
+                        _ => unreachable!(),
                     });
                     return Ok(());
                 } else {
@@ -1263,12 +1295,36 @@ impl<'a> X64HirToAsm<'a> {
                         },
                     )?;
 
-                    self.asm.push_inst(match val_bitw {
-                        1..=8 => IcedInst::with2(Code::Add_rm8_r8, memop, rhsr.to_reg8()),
-                        16 => IcedInst::with2(Code::Add_rm16_r16, memop, rhsr.to_reg16()),
-                        32 => IcedInst::with2(Code::Add_rm32_r32, memop, rhsr.to_reg32()),
-                        64 => IcedInst::with2(Code::Add_rm64_r64, memop, rhsr.to_reg64()),
-                        x => todo!("{x}"),
+                    self.asm.push_inst(match b.inst(*val) {
+                        Inst::Add(_) => match val_bitw {
+                            1..=8 => IcedInst::with2(Code::Add_rm8_r8, memop, rhsr.to_reg8()),
+                            16 => IcedInst::with2(Code::Add_rm16_r16, memop, rhsr.to_reg16()),
+                            32 => IcedInst::with2(Code::Add_rm32_r32, memop, rhsr.to_reg32()),
+                            64 => IcedInst::with2(Code::Add_rm64_r64, memop, rhsr.to_reg64()),
+                            x => todo!("{x}"),
+                        },
+                        Inst::And(_) => match val_bitw {
+                            1..=8 => IcedInst::with2(Code::And_rm8_r8, memop, rhsr.to_reg8()),
+                            16 => IcedInst::with2(Code::And_rm16_r16, memop, rhsr.to_reg16()),
+                            32 => IcedInst::with2(Code::And_rm32_r32, memop, rhsr.to_reg32()),
+                            64 => IcedInst::with2(Code::And_rm64_r64, memop, rhsr.to_reg64()),
+                            x => todo!("{x}"),
+                        },
+                        Inst::Or(_) => match val_bitw {
+                            1..=8 => IcedInst::with2(Code::Or_rm8_r8, memop, rhsr.to_reg8()),
+                            16 => IcedInst::with2(Code::Or_rm16_r16, memop, rhsr.to_reg16()),
+                            32 => IcedInst::with2(Code::Or_rm32_r32, memop, rhsr.to_reg32()),
+                            64 => IcedInst::with2(Code::Or_rm64_r64, memop, rhsr.to_reg64()),
+                            x => todo!("{x}"),
+                        },
+                        Inst::Xor(_) => match val_bitw {
+                            1..=8 => IcedInst::with2(Code::Xor_rm8_r8, memop, rhsr.to_reg8()),
+                            16 => IcedInst::with2(Code::Xor_rm16_r16, memop, rhsr.to_reg16()),
+                            32 => IcedInst::with2(Code::Xor_rm32_r32, memop, rhsr.to_reg32()),
+                            64 => IcedInst::with2(Code::Xor_rm64_r64, memop, rhsr.to_reg64()),
+                            x => todo!("{x}"),
+                        },
+                        _ => unreachable!(),
                     });
                     return Ok(());
                 }
@@ -11478,6 +11534,50 @@ mod test {
             "#],
         );
 
+        // load-and-store optimisation
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = load %0
+              %3: i64 = and %2, %1
+              store %3, %0
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              ; %2: i64 = load %0
+              ; %3: i64 = and %2, %1
+              ; store %3, %0
+              and [r.64.x], r.64.y
+              ; term [%0, %1]
+            "#],
+        );
+
+        // load-or-store optimisation
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = load %0
+              %3: i64 = or %2, %1
+              store %3, %0
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              ; %2: i64 = load %0
+              ; %3: i64 = or %2, %1
+              ; store %3, %0
+              or [r.64.x], r.64.y
+              ; term [%0, %1]
+            "#],
+        );
+
         // load-sub-store optimisation
         codegen_and_test(
             "
@@ -11496,6 +11596,28 @@ mod test {
               ; %3: i64 = sub %2, %1
               ; store %3, %0
               sub [r.64.x], r.64.y
+              ; term [%0, %1]
+            "#],
+        );
+
+        // load-xor-store optimisation
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = load %0
+              %3: i64 = xor %2, %1
+              store %3, %0
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              ; %2: i64 = load %0
+              ; %3: i64 = xor %2, %1
+              ; store %3, %0
+              xor [r.64.x], r.64.y
               ; term [%0, %1]
             "#],
         );
