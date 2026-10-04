@@ -584,17 +584,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         for RegCopy {
             bitw,
-            src_reg,
-            src_fill,
-            dst_reg,
-            dst_fill,
-        } in ractions.distinct_copies.iter()
-        {
-            be.copy_reg_with_fill(*src_reg, *src_fill, *dst_reg, *dst_fill, *bitw)?;
-        }
-
-        for RegCopy {
-            bitw,
             src_reg: _,
             src_fill,
             dst_reg,
@@ -602,6 +591,17 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         } in ractions.fill_changes.iter()
         {
             be.arrange_fill(*dst_reg, *src_fill, *bitw, *dst_fill);
+        }
+
+        for RegCopy {
+            bitw,
+            src_reg,
+            src_fill,
+            dst_reg,
+            dst_fill,
+        } in ractions.distinct_copies.iter()
+        {
+            be.copy_reg_with_fill(*src_reg, *src_fill, *dst_reg, *dst_fill, *bitw)?;
         }
 
         for RegSpill { iidxs } in ractions.spills.iter().rev() {
@@ -2923,9 +2923,45 @@ pub(crate) mod test {
             &["
           copy_reg: src_reg=GPR1, src_fill=Zeroed, dst_reg=GPR0, dst_fill=Undefined, dst_bitw=8
           alloc %1 GPR0 GPR1
-          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
           arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
         "],
+        );
+    }
+
+    #[test]
+    fn copy_before_arrange() {
+        // Check that register copies are done before fills are arranged.
+        let m = str_to_mod::<TestReg>("");
+        let TraceEnd::Test { block: b, .. } = &m.trace_end else {
+            panic!()
+        };
+        let mut ra = RegAlloc::<TestHirToAsm>::new(&m, b, &[], 0);
+        let mut be = TestHirToAsm::new(&m);
+        let mut ractions = RegActions::new();
+
+        ractions.distinct_copies.push(RegCopy {
+            bitw: 64,
+            src_reg: TestReg::GPR0,
+            src_fill: RegFill::Signed,
+            dst_reg: TestReg::GPR1,
+            dst_fill: RegFill::Undefined,
+        });
+        ractions.fill_changes.push(RegCopy {
+            bitw: 32,
+            src_reg: TestReg::GPR0,
+            src_fill: RegFill::Signed,
+            dst_reg: TestReg::GPR0,
+            dst_fill: RegFill::Zeroed,
+        });
+        ra.asm_ractions(&mut be, &ractions).unwrap();
+
+        assert_eq!(
+            be.ra_log,
+            [
+                "arrange_fill GPR0 from=Signed dst_bitw=32 to=Zeroed",
+                "copy_reg: src_reg=GPR0, src_fill=Signed, dst_reg=GPR1, dst_fill=Undefined, dst_bitw=64",
+            ]
         );
     }
 
@@ -2947,8 +2983,8 @@ pub(crate) mod test {
           alloc %3 GPR0 GPR1
           shl %2 GPR0 GPR2 GPR3
           const GPR2 tgt_bitw=8 fill=Zeroed Int(ArbBitInt { bitw: 8, val: 1 })
-          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
           arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
+          copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
         "],
         );
     }
