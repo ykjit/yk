@@ -10,11 +10,12 @@ use std::ffi::{c_int, c_longlong, c_uint, c_ushort, c_void};
 #[unsafe(no_mangle)]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_i32(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_i32(val);
+        });
+    }
     val
 }
 
@@ -22,11 +23,12 @@ pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
 #[unsafe(no_mangle)]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_unsigned_short(val: c_ushort) -> c_ushort {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_u16(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_u16(val);
+        });
+    }
     val
 }
 
@@ -34,11 +36,12 @@ pub extern "C" fn __yk_promote_c_unsigned_short(val: c_ushort) -> c_ushort {
 #[unsafe(no_mangle)]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_unsigned_int(val: c_uint) -> c_uint {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_u32(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_u32(val);
+        });
+    }
     val
 }
 
@@ -46,87 +49,95 @@ pub extern "C" fn __yk_promote_c_unsigned_int(val: c_uint) -> c_uint {
 #[unsafe(no_mangle)]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub extern "C" fn __yk_promote_c_long_long(val: c_longlong) -> c_longlong {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_i64(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_i64(val);
+        });
+    }
     val
 }
 
 /// Promote a `usize` during trace recording.
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_promote_usize(val: usize) -> usize {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_usize(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_usize(val);
+        });
+    }
     val
 }
 
 /// Promote a pointer during trace recording.
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_promote_ptr(val: *const c_void) -> *const c_void {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_ptr(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_ptr(val);
+        });
+    }
     val
 }
 
 /// Records a 64-bit return value of an idempotent function during trace recording.
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_idempotent_promote_i64(val: i64) -> i64 {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_i64(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_i64(val);
+        });
+    }
     val
 }
 
 /// Records a 32-bit return value of an idempotent function during trace recording.
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_idempotent_promote_i32(val: i32) -> i32 {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_i32(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_i32(val);
+        });
+    }
     val
 }
 
 /// Records a 16-bit return value of an idempotent function during trace recording.
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_idempotent_promote_i16(val: i16) -> i16 {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_i16(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_i16(val);
+        });
+    }
     val
 }
 
 /// Records an 8-bit return value of an idempotent function during trace recording.
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_idempotent_promote_i8(val: i8) -> i8 {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_i8(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_i8(val);
+        });
+    }
     val
 }
 
 /// Records a pointer return value of an idempotent function during trace recording.
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_idempotent_promote_ptr(val: *const c_void) -> *const c_void {
-    assert!(MTThread::is_tracing());
-    MTThread::with_borrow_mut(|mtt| {
-        // We ignore the return value as we can't really cancel tracing from this function.
-        mtt.promote_ptr(val);
-    });
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_ptr(val);
+        });
+    }
     val
 }

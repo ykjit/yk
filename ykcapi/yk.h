@@ -97,8 +97,7 @@ void yk_location_drop(YkLocation);
 // Promote a value to a constant. This is a generic macro that will
 // automatically select the right `yk_promote` function to call based on the
 // type of the value passed.
-#define yk_promote(x) (yk_is_interpreting() ? (x): __yk_promote(x))
-#define __yk_promote(X) _Generic((X), \
+#define yk_promote(X) _Generic((X), \
                                int: __yk_promote_c_int, \
                                unsigned short: __yk_promote_c_unsigned_short, \
                                unsigned int: __yk_promote_c_unsigned_int, \
