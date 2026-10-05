@@ -39,6 +39,7 @@ impl PassT for KnownBits {
             Inst::Or(x) => self.opt_or(opt, x),
             Inst::SExt(x) => self.opt_sext(opt, x),
             Inst::Shl(x) => self.opt_shl(opt, x),
+            Inst::Xor(x) => self.opt_xor(opt, x),
             Inst::ZExt(x) => self.opt_zext(opt, x),
             _ => OptOutcome::Rewritten(inst),
         }
@@ -419,6 +420,26 @@ impl KnownBits {
         OptOutcome::Rewritten(inst.into())
     }
 
+    fn opt_xor(&mut self, opt: &mut PassOpt, inst: Xor) -> OptOutcome {
+        let Xor { tyidx, lhs, rhs } = inst;
+        if let Some(lhs) = self.as_knownbits(opt, lhs)
+            && let Some(rhs) = self.as_knownbits(opt, rhs)
+        {
+            let res = lhs.bitxor(&rhs);
+            if res.all_known() {
+                return OptOutcome::Rewritten(
+                    Const {
+                        tyidx,
+                        kind: ConstKind::Int(res.as_arbbitint()),
+                    }
+                    .into(),
+                );
+            }
+            self.set_pending(res);
+        }
+        OptOutcome::Rewritten(inst.into())
+    }
+
     fn opt_zext(&mut self, opt: &mut PassOpt, inst: ZExt) -> OptOutcome {
         let ZExt { tyidx, val } = inst;
         if let Some(val_b) = self.as_knownbits(opt, val) {
@@ -537,6 +558,12 @@ impl KnownBitValue {
             ones: set_ones,
             unknowns,
         }
+    }
+
+    fn bitxor(&self, other: &KnownBitValue) -> KnownBitValue {
+        let unknowns = self.unknowns.bitor(&other.unknowns);
+        let ones = self.ones.bitxor(&other.ones).bitand(&unknowns.bitneg());
+        KnownBitValue { ones, unknowns }
     }
 
     fn checked_ashr(&self, bits: u32) -> Option<KnownBitValue> {
@@ -820,6 +847,26 @@ mod test {
           %6: i8 = or %0, %5
           blackbox %6
         ",
+        );
+    }
+
+    #[test]
+    fn opt_xor() {
+        test_known_bits(
+            "
+           %0: i8 = arg [reg]
+           %1: i16 = zext %0
+           %2: i16 = 5
+           %3: i16 = xor %1, %2
+           %4: i16 = 0
+           %5: i1 = icmp slt %3, %4
+           blackbox %5
+         ",
+            "
+           ...
+           %5: i1 = 0
+           blackbox %5
+          ",
         );
     }
 
