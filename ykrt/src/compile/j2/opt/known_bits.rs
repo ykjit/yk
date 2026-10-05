@@ -39,6 +39,7 @@ impl PassT for KnownBits {
             Inst::Or(x) => self.opt_or(opt, x),
             Inst::SExt(x) => self.opt_sext(opt, x),
             Inst::Shl(x) => self.opt_shl(opt, x),
+            Inst::Xor(x) => self.opt_xor(opt, x),
             Inst::ZExt(x) => self.opt_zext(opt, x),
             _ => OptOutcome::Rewritten(inst),
         }
@@ -289,25 +290,43 @@ impl KnownBits {
         if let Some(lhs_b) = self.as_knownbits(opt, lhs)
             && let Some(rhs_b) = self.as_knownbits(opt, rhs)
         {
-            let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
-            match pred {
-                IPred::Eq if lhs_b.definitely_ne(&rhs_b) => {
-                    OptOutcome::Rewritten(Inst::Const(Const {
-                        tyidx,
-                        kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
-                    }))
+            let result = match pred {
+                IPred::Eq => lhs_b.definitely_ne(&rhs_b).then_some(false),
+                IPred::Ne => lhs_b.definitely_ne(&rhs_b).then_some(true),
+                _ => {
+                    let sign = if pred.is_signed() {
+                        1 << (lhs_b.bitw() - 1)
+                    } else {
+                        0
+                    };
+                    let lhs_unknowns = lhs_b.unknowns.to_zero_ext_u64().unwrap();
+                    let rhs_unknowns = rhs_b.unknowns.to_zero_ext_u64().unwrap();
+                    let lmin = (lhs_b.ones.to_zero_ext_u64().unwrap() ^ sign) & !lhs_unknowns;
+                    let lmax = lmin | lhs_unknowns;
+                    let rmin = (rhs_b.ones.to_zero_ext_u64().unwrap() ^ sign) & !rhs_unknowns;
+                    let rmax = rmin | rhs_unknowns;
+                    match pred {
+                        IPred::Ugt | IPred::Sgt if lmin > rmax => Some(true),
+                        IPred::Ugt | IPred::Sgt if lmax <= rmin => Some(false),
+                        IPred::Uge | IPred::Sge if lmin >= rmax => Some(true),
+                        IPred::Uge | IPred::Sge if lmax < rmin => Some(false),
+                        IPred::Ult | IPred::Slt if lmax < rmin => Some(true),
+                        IPred::Ult | IPred::Slt if lmin >= rmax => Some(false),
+                        IPred::Ule | IPred::Sle if lmax <= rmin => Some(true),
+                        IPred::Ule | IPred::Sle if lmin > rmax => Some(false),
+                        _ => None,
+                    }
                 }
-                IPred::Ne if lhs_b.definitely_ne(&rhs_b) => {
-                    OptOutcome::Rewritten(Inst::Const(Const {
-                        tyidx,
-                        kind: ConstKind::Int(ArbBitInt::from_u64(1, 1)),
-                    }))
-                }
-                _ => OptOutcome::Rewritten(inst.into()),
+            };
+            if let Some(result) = result {
+                let tyidx = opt.push_ty(Ty::Int(1)).unwrap();
+                return OptOutcome::Rewritten(Inst::Const(Const {
+                    tyidx,
+                    kind: ConstKind::Int(ArbBitInt::from_u64(1, u64::from(result))),
+                }));
             }
-        } else {
-            OptOutcome::Rewritten(inst.into())
         }
+        OptOutcome::Rewritten(inst.into())
     }
 
     fn opt_lshr(&mut self, opt: &mut PassOpt, inst: LShr) -> OptOutcome {
@@ -397,6 +416,26 @@ impl KnownBits {
             && let Some(res) = lhs_b.checked_shl(rhs_int)
         {
             self.set_pending(res.clone());
+        }
+        OptOutcome::Rewritten(inst.into())
+    }
+
+    fn opt_xor(&mut self, opt: &mut PassOpt, inst: Xor) -> OptOutcome {
+        let Xor { tyidx, lhs, rhs } = inst;
+        if let Some(lhs) = self.as_knownbits(opt, lhs)
+            && let Some(rhs) = self.as_knownbits(opt, rhs)
+        {
+            let res = lhs.bitxor(&rhs);
+            if res.all_known() {
+                return OptOutcome::Rewritten(
+                    Const {
+                        tyidx,
+                        kind: ConstKind::Int(res.as_arbbitint()),
+                    }
+                    .into(),
+                );
+            }
+            self.set_pending(res);
         }
         OptOutcome::Rewritten(inst.into())
     }
@@ -519,6 +558,12 @@ impl KnownBitValue {
             ones: set_ones,
             unknowns,
         }
+    }
+
+    fn bitxor(&self, other: &KnownBitValue) -> KnownBitValue {
+        let unknowns = self.unknowns.bitor(&other.unknowns);
+        let ones = self.ones.bitxor(&other.ones).bitand(&unknowns.bitneg());
+        KnownBitValue { ones, unknowns }
     }
 
     fn checked_ashr(&self, bits: u32) -> Option<KnownBitValue> {
@@ -806,6 +851,26 @@ mod test {
     }
 
     #[test]
+    fn opt_xor() {
+        test_known_bits(
+            "
+           %0: i8 = arg [reg]
+           %1: i16 = zext %0
+           %2: i16 = 5
+           %3: i16 = xor %1, %2
+           %4: i16 = 0
+           %5: i1 = icmp slt %3, %4
+           blackbox %5
+         ",
+            "
+           ...
+           %5: i1 = 0
+           blackbox %5
+          ",
+        );
+    }
+
+    #[test]
     fn opt_constant() {
         test_known_bits(
             "
@@ -1046,6 +1111,76 @@ mod test {
           %2: i8 = and %0, %1
           %3: i1 = icmp ne %2, %1
           blackbox %3
+        ",
+        );
+
+        // The non-eq-ne predicates
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 7
+          %3: i8 = and %0, %2
+          %4: i8 = 8
+          %5: i8 = or %1, %4
+          %6: i1 = icmp ult %3, %5
+          %7: i1 = icmp uge %3, %5
+          blackbox %6
+          blackbox %7
+        ",
+            "
+          ...
+          %6: i1 = 1
+          %7: i1 = 0
+          blackbox %6
+          blackbox %7
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 128
+          %2: i8 = or %0, %1
+          %3: i8 = 0
+          %4: i1 = icmp sgt %2, %3
+          %5: i1 = icmp sle %2, %3
+          blackbox %4
+          blackbox %5
+        ",
+            "
+          ...
+          %4: i1 = 0
+          %5: i1 = 1
+          blackbox %4
+          blackbox %5
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 7
+          %2: i8 = and %0, %1
+          %3: i1 = icmp ugt %2, %1
+          %4: i1 = icmp ule %2, %1
+          %5: i1 = icmp sge %2, %1
+          %6: i1 = icmp slt %2, %1
+          blackbox %3
+          blackbox %4
+          blackbox %5
+          blackbox %6
+        ",
+            "
+          ...
+          %3: i1 = 0
+          %4: i1 = 1
+          %5: i1 = icmp sge %2, %1
+          %6: i1 = icmp slt %2, %1
+          blackbox %3
+          blackbox %4
+          blackbox %5
+          blackbox %6
         ",
         );
     }
