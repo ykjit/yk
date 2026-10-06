@@ -186,6 +186,24 @@ impl ArbBitInt {
         masked.trailing_zeros()
     }
 
+    /// Return a new [ArbBitInt] that performs two's complement saturating addition on `self` and
+    /// `other`.
+    ///
+    /// # Panics
+    ///
+    /// If `self` and `other` are not the same bit width.
+    pub(crate) fn saturating_add(&self, other: &Self) -> Self {
+        debug_assert_eq!(self.bitw, other.bitw);
+        Self {
+            bitw: self.bitw,
+            val: self
+                .val
+                .truncate_to(self.bitw)
+                .saturating_add(other.val.truncate_to(other.bitw))
+                .min(u64::MAX.truncate_to(self.bitw)),
+        }
+    }
+
     /// Return a new [ArbBitInt] that performs two's complement wrapping addition on `self` and
     /// `other`.
     ///
@@ -398,6 +416,20 @@ mod tests {
                 x.trailing_zeros()
             );
 
+            // saturating_add
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(8, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(8, y as i64)).to_zero_ext_u8(),
+                Some(x.cast_unsigned().saturating_add(y.cast_unsigned()))
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(8, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(8, y as i64)).to_zero_ext_u16(),
+                Some(u16::from(x.cast_unsigned().saturating_add(y.cast_unsigned())))
+            );
+
             // wrapping_add
             // i8
             assert_eq!(
@@ -514,6 +546,20 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_i64(16, x as i64).trailing_zeros(),
                 x.trailing_zeros()
+            );
+
+            // saturating_add
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(16, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(16, y as i64)).to_zero_ext_u8(),
+                u8::try_from(x.cast_unsigned().saturating_add(y.cast_unsigned())).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(16, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(16, y as i64)).to_zero_ext_u16(),
+                Some(x.cast_unsigned().saturating_add(y.cast_unsigned()))
             );
 
             // wrapping_add
@@ -651,6 +697,26 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_i64(32, x as i64).trailing_zeros(),
                 x.trailing_zeros()
+            );
+
+            // saturating_add
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(32, y as i64)).to_zero_ext_u8(),
+                u8::try_from(x.cast_unsigned().saturating_add(y.cast_unsigned())).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(32, y as i64)).to_zero_ext_u16(),
+                u16::try_from(x.cast_unsigned().saturating_add(y.cast_unsigned())).ok()
+            );
+            // i32
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(32, y as i64)).to_zero_ext_u32(),
+                Some(x.cast_unsigned().saturating_add(y.cast_unsigned()))
             );
 
             // wrapping_add
@@ -840,6 +906,32 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_i64(64, x).trailing_zeros(),
                 x.trailing_zeros()
+            );
+
+            // saturating_add
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .saturating_add(&ArbBitInt::from_i64(64, y)).to_zero_ext_u8(),
+                u8::try_from(x.cast_unsigned().saturating_add(y.cast_unsigned())).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .saturating_add(&ArbBitInt::from_i64(64, y)).to_zero_ext_u16(),
+                u16::try_from(x.cast_unsigned().saturating_add(y.cast_unsigned())).ok()
+            );
+            // i32
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .saturating_add(&ArbBitInt::from_i64(64, y)).to_zero_ext_u32(),
+                u32::try_from(x.cast_unsigned().saturating_add(y.cast_unsigned())).ok()
+            );
+            // i64
+            assert_eq!(
+                ArbBitInt::from_i64(64, x)
+                    .saturating_add(&ArbBitInt::from_i64(64, y)).to_zero_ext_u64(),
+                Some(x.cast_unsigned().saturating_add(y.cast_unsigned()))
             );
 
             // wrapping_add
@@ -1060,6 +1152,20 @@ mod tests {
                 (Err(_), None) => (),
                 a => panic!("{a:?}")
             }
+
+            // saturating_add
+            // i8
+            assert_eq!(
+                ArbBitInt::from_i64(64, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(64, y as i64)).to_zero_ext_u8(),
+                u8::try_from(x.saturating_add(y)).ok()
+            );
+            // i16
+            assert_eq!(
+                ArbBitInt::from_i64(64, x as i64)
+                    .saturating_add(&ArbBitInt::from_i64(64, y as i64)).to_zero_ext_u16(),
+                u16::try_from(x.saturating_add(y)).ok()
+            );
 
             // wrapping_add
             // i8
