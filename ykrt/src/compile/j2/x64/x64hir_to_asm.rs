@@ -1088,12 +1088,7 @@ impl<'a> X64HirToAsm<'a> {
             iidx,
             *ptr,
             RegCnstr::Output {
-                out_fill: RegCnstrFill::AnyOf(
-                    AnyOfFill::new()
-                        .with_undefined()
-                        .with_signed()
-                        .with_zeroed(),
-                ),
+                out_fill: RegCnstrFill::AnyOf(AnyOfFill::new().with_signed().with_zeroed()),
                 regs: &NORMAL_GP_REGS,
                 can_be_same_as_input: true,
             },
@@ -1102,7 +1097,7 @@ impl<'a> X64HirToAsm<'a> {
         self.asm.push_inst(match self.m.ty(*tyidx) {
             Ty::Int(bitw) => match bitw {
                 8 => {
-                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                    if matches!(out_fill, RegFill::Zeroed) {
                         IcedInst::with2(Code::Movzx_r32_rm8, outr.to_reg32(), memop)
                     } else {
                         assert_matches!(out_fill, RegFill::Signed);
@@ -1110,7 +1105,7 @@ impl<'a> X64HirToAsm<'a> {
                     }
                 }
                 16 => {
-                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                    if matches!(out_fill, RegFill::Zeroed) {
                         IcedInst::with2(Code::Movzx_r32_rm16, outr.to_reg32(), memop)
                     } else {
                         assert_matches!(out_fill, RegFill::Signed);
@@ -1118,7 +1113,7 @@ impl<'a> X64HirToAsm<'a> {
                     }
                 }
                 32 => {
-                    if matches!(out_fill, RegFill::Undefined | RegFill::Zeroed) {
+                    if matches!(out_fill, RegFill::Zeroed) {
                         IcedInst::with2(Code::Mov_r32_rm32, outr.to_reg32(), memop)
                     } else {
                         assert_matches!(out_fill, RegFill::Signed);
