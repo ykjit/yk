@@ -70,8 +70,7 @@
 //     yk-tracing: stop-tracing
 //     --- Begin hir ---
 //     ...
-//     %{{4}}: i32 = arg
-//     %{{5}}: ...
+//     %{{_}}: i32 = arg
 //     ...
 //     --- End hir ---
 //     35 99: default

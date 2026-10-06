@@ -1033,6 +1033,44 @@ fn opt_ptradd(opt: &mut PassOpt, mut inst: PtrAdd) -> OptOutcome {
     }
 }
 
+/// For `iidx` return `Some((iidx, lower, upper))` if an interval range (e.g. `x == 0 || x == 1`)
+/// can be found. Note that the input `iidx` may not be the same as the output `iidx`.
+fn cmp_interval(opt: &mut PassOpt, iidx: InstIdx) -> Option<(InstIdx, ArbBitInt, ArbBitInt)> {
+    let Inst::ICmp(cmp) = opt.inst(iidx) else {
+        return None;
+    };
+    let mut cmp = cmp.to_owned();
+    cmp.canonicalise(opt);
+    assert!(!cmp.samesign);
+    if !matches!(cmp.pred, IPred::Eq | IPred::Ule) {
+        return None;
+    }
+    let ConstKind::Int(bound) = opt.as_constkind(cmp.rhs)? else {
+        return None;
+    };
+    if cmp.pred == IPred::Eq {
+        return Some((cmp.lhs, bound.clone(), bound));
+    }
+    let mut cmp_lhs = opt.inst(cmp.lhs).to_owned();
+    cmp_lhs.canonicalise(opt);
+    let Inst::Sub(Sub {
+        lhs,
+        rhs,
+        nuw: false,
+        nsw: false,
+        ..
+    }) = &cmp_lhs
+    else {
+        return Some((cmp.lhs, ArbBitInt::from_u64(bound.bitw(), 0), bound));
+    };
+    let ConstKind::Int(base) = opt.as_constkind(*rhs)? else {
+        return None;
+    };
+    let end = base.wrapping_add(&bound);
+    // Addition wraps at the HIR width, so a smaller end means the interval wraps.
+    base.ule(&end).then_some((*lhs, base, end))
+}
+
 fn opt_or(opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
     inst.canonicalise(opt);
     let Or {
@@ -1046,6 +1084,46 @@ fn opt_or(opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
         // Reduce x | x to x.
         return OptOutcome::Equiv(lhs);
     }
+
+    // Try to turn comparison ranges (`x == 1 || x == 2 ...`) into range comparisons (`x - 1 <=
+    // 1`).
+    if let Some((x, lhs_lo, lhs_hi)) = cmp_interval(opt, lhs)
+        && let Some((y, rhs_lo, rhs_hi)) = cmp_interval(opt, rhs)
+        && x == y
+        && lhs_lo.ule(&rhs_hi.saturating_add(&ArbBitInt::from_u64(rhs_hi.bitw(), 1)))
+        && rhs_lo.ule(&lhs_hi.saturating_add(&ArbBitInt::from_u64(lhs_hi.bitw(), 1)))
+    {
+        let lo = if lhs_lo.ule(&rhs_lo) { lhs_lo } else { rhs_lo };
+        let hi = if rhs_hi.ule(&lhs_hi) { lhs_hi } else { rhs_hi };
+        let bound = hi.wrapping_sub(&lo);
+        let int_tyidx = opt.inst(x).tyidx(opt);
+        let val = if lo.to_zero_ext_u8() == Some(0) {
+            x
+        } else {
+            let base = opt.push_pre_inst(Inst::Const(Const {
+                tyidx: int_tyidx,
+                kind: ConstKind::Int(lo),
+            }));
+            opt.push_pre_inst(Inst::Sub(Sub {
+                tyidx: int_tyidx,
+                lhs: x,
+                rhs: base,
+                nuw: false,
+                nsw: false,
+            }))
+        };
+        let bound = opt.push_pre_inst(Inst::Const(Const {
+            tyidx: int_tyidx,
+            kind: ConstKind::Int(bound),
+        }));
+        return OptOutcome::Rewritten(Inst::ICmp(ICmp {
+            pred: IPred::Ule,
+            lhs: val,
+            rhs: bound,
+            samesign: false,
+        }));
+    }
+
     match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
         (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
             // Constant fold `c1 | c2`.
@@ -3967,6 +4045,82 @@ mod test {
           %4: i8 = 48
           %5: i8 = or %0, %4
           term [%5]
+        ",
+        );
+
+        // Range comparison identification
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 0
+          %2: i1 = icmp eq %0, %1
+          %3: i8 = 1
+          %4: i1 = icmp eq %0, %3
+          %5: i8 = 2
+          %6: i1 = icmp eq %0, %5
+          %7: i1 = or %2, %4
+          %8: i1 = or %6, %7
+          blackbox %8
+          term [%0]
+        ",
+            "
+          %0: i8 = arg
+          %9: i8 = 2
+          %10: i1 = icmp ule %0, %9
+          blackbox %10
+          term [%0]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i1 = icmp eq %0, %1
+          %3: i8 = 2
+          %4: i1 = icmp eq %0, %3
+          %5: i8 = 3
+          %6: i1 = icmp eq %0, %5
+          %7: i1 = or %2, %4
+          %8: i1 = or %6, %7
+          blackbox %8
+          term [%0]
+        ",
+            "
+          %0: i8 = arg
+          %10: i8 = 1
+          %11: i8 = sub %0, %10
+          %12: i8 = 2
+          %13: i1 = icmp ule %11, %12
+          blackbox %13
+          term [%0]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 250
+          %2: i8 = sub %0, %1
+          %3: i8 = 10
+          %4: i1 = icmp ule %2, %3
+          %5: i8 = 5
+          %6: i1 = icmp eq %0, %5
+          %7: i1 = or %4, %6
+          blackbox %7
+          term [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 250
+          %2: i8 = sub %0, %1
+          %3: i8 = 10
+          %4: i1 = icmp ule %2, %3
+          %5: i8 = 5
+          %6: i1 = icmp eq %0, %5
+          %7: i1 = or %4, %6
+          blackbox %7
+          term [%0]
         ",
         );
     }
