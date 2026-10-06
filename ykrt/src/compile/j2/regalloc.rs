@@ -1480,11 +1480,18 @@ struct RState {
 
 impl Clone for RState {
     fn clone(&self) -> Self {
-        // We only implement `clone` because `SmallVec::clone` is inefficient (until rustc
-        // stabilises specialisation) but `SmallVec::from_slice` is efficient.
+        // We only implement `clone` because `SmallVec::clone` (and to an extent
+        // `SmallVec::from_slice`) is inefficient. Because we're mostly dealing with a very small
+        // number of elements (mostly zero or 1), we can avoid doing a run-time copy of an
+        // arbitrary number of elements easily.
         Self {
             fill: self.fill,
-            iidxs: SmallVec::from_slice(self.iidxs.as_slice()),
+            iidxs: match self.iidxs.as_slice() {
+                [] => smallvec![],
+                [a] => smallvec![*a],
+                [a, b] => smallvec![*a, *b],
+                iidxs => SmallVec::from_slice(iidxs),
+            },
         }
     }
 }
