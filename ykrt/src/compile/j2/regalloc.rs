@@ -791,15 +791,24 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 }
                 RegCnstr::InputOutput { out_fill, .. } | RegCnstr::Output { out_fill, .. } => {
                     if let RegCnstrFill::AnyOf(cnd_fills) = out_fill {
-                        let fill = if self.rstates.iidxs(reg).contains(&iidx) {
+                        let mut fill = if self.rstates.iidxs(reg).contains(&iidx) {
                             self.rstates.fill(reg)
                         } else if let Some(other_reg) = self.iter_reg_for(iidx).nth(0) {
                             self.rstates.fill(other_reg)
-                        } else if cnd_fills.has_undefined() {
-                            RegFill::Undefined
                         } else {
-                            todo!();
+                            RegFill::Undefined
                         };
+                        // If we only need an `Undefined` fill but we can produce
+                        // `Zeroed`/`Signed`, retain those: we never lose by doing so and sometimes
+                        // we gain when we do a copy and want them to be `Zeroed`/`Signed`.
+                        if fill == RegFill::Undefined {
+                            if cnd_fills.intersects_with(&AnyOfFill::new().with_zeroed()) {
+                                fill = RegFill::Zeroed;
+                            } else {
+                                assert!(cnd_fills.intersects_with(&AnyOfFill::new().with_signed()));
+                                fill = RegFill::Signed;
+                            };
+                        }
                         assert!(AnyOfFill::from_regfill(fill).intersects_with(cnd_fills));
                         *out_fill = RegCnstrFill::from_regfill(fill);
                     }
@@ -1809,6 +1818,7 @@ impl AnyOfFill {
     }
 
     /// Can `self` accept [RegFill::Undefined]?
+    #[allow(unused)]
     const fn has_undefined(&self) -> bool {
         (self.0 & ANYOFFILL_UNDEFINED) != 0
     }
@@ -2514,6 +2524,36 @@ pub(crate) mod test {
             Ok(())
         }
 
+        fn i_load(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            Load { ptr, .. }: &Load,
+        ) -> Result<(), CompilationError> {
+            let [(outr, fill), (ptrr, _)] = ra.alloc_with_fills(
+                self,
+                iidx,
+                [
+                    RegCnstr::Output {
+                        out_fill: RegCnstrFill::AnyOf(AnyOfFill::new().with_signed().with_zeroed()),
+                        regs: &GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *ptr,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )?;
+            self.ra_log.push(format!(
+                "load %{iidx:?} ptr={ptrr:?} dst={outr:?} fill={fill:?}"
+            ));
+            Ok(())
+        }
+
         fn i_shl(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -2986,6 +3026,25 @@ pub(crate) mod test {
           arrange_fill GPR0 from=Undefined dst_bitw=8 to=Zeroed
           copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=8
         "],
+        );
+    }
+
+    #[test]
+    fn dont_lose_non_undefined_fills() {
+        build_and_test(
+            r#"
+            %0: ptr = arg [reg ("GPR0", undefined)]
+            %1: i8 = load %0
+            %2: i8 = shl %1, %1
+            blackbox %2
+            term [%0]
+          "#,
+            |_| true,
+            &["
+            shl %2 GPR1 GPR2 GPR3
+            copy_reg: src_reg=GPR1, src_fill=Zeroed, dst_reg=GPR2, dst_fill=Zeroed, dst_bitw=8
+            load %1 ptr=GPR0 dst=GPR1 fill=Zeroed
+          "],
         );
     }
 
