@@ -186,8 +186,18 @@ impl ArbBitInt {
         masked.trailing_zeros()
     }
 
-    /// Return a new [ArbBitInt] that performs two's complement saturating addition on `self` and
-    /// `other`.
+    /// Return `true` if `self <= other`.
+    ///
+    /// # Panics
+    ///
+    /// If `self` and `other` are not the same bit width.
+    pub(crate) fn ule(&self, other: &Self) -> bool {
+        debug_assert_eq!(self.bitw, other.bitw);
+        self.val.truncate_to(self.bitw) <= other.val.truncate_to(other.bitw)
+    }
+
+    /// Return a new [ArbBitInt] that performs two's complement unsigned saturating addition on
+    /// `self` and `other`.
     ///
     /// # Panics
     ///
@@ -416,6 +426,12 @@ mod tests {
                 x.trailing_zeros()
             );
 
+            // ule
+            assert_eq!(
+                ArbBitInt::from_i64(8, x as i64).ule(&ArbBitInt::from_i64(8, y as i64)),
+                x.cast_unsigned() <= y.cast_unsigned()
+            );
+
             // saturating_add
             // i8
             assert_eq!(
@@ -546,6 +562,12 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_i64(16, x as i64).trailing_zeros(),
                 x.trailing_zeros()
+            );
+
+            // ule
+            assert_eq!(
+                ArbBitInt::from_i64(16, x as i64).ule(&ArbBitInt::from_i64(16, y as i64)),
+                x.cast_unsigned() <= y.cast_unsigned()
             );
 
             // saturating_add
@@ -697,6 +719,12 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_i64(32, x as i64).trailing_zeros(),
                 x.trailing_zeros()
+            );
+
+            // ule
+            assert_eq!(
+                ArbBitInt::from_i64(32, x as i64).ule(&ArbBitInt::from_i64(32, y as i64)),
+                x.cast_unsigned() <= y.cast_unsigned()
             );
 
             // saturating_add
@@ -906,6 +934,12 @@ mod tests {
             assert_eq!(
                 ArbBitInt::from_i64(64, x).trailing_zeros(),
                 x.trailing_zeros()
+            );
+
+            // ule
+            assert_eq!(
+                ArbBitInt::from_i64(64, x).ule(&ArbBitInt::from_i64(64, y)),
+                x.cast_unsigned() <= y.cast_unsigned()
             );
 
             // saturating_add
