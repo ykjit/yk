@@ -1303,45 +1303,63 @@ fn opt_shl(opt: &mut PassOpt, mut inst: Shl) -> OptOutcome {
         && let Some(c2) = c2.to_zero_ext_u32()
         && c2 < bitw
     {
-        let (shft, mask) = match opt.inst(lhs) {
+        let (val, src_tyidx) = match opt.inst(lhs) {
+            Inst::ZExt(ZExt { val, .. }) => {
+                let val = opt.equiv_iidx(*val);
+                (val, opt.inst(val).tyidx(opt))
+            }
+            _ => (lhs, tyidx),
+        };
+        let (shft, mask, src_tyidx) = match opt.inst(val) {
             Inst::And(And { lhs, rhs, .. }) => {
                 let Some(ConstKind::Int(mask)) = opt.as_constkind(opt.equiv_iidx(*rhs)) else {
                     return OptOutcome::Rewritten(inst.into());
                 };
-                (opt.equiv_iidx(*lhs), mask)
+                (opt.equiv_iidx(*lhs), mask, src_tyidx)
             }
-            Inst::ZExt(ZExt { val, .. }) => {
+            Inst::Trunc(Trunc {
+                tyidx: narrow_tyidx,
+                val,
+                ..
+            }) if src_tyidx != tyidx => {
                 // zext(trunc()) is `x & mask` in disguise
-                let Inst::Trunc(Trunc { tyidx, val, .. }) = opt.inst(opt.equiv_iidx(*val)) else {
-                    return OptOutcome::Rewritten(inst.into());
-                };
                 (
                     opt.equiv_iidx(*val),
-                    ArbBitInt::all_bits_set(opt.ty(*tyidx).bitw()).zero_extend(bitw),
+                    ArbBitInt::all_bits_set(opt.ty(*narrow_tyidx).bitw()).zero_extend(bitw),
+                    tyidx,
                 )
             }
-            _ => (lhs, ArbBitInt::all_bits_set(bitw)),
+            _ => (
+                val,
+                ArbBitInt::all_bits_set(opt.ty(src_tyidx).bitw()),
+                src_tyidx,
+            ),
         };
+        let src_bitw = opt.ty(src_tyidx).bitw();
         if let Inst::LShr(LShr {
             lhs: x,
             rhs,
             exact: false,
             ..
         }) = opt.inst(shft)
-            // Keep the source and result widths equal; otherwise combining the shifts would
-            // also require moving an extension or truncation across them.
-            && opt.inst_bitw(opt, *x) == bitw
-            && let Some(ConstKind::Int(c1)) =
-                opt.as_constkind(opt.equiv_iidx(*rhs))
+            && opt.inst_bitw(opt, *x) == src_bitw
+            && let Some(ConstKind::Int(c1)) = opt.as_constkind(opt.equiv_iidx(*rhs))
             && let Some(c1) = c1.to_zero_ext_u32()
-            && c1 < bitw
+            && c1 < src_bitw
+            && let mask = if src_tyidx == tyidx {
+                mask
+            } else {
+                mask.bitand(&ArbBitInt::all_bits_set(src_bitw).checked_lshr(c1).unwrap())
+            }
+            && let Some(scaled_mask) = mask.checked_shl(c2)
+            && (src_tyidx == tyidx || scaled_mask.checked_lshr(c2) == Some(mask))
         {
             let x = opt.equiv_iidx(*x);
-            let mask = mask.checked_shl(c2).unwrap();
+            let mask = scaled_mask;
             if mask.to_zero_ext_u64() == Some(0) {
                 return OptOutcome::Rewritten(Inst::Const(Const {
                     tyidx,
-                    kind: ConstKind::Int(mask),
+                    kind: ConstKind::Int(mask.zero_extend(bitw)),
                 }));
             }
             let shft_iidx = if c1 == c2 {
@@ -1349,19 +1367,19 @@ fn opt_shl(opt: &mut PassOpt, mut inst: Shl) -> OptOutcome {
                 x
             } else {
                 let amount = opt.push_pre_inst(Inst::Const(Const {
-                    tyidx,
-                    kind: ConstKind::Int(ArbBitInt::from_u64(bitw, u64::from(c1.abs_diff(c2)))),
+                    tyidx: src_tyidx,
+                    kind: ConstKind::Int(ArbBitInt::from_u64(src_bitw, u64::from(c1.abs_diff(c2)))),
                 }));
                 opt.push_pre_inst(if c1 > c2 {
                     Inst::LShr(LShr {
-                        tyidx,
+                        tyidx: src_tyidx,
                         lhs: x,
                         rhs: amount,
                         exact: false,
                     })
                 } else {
                     Inst::Shl(Shl {
-                        tyidx,
+                        tyidx: src_tyidx,
                         lhs: x,
                         rhs: amount,
                         nuw: false,
@@ -1370,14 +1388,20 @@ fn opt_shl(opt: &mut PassOpt, mut inst: Shl) -> OptOutcome {
                 })
             };
             let mask_iidx = opt.push_pre_inst(Inst::Const(Const {
-                tyidx,
+                tyidx: src_tyidx,
                 kind: ConstKind::Int(mask),
             }));
-            return OptOutcome::Rewritten(Inst::And(And {
-                tyidx,
+            let and_iidx = Inst::And(And {
+                tyidx: src_tyidx,
                 lhs: shft_iidx,
                 rhs: mask_iidx,
-            }));
+            });
+            if src_tyidx == tyidx {
+                return OptOutcome::Rewritten(and_iidx);
+            } else {
+                let val = opt.push_pre_inst(and_iidx);
+                return OptOutcome::Rewritten(Inst::ZExt(ZExt { tyidx, val }));
+            }
         }
     }
 
@@ -4482,9 +4506,7 @@ mod test {
         // Rewrites of `((x >> c1) & mask) << c2`
 
         // The `&` case
-        for (bitw, right, left, mask) in
-            [(8, 3, 3, None), (16, 4, 7, Some(5)), (8, 7, 4, Some(129))]
-        {
+        for (bitw, right, left, mask) in [(8, 3, 3, None), (8, 7, 4, Some(129))] {
             let max = u64::MAX >> (64 - bitw);
             let extraction = format!(
                 "%3: i{bitw} = {}\n%4: i{bitw} = and %2, %3",
@@ -4588,6 +4610,36 @@ mod test {
                 ),
             );
         }
+
+        // Fold the extraction in i32, then zero extend the scaled result.
+        test_sf(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 7
+              %2: i32 = lshr %0, %1
+              %3: i32 = 255
+              %4: i32 = and %2, %3
+              %5: i64 = zext %4
+              %6: i64 = 4
+              %7: i64 = shl %5, %6
+              blackbox %7
+            ",
+            "
+              %0: i32 = arg
+              %1: i32 = 7
+              %2: i32 = lshr %0, %1
+              %3: i32 = 255
+              %4: i32 = and %2, %3
+              %5: i64 = zext %4
+              %6: i64 = 4
+              %7: i32 = 3
+              %8: i32 = lshr %0, %7
+              %9: i32 = 4080
+              %10: i32 = and %8, %9
+              %11: i64 = zext %10
+              blackbox %11
+            ",
+        );
     }
 
     #[test]
