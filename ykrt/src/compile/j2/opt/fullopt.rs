@@ -217,13 +217,14 @@ impl FullOpt {
         mut popt_inner: PassOptInner,
         mut inst: Inst,
     ) -> Result<Option<InstIdx>, CompilationError> {
-        for i in 0..self.passes.len() {
+        let mut pass = 0;
+        while pass < self.passes.len() {
             let mut opt = PassOpt {
                 optinternal: &mut self.inner,
                 inner: &mut popt_inner,
             };
 
-            let fed = self.passes[i].feed(&mut opt, inst);
+            let fed = self.passes[pass].feed(&mut opt, inst);
 
             for inst in popt_inner.pre_insts.drain(..) {
                 self.commit_preinst(inst);
@@ -231,7 +232,14 @@ impl FullOpt {
 
             match fed {
                 OptOutcome::NotNeeded => return Ok(None),
-                OptOutcome::Rewritten(new_inst) => inst = new_inst,
+                OptOutcome::Rerun(new_inst) => {
+                    inst = new_inst;
+                    pass = 0;
+                }
+                OptOutcome::Rewritten(new_inst) => {
+                    inst = new_inst;
+                    pass += 1;
+                }
                 OptOutcome::Equiv(iidx) => return Ok(Some(iidx)),
             }
         }
@@ -614,6 +622,9 @@ impl Eq for HashableConst {}
 #[derive(Debug)]
 pub enum OptOutcome {
     NotNeeded,
+    /// The input [Inst] has been rewritten to a new [Inst] which should be rerun through the
+    /// optimisation pipeline.
+    Rerun(Inst),
     /// The input [Inst] has been rewritten to a new [Inst].
     Rewritten(Inst),
     /// The input [Inst] is equivalent to [InstIdx].
@@ -1017,44 +1028,55 @@ pub(in crate::compile::j2) mod test {
         // We need to maintain a manual map of iidxs the user has written in their test to the
         // current state of the actual optimiser. See the comment in [full_opt_test].
         let mut opt_map = TypedVec::with_capacity(insts.len_usize());
-        for mut inst in insts.into_iter() {
+        'a: for mut inst in insts.into_iter() {
             inst.rewrite_iidxs(&mut *fopt, |x| opt_map[x]);
-            let mut popt_inner = PassOptInner::new();
-            let mut opt = PassOpt {
-                optinternal: &mut fopt.inner,
-                inner: &mut popt_inner,
-            };
-            let fed = feed_f(&mut opt, inst);
-
-            for inst in popt_inner.pre_insts.drain(..) {
-                let iidx = fopt.inner.insts.push(InstEquiv {
-                    inst,
-                    equiv: InstIdx::MAX,
-                });
-                let opt = CommitInstOpt { inner: &fopt.inner };
-                inst_committed_f(&opt, iidx);
-            }
-
-            for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
-                let (equiv1, equiv2) = match (fopt.inst(equiv1), fopt.inst(equiv2)) {
-                    (_, Inst::Const(_)) => (equiv1, equiv2),
-                    (_, _) => (equiv2, equiv1),
+            loop {
+                let mut popt_inner = PassOptInner::new();
+                let mut opt = PassOpt {
+                    optinternal: &mut fopt.inner,
+                    inner: &mut popt_inner,
                 };
-                fopt.inner.insts.get_mut(equiv1).unwrap().equiv = equiv2;
-                equiv_committed_f(equiv1, equiv2);
-            }
+                let fed = feed_f(&mut opt, inst);
 
-            match fed {
-                OptOutcome::NotNeeded => {
-                    opt_map.push(InstIdx::MAX);
-                    continue;
+                for inst in popt_inner.pre_insts.drain(..) {
+                    if let Inst::Const(c) = &inst {
+                        fopt.inner
+                            .consts_map
+                            .insert(HashableConst(c.clone()), fopt.inner.insts.len());
+                    }
+                    let iidx = fopt.inner.insts.push(InstEquiv {
+                        inst,
+                        equiv: InstIdx::MAX,
+                    });
+                    let opt = CommitInstOpt { inner: &fopt.inner };
+                    inst_committed_f(&opt, iidx);
                 }
-                OptOutcome::Rewritten(new_inst) => {
-                    inst = new_inst;
+
+                for (equiv1, equiv2) in popt_inner.new_equivs.drain(..) {
+                    let (equiv1, equiv2) = match (fopt.inst(equiv1), fopt.inst(equiv2)) {
+                        (_, Inst::Const(_)) => (equiv1, equiv2),
+                        (_, _) => (equiv2, equiv1),
+                    };
+                    fopt.inner.insts.get_mut(equiv1).unwrap().equiv = equiv2;
+                    equiv_committed_f(equiv1, equiv2);
                 }
-                OptOutcome::Equiv(iidx) => {
-                    opt_map.push(iidx);
-                    continue;
+
+                match fed {
+                    OptOutcome::NotNeeded => {
+                        opt_map.push(InstIdx::MAX);
+                        continue 'a;
+                    }
+                    OptOutcome::Rerun(new_inst) => {
+                        inst = new_inst;
+                    }
+                    OptOutcome::Rewritten(new_inst) => {
+                        inst = new_inst;
+                        break;
+                    }
+                    OptOutcome::Equiv(iidx) => {
+                        opt_map.push(iidx);
+                        continue 'a;
+                    }
                 }
             }
 
