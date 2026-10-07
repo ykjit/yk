@@ -372,15 +372,15 @@ fn opt_dynptradd(opt: &mut PassOpt, mut inst: DynPtrAdd) -> OptOutcome {
         } else {
             // We've optimised to a `ptradd`, so run it through that pass, which may be able to
             // optimise it further.
-            return opt_ptradd(
-                opt,
+            return OptOutcome::Rerun(
                 PtrAdd {
                     ptr,
                     off,
                     in_bounds: false,
                     nusw: false,
                     nuw: false,
-                },
+                }
+                .into(),
             );
         }
     } else if let Inst::Sub(Sub {
@@ -3585,9 +3585,8 @@ mod test {
           %6: i16 = 512
           %7: i1 = icmp ne %1, %6
           blackbox %7
-          %9: i8 = 8
-          %10: i1 = icmp ult %0, %9
-          blackbox %10
+          %9: i1 = icmp ult %0, %3
+          blackbox %9
         ",
         );
 
@@ -4088,11 +4087,11 @@ mod test {
         ",
             "
           %0: i8 = arg
-          %10: i8 = 1
-          %11: i8 = sub %0, %10
-          %12: i8 = 2
-          %13: i1 = icmp ule %11, %12
-          blackbox %13
+          %7: i8 = 1
+          %10: i8 = sub %0, %7
+          %11: i8 = 2
+          %12: i1 = icmp ule %10, %11
+          blackbox %12
           term [%0]
         ",
         );

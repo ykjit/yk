@@ -301,7 +301,6 @@ mod test {
           guard true, %6, []
           %9: i8 = and %2, %3
           %10: i1 = icmp eq %4, %9
-          %11: i1 = 1
           guard true, %10, []
           blackbox %4
         ",
