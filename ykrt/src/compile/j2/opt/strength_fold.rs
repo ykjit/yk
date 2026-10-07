@@ -1116,7 +1116,7 @@ fn opt_or(opt: &mut PassOpt, mut inst: Or) -> OptOutcome {
             tyidx: int_tyidx,
             kind: ConstKind::Int(bound),
         }));
-        return OptOutcome::Rewritten(Inst::ICmp(ICmp {
+        return OptOutcome::Rerun(Inst::ICmp(ICmp {
             pred: IPred::Ule,
             lhs: val,
             rhs: bound,

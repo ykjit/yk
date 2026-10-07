@@ -97,21 +97,17 @@
 //! be committed to the trace before the current instruction. Preinstructions should be used
 //! carefully:
 //!
-//! 1. They are only committed at the _end_ of the current pass. In other words, if a pass P calls
-//!    [PassOpt::push_pre_inst] then those instructions are not accessible via [PassOpt::inst] for
-//!    the duration of P. As soon as P has completed, the preinstructions will be committed, and
-//!    subsequent passes will have access to them. Note: it is guaranteed that the [InstIdx]s
-//!    returned by [PassOpt::push_pre_inst] will be valid after the preinstructions are
-//!    subsequently committed.
+//! 1. They are not available via [PassOpt::inst] during the current pass.
 //!
-//! 2. They are committed unconditionally at the end of a pass, even if a subsequent pass proves
-//!    that the instruction they were originally associated with is no longer needed.
+//! 2. They are not run through the optimisation pipeline unless [OptOutcome::Rerun] is used.
 //!
-//! In practise, the main use of preinstructions is for constants: modulo (1), there are no real
-//! issues for constants. Similarly, for other side-effect-free instructions, one may put some
-//! pressure on dead-code elimination, but not on the eventual compiled trace. However, for
-//! side-effectful instructions of any kind, one should be extremely cautious about committing them
-//! as preinstructions.
+//! 3. When [OptOutcome::Rewritten] is used, preinstructions are committed unconditionally at the
+//!    end of the current pass. Note: it is guaranteed that the [InstIdx]s returned by
+//!    [PassOpt::push_pre_inst] will be valid after the preinstructions are subsequently committed.
+//!
+//! In general, if your only preinstructions are constants, [OptOutcome::Rewritten] works as
+//! normal; if you insert any other instructions, [OptOutcome::Rerun] is more likely to do what you
+//! want.
 //!
 //!
 //! ### New equivalences
@@ -226,16 +222,20 @@ impl FullOpt {
 
             let fed = self.passes[pass].feed(&mut opt, inst);
 
+            if let OptOutcome::Rerun(mut new_inst) = fed {
+                self.feed_pre_insts(&mut popt_inner, &mut new_inst, |opt, inst| opt.feed(inst))?;
+                inst = new_inst;
+                pass = 0;
+                continue;
+            }
+
             for inst in popt_inner.pre_insts.drain(..) {
                 self.commit_preinst(inst);
             }
 
             match fed {
                 OptOutcome::NotNeeded => return Ok(None),
-                OptOutcome::Rerun(new_inst) => {
-                    inst = new_inst;
-                    pass = 0;
-                }
+                OptOutcome::Rerun(_) => unreachable!(),
                 OptOutcome::Rewritten(new_inst) => {
                     inst = new_inst;
                     pass += 1;
@@ -272,6 +272,49 @@ impl FullOpt {
         }
 
         Ok(Some(self.commit_inst(inst)))
+    }
+
+    /// Feed the current preinstructions into the pipeline.
+    fn feed_pre_insts<F>(
+        &mut self,
+        inner: &mut PassOptInner,
+        inst: &mut Inst,
+        mut feed: F,
+    ) -> Result<(), CompilationError>
+    where
+        F: FnMut(&mut Self, Inst) -> Result<InstIdx, CompilationError>,
+    {
+        let cur_end = self.inner.insts.len_usize();
+        let mut map = TypedVec::new();
+        for mut preinst in mem::take(&mut inner.pre_insts) {
+            preinst.rewrite_iidxs(self, |idx| {
+                if idx.to_raw_index() < cur_end {
+                    idx
+                } else {
+                    map[InstIdx::from_raw_index(idx.to_raw_index() - cur_end)]
+                }
+            });
+            map.push(feed(self, preinst)?);
+        }
+        let remap = |idx: InstIdx| {
+            if idx.to_raw_index() < cur_end {
+                idx
+            } else {
+                map[InstIdx::from_raw_index(idx.to_raw_index() - cur_end)]
+            }
+        };
+        inst.rewrite_iidxs(
+            &mut PassOpt {
+                optinternal: &mut self.inner,
+                inner,
+            },
+            remap,
+        );
+        for (lhs, rhs) in &mut inner.new_equivs {
+            *lhs = remap(*lhs);
+            *rhs = remap(*rhs);
+        }
+        Ok(())
     }
 
     fn commit_inst(&mut self, inst: Inst) -> InstIdx {
@@ -622,8 +665,8 @@ impl Eq for HashableConst {}
 #[derive(Debug)]
 pub enum OptOutcome {
     NotNeeded,
-    /// The input [Inst] has been rewritten to a new [Inst] which should be rerun through the
-    /// optimisation pipeline.
+    /// The input [Inst] has been rewritten to a new [Inst]. Rerun the optimisation pipieline,
+    /// first with the current preinstructions, then with the `Inst` passed to `Rerun`.
     Rerun(Inst),
     /// The input [Inst] has been rewritten to a new [Inst].
     Rewritten(Inst),
@@ -697,15 +740,9 @@ impl PassOpt<'_> {
         self.optinternal.push_ty(ty)
     }
 
-    /// Add the "preinstruction" `preinst`. After the current pass has completed, `inst` is
-    /// guaranteed to have been committed to the trace, and will be available to subsequent passes.
-    ///
-    /// The [InstIdx] returned is only valid for use _after_ the current pass has completed.
-    /// Attempting to make use of it (e.g. by querying `Opt`) is undefined behaviour.
-    ///
-    /// Note the careful wording in the above: it is possible that the optimiser will prove `inst`
-    /// is equivalent to an existing instruction. However, that cannot be guaranteed, and must not
-    /// be relied upon in any way.undefined behaviour.
+    /// Add the "preinstruction" `preinst`. The [InstIdx] returned is only valid for use _after_
+    /// the current pass has completed. Attempting to make use of it before then (e.g. by querying
+    /// `Opt`) is undefined behaviour.
     pub(super) fn push_pre_inst(&mut self, preinst: Inst) -> InstIdx {
         if let Inst::Const(c) = &preinst {
             // Try and find a match in the overall trace.
@@ -1028,15 +1065,39 @@ pub(in crate::compile::j2) mod test {
         // We need to maintain a manual map of iidxs the user has written in their test to the
         // current state of the actual optimiser. See the comment in [full_opt_test].
         let mut opt_map = TypedVec::with_capacity(insts.len_usize());
-        'a: for mut inst in insts.into_iter() {
-            inst.rewrite_iidxs(&mut *fopt, |x| opt_map[x]);
+
+        fn feed_test<F, G, H>(
+            fopt: &mut FullOpt,
+            mut inst: Inst,
+            feed_f: &F,
+            inst_committed_f: &G,
+            equiv_committed_f: &H,
+        ) -> InstIdx
+        where
+            for<'a> F: Fn(&'a mut PassOpt, Inst) -> OptOutcome,
+            for<'a> G: Fn(&'a CommitInstOpt, InstIdx),
+            H: Fn(InstIdx, InstIdx),
+        {
             loop {
                 let mut popt_inner = PassOptInner::new();
                 let mut opt = PassOpt {
                     optinternal: &mut fopt.inner,
                     inner: &mut popt_inner,
                 };
-                let fed = feed_f(&mut opt, inst);
+                let mut fed = feed_f(&mut opt, inst);
+
+                if let OptOutcome::Rerun(mut new_inst) = fed {
+                    fopt.feed_pre_insts(&mut popt_inner, &mut new_inst, |opt, inst| {
+                        let iidx =
+                            feed_test(opt, inst, feed_f, inst_committed_f, equiv_committed_f);
+                        if let Inst::Const(c) = opt.inst(iidx) {
+                            opt.inner.consts_map.insert(HashableConst(c.clone()), iidx);
+                        }
+                        Ok(iidx)
+                    })
+                    .unwrap();
+                    fed = OptOutcome::Rerun(new_inst);
+                }
 
                 for inst in popt_inner.pre_insts.drain(..) {
                     if let Inst::Const(c) = &inst {
@@ -1063,8 +1124,7 @@ pub(in crate::compile::j2) mod test {
 
                 match fed {
                     OptOutcome::NotNeeded => {
-                        opt_map.push(InstIdx::MAX);
-                        continue 'a;
+                        return InstIdx::MAX;
                     }
                     OptOutcome::Rerun(new_inst) => {
                         inst = new_inst;
@@ -1074,21 +1134,32 @@ pub(in crate::compile::j2) mod test {
                         break;
                     }
                     OptOutcome::Equiv(iidx) => {
-                        opt_map.push(iidx);
-                        continue 'a;
+                        return iidx;
                     }
                 }
             }
 
             let iidx = fopt.inner.insts.len();
-            opt_map.push(iidx);
             fopt.inner.insts.push(InstEquiv {
                 inst,
                 equiv: InstIdx::MAX,
             });
             let opt = CommitInstOpt { inner: &fopt.inner };
             inst_committed_f(&opt, iidx);
+            iidx
         }
+
+        for mut inst in insts.into_iter() {
+            inst.rewrite_iidxs(&mut *fopt, |x| opt_map[x]);
+            opt_map.push(feed_test(
+                &mut fopt,
+                inst,
+                &feed_f,
+                &inst_committed_f,
+                &equiv_committed_f,
+            ));
+        }
+
         let tyidx_int1 = fopt.inner.tyidx_int1;
         let tyidx_ptr0 = fopt.inner.tyidx_ptr0;
         let tyidx_void = fopt.inner.tyidx_void;
@@ -1260,6 +1331,59 @@ pub(in crate::compile::j2) mod test {
           %{{5}}: i8 = 1
           term [%{{5}}]
         ",
+        );
+    }
+
+    #[test]
+    fn rerun_optimises_pre_insts() {
+        use crate::compile::jitc_yk::arbbitint::ArbBitInt;
+
+        user_defined_opt_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 2
+              %2: i64 = mul %0, %1
+              blackbox %2
+            ",
+            |opt, inst| {
+                if let Inst::Mul(Mul { tyidx, lhs, .. }) = inst {
+                    let zero = opt.push_pre_inst(Inst::Const(Const {
+                        tyidx,
+                        kind: ConstKind::Int(ArbBitInt::from_u64(64, 0)),
+                    }));
+                    let identity = opt.push_pre_inst(Inst::Add(Add {
+                        tyidx,
+                        lhs,
+                        rhs: zero,
+                        nuw: false,
+                        nsw: false,
+                    }));
+                    let doubled = opt.push_pre_inst(Inst::Add(Add {
+                        tyidx,
+                        lhs: identity,
+                        rhs: lhs,
+                        nuw: false,
+                        nsw: false,
+                    }));
+                    return OptOutcome::Rerun(Inst::Add(Add {
+                        tyidx,
+                        lhs: doubled,
+                        rhs: zero,
+                        nuw: false,
+                        nsw: false,
+                    }));
+                }
+                StrengthFold::new().feed(opt, inst)
+            },
+            |_, _| (),
+            |_, _| (),
+            "
+              %0: i64 = arg
+              %1: i64 = 2
+              %2: i64 = 0
+              %3: i64 = add %0, %0
+              blackbox %3
+            ",
         );
     }
 }
