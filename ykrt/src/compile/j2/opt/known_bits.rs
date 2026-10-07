@@ -7,7 +7,7 @@ use crate::compile::{
     j2::{
         hir::*,
         opt::{
-            BlockLikeT,
+            BlockLikeT, EquivIIdxT,
             fullopt::{CommitInstOpt, OptOutcome, PassOpt, PassT},
         },
     },
@@ -248,13 +248,25 @@ impl KnownBits {
                 && let Some(bits) = self.as_knownbits(opt, and_lhs)
             {
                 // `(x & c1) == c2` gives us more information about `x`'s known bits.
-                self.knownbits_set(
-                    and_lhs,
-                    bits.union(&KnownBitValue {
-                        ones: x,
-                        unknowns: mask.bitneg(),
-                    }),
-                );
+                let bits = bits.union(&KnownBitValue {
+                    ones: x,
+                    unknowns: mask.bitneg(),
+                });
+                if let Inst::ZExt(ZExt { val, .. }) = opt.inst(and_lhs).to_owned() {
+                    // A `zext` implicitly tells us about the source's low bits.
+                    let val = opt.equiv_iidx(val);
+                    if let Some(lhs_bits) = self.as_knownbits(opt, val) {
+                        let bitw = lhs_bits.bitw();
+                        self.knownbits_set(
+                            val,
+                            lhs_bits.union(&KnownBitValue {
+                                ones: bits.ones.truncate(bitw),
+                                unknowns: bits.unknowns.truncate(bitw),
+                            }),
+                        );
+                    }
+                }
+                self.knownbits_set(and_lhs, bits);
             }
         } else if expect
             && let Inst::ICmp(ICmp { pred, lhs, rhs, .. }) = opt.inst(cond).to_owned()
@@ -1036,6 +1048,42 @@ mod test {
           %8: i8 = 7
           %9: i8 = 5
           blackbox %9
+        ",
+        );
+
+        // Guards and `and` and `zext`
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i32 = zext %0
+          %2: i32 = 63
+          %3: i32 = and %1, %2
+          %4: i32 = 19
+          %5: i1 = icmp eq %3, %4
+          guard true, %5, []
+          %7: i8 = 3
+          %8: i1 = icmp eq %0, %7
+          blackbox %8
+          %10: i8 = 192
+          %11: i8 = and %0, %10
+          blackbox %11
+        ",
+            "
+          %0: i8 = arg
+          %1: i32 = zext %0
+          %2: i32 = 63
+          %3: i32 = and %1, %2
+          %4: i32 = 19
+          %5: i1 = icmp eq %3, %4
+          %6: i32 = 19
+          %7: i1 = 1
+          guard true, %5, []
+          %9: i8 = 3
+          %10: i1 = 0
+          blackbox %10
+          %12: i8 = 192
+          %13: i8 = and %0, %12
+          blackbox %13
         ",
         );
     }
