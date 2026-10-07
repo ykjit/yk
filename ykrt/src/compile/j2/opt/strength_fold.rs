@@ -403,6 +403,54 @@ fn opt_dynptradd(opt: &mut PassOpt, mut inst: DynPtrAdd) -> OptOutcome {
         return OptOutcome::Equiv(*ptr);
     }
 
+    let tyidx = opt.inst(num_elems).tyidx(opt);
+    let bitw = opt.ty(tyidx).bitw();
+    assert_eq!(bitw, opt.ty(opt.tyidx_ptr0()).bitw());
+    if elem_size == 1
+        && let Inst::Shl(Shl {
+            lhs,
+            rhs,
+            nuw: false,
+            nsw: false,
+            ..
+        }) = opt.inst(num_elems)
+        && let Some(ConstKind::Int(amount)) = opt.as_constkind(opt.equiv_iidx(*rhs))
+        && let Some(amount) = amount.to_zero_ext_u32()
+        && (1..32).contains(&amount)
+    {
+        // Rewrite dynptradd(shl(...)) as dynptradd.
+        return OptOutcome::Rewritten(Inst::DynPtrAdd(DynPtrAdd {
+            ptr,
+            num_elems: opt.equiv_iidx(*lhs),
+            elem_size: 1 << amount,
+        }));
+    } else if elem_size > 1
+        && elem_size.is_power_of_two()
+        && let Inst::LShr(_) | Inst::And(_) | Inst::ZExt(_) = opt.inst(num_elems)
+    {
+        // Rewrite dynptradd of power-of-two values as dynptradd(shl) and rerun the optimisation
+        // pipeline (opt_shl will then optimise this).
+        let rhs = opt.push_pre_inst(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(
+                bitw,
+                u64::from(elem_size.trailing_zeros()),
+            )),
+        }));
+        let num_elems = opt.push_pre_inst(Inst::Shl(Shl {
+            tyidx,
+            lhs: num_elems,
+            rhs,
+            nuw: false,
+            nsw: false,
+        }));
+        return OptOutcome::Rerun(Inst::DynPtrAdd(DynPtrAdd {
+            ptr,
+            num_elems,
+            elem_size: 1,
+        }));
+    }
+
     OptOutcome::Rewritten(inst.into())
 }
 
@@ -1826,7 +1874,7 @@ fn opt_zext(opt: &mut PassOpt, mut inst: ZExt) -> OptOutcome {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::compile::j2::opt::fullopt::test::user_defined_opt_test;
+    use crate::compile::j2::opt::fullopt::test::{full_opt_test, user_defined_opt_test};
 
     fn test_sf(mod_s: &str, ptn: &str) {
         user_defined_opt_test(
@@ -2216,13 +2264,13 @@ mod test {
         test_sf(
             "
           %0: ptr = 0x1234
-          %1: i32 = 10
+          %1: i64 = 10
           %2: ptr = dynptradd %0, %1, 4
           blackbox %2
         ",
             "
           %0: ptr = 0x1234
-          %1: i32 = 10
+          %1: i64 = 10
           %2: ptr = 0x125C
           blackbox %2
         ",
@@ -2233,14 +2281,14 @@ mod test {
             "
           %0: ptr = arg [reg]
           %1: ptr = ptradd %0, 4
-          %2: i32 = 10
+          %2: i64 = 10
           %3: ptr = dynptradd %1, %2, 4
           blackbox %3
         ",
             "
           %0: ptr = arg
           %1: ptr = ptradd %0, 4
-          %2: i32 = 10
+          %2: i64 = 10
           %3: ptr = ptradd %0, 44
           blackbox %3
         ",
@@ -2265,6 +2313,69 @@ mod test {
           %4: i64 = sub %3, %1
           blackbox %0
         ",
+        );
+
+        // Optimise pointer element sizes
+        full_opt_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = 4
+              %3: i64 = lshr %1, %2
+              %4: i32 = trunc %3
+              %5: i64 = zext %4
+              %6: ptr = dynptradd %0, %5, 16
+              blackbox %6
+              term [%0, %1]
+            ",
+            "
+              %0: ptr = arg
+              %1: i64 = arg
+              %6: i64 = 68719476720
+              %7: i64 = and %1, %6
+              %8: ptr = dynptradd %0, %7, 1
+              blackbox %8
+              term [%0, %1]
+              ; peel
+              %0: ptr = arg
+              %1: i64 = arg
+              %2: i64 = 68719476720
+              %3: i64 = and %1, %2
+              %4: ptr = dynptradd %0, %3, 1
+              blackbox %4
+              term [%0, %1]
+            ",
+        );
+
+        test_sf(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = 7
+              %3: i32 = lshr %1, %2
+              %4: i32 = 255
+              %5: i32 = and %3, %4
+              %6: i64 = zext %5
+              %7: ptr = dynptradd %0, %6, 16
+              blackbox %7
+            ",
+            "
+              %0: ptr = arg
+              %1: i32 = arg
+              %2: i32 = 7
+              %3: i32 = lshr %1, %2
+              %4: i32 = 255
+              %5: i32 = and %3, %4
+              %6: i64 = zext %5
+              %7: i64 = 4
+              %8: i32 = 3
+              %9: i32 = lshr %1, %8
+              %10: i32 = 4080
+              %11: i32 = and %9, %10
+              %12: i64 = zext %11
+              %13: ptr = dynptradd %0, %12, 1
+              blackbox %13
+            ",
         );
     }
 
