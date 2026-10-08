@@ -14,6 +14,7 @@ use crate::compile::{
     jitc_yk::arbbitint::ArbBitInt,
 };
 use index_type::vec::TypedVec;
+use smallvec::SmallVec;
 
 /// Known-bits analysis.
 pub(super) struct KnownBits {
@@ -27,8 +28,46 @@ pub(super) struct KnownBits {
 }
 
 impl PassT for KnownBits {
-    fn feed(&mut self, opt: &mut PassOpt, inst: Inst) -> OptOutcome {
+    fn feed(&mut self, opt: &mut PassOpt, mut inst: Inst) -> OptOutcome {
         self.pending_commit = None;
+
+        // Canonicalise `sext`s when we've subsequently learnt that the `sext` must be
+        // non-negative. The correctness of this transformation depends on known_bits being the
+        // first pass: if it is not the first pass, this transformation will be unsafe for
+        // `guard`s.
+        let mut sexts = SmallVec::<[_; 2]>::new();
+        for iidx in inst.iter_iidxs(opt) {
+            if let Inst::SExt(SExt { tyidx, val }) = opt.inst(opt.equiv_iidx(iidx)) {
+                let val = opt.equiv_iidx(*val);
+                if let Some(bits) = &self.as_knownbits(opt, val)
+                    && bits
+                        .zeroes()
+                        .checked_lshr(bits.bitw() - 1)
+                        .unwrap()
+                        .to_zero_ext_u8()
+                        == Some(1)
+                    && !sexts.iter().any(|(x, _)| *x == iidx)
+                {
+                    sexts.push((iidx, Inst::ZExt(ZExt { tyidx: *tyidx, val })));
+                }
+            }
+        }
+        if !sexts.is_empty() {
+            let mut map = SmallVec::<[_; 2]>::new();
+            for (old_iidx, new_inst) in sexts {
+                let new_iidx = opt.push_pre_inst(new_inst);
+                map.push((old_iidx, new_iidx));
+            }
+
+            inst.rewrite_iidxs(opt, |x| {
+                map.iter()
+                    .find_map(|(y, z)| if x == *y { Some(*z) } else { None })
+                    .unwrap_or(x)
+            });
+
+            return OptOutcome::Rerun(inst);
+        }
+
         match inst {
             Inst::AShr(x) => self.opt_ashr(opt, x),
             Inst::And(x) => self.opt_and(opt, x),
@@ -104,13 +143,13 @@ impl KnownBits {
     }
 
     /// Returns what we know about the bits of `iidx`.
-    fn as_knownbits(&self, opt: &mut PassOpt, iidx: InstIdx) -> Option<KnownBitValue> {
+    fn as_knownbits(&self, opt: &PassOpt, iidx: InstIdx) -> Option<KnownBitValue> {
         match opt.ty(opt.inst(iidx).tyidx(opt)) {
             Ty::Func(_) => None,
             Ty::Void => None,
             ty => Some(
                 self.known_bits[iidx]
-                    .clone()
+                    .to_owned()
                     .unwrap_or_else(|| KnownBitValue::unknown(ty.bitw())),
             ),
         }
@@ -1323,24 +1362,27 @@ mod test {
         ",
         );
 
-        // Deducing sign bits
+        // Deduce that a `sext` can be canonicalised by a later guard to a `zext`.
         test_known_bits(
             "
           %0: i32 = arg [reg]
-          %1: i32 = 0
-          %2: i1 = icmp sgt %0, %1
-          guard true, %2, []
-          %4: i64 = sext %0
-          blackbox %4
+          %1: i64 = sext %0
+          blackbox %1
+          %3: i32 = 0
+          %4: i1 = icmp sge %0, %3
+          guard true, %4, [%1]
+          blackbox %1
         ",
             "
           %0: i32 = arg
-          %1: i32 = 0
-          %2: i1 = icmp sgt %0, %1
-          %3: i1 = 1
-          guard true, %2, []
-          %5: i64 = zext %0
-          blackbox %5
+          %1: i64 = sext %0
+          blackbox %1
+          %3: i32 = 0
+          %4: i1 = icmp sge %0, %3
+          %5: i1 = 1
+          guard true, %4, [%1]
+          %7: i64 = zext %0
+          blackbox %7
         ",
         );
     }
