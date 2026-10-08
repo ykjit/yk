@@ -4730,36 +4730,57 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         SMax { tyidx, lhs, rhs }: &SMax,
     ) -> Result<(), CompilationError> {
         let bitw = self.m.ty(*tyidx).bitw();
+        let (in_fill, out_fill) = if bitw == 32 {
+            (RegCnstrFill::Undefined, RegCnstrFill::Zeroed)
+        } else {
+            (RegCnstrFill::Signed, RegCnstrFill::Signed)
+        };
         let [lhsr, rhsr] = ra.alloc(
             self,
             iidx,
             [
                 RegCnstr::InputOutput {
                     in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Signed,
-                    out_fill: RegCnstrFill::Signed,
+                    in_fill: in_fill.clone(),
+                    out_fill,
                     regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Signed,
+                    in_fill,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
             ],
         )?;
 
-        assert!(bitw <= 64);
-        self.asm.push_inst(IcedInst::with2(
-            Code::Cmovl_r64_rm64,
-            lhsr.to_reg64(),
-            rhsr.to_reg64(),
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Cmp_rm64_r64,
-            lhsr.to_reg64(),
-            rhsr.to_reg64(),
-        ));
+        match bitw {
+            32 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmovl_r32_rm32,
+                    lhsr.to_reg32(),
+                    rhsr.to_reg32(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmp_rm32_r32,
+                    lhsr.to_reg32(),
+                    rhsr.to_reg32(),
+                ));
+            }
+            64 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmovl_r64_rm64,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmp_rm64_r64,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                ));
+            }
+            x => todo!("{x}"),
+        }
         Ok(())
     }
 
@@ -4771,36 +4792,57 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         SMin { tyidx, lhs, rhs }: &SMin,
     ) -> Result<(), CompilationError> {
         let bitw = self.m.ty(*tyidx).bitw();
+        let (in_fill, out_fill) = if bitw == 32 {
+            (RegCnstrFill::Undefined, RegCnstrFill::Zeroed)
+        } else {
+            (RegCnstrFill::Signed, RegCnstrFill::Signed)
+        };
         let [lhsr, rhsr] = ra.alloc(
             self,
             iidx,
             [
                 RegCnstr::InputOutput {
                     in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Signed,
-                    out_fill: RegCnstrFill::Signed,
+                    in_fill: in_fill.clone(),
+                    out_fill,
                     regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Input {
                     in_iidx: *rhs,
-                    in_fill: RegCnstrFill::Signed,
+                    in_fill,
                     regs: &NORMAL_GP_REGS,
                     clobber: false,
                 },
             ],
         )?;
 
-        assert!(bitw <= 64);
-        self.asm.push_inst(IcedInst::with2(
-            Code::Cmovg_r64_rm64,
-            lhsr.to_reg64(),
-            rhsr.to_reg64(),
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Cmp_rm64_r64,
-            lhsr.to_reg64(),
-            rhsr.to_reg64(),
-        ));
+        match bitw {
+            32 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmovg_r32_rm32,
+                    lhsr.to_reg32(),
+                    rhsr.to_reg32(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmp_rm32_r32,
+                    lhsr.to_reg32(),
+                    rhsr.to_reg32(),
+                ));
+            }
+            64 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmovg_r64_rm64,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Cmp_rm64_r64,
+                    lhsr.to_reg64(),
+                    rhsr.to_reg64(),
+                ));
+            }
+            x => todo!("{x}"),
+        }
         Ok(())
     }
 
@@ -10416,13 +10458,11 @@ mod test {
             ",
             &["
               ...
-              movsxd r.64.x, r.32._
-              ...
-              movsxd r.64.y, r.32._
-              ...
+              mov r.32.x, r.32._
+              mov r.32.y, r.32._
               ; %2: i32 = smax %0, %1
-              cmp r.64.y, r.64.x
-              cmovl r.64.y, r.64.x
+              cmp r.32.y, r.32.x
+              cmovl r.32.y, r.32.x
               ...
             "],
         );
@@ -10457,13 +10497,11 @@ mod test {
             ",
             &["
               ...
-              movsxd r.64.x, r.32._
-              ...
-              movsxd r.64.y, r.32._
-              ...
+              mov r.32.x, r.32._
+              mov r.32.y, r.32._
               ; %2: i32 = smin %0, %1
-              cmp r.64.y, r.64.x
-              cmovg r.64.y, r.64.x
+              cmp r.32.y, r.32.x
+              cmovg r.32.y, r.32.x
               ...
             "],
         );
