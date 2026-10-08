@@ -726,11 +726,29 @@ pub struct PassOpt<'a> {
 }
 
 impl PassOpt<'_> {
-    /// If `iidx` references a constant, return an owned version of the accompany [ConstKind], or
-    /// `None` otherwise.
+    /// If `iidx` can be considered a constant, return an owned [ConstKind], or `None` otherwise.
     pub(super) fn as_constkind(&self, iidx: InstIdx) -> Option<ConstKind> {
-        match self.inst(iidx) {
-            Inst::Const(Const { kind, .. }) => Some(kind.clone()),
+        let inst = self.inst(iidx);
+        match inst {
+            Inst::Const(Const { kind, .. }) => Some(kind.to_owned()),
+            Inst::ZExt(ZExt { tyidx, val })
+            | Inst::SExt(SExt { tyidx, val })
+            | Inst::Trunc(Trunc { tyidx, val, .. }) => {
+                let Inst::Const(Const {
+                    kind: ConstKind::Int(value),
+                    ..
+                }) = self.inst(self.equiv_iidx(*val))
+                else {
+                    return None;
+                };
+                let bitw = self.ty(*tyidx).bitw();
+                Some(ConstKind::Int(match inst {
+                    Inst::ZExt(_) => value.zero_extend(bitw),
+                    Inst::SExt(_) => value.sign_extend(bitw),
+                    Inst::Trunc(_) => value.truncate(bitw),
+                    _ => unreachable!(),
+                }))
+            }
             _ => None,
         }
     }
@@ -1384,6 +1402,54 @@ pub(in crate::compile::j2) mod test {
               %3: i64 = add %0, %0
               blackbox %3
             ",
+        );
+    }
+
+    #[test]
+    fn casts_become_consts() {
+        // Check that casts are recognised as constants when they reference a value which, after
+        // the cast, becomes constant.
+        full_opt_test(
+            "
+          %0: i16 = arg [reg]
+          %1: i8 = trunc %0
+          %2: i32 = sext %0
+          %3: i32 = zext %0
+          %4: i16 = 65535
+          %5: i1 = icmp eq %0, %4
+          guard true, %5, []
+          %7: i8 = 1
+          %8: i8 = add %1, %7
+          blackbox %8
+          %10: i32 = 2
+          %11: i32 = add %2, %10
+          blackbox %11
+          %13: i32 = add %3, %10
+          blackbox %13
+          term [%0]
+        ",
+            "
+          %0: i16 = arg
+          %4: i16 = 65535
+          %5: i1 = icmp eq %0, %4
+          guard true, %5, []
+          %10: i8 = 0
+          blackbox %10
+          %13: i32 = 1
+          blackbox %13
+          %15: i32 = 65537
+          blackbox %15
+          term [%4]
+          ; peel
+          %0: i16 = 65535
+          %2: i8 = 0
+          blackbox %2
+          %4: i32 = 1
+          blackbox %4
+          %6: i32 = 65537
+          blackbox %6
+          term [%0]
+        ",
         );
     }
 }

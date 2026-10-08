@@ -1346,6 +1346,50 @@ mod test {
     }
 
     #[test]
+    fn guarded_cast_constants() {
+        // The source becomes constant after the casts were committed. Its canonical value must
+        // be truncated, sign extended, or zero extended at each use, keeping deoptimisation intact.
+        test_known_bits(
+            "
+          %0: i16 = arg [reg]
+          %1: i8 = trunc %0
+          %2: i32 = sext %0
+          %3: i32 = zext %0
+          %4: i16 = 65535
+          %5: i1 = icmp eq %0, %4
+          guard true, %5, [%1, %2, %3]
+          %7: i8 = 1
+          %8: i8 = add %1, %7
+          blackbox %8
+          %10: i32 = 2
+          %11: i32 = add %2, %10
+          blackbox %11
+          %13: i32 = add %3, %10
+          blackbox %13
+        ",
+            "
+          %0: i16 = arg
+          %1: i8 = trunc %0
+          %2: i32 = sext %0
+          %3: i32 = zext %0
+          %4: i16 = 65535
+          %5: i1 = icmp eq %0, %4
+          %6: i16 = 65535
+          %7: i1 = 1
+          guard true, %5, [%1, %2, %3]
+          %9: i8 = 1
+          %10: i8 = 0
+          blackbox %10
+          %12: i32 = 2
+          %13: i32 = 1
+          blackbox %13
+          %15: i32 = 65537
+          blackbox %15
+        ",
+        );
+    }
+
+    #[test]
     fn opt_shl() {
         test_known_bits(
             "
