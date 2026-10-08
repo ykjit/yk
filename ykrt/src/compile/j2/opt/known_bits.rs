@@ -283,18 +283,18 @@ impl KnownBits {
                 lhs: and_lhs,
                 rhs: and_rhs,
                 ..
-            }) = opt.inst(lhs).to_owned()
-                && let Some(ConstKind::Int(mask)) = opt.as_constkind(and_rhs)
+            }) = opt.inst(lhs)
+                && let Some(ConstKind::Int(mask)) = opt.as_constkind(*and_rhs)
                 && let Some(ConstKind::Int(x)) = opt.as_constkind(rhs)
                 && x.bitand(&mask.bitneg()).to_zero_ext_u8() == Some(0)
-                && let Some(bits) = self.as_knownbits(opt, and_lhs)
+                && let Some(bits) = self.as_knownbits(opt, *and_lhs)
             {
                 // `(x & c1) == c2` gives us more information about `x`'s known bits.
                 let bits = bits.union(&KnownBitValue {
                     ones: x,
                     unknowns: mask.bitneg(),
                 });
-                if let Inst::ZExt(ZExt { val, .. }) = opt.inst(and_lhs).to_owned() {
+                if let Inst::ZExt(ZExt { val, .. }) = opt.inst(*and_lhs).to_owned() {
                     // A `zext` implicitly tells us about the source's low bits.
                     let val = opt.equiv_iidx(val);
                     if let Some(lhs_bits) = self.as_knownbits(opt, val) {
@@ -308,7 +308,37 @@ impl KnownBits {
                         );
                     }
                 }
-                self.knownbits_set(and_lhs, bits);
+                self.knownbits_set(*and_lhs, bits);
+            } else if let Inst::Or(Or {
+                lhs: or_lhs,
+                rhs: or_rhs,
+                ..
+            }) = opt.inst(lhs).to_owned()
+                && let Some(ConstKind::Int(mask)) = opt.as_constkind(or_rhs)
+                && let Some(ConstKind::Int(x)) = opt.as_constkind(rhs)
+                && x.bitand(&mask) == mask
+                && let Some(bits) = self.as_knownbits(opt, or_lhs)
+            {
+                // `(x | c1) == c2` gives us more information about `x`'s known bits.
+                let bits = bits.union(&KnownBitValue {
+                    ones: x.bitand(&mask.bitneg()),
+                    unknowns: mask,
+                });
+                if let Inst::ZExt(ZExt { val, .. }) = opt.inst(or_lhs).to_owned() {
+                    // A `zext` implicitly tells us about the source's low bits.
+                    let val = opt.equiv_iidx(val);
+                    if let Some(lhs_bits) = self.as_knownbits(opt, val) {
+                        let bitw = lhs_bits.bitw();
+                        self.knownbits_set(
+                            val,
+                            lhs_bits.union(&KnownBitValue {
+                                ones: bits.ones.truncate(bitw),
+                                unknowns: bits.unknowns.truncate(bitw),
+                            }),
+                        );
+                    }
+                }
+                self.knownbits_set(or_lhs, bits);
             }
         } else if expect
             && let Inst::ICmp(ICmp { pred, lhs, rhs, .. }) = opt.inst(cond).to_owned()
@@ -1127,6 +1157,68 @@ mod test {
           %13: i8 = and %0, %12
           blackbox %13
         ",
+        );
+
+        // Guards and `or`
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 15
+          %2: i8 = or %0, %1
+          %3: i8 = 95
+          %4: i1 = icmp eq %2, %3
+          guard true, %4, []
+          %6: i8 = 240
+          %7: i8 = and %0, %6
+          blackbox %7
+          %9: i8 = and %0, %1
+          blackbox %9
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 15
+          %2: i8 = or %0, %1
+          %3: i8 = 95
+          %4: i1 = icmp eq %2, %3
+          %5: i8 = 95
+          %6: i1 = 1
+          guard true, %4, []
+          %8: i8 = 240
+          %9: i8 = 80
+          blackbox %9
+          %11: i8 = and %0, %1
+          blackbox %11
+        ",
+        );
+
+        // Guards and `or` and `zext`
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i32 = zext %0
+          %2: i32 = 271
+          %3: i32 = or %1, %2
+          %4: i32 = 351
+          %5: i1 = icmp eq %3, %4
+          guard true, %5, []
+          %7: i8 = 240
+          %8: i8 = and %0, %7
+          blackbox %8
+        ",
+            "
+          %0: i8 = arg
+          %1: i32 = zext %0
+          %2: i32 = 271
+          %3: i32 = or %1, %2
+          %4: i32 = 351
+          %5: i1 = icmp eq %3, %4
+          %6: i32 = 351
+          %7: i1 = 1
+          guard true, %5, []
+          %9: i8 = 240
+          %10: i8 = 80
+          blackbox %10
+          ",
         );
     }
 
