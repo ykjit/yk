@@ -143,7 +143,10 @@ impl KnownBits {
     }
 
     /// Returns what we know about the bits of `iidx`.
-    fn as_knownbits(&self, opt: &PassOpt, iidx: InstIdx) -> Option<KnownBitValue> {
+    fn as_knownbits(&mut self, opt: &PassOpt, iidx: InstIdx) -> Option<KnownBitValue> {
+        if let Some(ConstKind::Int(value)) = opt.as_constkind(opt.equiv_iidx(iidx)) {
+            return Some(KnownBitValue::from_const(value));
+        }
         match opt.ty(opt.inst(iidx).tyidx(opt)) {
             Ty::Func(_) => None,
             Ty::Void => None,
@@ -1427,6 +1430,37 @@ mod test {
           blackbox %13
           %15: i32 = 65537
           blackbox %15
+        ",
+        );
+
+        // A cast committed before the guard has stale cached bits. Its now-constant value
+        // masks only bits that the shift has cleared, making the result constant too.
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i16 = zext %0
+          %3: i8 = 15
+          %4: i1 = icmp eq %0, %3
+          guard true, %4, [%2]
+          %6: i16 = 4
+          %7: i16 = shl %1, %6
+          %8: i16 = and %7, %2
+          blackbox %8
+        ",
+            "
+          %0: i8 = arg
+          %1: i16 = arg
+          %2: i16 = zext %0
+          %3: i8 = 15
+          %4: i1 = icmp eq %0, %3
+          %5: i8 = 15
+          %6: i1 = 1
+          guard true, %4, [%2]
+          %8: i16 = 4
+          %9: i16 = shl %1, %8
+          %10: i16 = 0
+          blackbox %10
         ",
         );
     }
