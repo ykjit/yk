@@ -703,6 +703,7 @@ impl<'a> X64HirToAsm<'a> {
         };
         let c = if *expect {
             match pred {
+                FPred::Oeq => Code::Jne_rel32_64, // Needs careful handling: see later.
                 FPred::One => Code::Je_rel32_64,
                 FPred::Oge => Code::Jb_rel32_64,
                 FPred::Ogt => Code::Jbe_rel32_64,
@@ -711,11 +712,12 @@ impl<'a> X64HirToAsm<'a> {
                 FPred::Ult => Code::Jae_rel32_64,
                 FPred::Ule => Code::Ja_rel32_64,
                 FPred::Uno => Code::Jnp_rel32_64,
-                FPred::False | FPred::Oeq | FPred::Une | FPred::True => return Ok(None),
+                FPred::False | FPred::Une | FPred::True => return Ok(None),
                 _ => unreachable!(),
             }
         } else {
             match pred {
+                FPred::Oeq => Code::Je_rel32_64, // Needs careful handling: see later.
                 FPred::One => Code::Jne_rel32_64,
                 FPred::Oge => Code::Jae_rel32_64,
                 FPred::Ogt => Code::Ja_rel32_64,
@@ -724,7 +726,7 @@ impl<'a> X64HirToAsm<'a> {
                 FPred::Ult => Code::Jb_rel32_64,
                 FPred::Ule => Code::Jbe_rel32_64,
                 FPred::Uno => Code::Jp_rel32_64,
-                FPred::False | FPred::Oeq | FPred::Une | FPred::True => return Ok(None),
+                FPred::False | FPred::Une | FPred::True => return Ok(None),
                 _ => unreachable!(),
             }
         };
@@ -750,8 +752,21 @@ impl<'a> X64HirToAsm<'a> {
         )?;
 
         let label = self.asm.mk_label();
+        let skip_label = if pred == FPred::Oeq && !*expect {
+            let x = self.asm.mk_label();
+            self.asm.attach_label(x);
+            x
+        } else {
+            label
+        };
         self.asm
             .push_reloc(IcedInst::with_branch(c, 0), RelocKind::NearWithLabel(label));
+        if pred == FPred::Oeq {
+            self.asm.push_reloc(
+                IcedInst::with_branch(Code::Jp_rel32_64, 0),
+                RelocKind::NearWithLabel(skip_label),
+            );
+        }
         self.asm.push_inst(match b.inst_bitw(self.m, *lhs) {
             64 => IcedInst::with2(Code::Ucomisd_xmm_xmmm64, lhsr.to_xmm(), rhsr.to_xmm()),
             32 => IcedInst::with2(Code::Ucomiss_xmm_xmmm32, lhsr.to_xmm(), rhsr.to_xmm()),
@@ -8474,6 +8489,30 @@ mod test {
               jle l1
               ; term []
             "#],
+        );
+
+        // Floating point `oeq` and guards
+        codegen_and_test(
+            "
+              %0: float = arg [reg]
+              %1: float = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i1 = fcmp oeq %0, %1
+              guard false, %3, []
+              blackbox %0
+              term [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i1 = fcmp oeq %0, %1
+              ; guard false, %3, []
+              ucomiss xmm0, xmm1
+              jp l2
+              je l1
+              ; l2
+              ; blackbox %0
+              ; term [%0, %1, %2]
+            "],
         );
     }
 
