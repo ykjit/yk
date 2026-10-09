@@ -1585,8 +1585,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             // have a definite register hint `continue` and avoid the code after this `let`.
             let cnd_iidx = match inst {
                 // Two operand instructions that implicitly clobber `lhs`.
-                Inst::Add(Add { lhs, .. })
-                | Inst::And(And { lhs, .. })
+                Inst::And(And { lhs, .. })
                 | Inst::AShr(AShr { lhs, .. })
                 | Inst::FAdd(FAdd { lhs, .. })
                 | Inst::FDiv(FDiv { lhs, .. })
@@ -2412,41 +2411,126 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             32 | 64 => RegCnstrFill::Zeroed,
             _ => RegCnstrFill::Undefined,
         };
+
         if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
-            let [lhsr] = ra.alloc(
+            let [lhsr, outr] = ra.alloc(
                 self,
                 iidx,
-                [RegCnstr::InputOutput {
+                [
+                    RegCnstr::Input {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill: out_fill(bitw),
+                        regs: &NORMAL_GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
+            )?;
+            if lhsr == outr {
+                self.asm.push_inst(match bitw {
+                    1..=32 => {
+                        IcedInst::with2(Code::Add_rm32_imm32, outr.to_reg32(), i64::from(imm))
+                    }
+                    64 => IcedInst::with2(Code::Add_rm64_imm32, outr.to_reg64(), i64::from(imm)),
+                    x => todo!("{x}"),
+                });
+            } else {
+                self.asm.push_inst(match bitw {
+                    1..=32 => IcedInst::with2(
+                        Code::Lea_r32_m,
+                        outr.to_reg32(),
+                        MemoryOperand::with_base_displ(lhsr.to_reg64(), i64::from(imm)),
+                    ),
+                    64 => IcedInst::with2(
+                        Code::Lea_r64_m,
+                        outr.to_reg64(),
+                        MemoryOperand::with_base_displ(lhsr.to_reg64(), i64::from(imm)),
+                    ),
+                    x => todo!("{x}"),
+                });
+            }
+        } else if self.try_load_to_mem_op(ra, b, iidx, *rhs).is_some()
+            && let Inst::Load(Load { ptr, .. }) = b.inst(*rhs)
+        {
+            let (memop, lhsr, _) = self.alloc_mem_op_with_reg(
+                ra,
+                b,
+                iidx,
+                *ptr,
+                RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill: RegCnstrFill::Undefined,
                     out_fill: out_fill(bitw),
                     regs: &NORMAL_GP_REGS,
-                }],
+                },
             )?;
             self.asm.push_inst(match bitw {
-                1..=32 => IcedInst::with2(Code::Add_rm32_imm32, lhsr.to_reg32(), imm),
-                64 => IcedInst::with2(Code::Add_rm64_imm32, lhsr.to_reg64(), imm),
+                8 => IcedInst::with2(Code::Add_r8_rm8, lhsr.to_reg8(), memop),
+                16 => IcedInst::with2(Code::Add_r16_rm16, lhsr.to_reg16(), memop),
+                32 => IcedInst::with2(Code::Add_r32_rm32, lhsr.to_reg32(), memop),
+                64 => IcedInst::with2(Code::Add_r64_rm64, lhsr.to_reg64(), memop),
                 x => todo!("{x}"),
             });
         } else {
-            self.i_binop(
-                ra,
-                b,
+            let [lhsr, rhsr, outr] = ra.alloc(
+                self,
                 iidx,
-                *lhs,
-                *rhs,
-                out_fill,
-                |bitw, lhsr, rhsr| match bitw {
-                    1..=32 => IcedInst::with2(Code::Add_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-                    64 => IcedInst::with2(Code::Add_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-                    x => todo!("{x}"),
-                },
-                |bitw, lhsr, rhsmemop| match bitw {
-                    1..=32 => IcedInst::with2(Code::Add_r32_rm32, lhsr.to_reg32(), rhsmemop),
-                    64 => IcedInst::with2(Code::Add_r64_rm64, lhsr.to_reg64(), rhsmemop),
-                    x => todo!("{x}"),
-                },
+                [
+                    RegCnstr::Input {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill: out_fill(bitw),
+                        regs: &NORMAL_GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
             )?;
+
+            // R13 (and RBP, but that's not part of `NORMAL_GP_REGS` so we don't need to worry
+            // about it) as a base requires a longer encoding and, on at least some CPUs I've
+            // tried it also takes longer to execute. Swapping things around gives a sporting
+            // chance that we avoid this case.
+            let (lhsr, rhsr) = if lhsr == Reg::R13 {
+                (rhsr, lhsr)
+            } else {
+                (lhsr, rhsr)
+            };
+            if lhsr == outr || rhsr == outr {
+                let inr = if lhsr == outr { rhsr } else { lhsr };
+                self.asm.push_inst(match bitw {
+                    1..=32 => IcedInst::with2(Code::Add_r32_rm32, outr.to_reg32(), inr.to_reg32()),
+                    64 => IcedInst::with2(Code::Add_r64_rm64, outr.to_reg64(), inr.to_reg64()),
+                    x => todo!("{x}"),
+                });
+            } else {
+                self.asm.push_inst(match bitw {
+                    1..=32 => IcedInst::with2(
+                        Code::Lea_r32_m,
+                        outr.to_reg32(),
+                        MemoryOperand::with_base_index(lhsr.to_reg64(), rhsr.to_reg64()),
+                    ),
+                    64 => IcedInst::with2(
+                        Code::Lea_r64_m,
+                        outr.to_reg64(),
+                        MemoryOperand::with_base_index(lhsr.to_reg64(), rhsr.to_reg64()),
+                    ),
+                    x => todo!("{x}"),
+                });
+            }
         }
 
         Ok(())
@@ -6019,8 +6103,8 @@ mod test {
 
           %0: i8 = arg [reg("R8", undefined)]
           %1: i8 = arg [reg("R13", undefined)]
-          %2: i8 = add %0, %1
-          %3: i8 = add %2, %2
+          %2: i8 = sub %0, %1
+          %3: i8 = sub %2, %2
           %4: ptr = @putchar
           %5: i8 = call putchar %4(%3)
           blackbox %5
@@ -6330,7 +6414,7 @@ mod test {
               ; %1: ptr = arg [Reg("r.64.y", Undefined)]
               ; %2: i8 = load %1
               ; %3: i8 = add %0, %2
-              add r.32.x, [r.64.y]
+              add r.8.x, [r.64.y]
               ; term [%3, %1]
             "#],
         );
@@ -6455,6 +6539,49 @@ mod test {
               ...
               ; %2: i64 = add %0, %1
               add r.64._, 0xFFFFFFFFFFFFFFFF
+              ...
+            "],
+        );
+
+        // LEA optimisation
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 0xFFFFFFFFFFFFFFFF
+              %2: i64 = add %0, %1
+              %3: i64 = add %2, %1
+              blackbox %2
+              term [%3]
+            ",
+            &["
+              ...
+              ; %2: i64 = add %0, %1
+              lea r.64.x, [r.64._-1]
+              ; %3: i64 = add %2, %1
+              lea r.64._, [r.64.x-1]
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = add %0, %1
+              %3: i64 = add %1, %2
+              %4: i64 = add %2, %3
+              blackbox %4
+              term [%2, %3]
+            ",
+            &["
+              ...
+              ; %2: i64 = add %0, %1
+              add r.64.x, r.64.y
+              ; %3: i64 = add %1, %2
+              add r.64.y, r.64.x
+              ; %4: i64 = add %2, %3
+              lea r.64._, [r.64.x+r.64.y]
+              ; blackbox %4
               ...
             "],
         );
