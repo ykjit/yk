@@ -1130,13 +1130,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                 continue;
                             }
                         } else if inst.read_write_effects().interferes(Effects::all())
-                            || (ra.is_used(giidx)
-                                && !matches!(inst, Inst::Const(_))
-                                && ra.iter_reg_for(giidx).nth(0).is_some())
+                            || (ra.is_in_reg(giidx) && !matches!(inst, Inst::Const(_)))
                         {
-                            // We don't copy instructions that are used by non-guard instructions
-                            // unless: they're a `Const`; aren't in a register; don't have
-                            // side-effects.
+                            // Don't copy instructions that are in registers (unless they're
+                            // constants as that confuses the register allocator).
                             gexit_vars.set(giidx.to_raw_index(), true);
                             continue;
                         }
