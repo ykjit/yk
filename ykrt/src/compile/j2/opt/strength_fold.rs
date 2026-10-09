@@ -1584,6 +1584,30 @@ fn opt_sub(opt: &mut PassOpt, mut inst: Sub) -> OptOutcome {
             // Reduce `x - 0` to `x`.
             return OptOutcome::Equiv(lhs);
         }
+        (Some(ConstKind::Int(lhs_c)), _) => {
+            if let Inst::Add(Add {
+                lhs: x,
+                rhs: add_rhs,
+                nuw: false,
+                nsw: false,
+                ..
+            }) = opt.inst(rhs).to_owned()
+                && let Some(ConstKind::Int(add_c)) = opt.as_constkind(opt.equiv_iidx(add_rhs))
+            {
+                // c1 - (x + c2) == (c1 - c2) - x, with wrapping integer arithmetic.
+                let lhs = opt.push_pre_inst(Inst::Const(Const {
+                    tyidx,
+                    kind: ConstKind::Int(lhs_c.wrapping_sub(&add_c)),
+                }));
+                return OptOutcome::Rerun(Inst::Sub(Sub {
+                    tyidx,
+                    lhs,
+                    rhs: opt.equiv_iidx(x),
+                    nuw: false,
+                    nsw: false,
+                }));
+            }
+        }
         _ => (),
     }
 
@@ -5035,6 +5059,27 @@ mod test {
           %5: i8 = xor %0, %4
           term [%5]
         ",
+        );
+
+        // c1 - (x + c2) == (c1 - c2) - x
+        test_sf(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 1
+              %2: i64 = add %0, %1
+              %3: i64 = 3
+              %4: i64 = sub %3, %2
+              blackbox %4
+            ",
+            "
+              %0: i64 = arg
+              %1: i64 = 1
+              %2: i64 = add %0, %1
+              %3: i64 = 3
+              %4: i64 = 2
+              %5: i64 = sub %4, %0
+              blackbox %5
+            ",
         );
     }
 
