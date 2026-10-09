@@ -2546,21 +2546,74 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let bitw = b.inst_bitw(self.m, *lhs);
 
         if let Some(imm) = self.zero_ext_op_for_imm32(b, bitw, *rhs) {
-            let [lhsr] = ra.alloc(
-                self,
-                iidx,
-                [RegCnstr::InputOutput {
-                    in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    out_fill: RegCnstrFill::Zeroed,
-                    regs: &NORMAL_GP_REGS,
-                }],
-            )?;
-            self.asm.push_inst(match bitw {
-                1..=32 => IcedInst::with2(Code::And_rm32_imm32, lhsr.to_reg32(), imm),
-                64 => IcedInst::with2(Code::And_rm64_imm32, lhsr.to_reg64(), imm),
-                x => todo!("{x}"),
-            });
+            if let 0xFF | 0xFFFF = imm {
+                // MOVZX masks the low byte/word without clobbering a live input.
+                let code = if imm == 0xff {
+                    Code::Movzx_r32_rm8
+                } else {
+                    Code::Movzx_r32_rm16
+                };
+                if self.try_load_to_mem_op(ra, b, iidx, *lhs).is_some()
+                    && let Inst::Load(Load { ptr, .. }) = b.inst(*lhs)
+                {
+                    let (memop, outr, _) = self.alloc_mem_op_with_reg(
+                        ra,
+                        b,
+                        iidx,
+                        *ptr,
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Zeroed,
+                            regs: &NORMAL_GP_REGS,
+                            can_be_same_as_input: true,
+                        },
+                    )?;
+                    self.asm
+                        .push_inst(IcedInst::with2(code, outr.to_reg32(), memop));
+                } else {
+                    let [lhsr, outr] = ra.alloc(
+                        self,
+                        iidx,
+                        [
+                            RegCnstr::Input {
+                                in_iidx: *lhs,
+                                in_fill: RegCnstrFill::Undefined,
+                                regs: &NORMAL_GP_REGS,
+                                clobber: false,
+                            },
+                            RegCnstr::Output {
+                                out_fill: RegCnstrFill::Zeroed,
+                                regs: &NORMAL_GP_REGS,
+                                can_be_same_as_input: true,
+                            },
+                        ],
+                    )?;
+                    self.asm.push_inst(IcedInst::with2(
+                        code,
+                        outr.to_reg32(),
+                        if imm == 0xff {
+                            lhsr.to_reg8()
+                        } else {
+                            lhsr.to_reg16()
+                        },
+                    ));
+                }
+            } else {
+                let [lhsr] = ra.alloc(
+                    self,
+                    iidx,
+                    [RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        out_fill: RegCnstrFill::Zeroed,
+                        regs: &NORMAL_GP_REGS,
+                    }],
+                )?;
+                self.asm.push_inst(match bitw {
+                    1..=32 => IcedInst::with2(Code::And_rm32_imm32, lhsr.to_reg32(), imm),
+                    64 => IcedInst::with2(Code::And_rm64_imm32, lhsr.to_reg64(), imm),
+                    x => todo!("{x}"),
+                });
+            }
         } else if bitw == 64
             && let Inst::Const(Const {
                 kind: ConstKind::Int(x),
@@ -2568,21 +2621,46 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             }) = b.inst(*rhs)
             && let Some(c) = x.to_zero_ext_u32()
         {
-            let [lhsr] = ra.alloc(
-                self,
-                iidx,
-                [RegCnstr::InputOutput {
-                    in_iidx: *lhs,
-                    in_fill: RegCnstrFill::Undefined,
-                    out_fill: RegCnstrFill::Zeroed,
-                    regs: &NORMAL_GP_REGS,
-                }],
-            )?;
-            self.asm.push_inst(IcedInst::with2(
-                Code::And_rm32_imm32,
-                lhsr.to_reg32(),
-                c.cast_signed(),
-            ));
+            if c == 0xFFFFFFFF {
+                let [inr, outr] = ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *lhs,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        },
+                        RegCnstr::Output {
+                            out_fill: RegCnstrFill::Zeroed,
+                            regs: &NORMAL_GP_REGS,
+                            can_be_same_as_input: true,
+                        },
+                    ],
+                )?;
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r32_rm32,
+                    outr.to_reg32(),
+                    inr.to_reg32(),
+                ));
+            } else {
+                let [lhsr] = ra.alloc(
+                    self,
+                    iidx,
+                    [RegCnstr::InputOutput {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        out_fill: RegCnstrFill::Zeroed,
+                        regs: &NORMAL_GP_REGS,
+                    }],
+                )?;
+                self.asm.push_inst(IcedInst::with2(
+                    Code::And_rm32_imm32,
+                    lhsr.to_reg32(),
+                    c.cast_signed(),
+                ));
+            }
         } else {
             self.i_binop(
                 ra,
@@ -6636,6 +6714,74 @@ mod test {
     }
 
     #[test]
+    fn cg_and_low_mask() {
+        // Keep all of the original input while extracting its low byte.
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 255
+              %2: i64 = and %0, %1
+              blackbox %2
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: i64 = arg [Reg("r15", Undefined)]
+              ; %1: i64 = 255
+              ; %2: i64 = and %0, %1
+              movzx r14d, r15b
+              ; blackbox %2
+              ; term [%0]
+            "#],
+        );
+
+        // Mask a wider nonvolatile load directly in memory.
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i32 = load %0
+              %2: i32 = 65535
+              %3: i32 = and %1, %2
+              blackbox %3
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r15", Undefined)]
+              ; %1: i32 = load %0
+              ; %2: i32 = 65535
+              ; %3: i32 = and %1, %2
+              movzx r14d, word [r15]
+              ; blackbox %3
+              ; term [%0]
+            "#],
+        );
+
+        // A volatile load must still read its entire native width.
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = load volatile %0
+              %2: i64 = 255
+              %3: i64 = and %1, %2
+              blackbox %3
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r15", Undefined)]
+              ; %1: i64 = load volatile %0
+              mov r14, [r15]
+              ; %2: i64 = 255
+              ; %3: i64 = and %1, %2
+              movzx r14d, r14b
+              ; blackbox %3
+              ; term [%0]
+            "#],
+        );
+    }
+
+    #[test]
     fn cg_and() {
         // Constant RHS
 
@@ -6682,8 +6828,80 @@ mod test {
             &["
               ...
               ; %2: i64 = and %0, %1
-              and r.32._, 0xFFFFFFFF
+              mov r.32._, r.32._
               ...
+            "],
+        );
+
+        // MOVZX optimisation
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 0xFF
+              %2: i64 = and %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = and %0, %1
+              movzx r.32._, r.8._
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = 0xFFFF
+              %2: i64 = and %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i64 = and %0, %1
+              movzx r.32._, r.16._
+              ...
+            "],
+        );
+
+        // MOVZX optimisation and load
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = load %0
+              %2: i64 = 0xFF
+              %3: i64 = and %1, %2
+              blackbox %3
+              term [%0]
+            ",
+            &["
+              ...
+              ; %1: i64 = load %0
+              ; %2: i64 = 255
+              ; %3: i64 = and %1, %2
+              movzx r.32._, byte [r.64._]
+              ; blackbox %3
+              ; term [%0]
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = load %0
+              %2: i64 = 0xFFFF
+              %3: i64 = and %1, %2
+              blackbox %3
+              term [%0]
+            ",
+            &["
+              ...
+              ; %1: i64 = load %0
+              ; %2: i64 = 65535
+              ; %3: i64 = and %1, %2
+              movzx r.32._, word [r.64._]
+              ; blackbox %3
+              ; term [%0]
             "],
         );
 
@@ -6734,7 +6952,7 @@ mod test {
             &["
               ...
               ; %2: i8 = and %0, %1
-              and r.32._, 0xFF
+              movzx r.32.x, r.8.x
               ; %3: i64 = zext %2
               ; %4: i8 = trunc %3
               ; term [%4]
