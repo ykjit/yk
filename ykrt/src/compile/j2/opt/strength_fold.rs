@@ -384,23 +384,55 @@ fn opt_dynptradd(opt: &mut PassOpt, mut inst: DynPtrAdd) -> OptOutcome {
             );
         }
     } else if let Inst::Sub(Sub {
+        tyidx,
         lhs,
         rhs,
         nuw: false,
         nsw: false,
-        ..
-    }) = opt.inst(num_elems)
-        && matches!(opt.as_constkind(*lhs), Some(ConstKind::Int(x)) if x.to_zero_ext_u8() == Some(0))
-        && let Inst::DynPtrAdd(DynPtrAdd {
-            ptr,
-            num_elems: inner_num_elems,
-            elem_size: inner_elem_size,
-        }) = opt.inst(ptr)
-        && *inner_num_elems == *rhs
-        && *inner_elem_size == elem_size
+    }) = opt.inst(num_elems).to_owned()
     {
-        // (ptr + num_elems * elem_size) + (0 - num_elems) * elem_size == ptr
-        return OptOutcome::Equiv(*ptr);
+        if let Some(ConstKind::Int(x)) = opt.as_constkind(lhs)
+            && x.to_zero_ext_u8() == Some(0)
+            && let Inst::DynPtrAdd(DynPtrAdd {
+                ptr,
+                num_elems: inner_num_elems,
+                elem_size: inner_elem_size,
+            }) = opt.inst(ptr)
+            && *inner_num_elems == rhs
+            && *inner_elem_size == elem_size
+        {
+            // (ptr + num_elems * elem_size) + (0 - num_elems) * elem_size == ptr
+            return OptOutcome::Equiv(*ptr);
+        } else if let Inst::PtrAdd(PtrAdd {
+            ptr,
+            off,
+            nusw: false,
+            nuw: false,
+            in_bounds: false,
+        }) = opt.inst(ptr).to_owned()
+            && let Some(ConstKind::Int(c)) = opt.as_constkind(lhs)
+            && c.to_sign_ext_isize()
+                .and_then(|c| c.checked_mul(isize::try_from(elem_size).unwrap()))
+                == Some(-isize::try_from(off).unwrap())
+        {
+            // (ptr - c * elem_size) + (c - x) * elem_size == ptr + (0 - x) * elem_size
+            let zero = opt.push_pre_inst(Inst::Const(Const {
+                tyidx,
+                kind: ConstKind::Int(ArbBitInt::from_u64(opt.ty(tyidx).bitw(), 0)),
+            }));
+            let num_elems = opt.push_pre_inst(Inst::Sub(Sub {
+                tyidx,
+                lhs: zero,
+                rhs: opt.equiv_iidx(rhs),
+                nuw: false,
+                nsw: false,
+            }));
+            return OptOutcome::Rerun(Inst::DynPtrAdd(DynPtrAdd {
+                ptr,
+                num_elems,
+                elem_size,
+            }));
+        }
     }
 
     let tyidx = opt.inst(num_elems).tyidx(opt);
@@ -2367,6 +2399,51 @@ mod test {
           %4: i64 = sub %3, %1
           blackbox %0
         ",
+        );
+
+        // (ptr - c * elem_size) + (c - x) * elem_size == ptr + (0 - x) * elem_size
+        test_sf(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = ptradd %0, -8
+              %3: i64 = 1
+              %4: i64 = sub %3, %1
+              %5: ptr = dynptradd %2, %4, 8
+              blackbox %5
+            ",
+            "
+              %0: ptr = arg
+              %1: i64 = arg
+              %2: ptr = ptradd %0, -8
+              %3: i64 = 1
+              %4: i64 = sub %3, %1
+              %5: i64 = 0
+              %6: i64 = sub %5, %1
+              %7: ptr = dynptradd %0, %6, 8
+              blackbox %7
+            ",
+        );
+
+        test_sf(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: ptr = ptradd %0, -9
+              %3: i64 = 1
+              %4: i64 = sub %3, %1
+              %5: ptr = dynptradd %2, %4, 8
+              blackbox %5
+            ",
+            "
+              %0: ptr = arg
+              %1: i64 = arg
+              %2: ptr = ptradd %0, -9
+              %3: i64 = 1
+              %4: i64 = sub %3, %1
+              %5: ptr = dynptradd %2, %4, 8
+              blackbox %5
+            ",
         );
 
         // Optimise pointer element sizes
