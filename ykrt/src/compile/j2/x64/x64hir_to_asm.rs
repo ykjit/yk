@@ -2603,7 +2603,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     x => todo!("{x}"),
                 },
                 |bitw, lhsr, rhsmemop| match bitw {
-                    1..=32 => IcedInst::with2(Code::And_r32_rm32, lhsr.to_reg32(), rhsmemop),
+                    1..=8 => IcedInst::with2(Code::And_r8_rm8, lhsr.to_reg8(), rhsmemop),
+                    16 => IcedInst::with2(Code::And_r16_rm16, lhsr.to_reg16(), rhsmemop),
+                    32 => IcedInst::with2(Code::And_r32_rm32, lhsr.to_reg32(), rhsmemop),
                     64 => IcedInst::with2(Code::And_r64_rm64, lhsr.to_reg64(), rhsmemop),
                     x => todo!("{x}"),
                 },
@@ -4379,7 +4381,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     x => todo!("{x}"),
                 },
                 |bitw, lhsr, rhsmemop| match bitw {
-                    1..=32 => IcedInst::with2(Code::Or_r32_rm32, lhsr.to_reg32(), rhsmemop),
+                    1..=8 => IcedInst::with2(Code::Or_r8_rm8, lhsr.to_reg8(), rhsmemop),
+                    16 => IcedInst::with2(Code::Or_r16_rm16, lhsr.to_reg16(), rhsmemop),
+                    32 => IcedInst::with2(Code::Or_r32_rm32, lhsr.to_reg32(), rhsmemop),
                     64 => IcedInst::with2(Code::Or_r64_rm64, lhsr.to_reg64(), rhsmemop),
                     x => todo!("{x}"),
                 },
@@ -5445,7 +5449,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     x => todo!("{x}"),
                 },
                 |bitw, lhsr, rhsmemop| match bitw {
-                    1..=32 => IcedInst::with2(Code::Xor_r32_rm32, lhsr.to_reg32(), rhsmemop),
+                    1..=8 => IcedInst::with2(Code::Xor_r8_rm8, lhsr.to_reg8(), rhsmemop),
+                    16 => IcedInst::with2(Code::Xor_r16_rm16, lhsr.to_reg16(), rhsmemop),
+                    32 => IcedInst::with2(Code::Xor_r32_rm32, lhsr.to_reg32(), rhsmemop),
                     64 => IcedInst::with2(Code::Xor_r64_rm64, lhsr.to_reg64(), rhsmemop),
                     x => todo!("{x}"),
                 },
@@ -10161,7 +10167,7 @@ mod test {
               ; %1: ptr = arg [Reg("r.64.y", Undefined)]
               ; %2: i8 = load %1
               ; %3: i8 = or %0, %2
-              or r.32.x, [r.64.y]
+              or r.8.x, [r.64.y]
               ; term [%3, %1]
             "#],
         );
@@ -12454,7 +12460,7 @@ mod test {
               ; %1: ptr = arg [Reg("r.64.y", Undefined)]
               ; %2: i8 = load %1
               ; %3: i8 = xor %0, %2
-              xor r.32.x, [r.64.y]
+              xor r.8.x, [r.64.y]
               ; term [%3, %1]
             "#],
         );
