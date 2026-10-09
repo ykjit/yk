@@ -1130,10 +1130,14 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                 continue;
                             }
                         } else if inst.read_write_effects().interferes(Effects::all())
-                            || (ra.is_in_reg(giidx) && !matches!(inst, Inst::Const(_)))
+                            || (!matches!(inst, Inst::Const(_))
+                                && (ra.is_in_reg(giidx)
+                                    || b.inst(x.cond).iter_iidxs(b).any(|op| op == giidx)))
                         {
-                            // Don't copy instructions that are in registers (unless they're
-                            // constants as that confuses the register allocator).
+                            // Don't copy instructions that:
+                            //   1. Have side effects.
+                            //   1. Are already in a register.
+                            //   2. Referenced by the guard's condition.
                             gexit_vars.set(giidx.to_raw_index(), true);
                             continue;
                         }
@@ -2825,6 +2829,36 @@ mod test {
           ; %3: i8 = load %1
           ...
         "#],
+        );
+
+        // Don't move something into a guard if doing so makes the lifetime of other values worse.
+        build_and_test(
+            r#"
+          %0: ptr = arg [reg]
+          %1: ptr = ptradd %0, 8
+          %2: i1 = load %1
+          guard true, %2, [%1], [[[reg("R0", undefined)]]]
+          term [%0]
+        "#,
+            |_| true,
+            &[r#"
+          ; term [%0]
+          i_guard: [%1]
+          ; guard true, %2, [%1]
+          load: R1=*R2
+          ; %2: i1 = load %1
+          ptradd: R2=R0 + 8
+          ; %1: ptr = ptradd %0, 8
+          ; %0: ptr = arg [Reg("R0", Undefined)]
+          guard_coupler_start: stack_off=0
+          ; term [%0]
+          spill: reg=R2, in_fill=Undefined, stack_off=8, bitw=64
+          ; %0: ptr = arg [Reg("R2", Undefined)]
+          guard_completed:
+            fromvlocs=[Stack(8)]
+            tovlocs=[Reg(R0, Undefined)]
+          ; gidx 0
+            "#],
         );
     }
 
