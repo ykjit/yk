@@ -362,11 +362,11 @@ fn opt_dynptradd(opt: &mut PassOpt, mut inst: DynPtrAdd) -> OptOutcome {
         // ykllvm forces `num_elems` to be pointer index sized, so we can safely convert to
         // `isize`.
         let v = c.to_sign_ext_isize().unwrap();
-        // In LLVM silent two's compliment wrapping is permitted, but in Rust a `unchecked_mul()`
-        // that wraps is UB. It seems unlikely that the overflow case will actually happen, so we
-        // can cross that bridge if we come to it.
-        let off = v.checked_mul(isize::try_from(elem_size).unwrap()).unwrap();
-        let off = i32::try_from(off).unwrap();
+        let off = v.wrapping_mul(isize::try_from(elem_size).unwrap());
+        let Ok(off) = i32::try_from(off) else {
+            // `ptradd` can't represent `off` as an `i32` so keep the `dynptradd` as-is.
+            return OptOutcome::Rewritten(inst.into());
+        };
         if off == 0 {
             return OptOutcome::Equiv(ptr);
         } else {
@@ -2292,6 +2292,36 @@ mod test {
           %3: ptr = ptradd %0, 44
           blackbox %3
         ",
+        );
+
+        test_sf(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = 9223372036854775808
+              %2: ptr = dynptradd %0, %1, 8
+              blackbox %2
+            ",
+            "
+              %0: ptr = arg
+              %1: i64 = 9223372036854775808
+              blackbox %0
+            ",
+        );
+
+        // Constant folding exceeds `ptradd`s i32
+        test_sf(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = 268435456
+              %2: ptr = dynptradd %0, %1, 8
+              blackbox %2
+            ",
+            "
+              %0: ptr = arg
+              %1: i64 = 268435456
+              %2: ptr = dynptradd %0, %1, 8
+              blackbox %2
+            ",
         );
 
         // `(ptr + num_elems * elem_size) + (0 - num_elems) * elem_size == ptr
