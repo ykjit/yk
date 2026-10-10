@@ -543,6 +543,7 @@ impl Block {
                     "%{iidx:?}: forward reference to %{op_iidx:?}"
                 );
                 if let Inst::SAddOverflow(_)
+                | Inst::SMulOverflow(_)
                 | Inst::UAddOverflow(_)
                 | Inst::USubOverflow(_)
                 | Inst::SSubOverflow(_) = self.inst(op_iidx)
@@ -550,7 +551,7 @@ impl Block {
                     match inst {
                         Inst::ExtractVal(_) => (),
                         _ => panic!(
-                            "%{iidx:?}: {{sadd, uadd, usub, ssub}}_overflow result must only be accessed via extractval"
+                            "%{iidx:?}: {{sadd, smul, uadd, usub, ssub}}_overflow result must only be accessed via extractval"
                         ),
                     }
                 }
@@ -893,6 +894,7 @@ pub(super) enum Inst {
     SIToFP,
     SMax,
     SMin,
+    SMulOverflow,
     SRem,
     SSubOverflow,
     Store,
@@ -2029,10 +2031,11 @@ impl InstT for ExtractVal {
             b.inst(self.val),
             Inst::Call(_)
                 | Inst::SAddOverflow(_)
+                | Inst::SMulOverflow(_)
                 | Inst::UAddOverflow(_)
                 | Inst::USubOverflow(_)
                 | Inst::SSubOverflow(_),
-            "%{iidx:?}: extractval operand is not a call or {{sadd, uadd, usub, ssub}}_overflow"
+            "%{iidx:?}: extractval operand is not a call or {{sadd, smul, uadd, usub, ssub}}_overflow"
         );
         assert!(
             self.off + m.ty(self.tyidx).bitw() <= b.inst_bitw(m, self.val),
@@ -4576,6 +4579,80 @@ impl InstT for SMin {
     }
 }
 
+/// Signed multiply with overflow detection, with the same semantics as
+/// `llvm.smul.with.overflow`: the value is the operand-width result followed by an i1 flag,
+/// each only accessible via `extractval`.
+#[derive(Clone, Debug)]
+pub(super) struct SMulOverflow {
+    pub tyidx: TyIdx,
+    pub lhs: InstIdx,
+    pub rhs: InstIdx,
+}
+
+impl InstT for SMulOverflow {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            b.inst(self.lhs).tyidx(m),
+            b.inst(self.rhs).tyidx(m),
+            "%{iidx:?}: inconsistent lhs / rhs types"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.lhs = opt.equiv_iidx(self.lhs);
+        self.rhs = opt.equiv_iidx(self.rhs);
+        if matches!(opt.inst(self.lhs), Inst::Const(_))
+            && !matches!(opt.inst(self.rhs), Inst::Const(_))
+        {
+            mem::swap(&mut self.lhs, &mut self.rhs);
+        }
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::SMulOverflow(SMulOverflow { tyidx, lhs, rhs }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.lhs) == *lhs
+            && opt.equiv_iidx(self.rhs) == *rhs
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.lhs, self.rhs)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.lhs = iidx_map(self.lhs);
+        self.rhs = iidx_map(self.rhs);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!(
+            "smul_overflow %{}, %{}",
+            self.lhs.to_raw_index(),
+            self.rhs.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
 /// Return the remainder from signed division with the same semantics as LLVM's `srem`.
 #[derive(Clone, Debug)]
 pub(super) struct SRem {
@@ -6388,13 +6465,52 @@ mod test {
 
     #[test]
     #[should_panic(
-        expected = "%2: {sadd, uadd, usub, ssub}_overflow result must only be accessed via extractval"
+        expected = "%2: {sadd, smul, uadd, usub, ssub}_overflow result must only be accessed via extractval"
     )]
     fn sadd_overflow_result_must_only_be_used_via_extractval() {
         str_to_mod::<DummyReg>(
             "
           %0: i32 = arg [reg]
           %1: i64 = sadd_overflow %0, %0
+          %2: i64 = add %1, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%2: inconsistent lhs / rhs types")]
+    fn smul_overflow_inconsistent_types() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i16 = arg [reg]
+          %2: i64 = smul_overflow %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    fn smul_overflow_extractval() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i32 = arg [reg]
+          %1: i32 = arg [reg]
+          %2: i64 = smul_overflow %0, %1
+          %3: i32 = extractval %2 [0]
+          %4: i1 = extractval %2 [32]
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "%2: {sadd, smul, uadd, usub, ssub}_overflow result must only be accessed via extractval"
+    )]
+    fn smul_overflow_result_must_only_be_used_via_extractval() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i32 = arg [reg]
+          %1: i64 = smul_overflow %0, %0
           %2: i64 = add %1, %1
         ",
         );
@@ -6427,7 +6543,7 @@ mod test {
 
     #[test]
     #[should_panic(
-        expected = "%2: {sadd, uadd, usub, ssub}_overflow result must only be accessed via extractval"
+        expected = "%2: {sadd, smul, uadd, usub, ssub}_overflow result must only be accessed via extractval"
     )]
     fn uadd_overflow_result_must_only_be_used_via_extractval() {
         str_to_mod::<DummyReg>(
@@ -6466,7 +6582,7 @@ mod test {
 
     #[test]
     #[should_panic(
-        expected = "%2: {sadd, uadd, usub, ssub}_overflow result must only be accessed via extractval"
+        expected = "%2: {sadd, smul, uadd, usub, ssub}_overflow result must only be accessed via extractval"
     )]
     fn usub_overflow_result_must_only_be_used_via_extractval() {
         str_to_mod::<DummyReg>(
@@ -6505,7 +6621,7 @@ mod test {
 
     #[test]
     #[should_panic(
-        expected = "%2: {sadd, uadd, usub, ssub}_overflow result must only be accessed via extractval"
+        expected = "%2: {sadd, smul, uadd, usub, ssub}_overflow result must only be accessed via extractval"
     )]
     fn ssub_overflow_result_must_only_be_used_via_extractval() {
         str_to_mod::<DummyReg>(

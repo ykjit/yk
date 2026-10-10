@@ -149,6 +149,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "SADD_OVERFLOW" "LOCAL" "," "LOCAL" {
       Ok(AstInst::SAddOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
+  | "LOCAL" ":" Ty "=" "SMUL_OVERFLOW" "LOCAL" "," "LOCAL" {
+      Ok(AstInst::SMulOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
+    }
   | "LOCAL" ":" Ty "=" "UADD_OVERFLOW" "LOCAL" "," "LOCAL" {
       Ok(AstInst::UAddOverflow { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }

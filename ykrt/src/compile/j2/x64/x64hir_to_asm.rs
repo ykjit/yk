@@ -397,9 +397,9 @@ impl<'a> X64HirToAsm<'a> {
         Ok(())
     }
 
-    /// Generate code for the extractval of a `{sadd, uadd, usub, ssub}_overflow` instruction's
-    /// result or overflow flag. `arith` selects add vs sub; `set_code` is the x64 `set*`
-    /// instruction (e.g. `seto`, `setb`) that reads its flags into a register.
+    /// Generate code for the extractval of a `{sadd, smul, uadd, usub, ssub}_overflow`
+    /// instruction's result or overflow flag. `arith` selects the operation; `set_code` is the
+    /// x64 `set*` instruction (e.g. `seto`, `setb`) that reads its flags into a register.
     #[allow(clippy::too_many_arguments)]
     fn i_overflow(
         &mut self,
@@ -412,7 +412,7 @@ impl<'a> X64HirToAsm<'a> {
         arith: OverflowArith,
         set_code: Code,
     ) -> Result<(), CompilationError> {
-        // {s,u}{add,sub}_overflow returns a struct, so `off` (the bit offset the extractval is
+        // {s,u}{add,mul,sub}_overflow returns a struct, so `off` (the bit offset the extractval is
         // reading) is always 0 for the result.
         let operand_bitw = if off == 0 {
             bitw
@@ -425,6 +425,10 @@ impl<'a> X64HirToAsm<'a> {
             (OverflowArith::Add, 64) => Code::Add_rm64_r64,
             (OverflowArith::Sub, 32) => Code::Sub_rm32_r32,
             (OverflowArith::Sub, 64) => Code::Sub_rm64_r64,
+            // Two-operand `imul r, r/m` sets OF (and CF) iff the signed product does not fit
+            // the operand width, which is exactly `smul_overflow`'s flag.
+            (OverflowArith::Mul, 32) => Code::Imul_r32_rm32,
+            (OverflowArith::Mul, 64) => Code::Imul_r64_rm64,
             _ => todo!(),
         };
         let (res_iidx, flag_iidx) = match off {
@@ -433,7 +437,7 @@ impl<'a> X64HirToAsm<'a> {
             _ => panic!(),
         };
         // Identify the liveness of both values of the overflow instruction and perform dead
-        // code elimination here rather than at the {s,u}{add,sub}_overflow instruction: when
+        // code elimination here rather than at the {s,u}{add,mul,sub}_overflow instruction: when
         // both are used, the sum's extractval defers to the flag's, so codegen isn't emitted
         // twice.
         let sum_used = ra.is_used(res_iidx);
@@ -2963,6 +2967,16 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 OverflowArith::Add,
                 Code::Seto_rm8,
             ),
+            Inst::SMulOverflow(SMulOverflow { lhs, rhs, .. }) => self.i_overflow(
+                ra,
+                iidx,
+                *off,
+                bitw,
+                *lhs,
+                *rhs,
+                OverflowArith::Mul,
+                Code::Seto_rm8,
+            ),
             Inst::UAddOverflow(UAddOverflow { lhs, rhs, .. }) => self.i_overflow(
                 ra,
                 iidx,
@@ -2993,7 +3007,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 OverflowArith::Sub,
                 Code::Seto_rm8,
             ),
-            _ => panic!("extractval operand is not a call or {{sadd, uadd, usub, ssub}}_overflow"),
+            _ => panic!(
+                "extractval operand is not a call or {{sadd, smul, uadd, usub, ssub}}_overflow"
+            ),
         }
     }
 
@@ -5339,10 +5355,11 @@ enum RegOrMemOp {
     MemOp(Reg, i64),
 }
 
-/// The arithmetic of a `{sadd, uadd, usub, ssub}_overflow` instruction.
+/// The arithmetic of a `{sadd, smul, uadd, usub, ssub}_overflow` instruction.
 #[derive(Clone, Copy, Debug)]
 enum OverflowArith {
     Add,
+    Mul,
     Sub,
 }
 
@@ -8715,6 +8732,149 @@ mod test {
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
               %2: i64 = sadd_overflow %0, %1
+              %3: i8 = extractval %2 [8]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[""],
+        );
+    }
+
+    #[test]
+    fn cg_smul_overflow() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = smul_overflow %0, %1
+              %3: i32 = extractval %2 [0]
+              %4: i1 = extractval %2 [32]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = smul_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [32]
+              imul r.32.x, r.32.y
+              seto r.8._
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = smul_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = smul_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              imul r.64.x, r.64.y
+              seto r.8.flag
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    fn cg_smul_overflow_result_only() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = smul_overflow %0, %1
+              %3: i32 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = smul_overflow %0, %1
+              ; %3: i32 = extractval %2 [0]
+              imul r.32.x, r.32.y
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = smul_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = smul_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              imul r.64.x, r.64.y
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    fn cg_smul_overflow_overflow_only() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = smul_overflow %0, %1
+              %3: i1 = extractval %2 [32]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i64 = smul_overflow %0, %1
+              ; %3: i1 = extractval %2 [32]
+              imul r.32.x, r.32.y
+              seto r.8._
+              ...
+            "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = smul_overflow %0, %1
+              %3: i1 = extractval %2 [64]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %2: i65 = smul_overflow %0, %1
+              ; %3: i1 = extractval %2 [64]
+              imul r.64.x, r.64.y
+              seto r.8.flag
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn cg_smul_overflow_bad_offset() {
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i64 = smul_overflow %0, %1
               %3: i8 = extractval %2 [8]
               blackbox %3
               term [%0, %1]
