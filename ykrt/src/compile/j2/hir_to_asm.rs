@@ -1253,6 +1253,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_smin(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::SMulOverflow(_) => (),
                 Inst::SRem(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_srem(&mut ra, b, iidx, x)?;

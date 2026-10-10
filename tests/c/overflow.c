@@ -14,6 +14,8 @@
 //     5: ssub result=2147483646 overflow=1
 //     5: usub full=1,4294967295
 //     5: usub result=4294967295 overflow=1
+//     5: smul full=1,-2
+//     5: smul result=-2 overflow=1
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -37,6 +39,11 @@
 //     %{{usub_ov}}: i1 = extractvalue %{{usub}}, [1]
 //     %{{usub_r}}: i32 = extractvalue %{{usub}}, [0]
 //     ...
+//     %{{smul}}: {0: i32, 32: i1} = call llvm.smul.with.overflow.i32(%{{_}}, 2i32)
+//     ...
+//     %{{smul_ov}}: i1 = extractvalue %{{smul}}, [1]
+//     %{{smul_r}}: i32 = extractvalue %{{smul}}, [0]
+//     ...
 //     --- End aot ---
 //     --- Begin hir ---
 //     ...
@@ -48,6 +55,8 @@
 //     ...
 //     %{{h_usub}}: i64 = usub_overflow %{{_}}, %{{_}}
 //     ...
+//     %{{h_smul}}: i64 = smul_overflow %{{_}}, %{{_}}
+//     ...
 //     --- End hir ---
 //     4: sadd full=0,2147483647
 //     4: sadd result=2147483647 overflow=0
@@ -57,6 +66,8 @@
 //     4: ssub result=-2147483648 overflow=0
 //     4: usub full=0,3
 //     4: usub result=3 overflow=0
+//     4: smul full=0,6
+//     4: smul result=6 overflow=0
 //     yk-execution: enter-jit-code {"trid": "0"}
 //     3: sadd full=1,-2147483647
 //     3: sadd result=-2147483647 overflow=1
@@ -66,6 +77,8 @@
 //     3: ssub result=2147483646 overflow=1
 //     3: usub full=1,4294967295
 //     3: usub result=4294967295 overflow=1
+//     3: smul full=1,-2
+//     3: smul result=-2 overflow=1
 //     2: sadd full=0,2147483647
 //     2: sadd result=2147483647 overflow=0
 //     2: uadd full=0,4294967295
@@ -74,6 +87,8 @@
 //     2: ssub result=-2147483648 overflow=0
 //     2: usub full=0,3
 //     2: usub result=3 overflow=0
+//     2: smul full=0,6
+//     2: smul result=6 overflow=0
 //     1: sadd full=1,-2147483647
 //     1: sadd result=-2147483647 overflow=1
 //     1: uadd full=1,1
@@ -82,10 +97,12 @@
 //     1: ssub result=2147483646 overflow=1
 //     1: usub full=1,4294967295
 //     1: usub result=4294967295 overflow=1
+//     1: smul full=1,-2
+//     1: smul result=-2 overflow=1
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
-// Check that llvm.{sadd,uadd,ssub,usub}.with.overflow are supported by the yk when:
+// Check that llvm.{sadd,uadd,ssub,usub,smul}.with.overflow are supported by the yk when:
 // 1. Only the result is used
 // 2. Only the overflow flag is used
 // 2. Both the result and the overflow flag are used.
@@ -155,6 +172,16 @@ int main(int argc, char **argv) {
     fprintf(stderr, "%d: usub full=%d,%u\n", i, usub_full_ov, usub_full_r);
     fprintf(stderr, "%d: usub result=%u overflow=%d\n", i, usub_res_r,
             usub_ov_ov);
+
+    int ma = i % 2 ? INT_MAX : 3;
+    NOOPT_VAL(ma);
+    int smul_full_r, smul_res_r, smul_ov_r;
+    bool smul_full_ov = __builtin_smul_overflow(ma, 2, &smul_full_r);
+    __builtin_smul_overflow(ma, 2, &smul_res_r);
+    bool smul_ov_ov = __builtin_smul_overflow(ma, 2, &smul_ov_r);
+    fprintf(stderr, "%d: smul full=%d,%d\n", i, smul_full_ov, smul_full_r);
+    fprintf(stderr, "%d: smul result=%d overflow=%d\n", i, smul_res_r,
+            smul_ov_ov);
 
     i--;
   }

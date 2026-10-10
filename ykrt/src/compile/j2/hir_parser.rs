@@ -645,6 +645,18 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let rhs = self.p_local(rhs);
                     self.insts.push(SAddOverflow { tyidx, lhs, rhs }.into());
                 }
+                AstInst::SMulOverflow {
+                    local,
+                    ty,
+                    lhs,
+                    rhs,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let lhs = self.p_local(lhs);
+                    let rhs = self.p_local(rhs);
+                    self.insts.push(SMulOverflow { tyidx, lhs, rhs }.into());
+                }
                 AstInst::UAddOverflow {
                     local,
                     ty,
@@ -1527,6 +1539,12 @@ enum AstInst {
         rhs: Span,
     },
     SAddOverflow {
+        local: Span,
+        ty: AstTy,
+        lhs: Span,
+        rhs: Span,
+    },
+    SMulOverflow {
         local: Span,
         ty: AstTy,
         lhs: Span,
