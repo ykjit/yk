@@ -589,12 +589,10 @@ fn opt_fsub(opt: &mut PassOpt, mut inst: FSub) -> OptOutcome {
     OptOutcome::Rewritten(inst.into())
 }
 
-fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) -> OptOutcome {
-    // Since guards tend to have lots of operands, we avoid `canonicalising` unless we really need
-    // to. This needs to be done carefully, because after we've called `set_equiv` below,
-    // recanonicalising the guard would change the `entry_vars` in a semantically incorrect way.
-
-    let cond = opt.equiv_iidx(cond);
+fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, .. }: Guard) -> OptOutcome {
+    // We avoid immediately canonicalising because the "guard references const" case doesn't
+    // require us to do that work.
+    let cond = opt.equiv_iidx(inst.cond);
     if let Some(ConstKind::Int(x)) = opt.as_constkind(cond) {
         if (expect && x.to_zero_ext_u8() == Some(0)) || (!expect && x.to_zero_ext_u8() == Some(1)) {
             // Let contradictions pass through.
@@ -614,6 +612,7 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         opt.push_equiv(cond, constant);
     }
 
+    inst.canonicalise(opt);
     let mut cond_inst = opt.inst(cond).to_owned();
     cond_inst.canonicalise(opt);
 
@@ -628,7 +627,6 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
     {
         // When the guard fails, lhs must become equal to rhs so we can rewrite the deopt var to
         // the constant.
-        inst.canonicalise(opt);
         for var in &mut opt.gextra_mut(inst.geidx).deopt_vars {
             if *var == *lhs {
                 *var = *rhs;
@@ -650,7 +648,6 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         // Reduce a guard referencing an icmp against a constant boolean to the lhs of the icmp.
         inst.expect = !expect;
         inst.cond = *lhs;
-        inst.canonicalise(opt);
         if (expect && *pred == IPred::Eq) || (!expect && *pred == IPred::Ne) {
             opt.push_equiv(*lhs, *rhs);
         } else {
@@ -688,52 +685,39 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
         if lhs == rhs {
             return OptOutcome::NotNeeded;
         }
-        inst.canonicalise(opt);
         opt.push_equiv(lhs, rhs);
-    } else if let Inst::And(And { tyidx: _, lhs, rhs }) = opt.inst(cond)
+    } else if let Inst::And(And { tyidx: _, lhs, rhs }) = &cond_inst
         && expect
     {
         // A `guard true` referencing `and x, y` means that both `x` and `y` must be true.
-        let lhs = opt.equiv_iidx(*lhs);
-        let rhs = opt.equiv_iidx(*rhs);
-        inst.canonicalise(opt);
-        push_equiv(opt, lhs, true);
-        push_equiv(opt, rhs, true);
+        push_equiv(opt, *lhs, true);
+        push_equiv(opt, *rhs, true);
     } else if let Inst::Or(Or {
         tyidx: _,
         lhs,
         rhs,
         disjoint: false,
-    }) = opt.inst(cond)
+    }) = &cond_inst
         && !expect
     {
         // A `guard false` referencing `or x, y` means that both `x` and `y` must be false.
-        let lhs = opt.equiv_iidx(*lhs);
-        let rhs = opt.equiv_iidx(*rhs);
-        inst.canonicalise(opt);
-        push_equiv(opt, lhs, false);
-        push_equiv(opt, rhs, false);
-    } else if let Inst::Xor(Xor { tyidx: _, lhs, rhs }) = opt.inst(cond)
-        && let Some(ConstKind::Int(x)) = opt.as_constkind(opt.equiv_iidx(*rhs))
+        push_equiv(opt, *lhs, false);
+        push_equiv(opt, *rhs, false);
+    } else if let Inst::Xor(Xor { tyidx: _, lhs, rhs }) = &cond_inst
+        && let Some(ConstKind::Int(x)) = opt.as_constkind(*rhs)
         && x.to_zero_ext_u8() == Some(1)
     {
         // If a guard references `xor x, 1` we can invert the guard condition and reference `x`
         // directly.
         inst.expect = !expect;
         inst.cond = *lhs;
-        inst.canonicalise(opt);
         push_equiv(opt, inst.cond, inst.expect);
-    } else if let Inst::Xor(Xor { tyidx: _, lhs, rhs }) = opt.inst(cond)
+    } else if let Inst::Xor(Xor { tyidx: _, lhs, rhs }) = &cond_inst
         && !expect
     {
         // If `guard false` references `xor x, y`, then `x` and `y` are equivalent henceforth and
         // we can pick one or the other for equivalence.
-        let lhs = opt.equiv_iidx(*lhs);
-        let rhs = opt.equiv_iidx(*rhs);
-        inst.canonicalise(opt);
-        opt.push_equiv(lhs, rhs);
-    } else {
-        inst.canonicalise(opt);
+        opt.push_equiv(*lhs, *rhs);
     }
 
     push_equiv(opt, cond, expect);
