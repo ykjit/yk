@@ -615,6 +615,27 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
     }
 
     let mut cond_inst = opt.inst(cond).to_owned();
+    cond_inst.canonicalise(opt);
+
+    if let Inst::ICmp(ICmp {
+        pred,
+        lhs,
+        rhs,
+        samesign: false,
+    }) = &cond_inst
+        && ((!expect && *pred == IPred::Eq) || (expect && *pred == IPred::Ne))
+        && opt.as_constkind(*rhs).is_some()
+    {
+        // When the guard fails, lhs must become equal to rhs so we can rewrite the deopt var to
+        // the constant.
+        inst.canonicalise(opt);
+        for var in &mut opt.gextra_mut(inst.geidx).deopt_vars {
+            if *var == *lhs {
+                *var = *rhs;
+            }
+        }
+    }
+
     if let Inst::ICmp(ICmp {
         pred,
         lhs,
@@ -654,7 +675,6 @@ fn opt_guard(opt: &mut PassOpt, mut inst @ Guard { expect, cond, .. }: Guard) ->
                 })
             ))
     {
-        cond_inst.canonicalise(opt);
         let Inst::ICmp(ICmp {
             pred: _,
             lhs,
@@ -3221,6 +3241,41 @@ mod test {
           %5: i1 = 0
           guard false, %0, []
           term [%5, %1, %2]
+        ",
+        );
+
+        // Rewrite deopt vars when they're provably a constant
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 2
+          %2: i1 = icmp eq %0, %1
+          guard false, %2, [%0]
+          term [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 2
+          %2: i1 = icmp eq %0, %1
+          guard false, %2, [%1]
+          term [%0]
+        ",
+        );
+
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 2
+          %2: i1 = icmp ne %0, %1
+          guard true, %2, [%0]
+          term [%0]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 2
+          %2: i1 = icmp ne %0, %1
+          guard true, %2, [%1]
+          term [%0]
         ",
         );
     }
