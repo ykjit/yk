@@ -911,6 +911,11 @@ impl<'a> X64HirToAsm<'a> {
         } else {
             let (rmop, rhsr) =
                 if let Some((load_iidx, off)) = self.try_load_to_mem_op(ra, b, iidx, *lhs) {
+                    let in_fill = if let 8 | 16 | 32 | 64 = bitw {
+                        RegCnstrFill::Undefined
+                    } else {
+                        RegCnstrFill::Zeroed
+                    };
                     let [lhsr, rhsr, _] = ra.alloc(
                         self,
                         iidx,
@@ -1025,6 +1030,16 @@ impl<'a> X64HirToAsm<'a> {
                 x => todo!("{x}"),
             },
             RegOrMemOp::MemOp(lhsr, disp) => match bitw {
+                8 => IcedInst::with2(
+                    Code::Cmp_rm8_r8,
+                    MemoryOperand::with_base_displ(lhsr.to_reg64(), disp),
+                    rhsr.to_reg8(),
+                ),
+                16 => IcedInst::with2(
+                    Code::Cmp_rm16_r16,
+                    MemoryOperand::with_base_displ(lhsr.to_reg64(), disp),
+                    rhsr.to_reg16(),
+                ),
                 32 => IcedInst::with2(
                     Code::Cmp_rm32_r32,
                     MemoryOperand::with_base_displ(lhsr.to_reg64(), disp),
@@ -8719,6 +8734,52 @@ mod test {
         );
 
         // ICmp optimisation with loads
+
+        // i8
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i8 = arg [reg]
+              %2: i8 = load %0
+              %3: i1 = icmp ugt %2, %1
+              guard true, %3, []
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i8 = arg [Reg("r.64.y", Undefined)]
+              ; %2: i8 = load %0
+              ; %3: i1 = icmp ugt %2, %1
+              ; guard true, %3, []
+              cmp [r.64.x], r.8.y
+              jbe l{{1}}
+              ; term [%0, %1]
+            "#],
+        );
+
+        // i16
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i16 = arg [reg]
+              %2: i16 = load %0
+              %3: i1 = icmp ugt %2, %1
+              guard true, %3, []
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: ptr = arg [Reg("r.64.x", Undefined)]
+              ; %1: i16 = arg [Reg("r.64.y", Undefined)]
+              ; %2: i16 = load %0
+              ; %3: i1 = icmp ugt %2, %1
+              ; guard true, %3, []
+              cmp [r.64.x], r.16.y
+              jbe l{{1}}
+              ; term [%0, %1]
+            "#],
+        );
 
         // i32
         codegen_and_test(
