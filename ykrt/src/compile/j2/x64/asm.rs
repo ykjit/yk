@@ -281,6 +281,11 @@ impl Asm {
                         off + 4 // PUNPCKLDQ / SUBPD
                     } else if (bufs[off] == 0xF2 || bufs[off] == 0xF3) && bufs[off + 1] == 0x0F {
                         off + 4 // MOVSD / MOVSS / SUBSD / SUBSS
+                    } else if (bufs[off] == 0xF2 || bufs[off] == 0xF3)
+                        && (bufs[off + 1] & 0xF0) == 0x40
+                        && bufs[off + 2] == 0x0F
+                    {
+                        off + 5 // REX-prefixed MOVSD / MOVSS / SUBSD / SUBSS
                     } else {
                         todo!("{:X?}", &bufs[off..off + 3])
                     };
