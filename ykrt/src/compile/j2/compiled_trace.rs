@@ -262,6 +262,8 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum GuardKind {
     Normal,
+    /// The promotion instruction and its value's offset in `deopt_vars`.
+    Promote(InstId, usize),
     /// If this guard:
     ///
     ///   1. is the first guard in a trace,

@@ -225,6 +225,50 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let args_vlocs = self.p_start_side(&src_ctr, src_gidx)?;
                 match &src_ctr.guard(src_gidx).kind {
                     GuardKind::Normal => (),
+                    GuardKind::Promote(promote_iid, arg_off) => {
+                        // Promote guards start tracing after the `promote` instruction, so we need
+                        // to create an outcome that _looks_ like a `promote` executed, including
+                        // the guard.
+                        let promote_inst = self.am.inst(promote_iid);
+                        let ty = promote_inst.def_type(self.am).unwrap();
+                        let Inst::Promote { val, .. } = promote_inst else {
+                            unreachable!();
+                        };
+                        let frame = self.frames.last_mut().unwrap();
+                        let val_iid = if frame.locals.contains_key(promote_iid) {
+                            promote_iid
+                        } else {
+                            // If we got here the output of `yk_promote` isn't used.
+                            let Operand::Local(input_iid) = val else {
+                                panic!()
+                            };
+                            input_iid
+                        };
+                        let val_iidx = frame.get_local(&*self.opt, val_iid);
+                        frame.set_local(promote_iid.clone(), val_iidx);
+                        if let Operand::Local(input_iid) = val {
+                            frame.set_local(input_iid.clone(), val_iidx);
+                        }
+                        let statepoint = frame.pc_statepoint.unwrap();
+                        let const_iidx = self.promotion_data_to_const(ty)?;
+                        let icmp = self.opt.feed(
+                            hir::ICmp {
+                                pred: hir::IPred::Eq,
+                                lhs: val_iidx,
+                                rhs: const_iidx,
+                                samesign: false,
+                            }
+                            .into(),
+                        )?;
+                        self.push_guard(
+                            GuardKind::Promote(promote_iid.clone(), *arg_off),
+                            src_ctr.bid(src_gidx),
+                            self.next_pc(promote_iid.to_owned()),
+                            true,
+                            icmp,
+                            statepoint,
+                        )?;
+                    }
                     GuardKind::Switch(hir::Switch {
                         iid,
                         seen_bbidxs: seen_blocks,
@@ -2145,9 +2189,23 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             .last_mut()
             .unwrap()
             .set_local(iid.clone(), val_iidx);
-        let _bitw = self.opt.inst_bitw(&*self.opt, val_iidx);
-        let const_iidx = self.promotion_data_to_const(self.am.type_(*tyidx))?;
+        let frame_off = self.frames[..self.frames.len() - 1]
+            .iter()
+            .map(|frame| frame.pc_statepoint.unwrap().lives.len())
+            .sum::<usize>();
+        let val_off = statepoint.lives.iter().position(|op| {
+            op.to_inst_id() == iid
+                || matches!(val, Operand::Local(input_iid) if op.to_inst_id() == *input_iid)
+        });
+        let kind = match val_off {
+            Some(val_off) => GuardKind::Promote(iid.clone(), frame_off + val_off),
+            None => {
+                // Neither the input or output of `yk_promote` is used
+                GuardKind::Normal
+            }
+        };
 
+        let const_iidx = self.promotion_data_to_const(self.am.type_(*tyidx))?;
         let icmp = self.opt.feed(
             hir::ICmp {
                 pred: hir::IPred::Eq,
@@ -2157,14 +2215,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             .into(),
         )?;
-        self.push_guard(
-            GuardKind::Normal,
-            bid,
-            self.next_pc(iid.clone()),
-            true,
-            icmp,
-            statepoint,
-        )
+        self.push_guard(kind, bid, self.next_pc(iid), true, icmp, statepoint)
     }
 
     fn p_ptradd(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {

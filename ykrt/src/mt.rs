@@ -1153,7 +1153,8 @@ impl MT {
         self.stats.trace_recorded_err();
     }
 
-    /// Inform this meta-tracer that guard `gid` has failed.
+    /// Inform this meta-tracer that guard `gid` has failed. Guards whose kind is
+    /// [GuardKind::Promote] should pass non-empty `promotions`.
     ///
     // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
     // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
@@ -1163,6 +1164,7 @@ impl MT {
         parent: Arc<dyn CompiledTrace>,
         gid: GuardId,
         frameaddr: *mut c_void,
+        promotions: &[u8],
     ) {
         match self.transition_guard_failure(Arc::clone(&parent), gid) {
             TransitionGuardFailure::NoAction => {
@@ -1189,7 +1191,7 @@ impl MT {
                         trid,
                         hl: Arc::clone(&hl),
                         thread_tracer: tt,
-                        promotions: Vec::new(),
+                        promotions: promotions.to_vec(),
                         debug_strs: Vec::new(),
                         frameaddr,
                         seen_hls: SeenHotLocations::new(hl),
