@@ -96,8 +96,8 @@ use crate::{
         j2::{
             codebuf::ExeCodeBuf,
             compiled_trace::{
-                CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledGuard, J2CompiledTrace,
-                J2TraceStart,
+                CompiledGuardIdx, DeoptFrame, DeoptVar, GuardKind, J2CompiledGuard,
+                J2CompiledTrace, J2TraceStart,
             },
             effects::Effects,
             hir::*,
@@ -370,14 +370,15 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             .into_iter()
             .map(
                 |GuardBody {
+                     kind,
                      patch_labels,
                      bid,
                      deopt_frames,
                      deopt_vars,
                      extra_stack_len,
-                     switch,
                  }| {
                     J2CompiledGuard::new(
+                        kind,
                         bid,
                         deopt_frames,
                         deopt_vars,
@@ -385,7 +386,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             .map(|_| u32::try_from(labels_iter.next().unwrap()).unwrap())
                             .collect::<SmallVec<[_; 2]>>(),
                         extra_stack_len,
-                        switch,
                     )
                 },
             )
@@ -802,7 +802,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 if gextra.bid == gbody.bid
                     && deopt_frames == gbody.deopt_frames
                     && deopt_vars_compatible(&gbody.deopt_vars, &deopt_vars)
-                    && gextra.switch == gbody.switch
+                    && gextra.kind == gbody.kind
                 {
                     gidx = cnd_gidx;
                     merged = true;
@@ -852,12 +852,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 self.be
                     .guard_completed(gexit.label.clone(), extra_stack_len, &deopt_vars);
                 gbodies.push(GuardBody {
+                    kind: gextra.kind.clone(),
                     patch_labels: smallvec![patch_label],
                     bid: gextra.bid,
                     deopt_frames,
                     deopt_vars: deopt_vars.clone(),
                     extra_stack_len,
-                    switch: gextra.switch.clone(),
                 });
                 gbodies_map.entry(gextra.bid).or_default().push(gidx);
             }
@@ -2034,13 +2034,13 @@ struct GuardExit<'a, AB: HirToAsmBackend + ?Sized> {
 /// to [J2CompiledGuard].
 #[derive(Debug)]
 struct GuardBody<AB: HirToAsmBackend + ?Sized> {
+    kind: GuardKind,
     /// The [AB::Label]s of machine code which will need patching. Must contain at least one label.
     patch_labels: SmallVec<[AB::Label; 2]>,
     bid: aot_ir::BBlockId,
     deopt_frames: SmallVec<[DeoptFrame; 2]>,
     deopt_vars: Vec<DeoptVar<AB::Reg>>,
     extra_stack_len: u32,
-    switch: Option<Switch>,
 }
 
 #[cfg(test)]

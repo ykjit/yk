@@ -23,7 +23,7 @@ use crate::{
         j2::{
             J2,
             compiled_trace::{
-                CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace, J2TraceStart,
+                CompiledGuardIdx, DeoptFrame, DeoptVar, GuardKind, J2CompiledTrace, J2TraceStart,
             },
             hir::{self, InstT},
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
@@ -223,18 +223,20 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         .unwrap()
                 });
                 let args_vlocs = self.p_start_side(&src_ctr, src_gidx)?;
-                if let Some(hir::Switch {
-                    iid,
-                    seen_bbidxs: seen_blocks,
-                }) = src_ctr.switch(src_gidx)
-                {
-                    // In the past, we saw cases where parts of switch blocks were retraced. I
-                    // suspect that was an hwt artefact, but I'm not 100% sure, so guard against it
-                    // happening here until we understand if it's still possible or not.
-                    let next_ta = self.ta_iter.peek().unwrap().as_ref().unwrap().clone();
-                    assert_ne!(self.ta_to_bid(&next_ta), Some(prev_bid));
+                match &src_ctr.guard(src_gidx).kind {
+                    GuardKind::Normal => (),
+                    GuardKind::Switch(hir::Switch {
+                        iid,
+                        seen_bbidxs: seen_blocks,
+                    }) => {
+                        // In the past, we saw cases where parts of switch blocks were retraced. I
+                        // suspect that was an hwt artefact, but I'm not 100% sure, so guard against it
+                        // happening here until we understand if it's still possible or not.
+                        let next_ta = self.ta_iter.peek().unwrap().as_ref().unwrap().clone();
+                        assert_ne!(self.ta_to_bid(&next_ta), Some(prev_bid));
 
-                    self.p_switch(iid.clone(), prev_bid, self.am.inst(iid), Some(seen_blocks))?;
+                        self.p_switch(iid.clone(), prev_bid, self.am.inst(iid), Some(seen_blocks))?;
+                    }
                 }
                 BuildModKind::Side {
                     prev_bid,
@@ -466,12 +468,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
     fn push_guard(
         &mut self,
+        kind: GuardKind,
         bid: BBlockId,
         iid: InstId,
         expect_true: bool,
         cond_iidx: hir::InstIdx,
         guard_statepoint: &'static Statepoint,
-        switch: Option<hir::Switch>,
     ) -> Result<(), CompilationError> {
         self.frames.last_mut().unwrap().pc_statepoint = Some(guard_statepoint);
 
@@ -527,8 +529,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             geidx: hir::GuardExtraIdx::MAX,
         };
         let gextra = hir::GuardExtra {
+            kind,
             bid,
-            switch,
             deopt_vars,
             deopt_frames,
         };
@@ -1345,12 +1347,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     let ciidx = self
                         .const_to_iidx(i1_tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(1, 0)))?;
                     self.push_guard(
+                        GuardKind::Normal,
                         bid,
                         self.next_pc(iid),
                         true,
                         ciidx,
                         statepoint_after.unwrap(),
-                        None,
                     )?;
                     self.opt.feed_void(hir::Term(Vec::new()).into())?;
                     Ok(CallProcessedKind::Terminated)
@@ -1426,7 +1428,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let i1_tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
                 let ciidx =
                     self.const_to_iidx(i1_tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(1, 0)))?;
-                self.push_guard(bid, self.next_pc(iid), true, ciidx, statepoint_after, None)?;
+                self.push_guard(
+                    GuardKind::Normal,
+                    bid,
+                    self.next_pc(iid),
+                    true,
+                    ciidx,
+                    statepoint_after,
+                )?;
                 self.opt.feed_void(hir::Term(Vec::new()).into())?;
                 Ok(CallProcessedKind::Terminated)
             }
@@ -1848,12 +1857,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
         let cond_iidx = self.p_operand(cond)?;
         self.push_guard(
+            GuardKind::Normal,
             bid,
             self.next_pc(iid),
             next_bid.bbidx() == *true_bb,
             cond_iidx,
             statepoint,
-            None,
         )
     }
 
@@ -2148,7 +2157,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             .into(),
         )?;
-        self.push_guard(bid, self.next_pc(iid.clone()), true, icmp, statepoint, None)
+        self.push_guard(
+            GuardKind::Normal,
+            bid,
+            self.next_pc(iid.clone()),
+            true,
+            icmp,
+            statepoint,
+        )
     }
 
     fn p_ptradd(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
@@ -2433,12 +2449,15 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 vec![next_bbidx]
             };
             self.push_guard(
+                GuardKind::Switch(hir::Switch {
+                    iid: iid.clone(),
+                    seen_bbidxs,
+                }),
                 bid,
-                iid.clone(),
+                iid,
                 expect,
                 icmp,
                 statepoint,
-                Some(hir::Switch { iid, seen_bbidxs }),
             )?;
         }
 

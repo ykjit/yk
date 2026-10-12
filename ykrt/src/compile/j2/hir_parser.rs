@@ -25,6 +25,7 @@ use crate::{
     aotsmp::StackMapIdx,
     compile::{
         j2::{
+            compiled_trace::GuardKind,
             hir::*,
             regalloc::{RegFill, RegT, TestRegIter, VarLoc, VarLocs},
         },
@@ -600,8 +601,8 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     }
                     let cond = self.p_local(cond);
                     let geidx = guards.push(GuardExtra {
+                        kind: GuardKind::Normal,
                         bid,
-                        switch: None,
                         deopt_vars,
                         deopt_frames,
                     });

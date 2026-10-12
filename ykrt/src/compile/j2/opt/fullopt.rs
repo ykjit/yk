@@ -503,8 +503,8 @@ impl OptT for FullOpt {
 
                 let old_gextra = &entry.guard_extras[x.geidx];
                 let gextra = GuardExtra {
+                    kind: old_gextra.kind.clone(),
                     bid: old_gextra.bid,
-                    switch: old_gextra.switch.clone(),
                     deopt_vars: old_gextra
                         .deopt_vars
                         .iter()
