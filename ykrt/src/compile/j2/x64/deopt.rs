@@ -5,7 +5,7 @@ use crate::{
     compile::{
         CompiledTrace, GuardId,
         j2::{
-            compiled_trace::{CompiledGuardIdx, DeoptVar, J2CompiledTrace},
+            compiled_trace::{CompiledGuardIdx, DeoptVar, GuardKind, J2CompiledTrace},
             hir::ConstKind,
             regalloc::{RegFill, VarLoc},
             x64::x64regalloc::Reg,
@@ -164,6 +164,38 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     mt.deopt(callee_saved_regs.as_mut_ptr() as *mut c_void);
 
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+
+    // OPT: We don't want to pay the price for a malloc for GuardKind::Promote, because that's the
+    // rare case. So we allocate stack space: if we're actually tracing and need to seed the
+    // trace's promotions, `mt.guard_failure` will make a heap allocation.
+    let mut promotions = [0; 8];
+    let mut promotions_len = 0;
+    if let GuardKind::Promote(_, var_off) = &guard.kind {
+        let var = &guard.deopt_vars[*var_off];
+        promotions_len = usize::try_from(var.bitw.div_ceil(8).next_power_of_two()).unwrap();
+        assert!(promotions_len <= 8);
+        assert_eq!(var.deopt_fromvlocs.len(), 1);
+        match var.deopt_fromvlocs.iter().next().unwrap() {
+            VarLoc::Const(ConstKind::Int(x)) => {
+                promotions = x.to_zero_ext_u64().unwrap().to_ne_bytes();
+            }
+            VarLoc::Const(ConstKind::Ptr(x)) => {
+                promotions = (*x as u64).to_ne_bytes();
+            }
+            VarLoc::Stack(off) => unsafe {
+                std::ptr::copy_nonoverlapping(
+                    faddr.byte_sub(usize::try_from(*off).unwrap()),
+                    promotions.as_mut_ptr(),
+                    promotions_len,
+                );
+            },
+            VarLoc::StackOff(off) => unsafe {
+                let addr = faddr.byte_sub(usize::try_from(*off).unwrap()) as u64;
+                promotions = addr.to_ne_bytes();
+            },
+            _ => unreachable!(),
+        }
+    };
 
     // We write to the buffer backwards, starting at `stkptr + stklen`. Eventually the contents of
     // this buffer (viewed from low to high address) will be:
@@ -330,7 +362,12 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         }
     };
 
-    mt.guard_failure(ctr, gid, faddr as *mut c_void);
+    mt.guard_failure(
+        ctr,
+        gid,
+        faddr as *mut c_void,
+        &promotions[..promotions_len],
+    );
 
     // In an ideal world, the following assertion would go inside `replace_stack`, but as a naked
     // function, it can only contain a single `asm` statement.

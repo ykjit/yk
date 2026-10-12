@@ -110,10 +110,6 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         self.guards[gidx].bid()
     }
 
-    pub(super) fn switch(&self, gidx: CompiledGuardIdx) -> Option<&Switch> {
-        self.guards[gidx].switch.as_ref()
-    }
-
     pub(super) fn guard(&self, gidx: CompiledGuardIdx) -> &J2CompiledGuard<Reg> {
         &self.guards[gidx]
     }
@@ -236,6 +232,7 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     guard: Guard,
 
     // j2 specific stuff.
+    pub kind: GuardKind,
     /// The block ID of the guard, needed for `prev_bid` in `aot_to_hir`.
     bid: aot_ir::BBlockId,
     /// The [DeoptFrame]s necessary to reconstruct the stackframes for this guard. See also
@@ -260,6 +257,13 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     /// How much additional space will this guard have consumed relative to the main part of the
     /// trace it was part of?
     pub extra_stack_len: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum GuardKind {
+    Normal,
+    /// The promotion instruction and its value's offset in `deopt_vars`.
+    Promote(InstId, usize),
     /// If this guard:
     ///
     ///   1. is the first guard in a trace,
@@ -267,26 +271,26 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     ///
     /// then this records the information necessary for subsequent sidetraces to deal with the
     /// switch properly.
-    pub switch: Option<Switch>,
+    Switch(Switch),
 }
 
 impl<Reg: RegT> J2CompiledGuard<Reg> {
     pub(super) fn new(
+        kind: GuardKind,
         bid: aot_ir::BBlockId,
         deopt_frames: SmallVec<[DeoptFrame; 2]>,
         deopt_vars: Vec<DeoptVar<Reg>>,
         patch_offs: SmallVec<[u32; 2]>,
         extra_stack_len: u32,
-        switch: Option<Switch>,
     ) -> Self {
         Self {
+            kind,
             bid,
             deopt_frames,
             deopt_vars,
             guard: Guard::new(),
             patch_offs,
             extra_stack_len,
-            switch,
         }
     }
 

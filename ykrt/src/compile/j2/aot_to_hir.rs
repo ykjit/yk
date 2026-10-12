@@ -23,7 +23,7 @@ use crate::{
         j2::{
             J2,
             compiled_trace::{
-                CompiledGuardIdx, DeoptFrame, DeoptVar, J2CompiledTrace, J2TraceStart,
+                CompiledGuardIdx, DeoptFrame, DeoptVar, GuardKind, J2CompiledTrace, J2TraceStart,
             },
             hir::{self, InstT},
             opt::{OptT, fullopt::FullOpt, noopt::NoOpt},
@@ -223,18 +223,64 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         .unwrap()
                 });
                 let args_vlocs = self.p_start_side(&src_ctr, src_gidx)?;
-                if let Some(hir::Switch {
-                    iid,
-                    seen_bbidxs: seen_blocks,
-                }) = src_ctr.switch(src_gidx)
-                {
-                    // In the past, we saw cases where parts of switch blocks were retraced. I
-                    // suspect that was an hwt artefact, but I'm not 100% sure, so guard against it
-                    // happening here until we understand if it's still possible or not.
-                    let next_ta = self.ta_iter.peek().unwrap().as_ref().unwrap().clone();
-                    assert_ne!(self.ta_to_bid(&next_ta), Some(prev_bid));
+                match &src_ctr.guard(src_gidx).kind {
+                    GuardKind::Normal => (),
+                    GuardKind::Promote(promote_iid, arg_off) => {
+                        // Promote guards start tracing after the `promote` instruction, so we need
+                        // to create an outcome that _looks_ like a `promote` executed, including
+                        // the guard.
+                        let promote_inst = self.am.inst(promote_iid);
+                        let ty = promote_inst.def_type(self.am).unwrap();
+                        let Inst::Promote { val, .. } = promote_inst else {
+                            unreachable!();
+                        };
+                        let frame = self.frames.last_mut().unwrap();
+                        let val_iid = if frame.locals.contains_key(promote_iid) {
+                            promote_iid
+                        } else {
+                            // If we got here the output of `yk_promote` isn't used.
+                            let Operand::Local(input_iid) = val else {
+                                panic!()
+                            };
+                            input_iid
+                        };
+                        let val_iidx = frame.get_local(&*self.opt, val_iid);
+                        frame.set_local(promote_iid.clone(), val_iidx);
+                        if let Operand::Local(input_iid) = val {
+                            frame.set_local(input_iid.clone(), val_iidx);
+                        }
+                        let statepoint = frame.pc_statepoint.unwrap();
+                        let const_iidx = self.promotion_data_to_const(ty)?;
+                        let icmp = self.opt.feed(
+                            hir::ICmp {
+                                pred: hir::IPred::Eq,
+                                lhs: val_iidx,
+                                rhs: const_iidx,
+                                samesign: false,
+                            }
+                            .into(),
+                        )?;
+                        self.push_guard(
+                            GuardKind::Promote(promote_iid.clone(), *arg_off),
+                            src_ctr.bid(src_gidx),
+                            self.next_pc(promote_iid.to_owned()),
+                            true,
+                            icmp,
+                            statepoint,
+                        )?;
+                    }
+                    GuardKind::Switch(hir::Switch {
+                        iid,
+                        seen_bbidxs: seen_blocks,
+                    }) => {
+                        // In the past, we saw cases where parts of switch blocks were retraced. I
+                        // suspect that was an hwt artefact, but I'm not 100% sure, so guard against it
+                        // happening here until we understand if it's still possible or not.
+                        let next_ta = self.ta_iter.peek().unwrap().as_ref().unwrap().clone();
+                        assert_ne!(self.ta_to_bid(&next_ta), Some(prev_bid));
 
-                    self.p_switch(iid.clone(), prev_bid, self.am.inst(iid), Some(seen_blocks))?;
+                        self.p_switch(iid.clone(), prev_bid, self.am.inst(iid), Some(seen_blocks))?;
+                    }
                 }
                 BuildModKind::Side {
                     prev_bid,
@@ -466,12 +512,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
     fn push_guard(
         &mut self,
+        kind: GuardKind,
         bid: BBlockId,
         iid: InstId,
         expect_true: bool,
         cond_iidx: hir::InstIdx,
         guard_statepoint: &'static Statepoint,
-        switch: Option<hir::Switch>,
     ) -> Result<(), CompilationError> {
         self.frames.last_mut().unwrap().pc_statepoint = Some(guard_statepoint);
 
@@ -527,8 +573,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             geidx: hir::GuardExtraIdx::MAX,
         };
         let gextra = hir::GuardExtra {
+            kind,
             bid,
-            switch,
             deopt_vars,
             deopt_frames,
         };
@@ -1345,12 +1391,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     let ciidx = self
                         .const_to_iidx(i1_tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(1, 0)))?;
                     self.push_guard(
+                        GuardKind::Normal,
                         bid,
                         self.next_pc(iid),
                         true,
                         ciidx,
                         statepoint_after.unwrap(),
-                        None,
                     )?;
                     self.opt.feed_void(hir::Term(Vec::new()).into())?;
                     Ok(CallProcessedKind::Terminated)
@@ -1426,7 +1472,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let i1_tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
                 let ciidx =
                     self.const_to_iidx(i1_tyidx, hir::ConstKind::Int(ArbBitInt::from_u64(1, 0)))?;
-                self.push_guard(bid, self.next_pc(iid), true, ciidx, statepoint_after, None)?;
+                self.push_guard(
+                    GuardKind::Normal,
+                    bid,
+                    self.next_pc(iid),
+                    true,
+                    ciidx,
+                    statepoint_after,
+                )?;
                 self.opt.feed_void(hir::Term(Vec::new()).into())?;
                 Ok(CallProcessedKind::Terminated)
             }
@@ -1848,12 +1901,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
 
         let cond_iidx = self.p_operand(cond)?;
         self.push_guard(
+            GuardKind::Normal,
             bid,
             self.next_pc(iid),
             next_bid.bbidx() == *true_bb,
             cond_iidx,
             statepoint,
-            None,
         )
     }
 
@@ -2136,9 +2189,23 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             .last_mut()
             .unwrap()
             .set_local(iid.clone(), val_iidx);
-        let _bitw = self.opt.inst_bitw(&*self.opt, val_iidx);
-        let const_iidx = self.promotion_data_to_const(self.am.type_(*tyidx))?;
+        let frame_off = self.frames[..self.frames.len() - 1]
+            .iter()
+            .map(|frame| frame.pc_statepoint.unwrap().lives.len())
+            .sum::<usize>();
+        let val_off = statepoint.lives.iter().position(|op| {
+            op.to_inst_id() == iid
+                || matches!(val, Operand::Local(input_iid) if op.to_inst_id() == *input_iid)
+        });
+        let kind = match val_off {
+            Some(val_off) => GuardKind::Promote(iid.clone(), frame_off + val_off),
+            None => {
+                // Neither the input or output of `yk_promote` is used
+                GuardKind::Normal
+            }
+        };
 
+        let const_iidx = self.promotion_data_to_const(self.am.type_(*tyidx))?;
         let icmp = self.opt.feed(
             hir::ICmp {
                 pred: hir::IPred::Eq,
@@ -2148,7 +2215,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
             .into(),
         )?;
-        self.push_guard(bid, self.next_pc(iid.clone()), true, icmp, statepoint, None)
+        self.push_guard(kind, bid, self.next_pc(iid), true, icmp, statepoint)
     }
 
     fn p_ptradd(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
@@ -2433,12 +2500,15 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 vec![next_bbidx]
             };
             self.push_guard(
+                GuardKind::Switch(hir::Switch {
+                    iid: iid.clone(),
+                    seen_bbidxs,
+                }),
                 bid,
-                iid.clone(),
+                iid,
                 expect,
                 icmp,
                 statepoint,
-                Some(hir::Switch { iid, seen_bbidxs }),
             )?;
         }
 

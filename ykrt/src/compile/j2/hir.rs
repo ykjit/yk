@@ -167,7 +167,7 @@ use crate::aotsmp::StackMapIdx;
 use crate::{
     compile::{
         j2::{
-            compiled_trace::{CompiledGuardIdx, J2CompiledTrace},
+            compiled_trace::{CompiledGuardIdx, GuardKind, J2CompiledTrace},
             effects::Effects,
             opt::EquivIIdxT,
             regalloc::{RegT, VarLocs},
@@ -2941,15 +2941,8 @@ impl InstT for Guard {
 /// Extra information for guard instructions that is too big to fit into [Guard].
 #[derive(Clone, Debug)]
 pub(super) struct GuardExtra {
+    pub kind: GuardKind,
     pub bid: aot_ir::BBlockId,
-    /// If this guard:
-    ///
-    ///   1. is the first guard in a trace,
-    ///   2. relates to an LLVM-level `switch`,
-    ///
-    /// then this records the information necessary for subsequent sidetraces to deal with the
-    /// switch properly.
-    pub switch: Option<Switch>,
     /// The variables used for deopt and side-tracing. These are stored as an ordered, flat,
     /// sequence, corresponding to the sequence of `deopt_frames`. For example, if `deopt_frames`
     /// has 2 frames, the first of which needs 3 variables and the second 1 variable `deopt_vars`
@@ -5568,8 +5561,8 @@ impl<'a> Iterator for IterIidxsIterator<'a> {
                     return Some(*cond);
                 } else {
                     let GuardExtra {
+                        kind: _,
                         bid: _,
-                        switch: _,
                         deopt_vars,
                         deopt_frames: _,
                     } = self.b.gextra(*geidx);
