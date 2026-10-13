@@ -35,7 +35,7 @@ use std::mem;
 /// Load/Store elimination
 pub(super) struct LoadStore {
     /// A map telling us what value we know is currently stored at a given [Address].
-    hv: FxHashMap<Address, InstIdx>,
+    hv: FxHashMap<Address, LSVal>,
 }
 
 impl LoadStore {
@@ -55,7 +55,7 @@ impl PassT for LoadStore {
                 is_volatile: false,
             }) => {
                 let addr = Address::from(opt, ptr);
-                if let Some(hv_iidx) = self.hv.get(&addr) {
+                if let Some(LSVal { val: hv_iidx }) = self.hv.get(&addr) {
                     let inst_ty = opt.ty(tyidx);
                     let hv_iidx = opt.equiv_iidx(*hv_iidx);
                     let hv_tyidx = opt.inst(hv_iidx).tyidx(opt);
@@ -117,9 +117,12 @@ impl PassT for LoadStore {
             }) => {
                 let val = opt.equiv_iidx(val);
                 let addr = Address::from(opt, ptr);
-                if let Some(iidx) = self.hv.get(&addr) {
-                    let iidx = opt.equiv_iidx(*iidx);
-                    if val == iidx {
+                if let Some(LSVal { val: known_iidx }) = self.hv.get(&addr) {
+                    // We already know something about this address.
+                    let known_iidx = opt.equiv_iidx(*known_iidx);
+                    if val == known_iidx {
+                        // We either loaded or stored this same value from this address and do not
+                        // need the new store.
                         return OptOutcome::NotNeeded;
                     }
                 }
@@ -141,7 +144,7 @@ impl PassT for LoadStore {
                 ptr,
                 is_volatile: _,
             }) => {
-                self.hv.insert(Address::from(opt, *ptr), iidx);
+                self.hv.insert(Address::from(opt, *ptr), LSVal::new(iidx));
             }
             Inst::Store(Store {
                 ptr,
@@ -160,35 +163,39 @@ impl PassT for LoadStore {
                         let ptr = opt.equiv_iidx(ptr);
                         let off = isize::try_from(off).unwrap();
                         let bytew = isize::try_from(opt.inst_bitw(opt, val).div_ceil(8)).unwrap();
-                        self.hv.retain(|hv_addr, hv_val| match hv_addr {
-                            Address::PtrOff(hv_ptr, hv_off) => {
-                                let hv_ptr = opt.equiv_iidx(*hv_ptr);
-                                let hv_off = isize::try_from(*hv_off).unwrap();
-                                let hv_val = opt.equiv_iidx(*hv_val);
-                                let hv_bytew =
-                                    isize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
-                                        .unwrap();
-                                ptr == hv_ptr && (off + bytew <= hv_off || hv_off + hv_bytew <= off)
-                            }
-                            Address::Const(_) => false,
-                        });
+                        self.hv
+                            .retain(|hv_addr, LSVal { val: hv_val }| match hv_addr {
+                                Address::PtrOff(hv_ptr, hv_off) => {
+                                    let hv_ptr = opt.equiv_iidx(*hv_ptr);
+                                    let hv_off = isize::try_from(*hv_off).unwrap();
+                                    let hv_val = opt.equiv_iidx(*hv_val);
+                                    let hv_bytew =
+                                        isize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
+                                            .unwrap();
+                                    ptr == hv_ptr
+                                        && (off + bytew <= hv_off || hv_off + hv_bytew <= off)
+                                }
+                                Address::Const(_) => false,
+                            });
                     }
                     Address::Const(addr) => {
-                        self.hv.retain(|hv_addr, hv_val| match hv_addr {
-                            Address::PtrOff(_, _) => false,
-                            Address::Const(hv_addr) => {
-                                let bytew =
-                                    usize::try_from(opt.inst_bitw(opt, val).div_ceil(8)).unwrap();
-                                let hv_val = opt.equiv_iidx(*hv_val);
-                                let hv_bytew =
-                                    usize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
-                                        .unwrap();
-                                addr + bytew <= *hv_addr || hv_addr + hv_bytew <= addr
-                            }
-                        });
+                        self.hv
+                            .retain(|hv_addr, LSVal { val: hv_val }| match hv_addr {
+                                Address::PtrOff(_, _) => false,
+                                Address::Const(hv_addr) => {
+                                    let bytew =
+                                        usize::try_from(opt.inst_bitw(opt, val).div_ceil(8))
+                                            .unwrap();
+                                    let hv_val = opt.equiv_iidx(*hv_val);
+                                    let hv_bytew =
+                                        usize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
+                                            .unwrap();
+                                    addr + bytew <= *hv_addr || hv_addr + hv_bytew <= addr
+                                }
+                            });
                     }
                 }
-                self.hv.insert(addr, val);
+                self.hv.insert(addr, LSVal::new(val));
             }
             _ => {
                 if inst
@@ -204,7 +211,7 @@ impl PassT for LoadStore {
     fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
         // FIXME: This is a hack until `prepare_for_peel` can properly determine equivalences. At
         // that point, there's no need for this method to do anything.
-        for hv_val in self.hv.values_mut() {
+        for LSVal { val: hv_val } in self.hv.values_mut() {
             if *hv_val == equiv1 {
                 *hv_val = equiv2;
             }
@@ -219,7 +226,7 @@ impl PassT for LoadStore {
     ) {
         let mut new_hv = FxHashMap::default();
 
-        for (hv_addr, hv_val) in mem::take(&mut self.hv) {
+        for (hv_addr, LSVal { val: hv_val }) in mem::take(&mut self.hv) {
             let new_addr = match hv_addr {
                 Address::PtrOff(iidx, off) => {
                     if map[iidx] == InstIdx::MAX {
@@ -230,9 +237,12 @@ impl PassT for LoadStore {
                 Address::Const(_) => hv_addr,
             };
             if map[hv_val] != InstIdx::MAX {
-                new_hv.insert(new_addr, opt.equiv_iidx(map[hv_val]));
+                new_hv.insert(new_addr, LSVal::new(opt.equiv_iidx(map[hv_val])));
             } else if let Inst::Const(x) = entry.inst(hv_val) {
-                new_hv.insert(new_addr, opt.push_pre_inst(Inst::Const(x.to_owned())));
+                new_hv.insert(
+                    new_addr,
+                    LSVal::new(opt.push_pre_inst(Inst::Const(x.to_owned()))),
+                );
             }
         }
         self.hv = new_hv;
@@ -288,6 +298,18 @@ impl Address {
         } else {
             Address::PtrOff(ptr, cum_off)
         }
+    }
+}
+
+/// What we know about the value stored at a given address.
+struct LSVal {
+    // The value stored at this address.
+    val: InstIdx,
+}
+
+impl LSVal {
+    fn new(val: InstIdx) -> Self {
+        Self { val }
     }
 }
 
