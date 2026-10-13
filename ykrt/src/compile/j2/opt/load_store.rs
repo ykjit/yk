@@ -120,11 +120,7 @@ impl PassT for LoadStore {
                 if let Some(iidx) = self.hv.get(&addr) {
                     let iidx = opt.equiv_iidx(*iidx);
                     if val == iidx {
-                        // We currently only allow the same number of bits to lead to load
-                        // elimination. We could relax this to allow <= the number of known bits.
-                        if opt.inst_bitw(opt, val) == opt.inst_bitw(opt, iidx) {
-                            return OptOutcome::NotNeeded;
-                        }
+                        return OptOutcome::NotNeeded;
                     }
                 }
                 OptOutcome::Rewritten(inst)
