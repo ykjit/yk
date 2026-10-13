@@ -4073,7 +4073,37 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             in_fill = RegCnstrFill::Undefined;
         }
 
-        if let Some(imm) = imm {
+        if imm == Some(0)
+            && let IPred::Eq | IPred::Ne = pred
+            && !ra.is_in_reg(*lhs)
+            && let Inst::And(And { lhs, rhs, .. }) = b.inst(*lhs)
+            && let Some(mask) = self.zero_ext_op_for_imm32(b, bitw, *rhs)
+        {
+            // (x & mask) ==/!= 0
+            let [inr, outr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
+            )?;
+            self.asm.push_inst(IcedInst::with1(c, outr.to_reg8()));
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Test_rm32_imm32, inr.to_reg32(), mask),
+                64 => IcedInst::with2(Code::Test_rm64_imm32, inr.to_reg64(), mask),
+                x => todo!("{x}"),
+            });
+        } else if let Some(imm) = imm {
             let [lhsr, outr] = ra.alloc(
                 self,
                 iidx,
@@ -9008,6 +9038,29 @@ mod test {
               cmp r.32.x, r.32.y
               sete r.8._
               ...
+            "],
+        );
+
+        // (x & mask) ==/!= 0
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = 42
+              %2: i32 = and %0, %1
+              %3: i32 = 0
+              %4: i1 = icmp eq %2, %3
+              blackbox %4
+              term [%0]
+            ",
+            &["
+              ...
+              ; %2: i32 = and %0, %1
+              ; %3: i32 = 0
+              ; %4: i1 = icmp eq %2, %3
+              test r.32.x, 0x2A
+              sete r.8._
+              ; blackbox %4
+              ; term [%0]
             "],
         );
     }
