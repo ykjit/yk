@@ -35,7 +35,7 @@ use std::mem;
 /// Load/Store elimination
 pub(super) struct LoadStore {
     /// A map telling us what value we know is currently stored at a given [Address].
-    hv: FxHashMap<Address, InstIdx>,
+    hv: FxHashMap<Address, LSVal>,
 }
 
 impl LoadStore {
@@ -55,7 +55,7 @@ impl PassT for LoadStore {
                 is_volatile: false,
             }) => {
                 let addr = Address::from(opt, ptr);
-                if let Some(hv_iidx) = self.hv.get(&addr) {
+                if let Some(LSVal { val: hv_iidx, .. }) = self.hv.get(&addr) {
                     let inst_ty = opt.ty(tyidx);
                     let hv_iidx = opt.equiv_iidx(*hv_iidx);
                     let hv_tyidx = opt.inst(hv_iidx).tyidx(opt);
@@ -117,10 +117,31 @@ impl PassT for LoadStore {
             }) => {
                 let val = opt.equiv_iidx(val);
                 let addr = Address::from(opt, ptr);
-                if let Some(iidx) = self.hv.get(&addr) {
-                    let iidx = opt.equiv_iidx(*iidx);
-                    if val == iidx {
+                if let Some(LSVal {
+                    val: known_iidx,
+                    last_store,
+                }) = self.hv.get(&addr)
+                {
+                    // We already know something about this address.
+                    let known_iidx = opt.equiv_iidx(*known_iidx);
+                    if val == known_iidx {
+                        // We either loaded or stored this same value from this address and do not
+                        // need the new store.
                         return OptOutcome::NotNeeded;
+                    } else if let Some(last_store) = last_store {
+                        let bitw = opt.inst_bitw(opt, val);
+                        let Inst::Store(Store {
+                            val: last_val,
+                            is_volatile: false,
+                            ..
+                        }) = opt.inst(*last_store)
+                        else {
+                            panic!()
+                        };
+                        let last_bitw = opt.inst_bitw(opt, *last_val);
+                        if last_bitw <= bitw {
+                            opt.set_to_nop(*last_store);
+                        }
                     }
                 }
                 OptOutcome::Rewritten(inst)
@@ -137,16 +158,86 @@ impl PassT for LoadStore {
         let inst = opt.inst(iidx);
         match inst {
             Inst::Load(Load {
-                tyidx: _,
+                tyidx,
                 ptr,
                 is_volatile: _,
             }) => {
-                self.hv.insert(Address::from(opt, *ptr), iidx);
+                // We are ultra conservative here in removing `last_store`: we only say "these
+                // don't overlap" if two stores ultimately reference the same SSA variable with
+                // pointer adds. In other words, if we're writing 8 bytes and we're storing to `%3
+                // + 8` and `%3 + 24` we can be entirely sure the stores don't overlap: in any
+                // other situation, we assume overlap is possible.
+                let addr = Address::from(opt, *ptr);
+                match &addr {
+                    Address::PtrOff(ptr, off) => {
+                        let ptr = opt.equiv_iidx(*ptr);
+                        let off = isize::try_from(*off).unwrap();
+                        let bytew = isize::try_from(opt.ty(*tyidx).bitw().div_ceil(8)).unwrap();
+                        for (
+                            hv_addr,
+                            LSVal {
+                                val: hv_val,
+                                last_store,
+                            },
+                        ) in self.hv.iter_mut()
+                        {
+                            if last_store.is_some() {
+                                match hv_addr {
+                                    Address::PtrOff(hv_ptr, hv_off) => {
+                                        let hv_ptr = opt.equiv_iidx(*hv_ptr);
+                                        let hv_off = isize::try_from(*hv_off).unwrap();
+                                        let hv_val = opt.equiv_iidx(*hv_val);
+                                        let hv_bytew =
+                                            isize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
+                                                .unwrap();
+                                        if !(ptr == hv_ptr
+                                            && (off + bytew <= hv_off || hv_off + hv_bytew <= off))
+                                        {
+                                            *last_store = None;
+                                        }
+                                    }
+                                    Address::Const(_) => *last_store = None,
+                                }
+                            }
+                        }
+                    }
+                    Address::Const(addr) => {
+                        for (
+                            hv_addr,
+                            LSVal {
+                                val: hv_val,
+                                last_store,
+                            },
+                        ) in self.hv.iter_mut()
+                        {
+                            if last_store.is_some() {
+                                match hv_addr {
+                                    Address::PtrOff(_, _) => *last_store = None,
+                                    Address::Const(hv_addr) => {
+                                        let bytew =
+                                            usize::try_from(opt.ty(*tyidx).bitw().div_ceil(8))
+                                                .unwrap();
+                                        let hv_val = opt.equiv_iidx(*hv_val);
+                                        let hv_bytew =
+                                            usize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
+                                                .unwrap();
+                                        if !(addr + bytew <= *hv_addr
+                                            || hv_addr + hv_bytew <= *addr)
+                                        {
+                                            *last_store = None;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                self.hv.insert(addr, LSVal::new(iidx));
             }
             Inst::Store(Store {
                 ptr,
                 val,
-                is_volatile: _,
+                is_volatile,
             }) => {
                 let addr = Address::from(opt, *ptr);
                 let val = opt.equiv_iidx(*val);
@@ -160,35 +251,43 @@ impl PassT for LoadStore {
                         let ptr = opt.equiv_iidx(ptr);
                         let off = isize::try_from(off).unwrap();
                         let bytew = isize::try_from(opt.inst_bitw(opt, val).div_ceil(8)).unwrap();
-                        self.hv.retain(|hv_addr, hv_val| match hv_addr {
-                            Address::PtrOff(hv_ptr, hv_off) => {
-                                let hv_ptr = opt.equiv_iidx(*hv_ptr);
-                                let hv_off = isize::try_from(*hv_off).unwrap();
-                                let hv_val = opt.equiv_iidx(*hv_val);
-                                let hv_bytew =
-                                    isize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
-                                        .unwrap();
-                                ptr == hv_ptr && (off + bytew <= hv_off || hv_off + hv_bytew <= off)
-                            }
-                            Address::Const(_) => false,
-                        });
+                        self.hv
+                            .retain(|hv_addr, LSVal { val: hv_val, .. }| match hv_addr {
+                                Address::PtrOff(hv_ptr, hv_off) => {
+                                    let hv_ptr = opt.equiv_iidx(*hv_ptr);
+                                    let hv_off = isize::try_from(*hv_off).unwrap();
+                                    let hv_val = opt.equiv_iidx(*hv_val);
+                                    let hv_bytew =
+                                        isize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
+                                            .unwrap();
+                                    ptr == hv_ptr
+                                        && (off + bytew <= hv_off || hv_off + hv_bytew <= off)
+                                }
+                                Address::Const(_) => false,
+                            });
                     }
                     Address::Const(addr) => {
-                        self.hv.retain(|hv_addr, hv_val| match hv_addr {
-                            Address::PtrOff(_, _) => false,
-                            Address::Const(hv_addr) => {
-                                let bytew =
-                                    usize::try_from(opt.inst_bitw(opt, val).div_ceil(8)).unwrap();
-                                let hv_val = opt.equiv_iidx(*hv_val);
-                                let hv_bytew =
-                                    usize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
-                                        .unwrap();
-                                addr + bytew <= *hv_addr || hv_addr + hv_bytew <= addr
-                            }
-                        });
+                        self.hv
+                            .retain(|hv_addr, LSVal { val: hv_val, .. }| match hv_addr {
+                                Address::PtrOff(_, _) => false,
+                                Address::Const(hv_addr) => {
+                                    let bytew =
+                                        usize::try_from(opt.inst_bitw(opt, val).div_ceil(8))
+                                            .unwrap();
+                                    let hv_val = opt.equiv_iidx(*hv_val);
+                                    let hv_bytew =
+                                        usize::try_from(opt.inst_bitw(opt, hv_val).div_ceil(8))
+                                            .unwrap();
+                                    addr + bytew <= *hv_addr || hv_addr + hv_bytew <= addr
+                                }
+                            });
                     }
                 }
-                self.hv.insert(addr, val);
+                if *is_volatile {
+                    self.hv.insert(addr, LSVal::new(val));
+                } else {
+                    self.hv.insert(addr, LSVal::new_with_store(val, iidx));
+                }
             }
             _ => {
                 if inst
@@ -196,6 +295,15 @@ impl PassT for LoadStore {
                     .interferes(Effects::none().add_heap().add_volatile())
                 {
                     self.hv.clear();
+                } else if inst
+                    .read_effects()
+                    .interferes(Effects::none().add_guard().add_heap().add_volatile())
+                {
+                    // If an instruction can read from the heap, we can't remove any preceding
+                    // stores.
+                    for x in self.hv.values_mut() {
+                        x.last_store = None;
+                    }
                 }
             }
         }
@@ -204,7 +312,7 @@ impl PassT for LoadStore {
     fn equiv_committed(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
         // FIXME: This is a hack until `prepare_for_peel` can properly determine equivalences. At
         // that point, there's no need for this method to do anything.
-        for hv_val in self.hv.values_mut() {
+        for LSVal { val: hv_val, .. } in self.hv.values_mut() {
             if *hv_val == equiv1 {
                 *hv_val = equiv2;
             }
@@ -219,7 +327,7 @@ impl PassT for LoadStore {
     ) {
         let mut new_hv = FxHashMap::default();
 
-        for (hv_addr, hv_val) in mem::take(&mut self.hv) {
+        for (hv_addr, LSVal { val: hv_val, .. }) in mem::take(&mut self.hv) {
             let new_addr = match hv_addr {
                 Address::PtrOff(iidx, off) => {
                     if map[iidx] == InstIdx::MAX {
@@ -230,9 +338,12 @@ impl PassT for LoadStore {
                 Address::Const(_) => hv_addr,
             };
             if map[hv_val] != InstIdx::MAX {
-                new_hv.insert(new_addr, opt.equiv_iidx(map[hv_val]));
+                new_hv.insert(new_addr, LSVal::new(opt.equiv_iidx(map[hv_val])));
             } else if let Inst::Const(x) = entry.inst(hv_val) {
-                new_hv.insert(new_addr, opt.push_pre_inst(Inst::Const(x.to_owned())));
+                new_hv.insert(
+                    new_addr,
+                    LSVal::new(opt.push_pre_inst(Inst::Const(x.to_owned()))),
+                );
             }
         }
         self.hv = new_hv;
@@ -287,6 +398,30 @@ impl Address {
             Address::Const(*addr + usize::try_from(cum_off).unwrap())
         } else {
             Address::PtrOff(ptr, cum_off)
+        }
+    }
+}
+
+/// What we know about the value stored at a given address.
+struct LSVal {
+    /// The value stored at this address.
+    val: InstIdx,
+    /// If a store wrote this value, this will be Some([InstIdx]) of that store instruction.
+    last_store: Option<InstIdx>,
+}
+
+impl LSVal {
+    fn new(val: InstIdx) -> Self {
+        Self {
+            val,
+            last_store: None,
+        }
+    }
+
+    fn new_with_store(val: InstIdx, store_iidx: InstIdx) -> Self {
+        Self {
+            val,
+            last_store: Some(store_iidx),
         }
     }
 }
@@ -643,6 +778,112 @@ mod test {
         ",
             );
         }
+    }
+
+    #[test]
+    fn store_overiding_store() {
+        // The simple case: remove an equal width earlier store
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = 0
+          store %1, %0
+          %3: i8 = 1
+          store %3, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = 0
+          %2: i1 = 0
+          %3: i8 = 1
+          store %3, %0
+        ",
+        );
+
+        // Remove a narrower earlier store
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = 0
+          store %1, %0
+          %3: i16 = 1
+          store %3, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = 0
+          %2: i1 = 0
+          %3: i16 = 1
+          store %3, %0
+        ",
+        );
+
+        // A wider earlier store can't be removed
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i16 = 0
+          store %1, %0
+          %3: i8 = 1
+          store %3, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i16 = 0
+          store %1, %0
+          %3: i8 = 1
+          store %3, %0
+        ",
+        );
+
+        // Possible/actual reads prevent us removing earlier stores
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i1 = arg [reg]
+          %2: i8 = 0
+          store %2, %0
+          %4: i1 = 1
+          guard true, %1, []
+          %6: i8 = 1
+          store %6, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i1 = arg
+          %2: i8 = 0
+          store %2, %0
+          %4: i1 = 1
+          %5: i1 = 1
+          guard true, %1, []
+          %7: i8 = 1
+          store %7, %0
+        ",
+        );
+
+        test_ls(
+            "
+          %0: ptr = arg [reg]
+          %1: i1 = arg [reg]
+          %2: i8 = 0
+          store %2, %0
+          %4: i1 = 1
+          guard true, %1, []
+          %6: i8 = 1
+          store %6, %0
+        ",
+            "
+          %0: ptr = arg
+          %1: i1 = arg
+          %2: i8 = 0
+          store %2, %0
+          %4: i1 = 1
+          %5: i1 = 1
+          guard true, %1, []
+          %7: i8 = 1
+          store %7, %0
+        ",
+        );
     }
 
     #[test]

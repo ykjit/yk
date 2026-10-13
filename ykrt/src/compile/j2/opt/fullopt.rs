@@ -127,6 +127,7 @@ use crate::compile::{
             strength_fold::StrengthFold,
         },
     },
+    jitc_yk::arbbitint::ArbBitInt,
 };
 use index_type::{IndexType, typed_vec, vec::TypedVec};
 use rustc_hash::FxHashMap;
@@ -802,6 +803,19 @@ impl PassOpt<'_> {
     /// transformed for equivalence.
     pub(super) fn push_equiv(&mut self, equiv1: InstIdx, equiv2: InstIdx) {
         self.inner.new_equivs.push((equiv1, equiv2));
+    }
+
+    /// Make the instruction at `iidx` a nop. This should be used with caution and not "nop out" an
+    /// instruction that other instructions rely upon: doing so leads to undefined behaviour.
+    pub(super) fn set_to_nop(&mut self, iidx: InstIdx) {
+        // We don't have a dedicated NOP instruction, so bung a constant in.
+        self.optinternal.insts[iidx] = InstEquiv {
+            inst: Inst::Const(Const {
+                tyidx: self.optinternal.tyidx_int1,
+                kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
+            }),
+            equiv: InstIdx::MAX,
+        };
     }
 }
 
