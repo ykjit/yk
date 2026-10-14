@@ -7,6 +7,7 @@ license = "Apache-2.0 OR MIT"
 
 [lints.cargo]
 non_kebab_case_bins = "allow"
+unused_dependencies = "allow"
 
 [dependencies]
 array-concat = "0.5.5"
