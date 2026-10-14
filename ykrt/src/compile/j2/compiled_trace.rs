@@ -173,15 +173,19 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
     #[cfg(target_arch = "x86_64")]
     fn patch_guard(&self, gid: GuardId, tgt: *const std::ffi::c_void) {
         let gidx = CompiledGuardIdx::from_raw_index(usize::from(gid));
-        for patch_off in &self.guards[gidx].patch_offs {
-            let patch_off = usize::try_from(*patch_off).unwrap();
-            self.codebuf.patch(patch_off, 8, |patch_addr| {
+        let low = usize::try_from(*self.guards[gidx].patch_offs.iter().min().unwrap()).unwrap();
+        let high =
+            usize::try_from(*self.guards[gidx].patch_offs.iter().max().unwrap() + 8).unwrap();
+        self.codebuf.patch(low, high - low, move |low_ptr| {
+            for patch_off in &self.guards[gidx].patch_offs {
+                let patch_off = usize::try_from(*patch_off).unwrap();
+                let patch_addr = unsafe { low_ptr.byte_add(patch_off - low) };
                 assert_eq!(patch_addr.addr() % 8, 0);
                 unsafe {
                     (patch_addr as *mut u64).write(u64::try_from(tgt.addr()).unwrap());
                 }
-            });
-        }
+            }
+        });
     }
 
     fn entry(&self) -> *const c_void {
