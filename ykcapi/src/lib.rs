@@ -211,3 +211,31 @@ pub unsafe extern "C" fn yk_thread_shadowstack_bounds(
 pub extern "C" fn yk_init() {
     ykrt::yk_init()
 }
+
+// The idempotent functions matching the declarations in `yk.h`. Putting them here means we don't
+// have to fiddle about with linking shenanigans.
+macro_rules! idem_load {
+    ($name:ident, $ty:ty, $record:ident) => {
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(p: *const c_void) -> $ty {
+            let value = unsafe { p.cast::<$ty>().read_unaligned() };
+            ykrt::promote::$record(value as _) as $ty
+        }
+    };
+}
+idem_load!(__yk_idempotent_load_uint8_t, u8, __yk_idempotent_promote_i8);
+idem_load!(
+    __yk_idempotent_load_uint16_t,
+    u16,
+    __yk_idempotent_promote_i16
+);
+idem_load!(
+    __yk_idempotent_load_uint32_t,
+    u32,
+    __yk_idempotent_promote_i32
+);
+idem_load!(
+    __yk_idempotent_load_uint64_t,
+    u64,
+    __yk_idempotent_promote_i64
+);
