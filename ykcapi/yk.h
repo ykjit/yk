@@ -113,6 +113,25 @@ long long __yk_promote_c_long_long(long long);
 uintptr_t __yk_promote_usize(uintptr_t);
 const void *__yk_promote_ptr(const void *);
 
+// Perform an idempotent load of the pointer `*P` returning a value of `P`.
+//
+// WARNING: idempotent is a _very_ strong guarantee and getting it wrong leads
+// to undefined behaviour.
+#define yk_idempotent_load(P) ({ \
+    __auto_type __yk_p = (P); \
+    __builtin_bit_cast(__typeof__(*__yk_p), _Generic( \
+        (char (*)[sizeof(*__yk_p)])0, \
+        char (*)[1]: __yk_idempotent_load_uint8_t, \
+        char (*)[2]: __yk_idempotent_load_uint16_t, \
+        char (*)[4]: __yk_idempotent_load_uint32_t, \
+        char (*)[8]: __yk_idempotent_load_uint64_t \
+    )(__yk_p)); \
+})
+__attribute__((yk_idempotent)) uint8_t __yk_idempotent_load_uint8_t(const void *);
+__attribute__((yk_idempotent)) uint16_t __yk_idempotent_load_uint16_t(const void *);
+__attribute__((yk_idempotent)) uint32_t __yk_idempotent_load_uint32_t(const void *);
+__attribute__((yk_idempotent)) uint64_t __yk_idempotent_load_uint64_t(const void *);
+
 /// Associate a UTF-8 compatible string to the next instruction to be traced.
 /// The string will be copied by this function, so callers can safely reuse the
 /// memory after this call has completed.
