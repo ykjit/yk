@@ -132,6 +132,20 @@ __attribute__((yk_idempotent)) uint16_t __yk_idempotent_load_uint16_t(const void
 __attribute__((yk_idempotent)) uint32_t __yk_idempotent_load_uint32_t(const void *);
 __attribute__((yk_idempotent)) uint64_t __yk_idempotent_load_uint64_t(const void *);
 
+// Promote a code ID. This has the same externally observable effects as a
+// normal call to `yk_promote` but also embeds knowledge that this code ID is
+// part of any trace being recorded. From yk's perspective a "code ID" is a
+// monotonically increasing integer uniquely identifying a chunk of code. Code
+// IDs cannot be reused.
+#define yk_promote_code_id(X) __yk_promote_code_id(X)
+uint64_t __yk_promote_code_id(uint64_t);
+
+// Inform yk that a code ID is not at the moment, and will never in the future,
+// be in use. yk can use this information to reoptimise traces, free machine
+// code, etc. Calling this only has any effect if `yk_promote_code_id` has
+// already seen the code ID passed here.
+void yk_retire_code_id(YkMT *, uint64_t);
+
 /// Associate a UTF-8 compatible string to the next instruction to be traced.
 /// The string will be copied by this function, so callers can safely reuse the
 /// memory after this call has completed.

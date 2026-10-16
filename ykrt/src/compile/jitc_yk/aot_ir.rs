@@ -1107,6 +1107,12 @@ pub(crate) enum Inst {
     },
     #[deku(id = "23")]
     Freeze { tyidx: TyIdx, op: Operand },
+    #[deku(id = "24")]
+    PromoteCodeId {
+        tyidx: TyIdx,
+        val: Operand,
+        statepoint: Statepoint,
+    },
     #[deku(id = "255")]
     Unimplemented {
         tyidx: TyIdx,
@@ -1186,7 +1192,9 @@ impl Inst {
             }
             Self::Nop => None,
             Self::FCmp { tyidx, .. } => Some(m.type_(*tyidx)),
-            Self::Promote { tyidx, .. } => Some(m.type_(*tyidx)),
+            Self::Promote { tyidx, .. } | Self::PromoteCodeId { tyidx, .. } => {
+                Some(m.type_(*tyidx))
+            }
             Self::FNeg { val } => Some(val.type_(m)),
             Self::DebugStr { .. } => None,
             Self::ExtractValue {
@@ -1483,10 +1491,18 @@ impl fmt::Display for DisplayableInst<'_> {
             }
             Inst::Promote {
                 val, statepoint, ..
+            }
+            | Inst::PromoteCodeId {
+                val, statepoint, ..
             } => {
                 write!(
                     f,
-                    "promote {} {}",
+                    "{} {} {}",
+                    if matches!(self.instruction, Inst::PromoteCodeId { .. }) {
+                        "promote_code_id"
+                    } else {
+                        "promote"
+                    },
                     val.display(self.m),
                     statepoint.display(self.m)
                 )

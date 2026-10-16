@@ -24,7 +24,7 @@ use std::{
     ptr,
     sync::Arc,
 };
-use ykrt::{HotThreshold, Location, MT, MTThread, StackMapIdx};
+use ykrt::{CodeId, HotThreshold, Location, MT, MTThread, StackMapIdx};
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
@@ -51,6 +51,14 @@ pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn yk_mt_shutdown(mt: *const MT) {
     unsafe { Arc::from_raw(mt) }.shutdown();
+}
+
+/// Notify yk that a guest-code generation is unreachable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn yk_retire_code_id(mt: *const MT, code_id: u64) {
+    let arc = unsafe { Arc::from_raw(mt) };
+    arc.retire_code_id(CodeId::from_u64(code_id));
+    forget(arc);
 }
 
 // The "dummy control point" that is replaced in an LLVM pass.

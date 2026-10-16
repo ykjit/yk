@@ -82,6 +82,18 @@ pub extern "C" fn __yk_promote_ptr(val: *const c_void) -> *const c_void {
     val
 }
 
+/// Promote a code ID.
+#[unsafe(no_mangle)]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+pub extern "C" fn __yk_promote_code_id(val: u64) -> u64 {
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            mtt.promote_i64(val as i64);
+        });
+    }
+    val
+}
+
 /// Records a 64-bit return value of an idempotent function during trace recording.
 #[unsafe(no_mangle)]
 pub extern "C" fn __yk_idempotent_promote_i64(val: i64) -> i64 {

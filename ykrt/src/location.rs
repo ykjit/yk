@@ -310,8 +310,8 @@ pub(crate) enum HotLocationKind {
     /// A trace for this HotLocation is being compiled in another trace. When compilation is
     /// complete, the compiling thread will update the state of this HotLocation.
     Compiling(TraceId),
-    /// Because of a failure in compiling / tracing, we have reentered the `Counting` state. This
-    /// can be seen as a way of implementing back-off in the face of errors.
+    /// We have reentered the `Counting` state (e.g. because compiling failed or a trace was
+    /// retired before compiling completed).
     Counting(HotThreshold),
     /// This HotLocation has encountered problems (e.g. traces which are too long) and shouldn't be
     /// traced again.

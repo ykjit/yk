@@ -265,7 +265,7 @@ impl Compiler for J2 {
 
         let mut promotions_iter = trace.promotions.iter();
         let mut debug_strs_iter = trace.debug_strs.iter().map(|x| x.as_str());
-        let hm = AotToHir::new(
+        let (hm, code_ids) = AotToHir::new(
             &mt,
             &self,
             &AOT_MOD,
@@ -286,7 +286,7 @@ impl Compiler for J2 {
         #[cfg(target_arch = "x86_64")]
         let be = x64::x64hir_to_asm::X64HirToAsm::new(&hm, buf, log);
 
-        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be, log).build(mt.clone())?;
+        let ct = hir_to_asm::HirToAsm::new(&hm, hl, be, log).build(mt.clone(), code_ids)?;
 
         // Register JITted code (if required).
         mt.trace_profiler().register_ctr(&ct).map_err(|e| {

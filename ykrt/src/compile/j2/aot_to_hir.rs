@@ -33,7 +33,7 @@ use crate::{
     },
     location::HotLocation,
     log::{IRPhase, log_ir, should_log_any_ir, should_log_ir, stats::TimingState},
-    mt::{MT, TraceId},
+    mt::{CodeId, MT, TraceId},
     trace::TraceAction,
 };
 use index_type::IndexType;
@@ -102,6 +102,8 @@ pub(super) struct AotToHir<'a, Reg: RegT> {
     call_extractvals: FxHashMap<hir::InstIdx, Vec<hir::InstIdx>>,
     /// The JIT IR this struct builds.
     phantom: PhantomData<Reg>,
+    /// The [CodeId]s encountered via `yk_promote_code_id`.
+    code_ids: Vec<CodeId>,
 }
 
 impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
@@ -155,10 +157,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             addr_name_map: should_log_any_ir().then_some(FxHashMap::default()),
             call_extractvals: FxHashMap::default(),
             phantom: PhantomData,
+            code_ids: Vec::new(),
         }
     }
 
-    pub(super) fn build(mut self) -> Result<hir::Mod<Reg>, CompilationError> {
+    pub(super) fn build(mut self) -> Result<(hir::Mod<Reg>, Vec<CodeId>), CompilationError> {
         if should_log_ir(IRPhase::AOT) && !AOT_HAS_BEEN_LOGGED.swap(true, Ordering::Relaxed) {
             log_ir(&format!(
                 "--- Begin aot ---\n{}\n--- End aot ---\n",
@@ -231,7 +234,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         // the guard.
                         let promote_inst = self.am.inst(promote_iid);
                         let ty = promote_inst.def_type(self.am).unwrap();
-                        let Inst::Promote { val, .. } = promote_inst else {
+                        let (Inst::Promote { val, .. } | Inst::PromoteCodeId { val, .. }) =
+                            promote_inst
+                        else {
                             unreachable!();
                         };
                         let frame = self.frames.last_mut().unwrap();
@@ -260,6 +265,17 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                             }
                             .into(),
                         )?;
+                        if let Inst::PromoteCodeId { .. } = promote_inst {
+                            let hir::Inst::Const(hir::Const {
+                                kind: hir::ConstKind::Int(c),
+                                ..
+                            }) = self.opt.inst(const_iidx)
+                            else {
+                                unreachable!()
+                            };
+                            let cid = CodeId::from_u64(c.to_zero_ext_u64().unwrap());
+                            self.code_ids.push(cid);
+                        }
                         self.push_guard(
                             GuardKind::Promote(promote_iid.clone(), *arg_off),
                             src_ctr.bid(src_gidx),
@@ -477,7 +493,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         #[cfg(test)]
         m.assert_well_formed();
 
-        Ok(m)
+        self.code_ids.sort_unstable();
+        self.code_ids.dedup();
+        Ok((m, self.code_ids))
     }
 
     fn peek_next_bbid(&mut self) -> Option<BBlockId> {
@@ -1018,7 +1036,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::Load { .. } => self.p_load(pc.clone(), inst)?,
                 Inst::LoadArg { .. } => self.p_loadarg(pc.clone(), inst)?,
                 Inst::Phi { .. } => unreachable!(),
-                Inst::Promote { .. } => self.p_promote(pc.clone(), bid, inst)?,
+                Inst::Promote { .. } | Inst::PromoteCodeId { .. } => {
+                    self.p_promote(pc.clone(), bid, inst)?
+                }
                 Inst::PtrAdd { .. } => self.p_ptradd(pc.clone(), inst)?,
                 Inst::Ret { .. } => {
                     if let Some(x) = self.p_return(pc.clone(), inst)? {
@@ -1543,7 +1563,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                             }
                         }
                     }
-                    Inst::Promote { tyidx, .. } => {
+                    Inst::Promote { tyidx, .. } | Inst::PromoteCodeId { tyidx, .. } => {
                         for _ in 0..self.am.type_(*tyidx).bytew() {
                             let _ = self.promotions_iter.next().unwrap();
                         }
@@ -2175,11 +2195,16 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         bid: BBlockId,
         inst: &'static Inst,
     ) -> Result<(), CompilationError> {
-        let Inst::Promote {
+        let (Inst::Promote {
             tyidx,
             val,
             statepoint,
-        } = inst
+        }
+        | Inst::PromoteCodeId {
+            tyidx,
+            val,
+            statepoint,
+        }) = inst
         else {
             panic!()
         };
@@ -2197,6 +2222,18 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             op.to_inst_id() == iid
                 || matches!(val, Operand::Local(input_iid) if op.to_inst_id() == *input_iid)
         });
+        let const_iidx = self.promotion_data_to_const(self.am.type_(*tyidx))?;
+        if let Inst::PromoteCodeId { .. } = inst {
+            let hir::Inst::Const(hir::Const {
+                kind: hir::ConstKind::Int(c),
+                ..
+            }) = self.opt.inst(const_iidx)
+            else {
+                unreachable!()
+            };
+            let cid = CodeId::from_u64(c.to_zero_ext_u64().unwrap());
+            self.code_ids.push(cid);
+        }
         let kind = match val_off {
             Some(val_off) => GuardKind::Promote(iid.clone(), frame_off + val_off),
             None => {
@@ -2205,7 +2242,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
         };
 
-        let const_iidx = self.promotion_data_to_const(self.am.type_(*tyidx))?;
         let icmp = self.opt.feed(
             hir::ICmp {
                 pred: hir::IPred::Eq,
