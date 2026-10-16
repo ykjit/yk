@@ -107,7 +107,7 @@ use crate::{
     },
     location::HotLocation,
     log::log_ir,
-    mt::{MT, TraceId},
+    mt::{CodeId, MT, TraceId},
     varlocs,
 };
 use index_type::{IndexType, vec::TypedVec};
@@ -142,7 +142,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         }
     }
 
-    pub(super) fn build(mut self, mt: Arc<MT>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+    pub(super) fn build(
+        mut self,
+        mt: Arc<MT>,
+        code_ids: Vec<CodeId>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         // `labels_off` are the offsets required by `gbodies`: note that some guard bodies have
         // multiple labels, so this is an M:N (where N>=M) relationship.
         let (buf, gbodies, labels_off, log, trace_start) = match &self.m.trace_start {
@@ -415,6 +419,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             buf,
             guards,
             trace_start,
+            code_ids,
         )))
     }
 

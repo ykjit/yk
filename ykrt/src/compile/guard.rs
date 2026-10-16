@@ -2,7 +2,7 @@
 
 use crate::{
     compile::CompiledTrace,
-    mt::{AtomicTraceCompilationErrorThreshold, HotThreshold, MT},
+    mt::{AtomicTraceCompilationErrorThreshold, HotThreshold, MT, TraceId},
 };
 use parking_lot::Mutex;
 use std::sync::{Arc, atomic::Ordering};
@@ -23,7 +23,7 @@ enum GuardState {
     Counting(HotThreshold),
     /// We are either creating a trace or waiting for that trace to compile.
     SideTracing,
-    Compiled,
+    Compiled(TraceId),
     /// This guard encountered errors sufficiently often when tracing or compiling that we don't
     /// want to try again.
     DontTrace,
@@ -51,8 +51,36 @@ impl Guard {
                     false
                 }
             }
-            GuardState::SideTracing | GuardState::Compiled | GuardState::DontTrace => false,
+            GuardState::SideTracing | GuardState::Compiled(_) | GuardState::DontTrace => false,
         }
+    }
+
+    /// Retire `tid` which (at least in the past) started from this guard. If it is still patched
+    /// in, call `patch_to_deopt` which must patch the running machine code to point to a deopt
+    /// call. This patching _must_ be done atomically since other threads may still be executing
+    /// the trace.
+    pub(crate) fn retire_cid<F>(&self, tid: TraceId, patch_to_deopt: F)
+    where
+        F: FnOnce(),
+    {
+        let mut lk = self.kind.lock();
+        if let GuardState::Compiled(ctid) = *lk
+            && ctid == tid
+        {
+            patch_to_deopt();
+            *lk = GuardState::Counting(0);
+            // Since we're effectively going to restart this guard from scratch, any errors it had in
+            // the past are irrelevant.
+            self.errors.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// A sidetrace was retired before compilation was complete: this shouldn't count as an error,
+    /// so go back to the counting state.
+    pub(crate) fn retired_early(&self) {
+        let mut lk = self.kind.lock();
+        assert_eq!(*lk, GuardState::SideTracing);
+        *lk = GuardState::Counting(0);
     }
 
     /// Inform this guard that a trace started from it failed (either in tracing or compiling).
@@ -85,7 +113,9 @@ impl Guard {
         let mut lk = self.kind.lock();
         let addr = ctr.entry();
         match &*lk {
-            GuardState::SideTracing => *lk = GuardState::Compiled,
+            GuardState::SideTracing => {
+                *lk = GuardState::Compiled(ctr.ctrid());
+            }
             _ => panic!(),
         }
         // It's important to patch the parent only after we've updated the `GuardState` to avoid a
@@ -101,7 +131,7 @@ impl Guard {
 /// The value contained in this ID has no specific semantics to the front-end: it is a token that
 /// compilers can interpret however they want provided they maintain the basic guarantee "this
 /// token uniquely identifies a guard within a given trace".
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GuardId(usize);
 
 impl From<usize> for GuardId {

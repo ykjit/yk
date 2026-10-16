@@ -160,4 +160,15 @@ impl ExeCodeBuf {
             todo!("{}", unsafe { *__errno_location() });
         }
     }
+
+    /// Read a deopt target at offset `off`.
+    ///
+    /// FIXME: This is a hack: see `compiled_trace.rs` for more.
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) fn read_deopt_ptr(&self, off: usize) -> usize {
+        usize::try_from(u64::from_le_bytes(
+            self.as_slice()[off..off + 8].try_into().unwrap(),
+        ))
+        .unwrap()
+    }
 }

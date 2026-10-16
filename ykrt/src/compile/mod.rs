@@ -28,7 +28,7 @@
 use crate::{
     compile::jitc_yk::aot_ir::Statepoint,
     location::HotLocation,
-    mt::{MT, TraceId},
+    mt::{CodeId, MT, TraceId},
     trace::AOTTraceIterator,
 };
 use libc::c_void;
@@ -149,6 +149,13 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// Return a slice containing the native executable code.
     fn code(&self) -> &[u8];
 
+    /// Guest-code generations referenced by this trace.
+    fn code_ids(&self) -> &[CodeId];
+
+    /// The trace `tid` starting at `gid` will be retired immediately after this call and the guard
+    /// should be set to deoptimise.
+    fn set_guard_to_deopt(&self, gid: GuardId, tid: TraceId);
+
     /// Return a unique name for the trace that can be used for (e.g.) a symbol name.
     fn name(&self) -> String;
 }
@@ -203,6 +210,14 @@ mod compiled_trace_testing {
         fn name(&self) -> String {
             panic!();
         }
+
+        fn code_ids(&self) -> &[CodeId] {
+            todo!()
+        }
+
+        fn set_guard_to_deopt(&self, _gid: GuardId, _tid: TraceId) {
+            panic!()
+        }
     }
 
     /// A [CompiledTrace] implementation suitable only for testing basic transitions. The `hl` method will return a
@@ -254,6 +269,14 @@ mod compiled_trace_testing {
 
         fn name(&self) -> String {
             panic!();
+        }
+
+        fn code_ids(&self) -> &[CodeId] {
+            todo!()
+        }
+
+        fn set_guard_to_deopt(&self, _gid: GuardId, _tid: TraceId) {
+            panic!()
         }
     }
 }

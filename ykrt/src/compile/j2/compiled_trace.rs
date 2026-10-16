@@ -10,7 +10,7 @@ use crate::{
         jitc_yk::aot_ir::{self, InstId, Statepoint},
     },
     location::HotLocation,
-    mt::{MT, TraceId},
+    mt::{CodeId, MT, TraceId},
 };
 use index_type::{IndexType, vec::TypedVec};
 use parking_lot::Mutex;
@@ -29,6 +29,7 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     codebuf: ExeCodeBuf,
     pub guards: TypedVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
     pub trace_start: J2TraceStart<Reg>,
+    code_ids: Vec<CodeId>,
     /// The name used for this trace as linker symbol.
     symbol_name: String,
 }
@@ -39,8 +40,9 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         m: &Mod<Reg>,
         hl: Weak<Mutex<HotLocation>>,
         codebuf: ExeCodeBuf,
-        guards: TypedVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
+        mut guards: TypedVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
         trace_start: J2TraceStart<Reg>,
+        code_ids: Vec<CodeId>,
     ) -> Self {
         // Extract source trace ID for guard traces.
         let src_ctr = match &m.trace_start {
@@ -57,7 +59,22 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         let symbol_name =
             Self::get_trace_name(m.trid, &trace_start, &m.trace_end, src_ctr, tgt_ctr);
 
+        // Preserve each original deopt target before any side-trace patches it.
+        //
+        // FIXME: Reading from the code buffer is horendous, but the way we structure
+        // `Guard`/`CompiledGuard` makes detangling the mess surprisingly difficult.
+        for guard in guards.iter_mut() {
+            guard.deopt_targets = guard
+                .patch_offs
+                .iter()
+                .map(|off| {
+                    let off = usize::try_from(*off).unwrap();
+                    codebuf.read_deopt_ptr(off)
+                })
+                .collect();
+        }
         Self {
+            code_ids,
             mt,
             trid: m.trid,
             hl,
@@ -200,6 +217,26 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
         self.codebuf.as_slice()
     }
 
+    fn set_guard_to_deopt(&self, gid: GuardId, tid: TraceId) {
+        let cgid = CompiledGuardIdx::from_raw_index(usize::from(gid));
+        let guard = self.guard(cgid);
+        guard.guard().retire_cid(tid, || {
+            for (off, target) in guard.patch_offs.iter().zip(&guard.deopt_targets) {
+                self.codebuf
+                    .patch(usize::try_from(*off).unwrap(), 8, |addr| {
+                        assert_eq!(addr.addr() % 8, 0);
+                        unsafe {
+                            (addr as *mut u64).write(u64::try_from(*target).unwrap());
+                        }
+                    });
+            }
+        });
+    }
+
+    fn code_ids(&self) -> &[CodeId] {
+        &self.code_ids
+    }
+
     fn name(&self) -> String {
         self.symbol_name.clone()
     }
@@ -256,8 +293,10 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     /// ```
     pub deopt_vars: Vec<DeoptVar<Reg>>,
     /// All of the instruction offsets in the associated machine code which will need to be patched
-    /// when a sidetrace is compiled.
+    /// when a sidetrace is compiled. Stored in order of guards in the trace.
     patch_offs: SmallVec<[u32; 2]>,
+    /// Pointers to the deopt stub. Stored in order of guards in the trace.
+    deopt_targets: SmallVec<[usize; 2]>,
     /// How much additional space will this guard have consumed relative to the main part of the
     /// trace it was part of?
     pub extra_stack_len: u32,
@@ -294,6 +333,7 @@ impl<Reg: RegT> J2CompiledGuard<Reg> {
             deopt_vars,
             guard: Guard::new(),
             patch_offs,
+            deopt_targets: SmallVec::new(),
             extra_stack_len,
         }
     }

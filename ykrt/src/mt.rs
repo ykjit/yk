@@ -3,7 +3,7 @@
 use std::{
     assert_matches,
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     debug_assert_matches, env,
     error::Error,
     ffi::c_void,
@@ -122,6 +122,8 @@ pub struct MT {
     /// sparse mapping due to (1) (one day!) we might garbage collect traces (2) some
     /// [TraceId]s that we hand out are "lost" because a trace failed to compile.
     pub(crate) compiled_traces: Mutex<HashMap<TraceId, Arc<dyn CompiledTrace>>>,
+    /// Serialises retirement with trace publication, including incoming-edge patching.
+    code_retirement: Mutex<CodeRetirement>,
     pub(crate) log: Log,
     pub(crate) stats: Stats,
     /// The trace profiler implementation to use.
@@ -137,10 +139,6 @@ impl std::fmt::Debug for MT {
 }
 
 impl MT {
-    pub(crate) fn trace_profiler(&self) -> &Arc<dyn PlatformTraceProfiler> {
-        &self.trace_profiler
-    }
-
     // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
     // are no guarantees as to whether they will share resources effectively or fairly.
     pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
@@ -180,6 +178,7 @@ impl MT {
             compiler: Mutex::new(default_compiler()?),
             compiled_trace_id: AtomicU64::new(0),
             compiled_traces: Mutex::new(HashMap::new()),
+            code_retirement: Mutex::new(CodeRetirement::default()),
             log: Log::new()?,
             stats: Stats::new(),
             trace_profiler: profiler_for_current_platform(),
@@ -339,19 +338,30 @@ impl MT {
             match compiler.compile(Arc::clone(&mt), &mut trace) {
                 Ok(ctr) => {
                     assert_eq!(ctr.ctrid(), ctrid);
-                    mt.compiled_traces
-                        .lock()
-                        .insert(ctr.ctrid(), Arc::clone(&ctr));
-                    match trace_start {
+                    let mut retirement = mt.code_retirement.lock();
+                    let ctrid = ctr.ctrid();
+                    match &trace_start {
                         TraceStart::ControlPoint { hl } => {
-                            let mut lk = hl.lock();
-                            assert_matches!(lk.kind, HotLocationKind::Compiling(_));
-                            lk.kind = HotLocationKind::Compiled(ctr);
-                            drop(lk);
+                            mt.compiled_traces.lock().insert(ctrid, Arc::clone(&ctr));
+                            let mut hl = hl.lock();
+                            assert_matches!(hl.kind, HotLocationKind::Compiling(id) if id == ctrid);
+                            hl.kind = HotLocationKind::Compiled(ctr);
+                            drop(hl);
                             mt.job_queue.notify_success(ctrid);
                         }
                         TraceStart::Guard { parent_ctr, gid } => {
-                            parent_ctr.guard(gid).set_ctr(ctr, &parent_ctr, gid);
+                            if ctr
+                                .code_ids()
+                                .iter()
+                                .any(|id| retirement.retired_code_ids.contains(id))
+                                || retirement.retired_trace_ids.contains(&parent_ctr.ctrid())
+                            {
+                                parent_ctr.guard(*gid).retired_early();
+                            } else {
+                                retirement.register_side_trace(&ctr, parent_ctr, *gid);
+                                mt.compiled_traces.lock().insert(ctrid, Arc::clone(&ctr));
+                                parent_ctr.guard(*gid).set_ctr(ctr, parent_ctr, *gid);
+                            }
                         }
                     }
                     mt.stats.trace_compiled_ok();
@@ -403,6 +413,16 @@ impl MT {
 
         self.job_queue
             .push(self, Job::new(Box::new(main), coupler_tid, failure));
+    }
+
+    /// Inform yk that `cid` has been retired. Only side traces are disconnected.
+    pub fn retire_code_id(self: &Arc<Self>, cid: CodeId) {
+        let mut lk = self.code_retirement.lock();
+        lk.retire_code_id(self, cid);
+    }
+
+    pub(crate) fn trace_profiler(&self) -> &Arc<dyn PlatformTraceProfiler> {
+        &self.trace_profiler
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -1072,7 +1092,12 @@ impl MT {
         parent_ctr: Arc<dyn CompiledTrace>,
         gid: GuardId,
     ) -> TransitionGuardFailure {
-        if parent_ctr.guard(gid).inc_failed(self) {
+        let start_side_tracing = {
+            let retirement = self.code_retirement.lock();
+            !retirement.retired_trace_ids.contains(&parent_ctr.ctrid())
+                && parent_ctr.guard(gid).inc_failed(self)
+        };
+        if start_side_tracing {
             if let Some(hl) = parent_ctr.hl().upgrade() {
                 // This thread should not be tracing anything.
                 debug_assert!(!MTThread::is_tracing());
@@ -1108,7 +1133,9 @@ impl MT {
             // JIT frame. We can compile such a location as a `Return` trace.
             let mut lk = hl.lock();
             match lk.kind {
-                HotLocationKind::Compiled(_) | HotLocationKind::Compiling(_) => {
+                HotLocationKind::Compiled(_)
+                | HotLocationKind::Compiling(_)
+                | HotLocationKind::Counting(_) => {
                     drop(lk);
                     let MTThreadState::Tracing { thread_tracer, .. } = st else {
                         panic!()
@@ -1116,7 +1143,6 @@ impl MT {
                     let _ = thread_tracer.stop();
                     MTThread::set_tracing(IsTracing::None);
                 }
-                HotLocationKind::Counting(_) => todo!(),
                 HotLocationKind::DontTrace => todo!(),
                 HotLocationKind::Tracing(_) => {
                     lk.kind = HotLocationKind::Compiling(trid);
@@ -1699,6 +1725,54 @@ pub(crate) enum TransitionGuardFailure {
     StartSideTracing(Arc<Mutex<HotLocation>>, TraceId),
 }
 
+/// The active-or-retired state of [CodeId]s and [TraceId]s.
+#[derive(Default)]
+struct CodeRetirement {
+    /// A map from a [CodeId] to all the traces that reference it.
+    cases: HashMap<CodeId, HashSet<TraceId>>,
+    /// A map from child -> parent, recording which guards in which parent traces will
+    /// need to be reset to deopt if the child is retired.
+    incoming: HashMap<TraceId, Vec<(TraceId, GuardId)>>,
+    /// Which [CodeId]s have been retired?
+    retired_code_ids: HashSet<CodeId>,
+    /// Side traces retired or rejected at publication.
+    retired_trace_ids: HashSet<TraceId>,
+}
+
+impl CodeRetirement {
+    fn retire_code_id(&mut self, mt: &Arc<MT>, cid: CodeId) {
+        if self.retired_code_ids.insert(cid)
+            && let Some(cases) = self.cases.get(&cid)
+        {
+            for &trid in cases {
+                if !self.retired_trace_ids.insert(trid) {
+                    continue;
+                }
+                for (parent_id, gid) in self.incoming.get(&trid).into_iter().flatten() {
+                    let parent = mt.compiled_trace(*parent_id);
+                    parent.set_guard_to_deopt(*gid, trid);
+                }
+            }
+        }
+    }
+
+    fn register_side_trace(
+        &mut self,
+        ctr: &Arc<dyn CompiledTrace>,
+        parent_ctr: &Arc<dyn CompiledTrace>,
+        gid: GuardId,
+    ) {
+        let ctrid = ctr.ctrid();
+        for owner in ctr.code_ids() {
+            self.cases.entry(*owner).or_default().insert(ctrid);
+        }
+        self.incoming
+            .entry(ctrid)
+            .or_default()
+            .push((parent_ctr.ctrid(), gid));
+    }
+}
+
 /// The unique identifier of a trace.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct TraceId(u64);
@@ -1742,6 +1816,15 @@ fn copy_callee_saved_regs(src_callee_saved_regs: &[u64; 5], dst_callee_saved_reg
             dst_callee_saved_regs.cast::<u64>(),
             5,
         );
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CodeId(u64);
+
+impl CodeId {
+    pub fn from_u64(cid: u64) -> Self {
+        Self(cid)
     }
 }
 
