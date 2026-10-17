@@ -2298,8 +2298,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         &mut self,
         trid: TraceId,
         gidx: CompiledGuardIdx,
-        _vlocs: &[VarLocs<Self::Reg>],
+        deopt_spills: &[(Self::Reg, RegFill, u32, u32)],
     ) -> Result<LabelIdx, CompilationError> {
+        // 1: The deopt part of the guard.
+
         // The call to `__yk_j2_deopt` uses `RAX`.
         self.asm
             .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
@@ -2324,10 +2326,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RDI,
             IcedReg::RBP,
         ));
+        for (reg, fill, stack_off, bitw) in deopt_spills.iter().rev() {
+            self.spill(*reg, *fill, *stack_off, *bitw)?;
+        }
 
-        // Guards end with a `JMP [rip+...]` where `...` is `patch_label`. Initially the pointer
-        // stored at this address will be `deopt_label`. If/when a side-trace is created, the
-        // pointer stored will be updated and point to the start of the side-trace.
+        // 2: The patachable JMP. Initially the pointer stored at this address will be
+        //    `deopt_label`. If/when a side-trace is created, the pointer stored will be updated
+        //    and point to the start of the side-trace.
         let deopt_label = self.asm.mk_label();
         self.asm.attach_label(deopt_label);
         let patch_label = self.asm.mk_label();
@@ -2340,6 +2345,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         );
         self.guard_targets.push((patch_label, deopt_label));
 
+        // 3. The parent caller will generate the guard body instructions.
         Ok(patch_label)
     }
 

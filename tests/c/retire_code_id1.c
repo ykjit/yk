@@ -30,8 +30,7 @@
 //     yk-tracing: start-side-tracing
 
 
-// The reconstructed promotion at side-trace entry must record its code ID.
-// Retiring that ID restores the root guard rather than entering the side trace.
+// Check that when a side-trace is retired, that guard subsequently deoptimises.
 
 #include <inttypes.h>
 #include <stdio.h>

@@ -787,7 +787,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             for (
                 iid,
                 DeoptVar {
-                    coupler_fromvlocs, ..
+                    sidetrace_fromvlocs,
+                    ..
                 },
             ) in
                 pc_statepoint.lives.iter().map(|x| x.to_inst_id()).zip(
@@ -795,17 +796,17 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 )
             {
                 let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
-                let iidx = if coupler_fromvlocs
+                let iidx = if sidetrace_fromvlocs
                     .iter()
                     .any(|vloc| matches!(vloc, VarLoc::Const(_)))
                 {
-                    assert_eq!(coupler_fromvlocs.len(), 1);
-                    self.vloc_arg_to_const(coupler_fromvlocs.iter().nth(0).unwrap())?
+                    assert_eq!(sidetrace_fromvlocs.len(), 1);
+                    self.vloc_arg_to_const(sidetrace_fromvlocs.iter().nth(0).unwrap())?
                 } else {
                     self.opt.feed_arg(hir::Arg { tyidx }.into())?
                 };
                 locals.insert(iid.clone(), iidx);
-                entry_vars.push(coupler_fromvlocs.clone());
+                entry_vars.push(sidetrace_fromvlocs.clone());
             }
             self.frames.push(Frame {
                 // aot_ir::Arg instructions come at the start of functions; by definition any frame
