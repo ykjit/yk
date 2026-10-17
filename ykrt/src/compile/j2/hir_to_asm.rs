@@ -579,15 +579,19 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     ) -> Result<TypedVec<CompiledGuardIdx, GuardBody<AB>>, CompilationError> {
         // For each guard we've encountered while assembling the main [Block]s, we now get the
         // backend to produce code for the associated guard body. We've already identified which
-        // instructions should end up in the guard body, so this isn't too difficult: we create a
-        // temporary [Block] with the appropriate instructions, work out the [VarLoc]s, and call
-        // [Self::p_block].
+        // instructions should end up in the guard body, so this mostly isn't too difficult: we
+        // create a temporary [Block] with the appropriate instructions, work out the [VarLoc]s,
+        // and call [Self::p_block]. The small complication is that we want to satisfy two
+        // different needs: deopt needs every value to be spilt; but once a sidetrace is created we
+        // want to pass as many things in registers to it as possible.
 
         // Since we're creating temporary [Block]s, we can reuse several allocations across each
         // iteration.
         let mut ginsts: TypedVec<InstIdx, Inst> = TypedVec::new();
         let mut gterms: Vec<InstIdx> = Vec::new();
         let mut deopt_vars = Vec::new();
+        let mut deopt_spills = Vec::new();
+        let mut deopt_vlocs: TypedVec<InstIdx, Option<VarLoc<AB::Reg>>> = TypedVec::new();
 
         // There is a little bit of awkwardness in testing mode, where there are no stackmaps:
         // instead [Mod::smaps] contains stackmaps specified by the test author.
@@ -657,9 +661,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             let mut stack_off = gexit.stack_off;
             let mut ra = RegAlloc::<AB>::new(self.m, &gblock, &gexit.exit_vlocs, stack_off);
             let mut deopt_frames = SmallVec::with_capacity(gextra.deopt_frames.len());
+            let sidetrace_fromvlocs = ra.set_guard_body_term_vlocs(&self.be);
             deopt_vars.clear();
+            deopt_spills.clear();
+            deopt_vlocs.clear();
+            deopt_vlocs.resize(gblock.insts.len(), None);
             assert_eq!(gextra.deopt_vars.len(), gblock.term_vars().len());
-            let mut deopt_term_iter = gextra.deopt_vars.iter().zip(gblock.term_vars().iter());
+            let mut deopt_term_iter = gblock.term_vars().iter().zip(&sidetrace_fromvlocs);
             for (frame_idx, frame) in gextra.deopt_frames.iter().enumerate() {
                 let frame_deopt_vars_off = deopt_vars.len();
                 // `max_bitw` is an optimisation that allows us to skip "is there a wider value?"
@@ -676,41 +684,32 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let smap_lives_iter = self.m.smaps[frame.smapidx].iter();
 
                 for smap_loc in smap_lives_iter {
-                    let (deopt_iidx, term_iidx) = deopt_term_iter.next().unwrap();
-                    // FIXME: This forces every variable represented in `gblock.term_vars` to be
-                    // spilt before the end. This makes deopt simple, but is unnecessary for
-                    // side-traces, where we could just pass things straight through in a register.
-                    let fromvlocs = if let Inst::Const(Const { kind, .. }) = gblock.inst(*term_iidx)
-                    {
-                        varlocs![VarLoc::Const(kind.clone())]
-                    } else {
-                        let fromvlocs = gexit
-                            .exit_vars
-                            .binary_search(deopt_iidx)
-                            .map(|x| &gexit.exit_vlocs[x])
-                            .ok();
-                        if let Some(fromvlocs) = fromvlocs
-                            && let Some(VarLoc::Stack(x)) =
-                                fromvlocs.iter().find(|x| matches!(x, VarLoc::Stack(_)))
-                        {
-                            varlocs![VarLoc::Stack(*x)]
-                        } else if let Some(fromvlocs) = fromvlocs
-                            && let Some(VarLoc::StackOff(x)) =
-                                fromvlocs.iter().find(|x| matches!(x, VarLoc::StackOff(_)))
-                        {
-                            varlocs![VarLoc::StackOff(*x)]
-                        } else {
-                            match ra.get_stack_off(*term_iidx) {
-                                Some(x) => varlocs![VarLoc::Stack(x)],
-                                None => {
-                                    let bitw = gblock.inst_bitw(self.m, *term_iidx);
-                                    stack_off = self.be.align_spill(stack_off, bitw);
-                                    ra.set_stack_off(*term_iidx, stack_off);
-                                    varlocs![VarLoc::Stack(stack_off)]
-                                }
+                    let (term_iidx, sidetrace_fromvlocs) = deopt_term_iter.next().unwrap();
+                    // sidetrace_fromvlocs is the full set of VarLocs but deopt_fromvlocs must be a
+                    // non-register. To keep things simple for deopt we select a single
+                    // non-register VarLoc: if no such VarLoc exists, we forcibly spill a register
+                    // and create a VarLoc::Stack.
+                    let deopt_fromvloc = deopt_vlocs[*term_iidx]
+                        .get_or_insert_with(|| {
+                            if let Some(vloc) = sidetrace_fromvlocs
+                                .iter()
+                                .find(|vloc| !matches!(vloc, VarLoc::Reg(_, _)))
+                            {
+                                vloc.clone()
+                            } else {
+                                // We need to forcibly spill (one of the) register(s) for deopt.
+                                let VarLoc::Reg(reg, fill) =
+                                    sidetrace_fromvlocs.iter().next().unwrap()
+                                else {
+                                    unreachable!()
+                                };
+                                let bitw = gblock.inst_bitw(self.m, *term_iidx);
+                                let off = ra.spill_space_for(&self.be, bitw);
+                                deopt_spills.push((*reg, *fill, off, bitw));
+                                VarLoc::Stack(off)
                             }
-                        }
-                    };
+                        })
+                        .to_owned();
                     #[cfg(not(test))]
                     let tovlocs = AB::smp_to_vloc(smap_loc, RegFill::Zeroed);
                     #[cfg(test)]
@@ -719,9 +718,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     max_bitw = max_bitw.max(bitw);
                     deopt_vars.push(DeoptVar {
                         bitw,
-                        coupler_fromvlocs: VarLocs::new(),
-                        deopt_fromvlocs: fromvlocs,
-                        tovlocs,
+                        sidetrace_fromvlocs: sidetrace_fromvlocs.clone(),
+                        deopt_fromvlocs: varlocs![deopt_fromvloc],
+                        deopt_tovlocs: tovlocs,
                     });
                 }
 
@@ -737,10 +736,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         // value, allowing us to skip the (somewhat expensive) check below.
                         continue;
                     }
-                    deopt_var.tovlocs.retain(|vloc| {
+                    deopt_var.deopt_tovlocs.retain(|vloc| {
                         !before.iter().chain(after.iter()).any(|other| {
                             other.bitw > deopt_var.bitw
-                                && other.tovlocs.iter().any(|other_vloc| {
+                                && other.deopt_tovlocs.iter().any(|other_vloc| {
                                     match (&*vloc, other_vloc) {
                                         (VarLoc::Stack(x), VarLoc::Stack(y)) => x == y,
                                         (VarLoc::Reg(x, _), VarLoc::Reg(y, _)) => x == y,
@@ -755,7 +754,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 // the latter from scratch); and `Const` / `Reg` `StackOff` / `Const`s are no-ops
                 // everywhere.
                 for deopt_var in frame_deopt_vars {
-                    if deopt_var.deopt_fromvlocs == deopt_var.tovlocs
+                    if deopt_var.deopt_fromvlocs == deopt_var.deopt_tovlocs
                         && (frame_idx == 0
                             || deopt_var.deopt_fromvlocs.iter().all(|vloc| {
                                 matches!(
@@ -767,7 +766,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         // We rely on deopt skipping over `tovlocs` when it's empty in order for
                         // no-ops to be a meaningful optimisation (though if a given backend's
                         // deopt doesn't do that, it doesn't affect correctness).
-                        deopt_var.tovlocs = VarLocs::new();
+                        deopt_var.deopt_tovlocs = VarLocs::new();
                     }
                 }
                 deopt_frames.push(DeoptFrame {
@@ -777,26 +776,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
             assert!(deopt_term_iter.next().is_none());
             assert!(!gblock.insts.is_empty());
-
-            // All values passed to deopt must be spillable (or just a const), but for values
-            // passed to another coupler trace they can be register only. `coupler_vlocs` is thus
-            // the same length as `from_vlocs` but doesn't force everything to be spilled.
-            let coupler_vlocs = gextra
-                .deopt_vars
-                .iter()
-                .zip(&mut deopt_vars)
-                .map(|(iidx, deopt_var)| {
-                    let vlocs = if let Inst::Const(Const { kind, .. }) = gexit.block.inst(*iidx) {
-                        varlocs![VarLoc::Const(kind.clone())]
-                    } else if let Ok(i) = gexit.exit_vars.binary_search(iidx) {
-                        gexit.exit_vlocs[i].clone()
-                    } else {
-                        deopt_var.deopt_fromvlocs.clone()
-                    };
-                    deopt_var.coupler_fromvlocs = vlocs.clone();
-                    vlocs
-                })
-                .collect::<Vec<_>>();
 
             let mut merged = false;
             let mut gidx = gbodies.len();
@@ -815,22 +794,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 }
             }
 
-            let vlocs = deopt_vars
-                .iter()
-                .map(|x| x.deopt_fromvlocs.clone())
-                .collect::<Vec<_>>();
-            let patch_label = self.be.guard_end(self.m.trid, gidx, &vlocs)?;
-            ra.set_term_vlocs(
-                &mut self.be,
-                &gblock,
-                false,
-                &gexit.exit_vlocs,
-                &coupler_vlocs,
-            )?;
-            ra.keep_alive_at_term(
-                InstIdx::from_raw_index(gblock.insts.len_usize() - 1),
-                gblock.term_vars(),
-            );
+            let patch_label = self.be.guard_end(self.m.trid, gidx, &deopt_spills)?;
             stack_off = self.p_block(&gblock, None, ra, &gexit.exit_vlocs)?;
             let extra_stack_len = stack_off - gexit.stack_off;
             if merged {
@@ -1374,7 +1338,7 @@ fn deopt_vars_compatible<Reg: RegT>(cnd: &[DeoptVar<Reg>], with: &[DeoptVar<Reg>
 
     cnd.iter().zip(with.iter()).all(|(x, y)| {
         x.bitw == y.bitw
-            && is_compatible(&x.coupler_fromvlocs, &y.coupler_fromvlocs)
+            && is_compatible(&x.sidetrace_fromvlocs, &y.sidetrace_fromvlocs)
             && is_compatible(&x.deopt_fromvlocs, &y.deopt_fromvlocs)
     })
 }
@@ -1567,12 +1531,25 @@ pub(super) trait HirToAsmBackend {
     // Functions for guards.
 
     /// Produce code for the end of a guard: return a label for the instruction to be patched when
-    /// a side-trace is produced.
+    /// a side-trace is produced. Guards are expected to be generated as follows (in forward order
+    /// to make reading this part easier!):
+    ///
+    /// ```text
+    /// guard_body_entry:
+    /// <guard body instructions>
+    /// patch_label:
+    /// jmp <to deopt_stub or to a sidetrace>
+    /// deopt_stub:
+    /// <spill everything in deopt_spills>
+    /// jmp deopt
+    /// ```
+    ///
+    /// `deopt_spills` are (register, fill, stack offset, bit width).
     fn guard_end(
         &mut self,
         trid: TraceId,
         gidx: CompiledGuardIdx,
-        vlocs: &[VarLocs<Self::Reg>],
+        deopt_spills: &[(Self::Reg, RegFill, u32, u32)],
     ) -> Result<Self::Label, CompilationError>;
 
     /// The current guard has been completed. `start_label` should be set to the beginning of the
@@ -2075,27 +2052,27 @@ mod test {
     fn deopt_vars_compatibility() {
         let x = vec![DeoptVar {
             bitw: 64,
-            coupler_fromvlocs: VarLocs::new(),
+            sidetrace_fromvlocs: VarLocs::new(),
             deopt_fromvlocs: varlocs![
                 VarLoc::Stack(8),
                 VarLoc::Reg(TestReg::R0, RegFill::Undefined)
             ],
-            tovlocs: VarLocs::new(),
+            deopt_tovlocs: VarLocs::new(),
         }];
         let y = vec![DeoptVar {
             bitw: 64,
-            coupler_fromvlocs: VarLocs::new(),
+            sidetrace_fromvlocs: VarLocs::new(),
             deopt_fromvlocs: varlocs![
                 VarLoc::Stack(8),
                 VarLoc::Reg(TestReg::R0, RegFill::Undefined)
             ],
-            tovlocs: VarLocs::new(),
+            deopt_tovlocs: VarLocs::new(),
         }];
         let z = vec![DeoptVar {
             bitw: 64,
-            coupler_fromvlocs: VarLocs::new(),
+            sidetrace_fromvlocs: VarLocs::new(),
             deopt_fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Zeroed)],
-            tovlocs: VarLocs::new(),
+            deopt_tovlocs: VarLocs::new(),
         }];
 
         assert!(deopt_vars_compatible(&x, &x));
@@ -2107,9 +2084,9 @@ mod test {
 
         let sgn = vec![DeoptVar {
             bitw: 64,
-            coupler_fromvlocs: VarLocs::new(),
+            sidetrace_fromvlocs: VarLocs::new(),
             deopt_fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Signed)],
-            tovlocs: VarLocs::new(),
+            deopt_tovlocs: VarLocs::new(),
         }];
         assert!(!deopt_vars_compatible(&z, &sgn));
         assert!(!deopt_vars_compatible(&sgn, &z));
@@ -2364,8 +2341,13 @@ mod test {
             &mut self,
             _trid: TraceId,
             _gidx: CompiledGuardIdx,
-            _args_vlocs: &[VarLocs<Self::Reg>],
+            deopt_spills: &[(Self::Reg, RegFill, u32, u32)],
         ) -> Result<Self::Label, CompilationError> {
+            for (reg, fill, stack_off, bitw) in deopt_spills {
+                self.log.push(format!(
+                    "deopt_spill: reg={reg:?}, in_fill={fill:?}, stack_off={stack_off}, bitw={bitw}"
+                ));
+            }
             Ok(TestLabelIdx::from_raw_index(0))
         }
 
@@ -2386,7 +2368,7 @@ mod test {
                             .map(|x| format!("{x:?}"))
                             .collect::<Vec<_>>()
                             .join(", "),
-                        x.tovlocs
+                        x.deopt_tovlocs
                             .iter()
                             .map(|x| format!("{x:?}"))
                             .collect::<Vec<_>>()
@@ -2681,8 +2663,8 @@ mod test {
           ...
           ; %0: i1 = arg [Reg("R0", Undefined)]
           guard_coupler_start: stack_off=0
+          deopt_spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
           ; term [%1]
-          spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
           ptradd: R0=R0 + 8
           ; %1: ptr = ptradd %0, 8
           copy_reg: src_reg=R1, src_fill=Undefined, dst_reg=R0, dst_fill=Undefined, dst_bitw=64
@@ -2709,14 +2691,13 @@ mod test {
           ; term [%0, %1]
           i_guard: [%1]
           ...
+          deopt_spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
+          deopt_spill: reg=R1, in_fill=Undefined, stack_off=16, bitw=64
           ; term [%1, %2]
-          spill: reg=R0, in_fill=Undefined, stack_off=16, bitw=64
-          ptradd: R0=R0 + 16
+          ptradd: R1=R1 + 16
           ; %2: ptr = ptradd %0, 16
-          spill: reg=R1, in_fill=Undefined, stack_off=8, bitw=64
-          ptradd: R1=R0 + 8
+          ptradd: R0=R1 + 8
           ; %1: ptr = ptradd %0, 8
-          copy_reg: src_reg=R1, src_fill=Undefined, dst_reg=R0, dst_fill=Undefined, dst_bitw=64
           ; %0: ptr = arg [Reg("R1", Undefined)]
           guard_completed:
             fromvlocs=[Stack(8)]
@@ -2743,8 +2724,8 @@ mod test {
           ; term [%0, %1, %2]
           i_guard: [%1, %2]
           ...
+          deopt_spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
           ; term [%3]
-          spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
           dynptradd: R0=R0 + (R1*8)
           ; %3: ptr = dynptradd %2, %1, 8
           ptradd: R0=R0 + 8
@@ -2856,8 +2837,8 @@ mod test {
           ; %1: ptr = ptradd %0, 8
           ; %0: ptr = arg [Reg("R0", Undefined)]
           guard_coupler_start: stack_off=0
+          deopt_spill: reg=R2, in_fill=Undefined, stack_off=8, bitw=64
           ; term [%0]
-          spill: reg=R2, in_fill=Undefined, stack_off=8, bitw=64
           ; %0: ptr = arg [Reg("R2", Undefined)]
           guard_completed:
             fromvlocs=[Stack(8)]
@@ -2908,8 +2889,8 @@ mod test {
           ...
           ; %0: i1 = arg [Reg("R0", Undefined)]
           guard_coupler_start: stack_off=0
+          deopt_spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
           ; term [%1]
-          spill: reg=R0, in_fill=Undefined, stack_off=8, bitw=64
           ptradd: R0=R0 + 8
           ; %1: ptr = ptradd %0, 8
           copy_reg: src_reg=R1, src_fill=Undefined, dst_reg=R0, dst_fill=Undefined, dst_bitw=64
@@ -3016,8 +2997,8 @@ mod test {
           copy_reg: src_reg=R0, src_fill=Undefined, dst_reg=R1, dst_fill=Undefined, dst_bitw=8
           ; %0: i8 = arg [Reg("R0", Undefined)]
           controlpoint_loop_start 2 0
+          deopt_spill: reg=R1, in_fill=Undefined, stack_off=8, bitw=8
           ; term [%0]
-          spill: reg=R1, in_fill=Undefined, stack_off=8, bitw=8
           ; %0: i8 = arg [Reg("R1", Undefined)]
           guard_completed:
             fromvlocs=[Stack(8)]

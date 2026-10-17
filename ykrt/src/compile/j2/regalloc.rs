@@ -218,7 +218,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
     }
 
-    /// Set the [VarLocs] of a [super::hir::Term] instruction.
+    /// Set the [VarLocs] of a [super::hir::Term] instruction. Note: guard bodies should use
+    /// [Self::set_guard_body_term_vlocs].
     pub(super) fn set_term_vlocs(
         &mut self,
         be: &mut AB,
@@ -401,28 +402,49 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         Ok(())
     }
 
-    /// For guard bodies, return the stack offset, if there is one, for `iidx`.
-    pub(super) fn get_stack_off(&self, iidx: InstIdx) -> Option<u32> {
-        match self.istates[iidx] {
-            IState::Stack(x) => Some(x),
-            _ => None,
-        }
-    }
+    /// Set the [VarLocs] of a [super::hir::Term] instruction in a guard body.
+    pub(super) fn set_guard_body_term_vlocs(&mut self, be: &AB) -> Vec<VarLocs<AB::Reg>> {
+        // We have an easier job here than in set_term_vlocs, as we don't need to shuffle anything
+        // around at the trace's end.
 
-    /// For guard bodies, set the stack offset for `iidx` to `stack_off`: this also updates the
-    /// allocator's stack offset to `stack_off`.
-    pub(super) fn set_stack_off(&mut self, iidx: InstIdx, stack_off: u32) {
-        assert!(stack_off > self.stack_off);
-        assert_eq!(self.istates[iidx], IState::None);
-        self.istates[iidx] = IState::Stack(stack_off);
-        self.stack_off = stack_off;
-    }
-
-    /// For guard bodies, ensure that the instructions `iidxs` are marked as used at `term_iidx`.
-    pub(super) fn keep_alive_at_term(&mut self, _term_iidx: InstIdx, iidxs: &[InstIdx]) {
-        for iidx in iidxs {
+        for iidx in self.b.term_vars() {
             self.is_used.set(iidx.to_raw_index(), true);
+            if let Some(vlocs) = self.args_vlocs.get(iidx.to_raw_index()) {
+                for vloc in vlocs.iter() {
+                    if let VarLoc::Reg(reg, fill) = vloc {
+                        self.rstates.set_fill(*reg, *fill);
+                        if !self.rstates.iidxs(*reg).contains(iidx) {
+                            self.rstates.iidxs_mut(*reg).push(*iidx);
+                        }
+                    }
+                }
+            }
         }
+        for iidx in self.b.term_vars() {
+            if matches!(self.b.inst(*iidx), Inst::Const(_))
+                || self.istates[*iidx] != IState::None
+                || self.is_in_reg(*iidx)
+            {
+                continue;
+            }
+            let reg = be
+                .iter_possible_regs(self.b, *iidx)
+                .find(|reg| self.rstates.iidxs(*reg).is_empty());
+            if let Some(reg) = reg {
+                self.rstates
+                    .set_fill_iidxs(reg, RegFill::Undefined, smallvec![*iidx]);
+            } else {
+                self.stack_off = be.align_spill(self.stack_off, self.b.inst_bitw(self.m, *iidx));
+                self.istates[*iidx] = IState::Stack(self.stack_off);
+            }
+        }
+        self.vlocs_from_iidxs(self.b.term_vars())
+    }
+
+    /// Extend the stack so that there is space for an aligned `bitw` value.
+    pub(super) fn spill_space_for(&mut self, be: &AB, bitw: u32) -> u32 {
+        self.stack_off = be.align_spill(self.stack_off, bitw);
+        self.stack_off
     }
 
     /// Topologically sort `ractions.distinct_copies`, breaking cycles as necessary, such that no
@@ -2388,7 +2410,7 @@ pub(crate) mod test {
             &mut self,
             _trid: crate::mt::TraceId,
             _gridx: CompiledGuardIdx,
-            _args_vlocs: &[VarLocs<Self::Reg>],
+            _deopt_spills: &[(Self::Reg, RegFill, u32, u32)],
         ) -> Result<Self::Label, CompilationError> {
             Ok(TestLabelIdx::from_raw_index(0))
         }

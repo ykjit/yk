@@ -392,9 +392,9 @@ fn reconstruct(
     for DeoptVar {
         bitw,
         deopt_fromvlocs,
-        tovlocs,
+        deopt_tovlocs: tovlocs,
         ..
-    } in varlocs.iter().filter(|x| !x.tovlocs.is_empty())
+    } in varlocs.iter().filter(|x| !x.deopt_tovlocs.is_empty())
     {
         let fromvlocs = deopt_fromvlocs;
         // FIXME: For now, we only deal with 1 fromvloc.
