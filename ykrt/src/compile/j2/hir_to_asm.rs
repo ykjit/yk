@@ -114,7 +114,7 @@ use index_type::{IndexType, vec::TypedVec};
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
-use std::{ffi::c_void, sync::Arc};
+use std::{ffi::c_void, mem, sync::Arc};
 use test_stubs::test_stubs;
 use vob::Vob;
 
@@ -583,10 +583,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // temporary [Block] with the appropriate instructions, work out the [VarLoc]s, and call
         // [Self::p_block].
 
-        // Since we're creating temporary [Block]s, we can reuse the allocation for its
-        // instructions and term_vars, so we hoist these out of the loop.
+        // Since we're creating temporary [Block]s, we can reuse several allocations across each
+        // iteration.
         let mut ginsts: TypedVec<InstIdx, Inst> = TypedVec::new();
         let mut gterms: Vec<InstIdx> = Vec::new();
+        let mut deopt_vars = Vec::new();
 
         // There is a little bit of awkwardness in testing mode, where there are no stackmaps:
         // instead [Mod::smaps] contains stackmaps specified by the test author.
@@ -600,7 +601,6 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // rather than a linear scan through all guards.
         let mut gbodies_map: FxHashMap<aot_ir::BBlockId, SmallVec<[CompiledGuardIdx; 5]>> =
             FxHashMap::default();
-        let mut deopt_vars = Vec::new();
         for gexit in gexits.into_iter() {
             let gextra = gexit.block.gextra(gexit.geidx);
 
@@ -861,7 +861,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     patch_labels: smallvec![patch_label],
                     bid: gextra.bid,
                     deopt_frames,
-                    deopt_vars: deopt_vars.clone(),
+                    deopt_vars: mem::take(&mut deopt_vars),
                     extra_stack_len,
                 });
                 gbodies_map.entry(gextra.bid).or_default().push(gidx);
