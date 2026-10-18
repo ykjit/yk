@@ -1410,6 +1410,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // immediately terminates but, as it iterates over registers, it also keeps track of the
         // first least-worst option in two categories.
 
+        // Is there a value which is a const / StackOff?
+        let mut const_stackoff = None;
         // Is there a value which has already been spilt, so at least we won't cause it to be spilt
         // twice?
         let mut already_spilt = None;
@@ -1422,21 +1424,31 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 return *reg;
             }
 
-            if already_spilt.is_none() {
+            if const_stackoff.is_none() {
                 if iidxs.iter().all(|iidx| {
-                    matches!(self.istates[*iidx], IState::Stack(_) | IState::StackOff(_))
+                    matches!(self.b.inst(*iidx), Inst::Const(_))
+                        || matches!(self.istates[*iidx], IState::StackOff(_))
                 }) {
-                    already_spilt = Some(*reg);
-                } else if not_needed.is_none() && iidxs.iter().all(|x| *x < iidx) {
-                    not_needed = Some(*reg);
+                    const_stackoff = Some(*reg);
+                } else if already_spilt.is_none() {
+                    if iidxs.iter().all(|iidx| {
+                        matches!(self.istates[*iidx], IState::Stack(_) | IState::StackOff(_))
+                    }) {
+                        already_spilt = Some(*reg);
+                    } else if not_needed.is_none() && iidxs.iter().all(|x| *x < iidx) {
+                        not_needed = Some(*reg);
+                    }
                 }
             }
         }
 
+        // Go through our candidates list, trying the better options first.
+        if let Some(x) = const_stackoff {
+            return x;
+        }
         if let Some(x) = already_spilt {
             return x;
         }
-
         if let Some(x) = not_needed {
             return x;
         }
@@ -3255,6 +3267,62 @@ pub(crate) mod test {
           arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
         "],
         )
+    }
+
+    #[test]
+    fn force_in_preference_order() {
+        // Test find_force_empty_reg to make sure it finds things in the right order of preference
+        // (consts, already spilt, not-needed-in-this-instruction).
+
+        // Consts are most preferred...
+        build_and_test(
+            r#"
+          %0: ptr = arg [reg("GPR0", undefined)]
+          %1: i8 = arg [reg("GPR1", undefined)]
+          %2: i8 = arg [reg("GPR2", undefined)]
+          %3: i8 = 7
+          %4: i8 = load %0
+          blackbox %4
+          %6: i8 = add %3, %2
+          blackbox %6
+          term [%0, %1, %2]
+        "#,
+            |s| s.starts_with("spill") || s.starts_with("unspill"),
+            &[""],
+        );
+
+        // ...then already-spilt values...
+        build_and_test(
+            r#"
+            %0: ptr = arg [reg("GPR0", undefined)]
+            %1: i8 = arg [reg("GPR1", undefined)]
+            %2: i8 = arg [reg("GPR2", undefined), stack (8)]
+            %3: i8 = arg [reg("GPR3", undefined)]
+            %4: i8 = load %0
+            blackbox %4
+            term [%0, %1, %2, %3]
+          "#,
+            |s| s.starts_with("spill") || s.starts_with("unspill"),
+            &["unspill stack_off=8 GPR2 Undefined bitw=8"],
+        );
+
+        // ...and finally values that aren't needed in this instruction.
+        build_and_test(
+            r#"
+            %0: ptr = arg [reg("GPR0", undefined)]
+            %1: i8 = arg [reg("GPR1", undefined)]
+            %2: i8 = arg [reg("GPR2", undefined)]
+            %3: i8 = arg [reg("GPR3", undefined)]
+            %4: i8 = load %0
+            blackbox %4
+            term [%0, %1, %2, %3]
+          "#,
+            |s| s.starts_with("spill") || s.starts_with("unspill"),
+            &["
+            unspill stack_off=8 GPR1 Undefined bitw=8
+            spill GPR1 Undefined stack_off=8 bitw=8
+          "],
+        );
     }
 
     #[test]
