@@ -1404,33 +1404,53 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         allocs: &[Option<AB::Reg>],
         regs: &[AB::Reg],
     ) -> AB::Reg {
-        // We continually iterate over `regs` looking for gradually less desirable registers to
-        // use.
+        // We're hoping to find an empty register but, if none is available, we'll have to choose a
+        // register with something in it. In the latter case we want to choose the least-expensive
+        // thing to recreate. The loop below does this in one go: if we find an empty register it
+        // immediately terminates but, as it iterates over registers, it also keeps track of the
+        // first least-worst option in two categories.
 
-        // The best case: is there a register with no value in it?
-        if let Some(reg) = regs
-            .iter()
-            .find(|reg| !allocs.contains(&Some(**reg)) && self.rstates.iidxs(**reg).is_empty())
-        {
-            return *reg;
-        }
-
+        // Is there a value which is a const / StackOff?
+        let mut const_stackoff = None;
         // Is there a value which has already been spilt, so at least we won't cause it to be spilt
         // twice?
-        if let Some(reg) = regs.iter().find(|reg| {
-            !allocs.contains(&Some(**reg))
-                && self.rstates.iidxs(**reg).iter().all(|iidx| {
-                    matches!(self.istates[*iidx], IState::Stack(_) | IState::StackOff(_))
-                })
-        }) {
-            return *reg;
+        let mut already_spilt = None;
+        // Is there something which isn't needed in `iidx` so we can force it to be spilt?
+        let mut not_needed = None;
+        for reg in regs.iter().filter(|x| !allocs.contains(&Some(**x))) {
+            let iidxs = self.rstates.iidxs(*reg);
+            if iidxs.is_empty() {
+                // The best case: a register with no value in it! We can immediately finish.
+                return *reg;
+            }
+
+            if const_stackoff.is_none() {
+                if iidxs.iter().all(|iidx| {
+                    matches!(self.b.inst(*iidx), Inst::Const(_))
+                        || matches!(self.istates[*iidx], IState::StackOff(_))
+                }) {
+                    const_stackoff = Some(*reg);
+                } else if already_spilt.is_none() {
+                    if iidxs.iter().all(|iidx| {
+                        matches!(self.istates[*iidx], IState::Stack(_) | IState::StackOff(_))
+                    }) {
+                        already_spilt = Some(*reg);
+                    } else if not_needed.is_none() && iidxs.iter().all(|x| *x < iidx) {
+                        not_needed = Some(*reg);
+                    }
+                }
+            }
         }
 
-        // Is there something which isn't needed in `iidx` so we can force it to be spilt?
-        if let Some(reg) = regs.iter().find(|reg| {
-            !allocs.contains(&Some(**reg)) && self.rstates.iidxs(**reg).iter().all(|x| *x < iidx)
-        }) {
-            return *reg;
+        // Go through our candidates list, trying the better options first.
+        if let Some(x) = const_stackoff {
+            return x;
+        }
+        if let Some(x) = already_spilt {
+            return x;
+        }
+        if let Some(x) = not_needed {
+            return x;
         }
 
         panic!("Cannot satisfy register constraints {:?}", self.rstates);
@@ -3247,6 +3267,62 @@ pub(crate) mod test {
           arrange_fill GPR1 from=Undefined dst_bitw=8 to=Zeroed
         "],
         )
+    }
+
+    #[test]
+    fn force_in_preference_order() {
+        // Test find_force_empty_reg to make sure it finds things in the right order of preference
+        // (consts, already spilt, not-needed-in-this-instruction).
+
+        // Consts are most preferred...
+        build_and_test(
+            r#"
+          %0: ptr = arg [reg("GPR0", undefined)]
+          %1: i8 = arg [reg("GPR1", undefined)]
+          %2: i8 = arg [reg("GPR2", undefined)]
+          %3: i8 = 7
+          %4: i8 = load %0
+          blackbox %4
+          %6: i8 = add %3, %2
+          blackbox %6
+          term [%0, %1, %2]
+        "#,
+            |s| s.starts_with("spill") || s.starts_with("unspill"),
+            &[""],
+        );
+
+        // ...then already-spilt values...
+        build_and_test(
+            r#"
+            %0: ptr = arg [reg("GPR0", undefined)]
+            %1: i8 = arg [reg("GPR1", undefined)]
+            %2: i8 = arg [reg("GPR2", undefined), stack (8)]
+            %3: i8 = arg [reg("GPR3", undefined)]
+            %4: i8 = load %0
+            blackbox %4
+            term [%0, %1, %2, %3]
+          "#,
+            |s| s.starts_with("spill") || s.starts_with("unspill"),
+            &["unspill stack_off=8 GPR2 Undefined bitw=8"],
+        );
+
+        // ...and finally values that aren't needed in this instruction.
+        build_and_test(
+            r#"
+            %0: ptr = arg [reg("GPR0", undefined)]
+            %1: i8 = arg [reg("GPR1", undefined)]
+            %2: i8 = arg [reg("GPR2", undefined)]
+            %3: i8 = arg [reg("GPR3", undefined)]
+            %4: i8 = load %0
+            blackbox %4
+            term [%0, %1, %2, %3]
+          "#,
+            |s| s.starts_with("spill") || s.starts_with("unspill"),
+            &["
+            unspill stack_off=8 GPR1 Undefined bitw=8
+            spill GPR1 Undefined stack_off=8 bitw=8
+          "],
+        );
     }
 
     #[test]
