@@ -1404,33 +1404,41 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         allocs: &[Option<AB::Reg>],
         regs: &[AB::Reg],
     ) -> AB::Reg {
-        // We continually iterate over `regs` looking for gradually less desirable registers to
-        // use.
-
-        // The best case: is there a register with no value in it?
-        if let Some(reg) = regs
-            .iter()
-            .find(|reg| !allocs.contains(&Some(**reg)) && self.rstates.iidxs(**reg).is_empty())
-        {
-            return *reg;
-        }
+        // We're hoping to find an empty register but, if none is available, we'll have to choose a
+        // register with something in it. In the latter case we want to choose the least-expensive
+        // thing to recreate. The loop below does this in one go: if we find an empty register it
+        // immediately terminates but, as it iterates over registers, it also keeps track of the
+        // first least-worst option in two categories.
 
         // Is there a value which has already been spilt, so at least we won't cause it to be spilt
         // twice?
-        if let Some(reg) = regs.iter().find(|reg| {
-            !allocs.contains(&Some(**reg))
-                && self.rstates.iidxs(**reg).iter().all(|iidx| {
+        let mut already_spilt = None;
+        // Is there something which isn't needed in `iidx` so we can force it to be spilt?
+        let mut not_needed = None;
+        for reg in regs.iter().filter(|x| !allocs.contains(&Some(**x))) {
+            let iidxs = self.rstates.iidxs(*reg);
+            if iidxs.is_empty() {
+                // The best case: a register with no value in it! We can immediately finish.
+                return *reg;
+            }
+
+            if already_spilt.is_none() {
+                if iidxs.iter().all(|iidx| {
                     matches!(self.istates[*iidx], IState::Stack(_) | IState::StackOff(_))
-                })
-        }) {
-            return *reg;
+                }) {
+                    already_spilt = Some(*reg);
+                } else if not_needed.is_none() && iidxs.iter().all(|x| *x < iidx) {
+                    not_needed = Some(*reg);
+                }
+            }
         }
 
-        // Is there something which isn't needed in `iidx` so we can force it to be spilt?
-        if let Some(reg) = regs.iter().find(|reg| {
-            !allocs.contains(&Some(**reg)) && self.rstates.iidxs(**reg).iter().all(|x| *x < iidx)
-        }) {
-            return *reg;
+        if let Some(x) = already_spilt {
+            return x;
+        }
+
+        if let Some(x) = not_needed {
+            return x;
         }
 
         panic!("Cannot satisfy register constraints {:?}", self.rstates);
