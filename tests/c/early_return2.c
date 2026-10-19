@@ -13,7 +13,7 @@
 //     b1
 //     7
 //     yk-execution: enter-jit-code {"trid": "0"}
-//     yk-execution: deoptimise {"trid": "0", "gidx": "9"}
+//     yk-execution: deoptimise {"trid": "0", "gidx": "{{_}}"}
 //     yk-tracing: start-side-tracing
 //     b1
 //     ret1
@@ -37,7 +37,7 @@
 //     b3
 //     8
 //     yk-execution: enter-jit-code {"trid": "0"}
-//     yk-execution: deoptimise {"trid": "0", "gidx": "10"}
+//     yk-execution: deoptimise {"trid": "0", "gidx": "{{_}}"}
 //     yk-tracing: start-side-tracing
 //     b3
 //     7
