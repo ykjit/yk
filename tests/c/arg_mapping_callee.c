@@ -12,7 +12,7 @@
 //     2:5
 //     yk-execution: enter-jit-code {"trid": "0"}
 //     1:5
-//     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
+//     yk-execution: deoptimise {"trid": "0", "gidx": "{{_}}"}
 //     ...
 
 // Check that using an argument (of a non-main() function) in a trace works.

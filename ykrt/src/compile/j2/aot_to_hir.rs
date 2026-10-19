@@ -18,6 +18,7 @@
 #[cfg(test)]
 use crate::aotsmp::StackMapIdx;
 use crate::{
+    aotsmp::AOT_STACKMAPS,
     compile::{
         CompilationError, CompiledTrace, GuardId,
         j2::{
@@ -759,9 +760,21 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             prev_pc: None,
         });
 
-        for op in statepoint.lives.iter() {
+        let (rec, _) = AOT_STACKMAPS.as_ref().unwrap().get(statepoint.smapidx);
+        let mut entry_args = Vec::with_capacity(statepoint.lives.len());
+        for (i, op) in statepoint.lives.iter().enumerate() {
             let tyidx = self.p_ty(op.type_(self.am))?;
-            let iidx = self.opt.feed_arg(hir::Arg { tyidx }.into())?;
+            let mut iidx = self.opt.feed_arg(hir::Arg { tyidx }.into())?;
+            // See if we can find a preceding `Arg` which shares the new `Arg`s stackmap entries:
+            // if it does, we can alias the two `Arg`s. Note: we still need to push an `Arg` to
+            // ensure the number of input arguments is correct, but nothing will reference this new
+            // `Arg` in the trace.
+            if let Some((_, (_, x))) = entry_args.iter().enumerate().find(|(j, (prev_tyidx, _))| {
+                *prev_tyidx == tyidx && rec.live_vals[*j] == rec.live_vals[i]
+            }) {
+                iidx = *x;
+            }
+            entry_args.push((tyidx, iidx));
             self.frames
                 .last_mut()
                 .unwrap()

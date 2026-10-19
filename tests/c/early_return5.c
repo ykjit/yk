@@ -4,6 +4,8 @@
 //   stderr:
 //     ...
 //     yk-execution: return {"trid": "{{_}}"}
+//     ...
+//     yk-execution: return {"trid": "{{_}}"}
 //     4 4 4
 
 // Check that a compiled return side-trace preserves a constant return value
