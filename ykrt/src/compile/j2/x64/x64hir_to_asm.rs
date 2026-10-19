@@ -875,7 +875,9 @@ impl<'a> X64HirToAsm<'a> {
             });
             Ok(label)
         } else if let Some(imm) = imm {
-            let rmop = if let Some((load_iidx, off)) = self.try_load_to_mem_op(ra, b, iidx, *lhs) {
+            let rmop = if matches!(bitw, 8 | 16 | 32 | 64)
+                && let Some((load_iidx, off)) = self.try_load_to_mem_op(ra, b, iidx, *lhs)
+            {
                 let [lhsr, _] = ra.alloc(
                     self,
                     iidx,
@@ -889,7 +891,16 @@ impl<'a> X64HirToAsm<'a> {
                         RegCnstr::KeepAlive { iidxs: exit_vars },
                     ],
                 )?;
-                RegOrMemOp::MemOp(lhsr, off)
+                RegOrMemOp::MemOp(MemoryOperand::with_base_displ(lhsr.to_reg64(), off))
+            } else if matches!(bitw, 8 | 16 | 32 | 64)
+                && !ra.is_in_reg(*lhs)
+                && let Some(off) = ra.is_on_stack(*lhs)
+            {
+                ra.alloc(self, iidx, [RegCnstr::KeepAlive { iidxs: exit_vars }])?;
+                RegOrMemOp::MemOp(MemoryOperand::with_base_displ(
+                    IcedReg::RBP,
+                    -i64::from(off),
+                ))
             } else {
                 let [lhsr, _] = ra.alloc(
                     self,
@@ -939,7 +950,10 @@ impl<'a> X64HirToAsm<'a> {
                             RegCnstr::KeepAlive { iidxs: exit_vars },
                         ],
                     )?;
-                    (RegOrMemOp::MemOp(lhsr, off), rhsr)
+                    (
+                        RegOrMemOp::MemOp(MemoryOperand::with_base_displ(lhsr.to_reg64(), off)),
+                        rhsr,
+                    )
                 } else {
                     let [lhsr, rhsr, _] = ra.alloc(
                         self,
@@ -985,41 +999,25 @@ impl<'a> X64HirToAsm<'a> {
                     RegOrMemOp::Reg(reg) => {
                         IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
                     }
-                    RegOrMemOp::MemOp(reg, disp) => IcedInst::with2(
-                        Code::Cmp_rm8_imm8,
-                        MemoryOperand::with_base_displ(reg.to_reg64(), disp),
-                        rhs,
-                    ),
+                    RegOrMemOp::MemOp(memop) => IcedInst::with2(Code::Cmp_rm8_imm8, memop, rhs),
                 },
                 16 => match rmop {
                     RegOrMemOp::Reg(reg) => {
                         IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
                     }
-                    RegOrMemOp::MemOp(reg, disp) => IcedInst::with2(
-                        Code::Cmp_rm16_imm16,
-                        MemoryOperand::with_base_displ(reg.to_reg64(), disp),
-                        rhs,
-                    ),
+                    RegOrMemOp::MemOp(memop) => IcedInst::with2(Code::Cmp_rm16_imm16, memop, rhs),
                 },
                 32 => match rmop {
                     RegOrMemOp::Reg(reg) => {
                         IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
                     }
-                    RegOrMemOp::MemOp(reg, disp) => IcedInst::with2(
-                        Code::Cmp_rm32_imm32,
-                        MemoryOperand::with_base_displ(reg.to_reg64(), disp),
-                        rhs,
-                    ),
+                    RegOrMemOp::MemOp(memop) => IcedInst::with2(Code::Cmp_rm32_imm32, memop, rhs),
                 },
                 64 => match rmop {
                     RegOrMemOp::Reg(reg) => {
                         IcedInst::with2(Code::Cmp_rm64_imm32, reg.to_reg64(), rhs)
                     }
-                    RegOrMemOp::MemOp(reg, disp) => IcedInst::with2(
-                        Code::Cmp_rm64_imm32,
-                        MemoryOperand::with_base_displ(reg.to_reg64(), disp),
-                        rhs,
-                    ),
+                    RegOrMemOp::MemOp(memop) => IcedInst::with2(Code::Cmp_rm64_imm32, memop, rhs),
                 },
                 x => todo!("{x}"),
             });
@@ -1033,27 +1031,11 @@ impl<'a> X64HirToAsm<'a> {
                 64 => IcedInst::with2(Code::Cmp_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
                 x => todo!("{x}"),
             },
-            RegOrMemOp::MemOp(lhsr, disp) => match bitw {
-                8 => IcedInst::with2(
-                    Code::Cmp_rm8_r8,
-                    MemoryOperand::with_base_displ(lhsr.to_reg64(), disp),
-                    rhsr.to_reg8(),
-                ),
-                16 => IcedInst::with2(
-                    Code::Cmp_rm16_r16,
-                    MemoryOperand::with_base_displ(lhsr.to_reg64(), disp),
-                    rhsr.to_reg16(),
-                ),
-                32 => IcedInst::with2(
-                    Code::Cmp_rm32_r32,
-                    MemoryOperand::with_base_displ(lhsr.to_reg64(), disp),
-                    rhsr.to_reg32(),
-                ),
-                64 => IcedInst::with2(
-                    Code::Cmp_rm64_r64,
-                    MemoryOperand::with_base_displ(lhsr.to_reg64(), disp),
-                    rhsr.to_reg64(),
-                ),
+            RegOrMemOp::MemOp(memop) => match bitw {
+                8 => IcedInst::with2(Code::Cmp_rm8_r8, memop, rhsr.to_reg8()),
+                16 => IcedInst::with2(Code::Cmp_rm16_r16, memop, rhsr.to_reg16()),
+                32 => IcedInst::with2(Code::Cmp_rm32_r32, memop, rhsr.to_reg32()),
+                64 => IcedInst::with2(Code::Cmp_rm64_r64, memop, rhsr.to_reg64()),
                 x => todo!("{x}"),
             },
         });
@@ -5628,7 +5610,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
 enum RegOrMemOp {
     Reg(Reg),
-    MemOp(Reg, i64),
+    MemOp(MemoryOperand),
 }
 
 /// The arithmetic of a `{sadd, smul, uadd, usub, ssub}_overflow` instruction.
@@ -8647,6 +8629,26 @@ mod test {
               cmp r.32.x, r.32.y
               jne l{{1}}
               ; term [%0, %1]
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i32 = arg [stack(32)]
+              %1: i32 = 3
+              %2: i1 = icmp eq %0, %1
+              guard true, %2, []
+              term [%0]
+            ",
+            &["
+              ...
+              ; %0: i32 = arg [Stack(0x20)]
+              ; %1: i32 = 3
+              ; %2: i1 = icmp eq %0, %1
+              ; guard true, %2, []
+              cmp dword [rbp-0x20], 3
+              jne l{{1}}
+              ; term [%0]
             "],
         );
 

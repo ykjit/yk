@@ -687,6 +687,19 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             .filter_map(move |(reg, rstate)| rstate.iidxs.contains(&iidx).then_some(reg))
     }
 
+    /// Is the value for `iidx` stored on the stack? If so, return `Some(offset)`.
+    ///
+    /// Note: just because something is stored on the stack doesn't mean that it isn't also
+    /// available in a register! This function is quite literal in how it interprets "is `iidx`
+    /// stored on the stack?"
+    pub(super) fn is_on_stack(&self, iidx: InstIdx) -> Option<u32> {
+        if let IState::Stack(off) = self.istates[iidx] {
+            Some(off)
+        } else {
+            None
+        }
+    }
+
     /// Allocate registers for the instruction at position `iidx`. Note: this function may leave
     /// CPU flags in an undefined state.
     ///
