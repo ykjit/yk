@@ -177,6 +177,11 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             .enumerate()
             .map(|(x, y)| (InstIdx::from_raw_index(x), y))
         {
+            if !self.is_used(iidx) {
+                // If we haven't used this argument, we can avoid the expense of considering it for
+                // register shuffling.
+                continue;
+            }
             for vloc in vlocs.iter() {
                 if let VarLoc::Reg(reg, fill) = vloc {
                     if !in_rstate.iidxs(*reg).is_empty() {
