@@ -792,7 +792,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     ) -> Result<Vec<VarLocs<Reg>>, CompilationError> {
         assert!(self.frames.is_empty());
         let guard = src_ctr.guard(src_gidx);
-        let mut entry_vars = Vec::with_capacity(guard.deopt_vars.len());
+        let mut entry_vars: Vec<VarLocs<Reg>> = Vec::with_capacity(guard.deopt_vars.len());
+        let mut entry_types = Vec::with_capacity(guard.deopt_vars.len());
         let mut deopt_vars_off = 0;
         for DeoptFrame { pc, pc_statepoint } in &guard.deopt_frames {
             let mut locals =
@@ -809,6 +810,15 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 )
             {
                 let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
+                // See if we can find a preceding local which aliases the one we're looking at.
+                if let Some(x) = entry_vars
+                    .iter()
+                    .zip(&entry_types)
+                    .position(|(vlocs, ty)| *ty == tyidx && vlocs == sidetrace_fromvlocs)
+                {
+                    locals.insert(iid.clone(), hir::InstIdx::from_raw_index(x));
+                    continue;
+                }
                 let iidx = if sidetrace_fromvlocs
                     .iter()
                     .any(|vloc| matches!(vloc, VarLoc::Const(_)))
@@ -820,6 +830,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 locals.insert(iid.clone(), iidx);
                 entry_vars.push(sidetrace_fromvlocs.clone());
+                entry_types.push(tyidx);
             }
             self.frames.push(Frame {
                 // aot_ir::Arg instructions come at the start of functions; by definition any frame
