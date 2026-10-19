@@ -241,15 +241,13 @@ impl KnownBits {
                 return OptOutcome::Rewritten(inst.into());
             }
             return OptOutcome::NotNeeded;
-        } else if expect
-            && let cond_inst @ Inst::ICmp(ICmp {
-                pred: IPred::Eq, ..
-            }) = opt.inst(cond)
+        } else if let cond_inst @ Inst::ICmp(ICmp { pred, .. }) = opt.inst(cond)
+            && ((expect && *pred == IPred::Eq) || (!expect && *pred == IPred::Ne))
         {
             let mut cond_inst = cond_inst.to_owned();
             cond_inst.canonicalise(opt);
             let Inst::ICmp(ICmp {
-                pred: IPred::Eq,
+                pred: _,
                 lhs,
                 rhs,
                 samesign,
@@ -340,12 +338,12 @@ impl KnownBits {
                 }
                 self.knownbits_set(or_lhs, bits);
             }
-        } else if expect
-            && let Inst::ICmp(ICmp { pred, lhs, rhs, .. }) = opt.inst(cond).to_owned()
-            && matches!(pred, IPred::Sgt | IPred::Sge)
+        } else if let Inst::ICmp(ICmp { pred, lhs, rhs, .. }) = opt.inst(cond).to_owned()
             && let Some(ConstKind::Int(rhs)) = opt.as_constkind(rhs)
             && rhs.to_sign_ext_i64().is_some_and(|rhs| {
-                (pred == IPred::Sgt && rhs >= -1) || (pred == IPred::Sge && rhs >= 0)
+                (matches!((expect, pred), (true, IPred::Sgt) | (false, IPred::Sle)) && rhs >= -1)
+                    || (matches!((expect, pred), (true, IPred::Sge) | (false, IPred::Slt))
+                        && rhs >= 0)
             })
             && let Some(mut lhs_b) = self.as_knownbits(opt, lhs)
         {
@@ -1021,6 +1019,29 @@ mod test {
         ",
         );
 
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 1
+          %3: i8 = or %1, %2
+          %4: i1 = icmp ne %3, %0
+          guard false, %4, []
+          %6: i8 = or %0, %2
+          blackbox %6
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = 1
+          %3: i8 = or %1, %2
+          %4: i1 = icmp ne %3, %0
+          %5: i1 = 0
+          guard false, %4, []
+          blackbox %3
+        ",
+        );
+
         // Known bits guard sets `icmp`'s result.
         test_known_bits(
             "
@@ -1036,7 +1057,6 @@ mod test {
           %2: i1 = icmp eq %0, %1
           %3: i1 = 0
           guard false, %2, []
-          ...
         ",
         );
 
@@ -1476,6 +1496,29 @@ mod test {
           %4: i1 = icmp sge %0, %3
           %5: i1 = 1
           guard true, %4, [%1]
+          %7: i64 = zext %0
+          blackbox %7
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i32 = arg [reg]
+          %1: i64 = sext %0
+          blackbox %1
+          %3: i32 = 0
+          %4: i1 = icmp slt %0, %3
+          guard false, %4, [%1]
+          blackbox %1
+        ",
+            "
+          %0: i32 = arg
+          %1: i64 = sext %0
+          blackbox %1
+          %3: i32 = 0
+          %4: i1 = icmp slt %0, %3
+          %5: i1 = 0
+          guard false, %4, [%1]
           %7: i64 = zext %0
           blackbox %7
         ",
