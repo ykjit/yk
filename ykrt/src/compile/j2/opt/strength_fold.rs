@@ -89,9 +89,10 @@ fn opt_abs(opt: &mut PassOpt, mut inst: Abs) -> OptOutcome {
         val,
         int_min_poison,
     } = inst;
-    assert!(int_min_poison);
     if let Some(ConstKind::Int(val_c)) = opt.as_constkind(val)
-        && let Some(c) = val_c.checked_abs()
+        && let Some(c) = val_c
+            .checked_abs()
+            .or_else(|| (!int_min_poison).then_some(val_c))
     {
         return OptOutcome::Rewritten(Inst::Const(Const {
             tyidx,
@@ -1977,6 +1978,46 @@ mod test {
           blackbox %1
         ",
         );
+
+        // !int_min_poison
+        for bitw in [8, 16, 32, 64] {
+            let min: u64 = 1 << (bitw - 1);
+            for (x, expected) in [("-2", 2), ("0", 0), (&min.to_string(), min)] {
+                test_sf(
+                    &format!(
+                        "
+                      %0: i{bitw} = {x}
+                      %1: i{bitw} = abs %0
+                      blackbox %1
+                    "
+                    ),
+                    &format!(
+                        "
+                      ...
+                      %1: i{bitw} = {expected}
+                      blackbox %1
+                    "
+                    ),
+                );
+            }
+
+            test_sf(
+                &format!(
+                    "
+                  %0: i{bitw} = {min}
+                  %1: i{bitw} = abs %0, int_min_poison
+                  blackbox %1
+                "
+                ),
+                &format!(
+                    "
+                  %0: i{bitw} = {min}
+                  %1: i{bitw} = abs %0, int_min_poison
+                  blackbox %1
+                "
+                ),
+            );
+        }
     }
 
     #[test]
