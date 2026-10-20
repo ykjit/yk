@@ -2434,13 +2434,16 @@ pub(crate) mod test {
             Ok(TestLabelIdx::from_raw_index(1))
         }
 
-        fn controlpoint_peel_start(&mut self, peel_label: Self::Label) -> Self::Label {
+        fn controlpoint_peel_start(&mut self, peel_label: Self::Label) {
             self.ra_log
                 .push(format!("controlpoint_peel_start {peel_label:?}"));
-            TestLabelIdx::from_raw_index(2)
         }
 
-        fn controlpoint_loop_start(&mut self, _post_stack_label: Self::Label, _stack_off: u32) {}
+        fn controlpoint_start(&mut self, _stack_off: u32) {}
+
+        fn controlpoint_iter0_start(&mut self, label: Option<Self::Label>) -> Self::Label {
+            label.unwrap_or_else(|| TestLabelIdx::from_raw_index(3))
+        }
 
         fn guard_coupler_start(&mut self, _stack_off: u32) {}
 

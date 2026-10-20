@@ -247,20 +247,21 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
 pub(super) enum J2TraceStart<Reg: RegT> {
     ControlPoint {
         entry_statepoint: &'static Statepoint,
-        /// Every entry in `entry_statepoint.lives` will have an entry in `args_vlocs`, in order.
-        /// In other words, `entry_statepoint.lives.iter().zip(args_vlocs.iter())` is guaranteed to
-        /// work as expected.
+        /// The offset into the compiled trace that sidetraces should jump to.
+        sidetrace_off: usize,
+        /// The variable locations at `sidetrace_off`. Every entry in `entry_statepoint.lives` will
+        /// have an entry in `args_vlocs`, in order. In other words,
+        /// `entry_statepoint.lives.iter().zip(args_vlocs.iter())` is guaranteed to work as
+        /// expected.
         ///
         /// However, some variables will have empty `VarLocs`. In other words, while this coupler
         /// trace guarantees to accept variables being set in accordance with
-        /// `entry_statepoint.lives`, it is also happy with a non-strict subset of those. That means
-        /// that other traces jumping to this coupler trace only need to deal with the subset
+        /// `entry_statepoint.lives`, it is also happy with a non-strict subset of those. That
+        /// means that other traces jumping to this coupler trace only need to deal with the subset
         /// recorded in `args_vlocs` (i.e. they can ignore the superset in
         /// `entry_statepoint.lives`).
         args_vlocs: Vec<VarLocs<Reg>>,
         stack_off: u32,
-        /// The offset into the compiled trace that sidetraces should jump to.
-        sidetrace_off: usize,
     },
     Guard {
         stack_off: u32,

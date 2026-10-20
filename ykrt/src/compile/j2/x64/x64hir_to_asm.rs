@@ -2047,26 +2047,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
     }
 
-    fn controlpoint_coupler_or_return_start(
-        &mut self,
-        stack_off: u32,
-    ) -> Result<Self::Label, CompilationError> {
+    fn controlpoint_start(&mut self, stack_off: u32) {
         let stack_off = i32::try_from(stack_off).unwrap();
-        let label = self.asm.mk_label();
-        self.asm.attach_label(label);
-        self.asm.push_inst(IcedInst::with2(
-            Code::Sub_rm64_imm32,
-            IcedReg::RSP,
-            stack_off.next_multiple_of(16),
-        ));
-        self.asm.attach_label(self.entry_label);
-        self.asm.block_completed();
-        Ok(label)
-    }
-
-    fn controlpoint_loop_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
-        let stack_off = i32::try_from(stack_off).unwrap();
-        self.asm.attach_label(post_stack_label);
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,
             IcedReg::RSP,
@@ -2076,10 +2058,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm.block_completed();
     }
 
-    fn controlpoint_peel_start(&mut self, peel_label: Self::Label) -> Self::Label {
+    fn controlpoint_peel_start(&mut self, peel_label: Self::Label) {
         self.asm.align_buffer();
         self.asm.attach_label(peel_label);
-        self.asm.mk_label()
     }
 
     fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError> {
@@ -2232,6 +2213,12 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
 
         Ok(())
+    }
+
+    fn controlpoint_iter0_start(&mut self, label: Option<Self::Label>) -> Self::Label {
+        let label = label.unwrap_or_else(|| self.asm.mk_label());
+        self.asm.attach_label(label);
+        label
     }
 
     fn star_coupler_end(
