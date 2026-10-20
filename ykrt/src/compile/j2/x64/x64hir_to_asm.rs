@@ -2349,7 +2349,6 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             int_min_poison,
         }: &Abs,
     ) -> Result<(), CompilationError> {
-        assert!(int_min_poison);
         let bitw = b.inst_bitw(self.m, iidx);
         let [ior, tmpr] = ra.alloc(
             self,
@@ -2358,7 +2357,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 RegCnstr::InputOutput {
                     in_iidx: *src,
                     in_fill: RegCnstrFill::Signed,
-                    out_fill: RegCnstrFill::Signed,
+                    out_fill: if *int_min_poison {
+                        RegCnstrFill::Signed
+                    } else {
+                        RegCnstrFill::Zeroed
+                    },
                     regs: &NORMAL_GP_REGS,
                 },
                 RegCnstr::Temp {
@@ -6525,6 +6528,27 @@ mod test {
               mov r.64.x, r.64.y
               neg r.64.y
               cmovl r.64.y, r.64.x
+              ...
+            "],
+        );
+
+        // !int_min_poison
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = abs %0
+              %2: i64 = sext %1
+              blackbox %2
+              term [%1]
+            ",
+            &["
+              ...
+              ; %1: i32 = abs %0
+              mov r.64.x, r.64.y
+              neg r.64.y
+              cmovl r.64.y, r.64.x
+              mov r.64.z, r.64.y
+              movsxd r.64.z, r.32.z
               ...
             "],
         );
