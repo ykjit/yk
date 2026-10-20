@@ -26,6 +26,7 @@
 //! <guard body 1>
 //! call __yk_j2_deopt
 //! <stack adjustment>
+//! <control point args shuffle>
 //! iter0_label:
 //! <instrs>
 //! jmp tgt_ctr.iter0_label
@@ -34,7 +35,7 @@
 //!
 //! ## (ControlPoint, Loop) traces
 //!
-//! These traces take the form:
+//! These traces have two different forms. If there is a peeled iteration they have the form:
 //!
 //! ```text
 //! <guard body n>
@@ -42,6 +43,7 @@
 //! <guard body 1>
 //! call __yk_j2_deopt
 //! <stack adjustment>
+//! <control point args shuffle>
 //! iter0_label:
 //! <instrs for first iteration of the loop>
 //! peel_label:
@@ -50,8 +52,20 @@
 //! <data>
 //! ```
 //!
-//! If peeling has not occurred, there will be no difference between `iter0_label` and
-//! `iter1_label`.
+//! otherwise they take the form:
+//!
+//! ```text
+//! <guard body n>
+//! ...
+//! <guard body 1>
+//! call __yk_j2_deopt
+//! <stack adjustment>
+//! iter0_label:
+//! <control point args shuffle>
+//! <instrs for first iteration of the loop>
+//! jmp iter0_label
+//! <data>
+//! ```
 //!
 //!
 //! ## (ControlPoint, Return) traces
@@ -65,6 +79,7 @@
 //! <data>
 //! call __yk_j2_deopt
 //! <stack adjustment>
+//! <control point args shuffle>
 //! iter0_label:
 //! <instrs>
 //! return
@@ -190,14 +205,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     });
                 }
 
-                let (post_stack_label, entry_stack_off) = match &self.m.trace_end {
+                let (entry, ra, bentry) = match &self.m.trace_end {
                     TraceEnd::Call { entry } => {
                         let ra = RegAlloc::<AB>::new(self.m, entry, &args_vlocs, base_stack_off);
-                        let entry_stack_off = self.p_block(entry, Some(entry), ra, &args_vlocs)?;
-                        let post_stack_label = self.be.controlpoint_coupler_or_return_start(
-                            entry_stack_off - base_stack_off,
-                        )?;
-                        (post_stack_label, entry_stack_off)
+                        (entry, ra, BlockEntry::ControlPoint)
                     }
                     TraceEnd::Coupler { entry, tgt_ctr } => {
                         let mut ra =
@@ -210,11 +221,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             &args_vlocs,
                             tgt_ctr.args_vlocs(),
                         )?;
-                        let entry_stack_off = self.p_block(entry, Some(entry), ra, &args_vlocs)?;
-                        let post_stack_label = self.be.controlpoint_coupler_or_return_start(
-                            entry_stack_off - base_stack_off,
-                        )?;
-                        (post_stack_label, entry_stack_off)
+                        (entry, ra, BlockEntry::ControlPoint)
                     }
                     TraceEnd::Loop { entry, peel } => match peel {
                         Some(peel) => {
@@ -225,8 +232,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                 RegAlloc::<AB>::new(self.m, peel, &peel_vlocs, base_stack_off);
                             let peel_label = self.be.controlpoint_loop_end()?;
                             ra.set_term_vlocs(&mut self.be, peel, true, &peel_vlocs, &peel_vlocs)?;
-                            let peel_stack_off = self.p_block(peel, Some(peel), ra, &peel_vlocs)?;
-                            let iter0_label = self.be.controlpoint_peel_start(peel_label);
+                            let peel_stack_off = self
+                                .p_block(peel, Some(peel), ra, &peel_vlocs, BlockEntry::Other)?
+                                .stack_off;
+                            self.be.controlpoint_peel_start(peel_label);
 
                             if self.log {
                                 self.be.log("peel".to_owned());
@@ -235,26 +244,14 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             let mut ra =
                                 RegAlloc::<AB>::new(self.m, entry, &args_vlocs, peel_stack_off);
                             ra.set_term_vlocs(&mut self.be, entry, true, &args_vlocs, &peel_vlocs)?;
-                            let entry_stack_off =
-                                self.p_block(entry, Some(entry), ra, &args_vlocs)?;
-                            self.be.controlpoint_loop_start(
-                                iter0_label.clone(),
-                                entry_stack_off - base_stack_off,
-                            );
-                            (iter0_label, entry_stack_off)
+                            (entry, ra, BlockEntry::ControlPoint)
                         }
                         None => {
                             let mut ra =
                                 RegAlloc::<AB>::new(self.m, entry, &args_vlocs, base_stack_off);
                             let iter0_label = self.be.controlpoint_loop_end()?;
                             ra.set_term_vlocs(&mut self.be, entry, true, &args_vlocs, &args_vlocs)?;
-                            let entry_stack_off =
-                                self.p_block(entry, Some(entry), ra, &args_vlocs)?;
-                            self.be.controlpoint_loop_start(
-                                iter0_label.clone(),
-                                entry_stack_off - base_stack_off,
-                            );
-                            (iter0_label, entry_stack_off)
+                            (entry, ra, BlockEntry::UnpeeledLoop(iter0_label))
                         }
                     },
                     TraceEnd::Return {
@@ -276,15 +273,20 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             rtn_val,
                         )?;
                         ra.set_term_vlocs(&mut self.be, entry, false, &args_vlocs, &[])?;
-                        let entry_stack_off = self.p_block(entry, Some(entry), ra, &args_vlocs)?;
-                        let post_stack_label = self.be.controlpoint_coupler_or_return_start(
-                            entry_stack_off - base_stack_off,
-                        )?;
-                        (post_stack_label, entry_stack_off)
+                        (entry, ra, BlockEntry::ControlPoint)
                     }
                     #[cfg(test)]
                     TraceEnd::Test { .. } | TraceEnd::TestPeel { .. } => todo!(),
                 };
+
+                let GeneratedBlock {
+                    stack_off: entry_stack_off,
+                    inter_trace_entry: Some((iter0_label, iter0_vlocs)),
+                } = self.p_block(entry, Some(entry), ra, &args_vlocs, bentry)?
+                else {
+                    unreachable!()
+                };
+                self.be.controlpoint_start(entry_stack_off - base_stack_off);
 
                 if self.log {
                     self.be.log("entry".to_owned());
@@ -293,12 +295,12 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let all_labels = gbodies
                     .iter()
                     .flat_map(|GuardBody { patch_labels, .. }| patch_labels.iter().cloned())
-                    .chain([post_stack_label])
+                    .chain([iter0_label])
                     .collect::<Vec<_>>();
                 let (buf, log, mut labels_off) = self.be.build_exe(&all_labels)?;
                 let sidetrace_off = labels_off.pop().unwrap();
                 let trace_start = J2TraceStart::ControlPoint {
-                    args_vlocs,
+                    args_vlocs: iter0_vlocs,
                     entry_statepoint,
                     stack_off: entry_stack_off,
                     sidetrace_off,
@@ -314,7 +316,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 let entry_stack_off = match &self.m.trace_end {
                     TraceEnd::Call { entry } => {
                         let ra = RegAlloc::<AB>::new(self.m, entry, args_vlocs, src_stack_off);
-                        self.p_block(entry, Some(entry), ra, args_vlocs)?
+                        self.p_block(entry, Some(entry), ra, args_vlocs, BlockEntry::Other)?
+                            .stack_off
                     }
                     TraceEnd::Coupler { entry, tgt_ctr } => {
                         let mut ra = RegAlloc::<AB>::new(self.m, entry, args_vlocs, src_stack_off);
@@ -326,7 +329,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             args_vlocs,
                             tgt_ctr.args_vlocs(),
                         )?;
-                        self.p_block(entry, Some(entry), ra, args_vlocs)?
+                        self.p_block(entry, Some(entry), ra, args_vlocs, BlockEntry::Other)?
+                            .stack_off
                     }
                     TraceEnd::Loop { .. } => unreachable!(),
                     TraceEnd::Return {
@@ -347,7 +351,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             rtn_val,
                         )?;
                         ra.set_term_vlocs(&mut self.be, entry, false, args_vlocs, &[])?;
-                        self.p_block(entry, Some(entry), ra, args_vlocs)?
+                        self.p_block(entry, Some(entry), ra, args_vlocs, BlockEntry::Other)?
+                            .stack_off
                     }
                     #[cfg(test)]
                     TraceEnd::Test { .. } | TraceEnd::TestPeel { .. } => todo!(),
@@ -436,7 +441,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         if let Inst::Term(_) = block.insts.last().unwrap() {
             ra.set_term_vlocs(&mut self.be, block, true, args_vlocs, args_vlocs)?;
         }
-        let stack_off = self.p_block(block, Some(block), ra, args_vlocs)?;
+        let stack_off = self
+            .p_block(block, Some(block), ra, args_vlocs, BlockEntry::Other)?
+            .stack_off;
         self.be.guard_coupler_start(stack_off);
 
         self.asm_guards()?;
@@ -461,14 +468,17 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         let mut ra = RegAlloc::<AB>::new(self.m, peel, &peel_vlocs, 0);
         let peel_label = self.be.controlpoint_loop_end()?;
         ra.set_term_vlocs(&mut self.be, peel, true, &peel_vlocs, &peel_vlocs)?;
-        let peel_stack_off = self.p_block(peel, Some(peel), ra, &peel_vlocs)?;
-        let iter0_label = self.be.controlpoint_peel_start(peel_label);
+        let peel_stack_off = self
+            .p_block(peel, Some(peel), ra, &peel_vlocs, BlockEntry::Other)?
+            .stack_off;
+        self.be.controlpoint_peel_start(peel_label);
 
         let mut ra = RegAlloc::<AB>::new(self.m, entry, args_vlocs, peel_stack_off);
         ra.set_term_vlocs(&mut self.be, entry, true, args_vlocs, &peel_vlocs)?;
-        let entry_stack_off = self.p_block(entry, Some(entry), ra, args_vlocs)?;
-        self.be
-            .controlpoint_loop_start(iter0_label.clone(), entry_stack_off);
+        let entry_stack_off = self
+            .p_block(entry, Some(entry), ra, args_vlocs, BlockEntry::ControlPoint)?
+            .stack_off;
+        self.be.controlpoint_start(entry_stack_off);
 
         self.asm_guards()?;
 
@@ -795,7 +805,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
 
             let patch_label = self.be.guard_end(self.m.trid, gidx, &deopt_spills)?;
-            stack_off = self.p_block(&gblock, None, ra, &gexit.exit_vlocs)?;
+            stack_off = self
+                .p_block(&gblock, None, ra, &gexit.exit_vlocs, BlockEntry::Other)?
+                .stack_off;
             let extra_stack_len = stack_off - gexit.stack_off;
             if merged {
                 if extra_stack_len > gbodies[gidx].extra_stack_len {
@@ -873,15 +885,14 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
     /// For blocks that contain [Guard] instructions, `b_self` must be `Some` and must point to the
     /// same block as `b` (albeit with a stricter lifetime requirement). Blocks which do not
     /// contain guards can pass `None` to `b_self`.
-    ///
-    /// Returns the offset of the stack after code generation for this block has occurred.
     fn p_block(
         &mut self,
         b: &Block,
         b_self: Option<&'a Block>,
         mut ra: RegAlloc<AB>,
         args_vlocs: &[VarLocs<AB::Reg>],
-    ) -> Result<u32, CompilationError> {
+        bentry: BlockEntry<AB::Label>,
+    ) -> Result<GeneratedBlock<AB>, CompilationError> {
         let logging_show = if self.log {
             let mut show = Vob::from_elem(false, b.insts_len());
             // Always show all of the block's arguments.
@@ -1293,7 +1304,35 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // We deal with [Arg] instructions specially: they're best thought of as
         // pseudo-instructions in the sense that they define variables but don't directly
         // generate code themselves.
-        ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
+        let inter_trace_entry = match bentry {
+            BlockEntry::ControlPoint => {
+                let iidxs = (0..args_vlocs.len())
+                    .map(InstIdx::from_raw_index)
+                    .collect::<Vec<_>>();
+                let mut entry_vlocs = ra.vlocs_from_iidxs(&iidxs);
+                // If an Arg is unused, we empty out its corresponding `VarLoc`s to ensure they
+                // don't clog up the register allocator.
+                for (iidx, vlocs) in iidxs.into_iter().zip(&mut entry_vlocs) {
+                    if !ra.is_used(iidx) {
+                        *vlocs = VarLocs::new();
+                    }
+                }
+                let entry = (self.be.controlpoint_iter0_start(None), entry_vlocs);
+                ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
+                Some(entry)
+            }
+            BlockEntry::UnpeeledLoop(label) => {
+                ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
+                Some((
+                    self.be.controlpoint_iter0_start(Some(label)),
+                    args_vlocs.to_vec(),
+                ))
+            }
+            BlockEntry::Other => {
+                ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
+                None
+            }
+        };
         if self.log {
             for (iidx, _inst) in insts_iter {
                 let pp_vlocs = args_vlocs[iidx.to_raw_index()]
@@ -1305,8 +1344,28 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
         }
 
-        Ok(ra.stack_off())
+        Ok(GeneratedBlock {
+            stack_off: ra.stack_off(),
+            inter_trace_entry,
+        })
     }
+}
+
+/// What kind of entry to a [Block] is needed?
+#[derive(Clone, Copy)]
+enum BlockEntry<Label> {
+    ControlPoint,
+    UnpeeledLoop(Label),
+    Other,
+}
+
+/// The outcome of generating a block with [HirToAsm::p_block].
+struct GeneratedBlock<AB: HirToAsmBackend> {
+    /// The space the block needs relative to the base of the interpreter frame.
+    stack_off: u32,
+    /// For those blocks where it is appropriate, a jump target and associated [VarLocs] where
+    /// traces can jump directly to. See this module's top-level doc-level comment for details.
+    inter_trace_entry: Option<(AB::Label, Vec<VarLocs<AB::Reg>>)>,
 }
 
 /// Are the `deopt_fromvlocs` vars in `cnd` compatible with those in `with`? Note: this
@@ -1488,23 +1547,20 @@ pub(super) trait HirToAsmBackend {
     // Functions for the start and end of various kinds of traces. Note that some functions are
     // used by more than one (x, y) trace kind.
 
-    /// Produce code for the completed body of a (ControlPoint, Coupler | Return) trace. It has
-    /// consumed `stack_off` additional bytes of stack space. The label returned must be attached
-    /// to the first instruction after the stack is adjusted.
-    fn controlpoint_coupler_or_return_start(
-        &mut self,
-        stack_off: u32,
-    ) -> Result<Self::Label, CompilationError>;
+    /// Produce code for the beginning of a control point trace.
+    fn controlpoint_start(&mut self, stack_off: u32);
+
+    /// Produce the code for the start of `iter0` in a loop starting at a control point. If `label`
+    /// is `Some` then that label is returned unchanged; if `label` is `None`, a new label is
+    /// returned.
+    fn controlpoint_iter0_start(&mut self, label: Option<Self::Label>) -> Self::Label;
+
+    /// Set the label for the beginning of a peel loop (and optionally align the code, as
+    /// appropriate for the platform).
+    fn controlpoint_peel_start(&mut self, peel_label: Self::Label);
 
     /// Produce code for the backwards jump at the end of a (ControlPoint, Loop) trace.
     fn controlpoint_loop_end(&mut self) -> Result<Self::Label, CompilationError>;
-
-    fn controlpoint_peel_start(&mut self, peel_label: Self::Label) -> Self::Label;
-
-    /// Produce code for the completed body of a (ControlPoint, Loop) trace. It has consumed
-    /// `stack_off` additional bytes of stack space. `post_stack_label` must be attached to the
-    /// first instruction after the stack is adjusted.
-    fn controlpoint_loop_start(&mut self, post_stack_label: Self::Label, stack_off: u32);
 
     /// Produce code for the jump to `tgt_ctr` at the end of a (*, Coupler) trace.
     fn star_coupler_end(
@@ -2321,16 +2377,18 @@ mod test {
             Ok(TestLabelIdx::from_raw_index(1))
         }
 
-        fn controlpoint_peel_start(&mut self, peel_label: Self::Label) -> Self::Label {
+        fn controlpoint_peel_start(&mut self, peel_label: Self::Label) {
             self.log
                 .push(format!("controlpoint_peel_start {peel_label:?}"));
-            TestLabelIdx::from_raw_index(2)
         }
 
-        fn controlpoint_loop_start(&mut self, post_stack_label: Self::Label, stack_off: u32) {
-            self.log.push(format!(
-                "controlpoint_loop_start {post_stack_label:?} {stack_off}"
-            ));
+        fn controlpoint_start(&mut self, stack_off: u32) {
+            self.log.push(format!("controlpoint_start {stack_off}"));
+        }
+
+        fn controlpoint_iter0_start(&mut self, label: Option<Self::Label>) -> Self::Label {
+            self.log.push("iter0_entry".to_owned());
+            label.unwrap_or_else(|| TestLabelIdx::from_raw_index(3))
         }
 
         fn guard_coupler_start(&mut self, stack_off: u32) {
@@ -2969,9 +3027,10 @@ mod test {
           controlpoint_peel_start 1
           ; term [%0, %2]
           ; %2: i8 = add %0, %1
+          iter0_entry
           ; %1: i8 = arg [Reg("R1", Undefined)]
           ; %0: i8 = arg [Reg("R0", Undefined)]
-          controlpoint_loop_start 2 16
+          controlpoint_start 16
         "#],
         );
 
@@ -2995,9 +3054,10 @@ mod test {
           ; guard true, %2, [%0]
           ; %2: i1 = icmp eq %0, %1
           ; %1: i8 = 4
+          iter0_entry
           copy_reg: src_reg=R0, src_fill=Undefined, dst_reg=R1, dst_fill=Undefined, dst_bitw=8
           ; %0: i8 = arg [Reg("R0", Undefined)]
-          controlpoint_loop_start 2 0
+          controlpoint_start 0
           deopt_spill: reg=R1, in_fill=Undefined, stack_off=8, bitw=8
           ; term [%0]
           ; %0: i8 = arg [Reg("R1", Undefined)]
