@@ -1145,6 +1145,123 @@ impl<'a> X64HirToAsm<'a> {
         Ok(())
     }
 
+    /// Generate code for an integer or pointer select whose condition is an [ICmp].
+    fn _i_select_icmp(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Select {
+            cond,
+            truev,
+            falsev,
+            ..
+        }: &Select,
+    ) -> Result<(), CompilationError> {
+        let Inst::ICmp(ICmp { pred, lhs, rhs, .. }) = b.inst(*cond) else {
+            panic!()
+        };
+        let lhs_bitw = b.inst_bitw(self.m, *lhs);
+        let (imm, mut in_fill) = if pred.is_signed() {
+            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
+        } else {
+            (
+                self.zero_ext_op_for_imm32(b, lhs_bitw, *rhs),
+                RegCnstrFill::Zeroed,
+            )
+        };
+        if lhs_bitw == 32 || lhs_bitw == 64 {
+            in_fill = RegCnstrFill::Undefined;
+        }
+        let bitw = b.inst_bitw(self.m, iidx);
+        let out_fill = if bitw == 32 || bitw == 64 {
+            RegCnstrFill::Zeroed
+        } else {
+            RegCnstrFill::Undefined
+        };
+        let true_cnstr = RegCnstr::InputOutput {
+            in_iidx: *truev,
+            in_fill: RegCnstrFill::Undefined,
+            out_fill,
+            regs: &NORMAL_GP_REGS,
+        };
+        let false_cnstr = RegCnstr::Input {
+            in_iidx: *falsev,
+            in_fill: RegCnstrFill::Undefined,
+            regs: &NORMAL_GP_REGS,
+            clobber: false,
+        };
+        let lhs_cnstr = RegCnstr::Input {
+            in_iidx: *lhs,
+            in_fill: in_fill.clone(),
+            regs: &NORMAL_GP_REGS,
+            clobber: false,
+        };
+        let (lhsr, rhsr, truer, falser) = if imm.is_some() {
+            let [lhsr, truer, falser] =
+                ra.alloc(self, iidx, [lhs_cnstr, true_cnstr, false_cnstr])?;
+            (lhsr, None, truer, falser)
+        } else {
+            let [lhsr, rhsr, truer, falser] = ra.alloc(
+                self,
+                iidx,
+                [
+                    lhs_cnstr,
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    },
+                    true_cnstr,
+                    false_cnstr,
+                ],
+            )?;
+            (lhsr, Some(rhsr), truer, falser)
+        };
+        self.asm.push_inst(match bitw {
+            1..=32 => IcedInst::with2(
+                match pred {
+                    IPred::Eq => Code::Cmovne_r32_rm32,
+                    IPred::Ne => Code::Cmove_r32_rm32,
+                    IPred::Ugt => Code::Cmovbe_r32_rm32,
+                    IPred::Uge => Code::Cmovb_r32_rm32,
+                    IPred::Ult => Code::Cmovae_r32_rm32,
+                    IPred::Ule => Code::Cmova_r32_rm32,
+                    IPred::Sgt => Code::Cmovle_r32_rm32,
+                    IPred::Sge => Code::Cmovl_r32_rm32,
+                    IPred::Slt => Code::Cmovge_r32_rm32,
+                    IPred::Sle => Code::Cmovg_r32_rm32,
+                },
+                truer.to_reg32(),
+                falser.to_reg32(),
+            ),
+            64 => IcedInst::with2(
+                match pred {
+                    IPred::Eq => Code::Cmovne_r64_rm64,
+                    IPred::Ne => Code::Cmove_r64_rm64,
+                    IPred::Ugt => Code::Cmovbe_r64_rm64,
+                    IPred::Uge => Code::Cmovb_r64_rm64,
+                    IPred::Ult => Code::Cmovae_r64_rm64,
+                    IPred::Ule => Code::Cmova_r64_rm64,
+                    IPred::Sgt => Code::Cmovle_r64_rm64,
+                    IPred::Sge => Code::Cmovl_r64_rm64,
+                    IPred::Slt => Code::Cmovge_r64_rm64,
+                    IPred::Sle => Code::Cmovg_r64_rm64,
+                },
+                truer.to_reg64(),
+                falser.to_reg64(),
+            ),
+            _ => todo!(),
+        });
+        if let Some(imm) = imm {
+            self.i_icmp_const(lhs_bitw, RegOrMemOp::Reg(lhsr), imm);
+        } else {
+            self.i_icmp_reg(lhs_bitw, RegOrMemOp::Reg(lhsr), rhsr.unwrap());
+        }
+        Ok(())
+    }
+
     fn _i_store_float(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -4667,13 +4784,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        Select {
+        inst @ Select {
             tyidx,
             cond,
             truev,
             falsev,
         }: &Select,
     ) -> Result<(), CompilationError> {
+        if !ra.is_used(*cond)
+            && let Inst::ICmp(_) = b.inst(*cond)
+            // i1 is often (but not always...) better optimised in this function
+            && matches!(self.m.ty(*tyidx), Ty::Int(2..=64) | Ty::Ptr(0))
+        {
+            return self._i_select_icmp(ra, b, iidx, inst);
+        }
         match self.m.ty(*tyidx) {
             Ty::Double | Ty::Float => {
                 let [condr, outr, falser] = ra.alloc(
@@ -10976,6 +11100,25 @@ mod test {
               bt r.32.x, 0
               cmovae r.64.y, r.64.z
               ...
+            "],
+        );
+
+        // select(icmp(...))
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: ptr = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i1 = icmp ult %0, %1
+              %4: ptr = select %3, %0, %2
+              term [%4, %0, %1]
+            ",
+            &["
+              ...
+              ; %4: ptr = select %3, %0, %2
+              cmp r.64.x, r.64.y
+              cmovae r.64.z, r.64.w
+              ; term [%4, %0, %1]
             "],
         );
     }
