@@ -311,6 +311,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // register-to-stack spill (rather than guaranteeing it will be stack-to-stack).
         let mut direct_spills = Vec::new();
         for (iidx, term_vlocs) in b.term_vars().iter().zip(all_term_vlocs.iter()).rev() {
+            if term_vlocs.is_empty() {
+                // In hir_to_asm, an unused Arg will have its `VarLocs` set to the empty set.
+                // There's thus no point calculating the output that corresponds to such an
+                // argument.
+                continue;
+            }
             if let Inst::Const(_) = self.b.inst(*iidx) {
                 // We handled these above.
                 continue;
