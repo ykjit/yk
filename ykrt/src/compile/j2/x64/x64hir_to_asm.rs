@@ -786,23 +786,7 @@ impl<'a> X64HirToAsm<'a> {
         };
 
         let (bitw, imm, in_fill) = self.icmp_setup(b, cmp_inst);
-        let c = match pred {
-            IPred::Eq => Code::Je_rel32_64,
-            IPred::Ne => Code::Jne_rel32_64,
-            IPred::Ugt => Code::Ja_rel32_64,
-            IPred::Uge => Code::Jae_rel32_64,
-            IPred::Ult => Code::Jb_rel32_64,
-            IPred::Ule => Code::Jbe_rel32_64,
-            IPred::Sgt => Code::Jg_rel32_64,
-            IPred::Sge => Code::Jge_rel32_64,
-            IPred::Slt => Code::Jl_rel32_64,
-            IPred::Sle => Code::Jle_rel32_64,
-        };
-        let c = if *expect {
-            c.negate_condition_code()
-        } else {
-            c
-        };
+        let c = Self::icmp_guard_jump(*pred, *expect);
         if !ra.is_in_reg(*lhs)
             && imm == Some(0)
             && matches!(pred, IPred::Eq | IPred::Ne)
@@ -960,6 +944,114 @@ impl<'a> X64HirToAsm<'a> {
             in_fill = RegCnstrFill::Undefined;
         }
         (bitw, imm, in_fill)
+    }
+
+    /// Return the jump [Code] necessary when `pred`'s outcome disagrees with `expect`.
+    fn icmp_guard_jump(pred: IPred, expect: bool) -> Code {
+        let code = match pred {
+            IPred::Eq => Code::Je_rel32_64,
+            IPred::Ne => Code::Jne_rel32_64,
+            IPred::Ugt => Code::Ja_rel32_64,
+            IPred::Uge => Code::Jae_rel32_64,
+            IPred::Ult => Code::Jb_rel32_64,
+            IPred::Ule => Code::Jbe_rel32_64,
+            IPred::Sgt => Code::Jg_rel32_64,
+            IPred::Sge => Code::Jge_rel32_64,
+            IPred::Slt => Code::Jl_rel32_64,
+            IPred::Sle => Code::Jle_rel32_64,
+        };
+        if expect {
+            code.negate_condition_code()
+        } else {
+            code
+        }
+    }
+
+    /// Generate code for a guard whose `cond` directly refers to a [Select] if both its arms refer
+    /// to [ICmp]s. Returns `Ok(None)` if it is unable to generate code for the [Guard].
+    fn _i_guard_select_icmp(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        Guard { expect, cond, .. }: &Guard,
+        exit_vars: &[InstIdx],
+    ) -> Result<Option<LabelIdx>, CompilationError> {
+        let Inst::Select(Select {
+            cond: select_cond,
+            truev,
+            falsev,
+            ..
+        }) = b.inst(*cond)
+        else {
+            panic!()
+        };
+        if [cond, truev, falsev].into_iter().any(|v| ra.is_in_reg(*v)) {
+            // There's no point optimising this if Any of the intermediate values are already in
+            // registers.
+            return Ok(None);
+        }
+        let (Inst::ICmp(tcmp), Inst::ICmp(fcmp)) = (b.inst(*truev), b.inst(*falsev)) else {
+            // We didn't match `guard(select(_, icmp(...), icmp(...))))`.
+            return Ok(None);
+        };
+        let (tbitw, timm, tfill) = self.icmp_setup(b, tcmp); // true ICmp
+        let (fbitw, fimm, ffill) = self.icmp_setup(b, fcmp); // false ICmp
+        let input = |in_iidx, in_fill| RegCnstr::Input {
+            in_iidx,
+            in_fill,
+            regs: &NORMAL_GP_REGS,
+            clobber: false,
+        };
+        let keepalive = |iidx, imm: Option<i32>, fill| {
+            if imm.is_some() {
+                RegCnstr::KeepAlive { iidxs: &[] }
+            } else {
+                input(iidx, fill)
+            }
+        };
+        // Allocate both paths together so allocator actions and exit values are valid on either.
+        let [selectorr, tlhsr, trhsr, flhsr, frhsr, _] = ra.alloc(
+            self,
+            iidx,
+            [
+                input(*select_cond, RegCnstrFill::Undefined),
+                input(tcmp.lhs, tfill.clone()),
+                keepalive(tcmp.rhs, timm, tfill),
+                input(fcmp.lhs, ffill.clone()),
+                keepalive(fcmp.rhs, fimm, ffill),
+                RegCnstr::KeepAlive { iidxs: exit_vars },
+            ],
+        )?;
+        let trhs = timm.map_or(RegOrImm32::Reg(trhsr), RegOrImm32::Imm);
+        let frhs = fimm.map_or(RegOrImm32::Reg(frhsr), RegOrImm32::Imm);
+        // guard_fail_label is "the select has failed relative to the guard's `expect`"
+        let guard_fail_label = self.asm.mk_label();
+        let false_eval_label = self.asm.mk_label();
+        let end_label = self.asm.mk_label();
+        self.asm.attach_label(end_label);
+        self.asm.push_reloc(
+            IcedInst::with_branch(Self::icmp_guard_jump(fcmp.pred, *expect), 0),
+            RelocKind::NearWithLabel(guard_fail_label),
+        );
+        self.push_icmp_cmp(fbitw, RegOrMemOp::Reg(flhsr), frhs);
+        self.asm.attach_label(false_eval_label);
+        self.asm.push_reloc(
+            IcedInst::with_branch(Code::Jmp_rel32_64, 0),
+            RelocKind::NearWithLabel(end_label),
+        );
+        self.asm.push_reloc(
+            IcedInst::with_branch(Self::icmp_guard_jump(tcmp.pred, *expect), 0),
+            RelocKind::NearWithLabel(guard_fail_label),
+        );
+        self.push_icmp_cmp(tbitw, RegOrMemOp::Reg(tlhsr), trhs);
+        self.asm.push_reloc(
+            IcedInst::with_branch(Code::Jae_rel32_64, 0),
+            RelocKind::NearWithLabel(false_eval_label),
+        );
+        self.asm
+            .push_inst(IcedInst::with2(Code::Bt_rm32_imm8, selectorr.to_reg32(), 0));
+        Ok(Some(guard_fail_label))
     }
 
     // Push a test/cmp instruction for an `ICmp`. This handles the four combinations of
@@ -4131,6 +4223,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             && let Some(label) = self.i_fcmp_guard(ra, b, iidx, ginst, exit_vars)?
         {
             return Ok(label);
+        } else if let Inst::Select(_) = b.inst(*cond)
+            && let Some(label) = self._i_guard_select_icmp(ra, b, iidx, ginst, exit_vars)?
+        {
+            return Ok(label);
         }
 
         let [cndr, _] = ra.alloc(
@@ -5723,7 +5819,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 enum RegOrImm32 {
     Reg(Reg),
     Imm(i32),
@@ -9204,6 +9300,35 @@ mod test {
               ; blackbox %0
               ; term [%0, %1, %2]
             "],
+        );
+
+        // `select(icmp, icmp)`
+        codegen_and_test(
+            "
+              %0: i1 = arg [reg]
+              %1: i32 = arg [reg]
+              %2: i32 = arg [reg]
+              %3: i32 = arg [reg]
+              %4: i1 = icmp sle %1, %2
+              %5: i1 = icmp sge %2, %3
+              %6: i1 = select %0, %4, %5
+              guard true, %6, []
+              term [%0, %1, %2, %3]
+                ",
+            &["
+              ...
+              ; guard true, %6, []
+              bt r.32._, 0
+              jae l{{false}}
+              cmp r.32._, r.32._
+              jg l{{fail}}
+              jmp l{{end}}
+              ; l{{false}}
+              cmp r.32._, r.32._
+              ......
+              ; l{{end}}
+              ...
+                "],
         );
     }
 
