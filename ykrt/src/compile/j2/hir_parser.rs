@@ -438,6 +438,12 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let off = self.p_bitw(off);
                     self.insts.push(ExtractVal { val, off, tyidx }.into());
                 }
+                AstInst::FAbs { local, ty, val } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let val = self.p_local(val);
+                    self.insts.push(FAbs { tyidx, val }.into());
+                }
                 AstInst::FAdd {
                     local,
                     ty,
@@ -1458,6 +1464,11 @@ enum AstInst {
         ty: AstTy,
         val: Span,
         off: Span,
+    },
+    FAbs {
+        local: Span,
+        ty: AstTy,
+        val: Span,
     },
     FAdd {
         local: Span,

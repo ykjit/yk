@@ -1002,6 +1002,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_extractval(&mut ra, b.inst(x.val), iidx, x)?;
                     }
                 }
+                Inst::FAbs(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_fabs(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::FAdd(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_fadd(&mut ra, b, iidx, x)?;
@@ -1706,6 +1711,14 @@ pub(super) trait HirToAsmBackend {
         val_inst: &Inst,
         iidx: InstIdx,
         inst: &ExtractVal,
+    ) -> Result<(), CompilationError>;
+
+    fn i_fabs(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FAbs,
     ) -> Result<(), CompilationError>;
 
     fn i_fadd(

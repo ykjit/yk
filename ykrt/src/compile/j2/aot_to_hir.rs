@@ -1755,6 +1755,16 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
+            "fabs" => {
+                let [src]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
+                let fty = self.opt.func_ty(ftyidx);
+                let hinst = hir::FAbs {
+                    tyidx: fty.rtn_tyidx,
+                    val: src,
+                };
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
+            }
             "floor" => {
                 let [src]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
                 let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;

@@ -104,6 +104,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "EXTRACTVAL" "LOCAL" "[" "INT" "]" {
       Ok(AstInst::ExtractVal { local: $1?.span(), ty: $3?, val: $6?.span(), off: $8?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FABS" "LOCAL" {
+       Ok(AstInst::FAbs { local: $1?.span(), ty: $3?, val: $6?.span() })
+    }
   | "LOCAL" ":" Ty "=" "FADD" "LOCAL" "," "LOCAL" {
        Ok(AstInst::FAdd { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
