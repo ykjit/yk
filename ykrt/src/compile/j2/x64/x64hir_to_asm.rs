@@ -705,34 +705,23 @@ impl<'a> X64HirToAsm<'a> {
             FPred::Ole => (FPred::Oge, rhs, lhs),
             _ => (*pred, lhs, rhs),
         };
+        let c = match pred {
+            FPred::Oeq => Code::Je_rel32_64, // Needs careful handling: see later.
+            FPred::One => Code::Jne_rel32_64,
+            FPred::Oge => Code::Jae_rel32_64,
+            FPred::Ogt => Code::Ja_rel32_64,
+            FPred::Ord => Code::Jnp_rel32_64,
+            FPred::Ueq => Code::Je_rel32_64,
+            FPred::Ult => Code::Jb_rel32_64,
+            FPred::Ule => Code::Jbe_rel32_64,
+            FPred::Uno => Code::Jp_rel32_64,
+            FPred::False | FPred::Une | FPred::True => return Ok(None),
+            _ => unreachable!(),
+        };
         let c = if *expect {
-            match pred {
-                FPred::Oeq => Code::Jne_rel32_64, // Needs careful handling: see later.
-                FPred::One => Code::Je_rel32_64,
-                FPred::Oge => Code::Jb_rel32_64,
-                FPred::Ogt => Code::Jbe_rel32_64,
-                FPred::Ord => Code::Jp_rel32_64,
-                FPred::Ueq => Code::Jne_rel32_64,
-                FPred::Ult => Code::Jae_rel32_64,
-                FPred::Ule => Code::Ja_rel32_64,
-                FPred::Uno => Code::Jnp_rel32_64,
-                FPred::False | FPred::Une | FPred::True => return Ok(None),
-                _ => unreachable!(),
-            }
+            c.negate_condition_code()
         } else {
-            match pred {
-                FPred::Oeq => Code::Je_rel32_64, // Needs careful handling: see later.
-                FPred::One => Code::Jne_rel32_64,
-                FPred::Oge => Code::Jae_rel32_64,
-                FPred::Ogt => Code::Ja_rel32_64,
-                FPred::Ord => Code::Jnp_rel32_64,
-                FPred::Ueq => Code::Je_rel32_64,
-                FPred::Ult => Code::Jb_rel32_64,
-                FPred::Ule => Code::Jbe_rel32_64,
-                FPred::Uno => Code::Jp_rel32_64,
-                FPred::False | FPred::Une | FPred::True => return Ok(None),
-                _ => unreachable!(),
-            }
+            c
         };
 
         let [lhsr, rhsr, _] = ra.alloc(
@@ -815,32 +804,22 @@ impl<'a> X64HirToAsm<'a> {
             // We can relax sign / zero fill for values that are exactly 32/64 bit.
             in_fill = RegCnstrFill::Undefined;
         }
+        let c = match pred {
+            IPred::Eq => Code::Je_rel32_64,
+            IPred::Ne => Code::Jne_rel32_64,
+            IPred::Ugt => Code::Ja_rel32_64,
+            IPred::Uge => Code::Jae_rel32_64,
+            IPred::Ult => Code::Jb_rel32_64,
+            IPred::Ule => Code::Jbe_rel32_64,
+            IPred::Sgt => Code::Jg_rel32_64,
+            IPred::Sge => Code::Jge_rel32_64,
+            IPred::Slt => Code::Jl_rel32_64,
+            IPred::Sle => Code::Jle_rel32_64,
+        };
         let c = if *expect {
-            match pred {
-                IPred::Eq => Code::Jne_rel32_64,
-                IPred::Ne => Code::Je_rel32_64,
-                IPred::Ugt => Code::Jbe_rel32_64,
-                IPred::Uge => Code::Jb_rel32_64,
-                IPred::Ult => Code::Jae_rel32_64,
-                IPred::Ule => Code::Ja_rel32_64,
-                IPred::Sgt => Code::Jle_rel32_64,
-                IPred::Sge => Code::Jl_rel32_64,
-                IPred::Slt => Code::Jge_rel32_64,
-                IPred::Sle => Code::Jg_rel32_64,
-            }
+            c.negate_condition_code()
         } else {
-            match pred {
-                IPred::Eq => Code::Je_rel32_64,
-                IPred::Ne => Code::Jne_rel32_64,
-                IPred::Ugt => Code::Ja_rel32_64,
-                IPred::Uge => Code::Jae_rel32_64,
-                IPred::Ult => Code::Jb_rel32_64,
-                IPred::Ule => Code::Jbe_rel32_64,
-                IPred::Sgt => Code::Jg_rel32_64,
-                IPred::Sge => Code::Jge_rel32_64,
-                IPred::Slt => Code::Jl_rel32_64,
-                IPred::Sle => Code::Jle_rel32_64,
-            }
+            c
         };
         if !ra.is_in_reg(*lhs)
             && imm == Some(0)
