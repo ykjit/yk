@@ -834,8 +834,9 @@ impl<'a> X64HirToAsm<'a> {
                 64 => IcedInst::with2(Code::Test_rm64_imm32, and_lhsr.to_reg64(), and_rhs),
                 x => todo!("{x}"),
             });
-            Ok(label)
-        } else if let Some(imm) = imm {
+            return Ok(label);
+        }
+        let (rmop, rhs) = if let Some(imm) = imm {
             let rmop = if matches!(bitw, 8 | 16 | 32 | 64)
                 && let Some((load_iidx, off)) = self.try_load_to_mem_op(ra, b, iidx, *lhs)
             {
@@ -879,11 +880,7 @@ impl<'a> X64HirToAsm<'a> {
                 RegOrMemOp::Reg(lhsr)
             };
 
-            let label = self.asm.mk_label();
-            self.asm
-                .push_reloc(IcedInst::with_branch(c, 0), RelocKind::NearWithLabel(label));
-            self.i_icmp_const(bitw, rmop, imm);
-            Ok(label)
+            (rmop, RegOrImm32::Imm(imm))
         } else {
             let (rmop, rhsr) =
                 if let Some((load_iidx, off)) = self.try_load_to_mem_op(ra, b, iidx, *lhs) {
@@ -937,12 +934,13 @@ impl<'a> X64HirToAsm<'a> {
                     )?;
                     (RegOrMemOp::Reg(lhsr), rhsr)
                 };
-            let label = self.asm.mk_label();
-            self.asm
-                .push_reloc(IcedInst::with_branch(c, 0), RelocKind::NearWithLabel(label));
-            self.i_icmp_reg(bitw, rmop, rhsr);
-            Ok(label)
-        }
+            (rmop, RegOrImm32::Reg(rhsr))
+        };
+        let label = self.asm.mk_label();
+        self.asm
+            .push_reloc(IcedInst::with_branch(c, 0), RelocKind::NearWithLabel(label));
+        self.push_icmp_cmp(bitw, rmop, rhs);
+        Ok(label)
     }
 
     /// Return the bit width, RHS immediate (if any), and input fill for an `ICmp` instruction.
@@ -964,60 +962,53 @@ impl<'a> X64HirToAsm<'a> {
         (bitw, imm, in_fill)
     }
 
-    fn i_icmp_const(&mut self, bitw: u32, rmop: RegOrMemOp, rhs: i32) {
-        if rhs == 0
-            && let RegOrMemOp::Reg(reg) = rmop
-        {
-            self.asm.push_inst(match bitw {
-                1..=32 => IcedInst::with2(Code::Test_rm32_r32, reg.to_reg32(), reg.to_reg32()),
-                64 => IcedInst::with2(Code::Test_rm64_r64, reg.to_reg64(), reg.to_reg64()),
-                x => todo!("{x}"),
-            });
-        } else {
-            self.asm.push_inst(match bitw {
-                1..=8 => match rmop {
-                    RegOrMemOp::Reg(reg) => {
-                        IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
-                    }
-                    RegOrMemOp::MemOp(memop) => IcedInst::with2(Code::Cmp_rm8_imm8, memop, rhs),
-                },
-                16 => match rmop {
-                    RegOrMemOp::Reg(reg) => {
-                        IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
-                    }
-                    RegOrMemOp::MemOp(memop) => IcedInst::with2(Code::Cmp_rm16_imm16, memop, rhs),
-                },
-                32 => match rmop {
-                    RegOrMemOp::Reg(reg) => {
-                        IcedInst::with2(Code::Cmp_rm32_imm32, reg.to_reg32(), rhs)
-                    }
-                    RegOrMemOp::MemOp(memop) => IcedInst::with2(Code::Cmp_rm32_imm32, memop, rhs),
-                },
-                64 => match rmop {
-                    RegOrMemOp::Reg(reg) => {
-                        IcedInst::with2(Code::Cmp_rm64_imm32, reg.to_reg64(), rhs)
-                    }
-                    RegOrMemOp::MemOp(memop) => IcedInst::with2(Code::Cmp_rm64_imm32, memop, rhs),
-                },
-                x => todo!("{x}"),
-            });
-        }
-    }
-
-    fn i_icmp_reg(&mut self, bitw: u32, rmop: RegOrMemOp, rhsr: Reg) {
-        self.asm.push_inst(match rmop {
-            RegOrMemOp::Reg(lhsr) => match bitw {
-                1..=32 => IcedInst::with2(Code::Cmp_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
-                64 => IcedInst::with2(Code::Cmp_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
-                x => todo!("{x}"),
-            },
-            RegOrMemOp::MemOp(memop) => match bitw {
-                8 => IcedInst::with2(Code::Cmp_rm8_r8, memop, rhsr.to_reg8()),
-                16 => IcedInst::with2(Code::Cmp_rm16_r16, memop, rhsr.to_reg16()),
-                32 => IcedInst::with2(Code::Cmp_rm32_r32, memop, rhsr.to_reg32()),
-                64 => IcedInst::with2(Code::Cmp_rm64_r64, memop, rhsr.to_reg64()),
-                x => todo!("{x}"),
-            },
+    // Push a test/cmp instruction for an `ICmp`. This handles the four combinations of
+    // [RegOrMemOp] and [RegOrImm32].
+    fn push_icmp_cmp(&mut self, bitw: u32, lhs: RegOrMemOp, rhs: RegOrImm32) {
+        self.asm.push_inst(match (lhs, rhs, bitw) {
+            (RegOrMemOp::Reg(lhs), RegOrImm32::Imm(0), 1..=32) => {
+                IcedInst::with2(Code::Test_rm32_r32, lhs.to_reg32(), lhs.to_reg32())
+            }
+            (RegOrMemOp::Reg(lhs), RegOrImm32::Imm(0), 64) => {
+                IcedInst::with2(Code::Test_rm64_r64, lhs.to_reg64(), lhs.to_reg64())
+            }
+            (RegOrMemOp::Reg(lhs), RegOrImm32::Imm(rhs), 1..=8 | 16 | 32) => {
+                IcedInst::with2(Code::Cmp_rm32_imm32, lhs.to_reg32(), rhs)
+            }
+            (RegOrMemOp::Reg(lhs), RegOrImm32::Imm(rhs), 64) => {
+                IcedInst::with2(Code::Cmp_rm64_imm32, lhs.to_reg64(), rhs)
+            }
+            (RegOrMemOp::MemOp(lhs), RegOrImm32::Imm(rhs), 1..=8) => {
+                IcedInst::with2(Code::Cmp_rm8_imm8, lhs, rhs)
+            }
+            (RegOrMemOp::MemOp(lhs), RegOrImm32::Imm(rhs), 16) => {
+                IcedInst::with2(Code::Cmp_rm16_imm16, lhs, rhs)
+            }
+            (RegOrMemOp::MemOp(lhs), RegOrImm32::Imm(rhs), 32) => {
+                IcedInst::with2(Code::Cmp_rm32_imm32, lhs, rhs)
+            }
+            (RegOrMemOp::MemOp(lhs), RegOrImm32::Imm(rhs), 64) => {
+                IcedInst::with2(Code::Cmp_rm64_imm32, lhs, rhs)
+            }
+            (RegOrMemOp::Reg(lhs), RegOrImm32::Reg(rhs), 1..=32) => {
+                IcedInst::with2(Code::Cmp_rm32_r32, lhs.to_reg32(), rhs.to_reg32())
+            }
+            (RegOrMemOp::Reg(lhs), RegOrImm32::Reg(rhs), 64) => {
+                IcedInst::with2(Code::Cmp_rm64_r64, lhs.to_reg64(), rhs.to_reg64())
+            }
+            (RegOrMemOp::MemOp(lhs), RegOrImm32::Reg(rhs), 8) => {
+                IcedInst::with2(Code::Cmp_rm8_r8, lhs, rhs.to_reg8())
+            }
+            (RegOrMemOp::MemOp(lhs), RegOrImm32::Reg(rhs), 16) => {
+                IcedInst::with2(Code::Cmp_rm16_r16, lhs, rhs.to_reg16())
+            }
+            (RegOrMemOp::MemOp(lhs), RegOrImm32::Reg(rhs), 32) => {
+                IcedInst::with2(Code::Cmp_rm32_r32, lhs, rhs.to_reg32())
+            }
+            (RegOrMemOp::MemOp(lhs), RegOrImm32::Reg(rhs), 64) => {
+                IcedInst::with2(Code::Cmp_rm64_r64, lhs, rhs.to_reg64())
+            }
+            x => todo!("{x:?}"),
         });
     }
 
@@ -1167,10 +1158,10 @@ impl<'a> X64HirToAsm<'a> {
             regs: &NORMAL_GP_REGS,
             clobber: false,
         };
-        let (lhsr, rhsr, truer, falser) = if imm.is_some() {
+        let (lhsr, rhs, truer, falser) = if let Some(imm) = imm {
             let [lhsr, truer, falser] =
                 ra.alloc(self, iidx, [lhs_cnstr, true_cnstr, false_cnstr])?;
-            (lhsr, None, truer, falser)
+            (lhsr, RegOrImm32::Imm(imm), truer, falser)
         } else {
             let [lhsr, rhsr, truer, falser] = ra.alloc(
                 self,
@@ -1187,7 +1178,7 @@ impl<'a> X64HirToAsm<'a> {
                     false_cnstr,
                 ],
             )?;
-            (lhsr, Some(rhsr), truer, falser)
+            (lhsr, RegOrImm32::Reg(rhsr), truer, falser)
         };
         self.asm.push_inst(match bitw {
             1..=32 => IcedInst::with2(
@@ -1224,11 +1215,7 @@ impl<'a> X64HirToAsm<'a> {
             ),
             _ => todo!(),
         });
-        if let Some(imm) = imm {
-            self.i_icmp_const(lhs_bitw, RegOrMemOp::Reg(lhsr), imm);
-        } else {
-            self.i_icmp_reg(lhs_bitw, RegOrMemOp::Reg(lhsr), rhsr.unwrap());
-        }
+        self.push_icmp_cmp(lhs_bitw, RegOrMemOp::Reg(lhsr), rhs);
         Ok(())
     }
 
@@ -5736,6 +5723,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     }
 }
 
+#[derive(Debug)]
+enum RegOrImm32 {
+    Reg(Reg),
+    Imm(i32),
+}
+
+#[derive(Debug)]
 enum RegOrMemOp {
     Reg(Reg),
     MemOp(MemoryOperand),
