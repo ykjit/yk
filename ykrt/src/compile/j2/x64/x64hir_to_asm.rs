@@ -3402,6 +3402,66 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_fabs(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        FAbs { tyidx, val }: &FAbs,
+    ) -> Result<(), CompilationError> {
+        let [outr, tmpr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::InputOutput {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Undefined,
+                    out_fill: RegCnstrFill::Undefined,
+                    regs: &ALL_XMM_REGS,
+                },
+                RegCnstr::Temp {
+                    regs: &ALL_XMM_REGS,
+                },
+            ],
+        )?;
+        match self.m.ty(*tyidx) {
+            Ty::Double => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Andpd_xmm_xmmm128,
+                    outr.to_xmm(),
+                    tmpr.to_xmm(),
+                ));
+                let lidx = self.push_data(16, &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]);
+                self.asm.push_reloc(
+                    IcedInst::with2(
+                        Code::Movsd_xmm_xmmm64,
+                        tmpr.to_xmm(),
+                        MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                    ),
+                    RelocKind::NearWithLabel(lidx),
+                );
+            }
+            Ty::Float => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Andps_xmm_xmmm128,
+                    outr.to_xmm(),
+                    tmpr.to_xmm(),
+                ));
+                let lidx = self.push_data(16, &[0xFF, 0xFF, 0xFF, 0x7F]);
+                self.asm.push_reloc(
+                    IcedInst::with2(
+                        Code::Movss_xmm_xmmm32,
+                        tmpr.to_xmm(),
+                        MemoryOperand::with_base_displ(IcedReg::RIP, 0),
+                    ),
+                    RelocKind::NearWithLabel(lidx),
+                );
+            }
+            _ => panic!(),
+        }
+        Ok(())
+    }
+
     fn i_fadd(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -7938,6 +7998,45 @@ mod test {
               add r.64.z, r.64.y
               ...
             "#],
+        );
+    }
+
+    #[test]
+    fn cg_fabs() {
+        // float
+        codegen_and_test(
+            "
+              %0: float = arg [reg]
+              %1: float = fabs %0
+              term [%1]
+            ",
+            &["
+              ; l{{1}}
+              db 0xFF, 0xFF, 0xFF, 0x7F
+              ...
+              ; %1: float = fabs %0
+              movss fp.128.x, l{{1}}
+              andps fp.128.y, fp.128.x
+              ; term [%1]
+            "],
+        );
+
+        // double
+        codegen_and_test(
+            "
+              %0: double = arg [reg]
+              %1: double = fabs %0
+              term [%1]
+            ",
+            &["
+              ; l{{1}}
+              db 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F
+              ...
+              ; %1: double = fabs %0
+              movsd fp.128.x, l{{1}}
+              andpd fp.128.y, fp.128.x
+              ; term [%1]
+            "],
         );
     }
 

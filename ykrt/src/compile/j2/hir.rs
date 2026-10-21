@@ -863,6 +863,7 @@ pub(super) enum Inst {
     DebugStr,
     DynPtrAdd,
     ExtractVal,
+    FAbs,
     FAdd,
     FCmp,
     FDiv,
@@ -2072,6 +2073,66 @@ impl InstT for ExtractVal {
 
     fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
         format!("extractval %{} [{}]", self.val.to_raw_index(), self.off)
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
+/// Floating point "absolute" with the same semantics as LLVM's `fabs`.
+#[derive(Clone, Debug)]
+pub(super) struct FAbs {
+    pub tyidx: TyIdx,
+    /// What LLVM calls `op1`.
+    pub val: InstIdx,
+}
+
+impl InstT for FAbs {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_eq!(
+            self.tyidx,
+            b.inst(self.val).tyidx(m),
+            "%{iidx:?}: inconsistent return / val types"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.val = opt.equiv_iidx(self.val);
+    }
+
+    fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        if let Inst::FAbs(FAbs { tyidx, val }) = other
+            && self.tyidx == *tyidx
+            && opt.equiv_iidx(self.val) == *val
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(b, self.val)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.val = iidx_map(self.val);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        format!("fabs %{}", self.val.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -6275,6 +6336,17 @@ mod test {
           %1: i128 = call f %0()
           %2: i64 = extractval %1 [0]
           %3: i64 = extractval %1 [32]
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: inconsistent return / val types")]
+    fn fabs_type_consistency() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: float = arg [reg]
+          %1: double = fabs %0
         ",
         );
     }
