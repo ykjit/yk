@@ -781,29 +781,11 @@ impl<'a> X64HirToAsm<'a> {
         Guard { expect, cond, .. }: &Guard,
         exit_vars: &[InstIdx],
     ) -> Result<LabelIdx, CompilationError> {
-        let Inst::ICmp(ICmp {
-            pred,
-            lhs,
-            rhs,
-            samesign: _,
-        }) = b.inst(*cond)
-        else {
+        let Inst::ICmp(cmp_inst @ ICmp { pred, lhs, rhs, .. }) = b.inst(*cond) else {
             panic!()
         };
 
-        let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred.is_signed() {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
-        } else {
-            (
-                self.zero_ext_op_for_imm32(b, bitw, *rhs),
-                RegCnstrFill::Zeroed,
-            )
-        };
-        if bitw == 32 || bitw == 64 {
-            // We can relax sign / zero fill for values that are exactly 32/64 bit.
-            in_fill = RegCnstrFill::Undefined;
-        }
+        let (bitw, imm, in_fill) = self.icmp_setup(b, cmp_inst);
         let c = match pred {
             IPred::Eq => Code::Je_rel32_64,
             IPred::Ne => Code::Jne_rel32_64,
@@ -961,6 +943,25 @@ impl<'a> X64HirToAsm<'a> {
             self.i_icmp_reg(bitw, rmop, rhsr);
             Ok(label)
         }
+    }
+
+    /// Return the bit width, RHS immediate (if any), and input fill for an `ICmp` instruction.
+    /// This is useful for setting up optimised code generation involving an `ICmp`.
+    fn icmp_setup(&self, b: &Block, cmp: &ICmp) -> (u32, Option<i32>, RegCnstrFill) {
+        let bitw = b.inst_bitw(self.m, cmp.lhs);
+        let (imm, mut in_fill) = if cmp.pred.is_signed() {
+            (self.sign_ext_op_for_imm32(b, cmp.rhs), RegCnstrFill::Signed)
+        } else {
+            (
+                self.zero_ext_op_for_imm32(b, bitw, cmp.rhs),
+                RegCnstrFill::Zeroed,
+            )
+        };
+        if bitw == 32 || bitw == 64 {
+            // We can relax sign / zero fill for values that are exactly 32/64 bit.
+            in_fill = RegCnstrFill::Undefined;
+        }
+        (bitw, imm, in_fill)
     }
 
     fn i_icmp_const(&mut self, bitw: u32, rmop: RegOrMemOp, rhs: i32) {
@@ -1137,21 +1138,11 @@ impl<'a> X64HirToAsm<'a> {
             ..
         }: &Select,
     ) -> Result<(), CompilationError> {
-        let Inst::ICmp(ICmp { pred, lhs, rhs, .. }) = b.inst(*cond) else {
+        let Inst::ICmp(cmp) = b.inst(*cond) else {
             panic!()
         };
-        let lhs_bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred.is_signed() {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
-        } else {
-            (
-                self.zero_ext_op_for_imm32(b, lhs_bitw, *rhs),
-                RegCnstrFill::Zeroed,
-            )
-        };
-        if lhs_bitw == 32 || lhs_bitw == 64 {
-            in_fill = RegCnstrFill::Undefined;
-        }
+        let ICmp { pred, lhs, rhs, .. } = cmp;
+        let (lhs_bitw, imm, in_fill) = self.icmp_setup(b, cmp);
         let bitw = b.inst_bitw(self.m, iidx);
         let out_fill = if bitw == 32 || bitw == 64 {
             RegCnstrFill::Zeroed
@@ -4189,13 +4180,9 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         ra: &mut RegAlloc<Self>,
         b: &Block,
         iidx: InstIdx,
-        ICmp {
-            pred,
-            lhs,
-            rhs,
-            samesign: _,
-        }: &ICmp,
+        cmp: &ICmp,
     ) -> Result<(), CompilationError> {
+        let ICmp { pred, lhs, rhs, .. } = cmp;
         let c = match pred {
             IPred::Eq => Code::Sete_rm8,
             IPred::Ne => Code::Setne_rm8,
@@ -4209,19 +4196,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IPred::Sle => Code::Setle_rm8,
         };
 
-        let bitw = b.inst_bitw(self.m, *lhs);
-        let (imm, mut in_fill) = if pred.is_signed() {
-            (self.sign_ext_op_for_imm32(b, *rhs), RegCnstrFill::Signed)
-        } else {
-            (
-                self.zero_ext_op_for_imm32(b, bitw, *rhs),
-                RegCnstrFill::Zeroed,
-            )
-        };
-        if bitw == 32 || bitw == 64 {
-            // We can relax sign / zero fill for values that are exactly 32/64 bit.
-            in_fill = RegCnstrFill::Undefined;
-        }
+        let (bitw, imm, in_fill) = self.icmp_setup(b, cmp);
 
         if imm == Some(0)
             && let IPred::Eq | IPred::Ne = pred
