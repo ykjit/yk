@@ -811,7 +811,20 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         // work out what fill this constraint should have.
         let mut output_reg = None; // Needed when outputs can end up in multiple registers.
         let mut rtn_fills = [RegFill::Undefined; N];
-        for (i, (reg, cnstr)) in allocs.iter().cloned().zip(cnstrs.iter_mut()).enumerate() {
+
+        // If we process an `[Input]Output/Cast` before `Input`s we can cause a problem where the
+        // `Input`s needs override the `Output`s needs leading to an incorrect `n_out` state.
+        // Rather than burdening the caller with that, we extract the output constraint and deal
+        // with it last. Happily, that localises the fix to just this loop.
+        let output_i = cnstrs.iter().position(|c| {
+            matches!(
+                c,
+                RegCnstr::InputOutput { .. } | RegCnstr::Output { .. } | RegCnstr::Cast { .. }
+            )
+        });
+        for i in (0..N).filter(|i| Some(*i) != output_i).chain(output_i) {
+            let reg = allocs[i];
+            let cnstr = &mut cnstrs[i];
             match cnstr {
                 RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } => {
                     n_out.set_fill_iidxs(reg, RegFill::Undefined, smallvec![]);
@@ -3402,5 +3415,49 @@ pub(crate) mod test {
         ",
             ],
         );
+    }
+
+    #[test]
+    fn outputs_dont_overwrite_inputs() {
+        // This is a test for a specific bug that occurs if `Output` constraints are processed
+        // before `Input` constraints.
+        let m = str_to_mod::<TestReg>(
+            r#"
+              %0: i8 = arg [reg ("GPR0", undefined)]
+              %1: i8 = 1
+              %2: i8 = add %0, %1
+            "#,
+        );
+        let TraceEnd::Test { block, args_vlocs } = &m.trace_end else {
+            panic!()
+        };
+        let input = InstIdx::from_raw_index(0);
+        let output = InstIdx::from_raw_index(2);
+        let mut ra = RegAlloc::<TestHirToAsm>::new(&m, block, args_vlocs, 0);
+        let mut be = TestHirToAsm::new(&m);
+        ra.rstates
+            .set_fill_iidxs(TestReg::GPR0, RegFill::Zeroed, smallvec![output]);
+        let allocs = ra
+            .alloc_with_fills(
+                &mut be,
+                output,
+                [
+                    RegCnstr::Output {
+                        out_fill: RegCnstrFill::Zeroed,
+                        regs: &GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: input,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                ],
+            )
+            .unwrap();
+        assert_eq!(allocs[0].0, TestReg::GPR0);
+        assert_eq!(allocs[0].0, allocs[1].0);
+        assert!(be.ra_log.is_empty());
     }
 }
