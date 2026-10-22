@@ -798,7 +798,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         // Phase 1: Find registers for constraints. Note that multiple constraints may end up
         // using the same register. This phase does not mutate `self`.
-        let allocs = self.find_regs_for_constraints(be, iidx, &cnstrs)?;
+        let allocs = self.find_regs_for_constraints(be, iidx, &mut cnstrs)?;
 
         // Phase 2: Calculate *n:out*. Counter-intuitively, we need to calculate this "forwards",
         // even though when we generate code we'll do so backwards.
@@ -1155,12 +1155,53 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         &self,
         be: &AB,
         iidx: InstIdx,
-        cnstrs: &[RegCnstr<AB::Reg>; N],
+        cnstrs: &mut [RegCnstr<AB::Reg>; N],
     ) -> Result<[AB::Reg; N], CompilationError> {
-        // This is a somewhat simple minded approach to allocating registers. In particular, it
-        // misses opportunities to merge together `Input`s into the same register (this allows us
-        // to avoid worrying about things like incompatible fills).
+        // First, we want to merge together input constraints where they are compatible so that we
+        // can allocate fewer distinct registers.
 
+        let mut unique: SmallVec<[RegCnstr<AB::Reg>; N]> = SmallVec::new();
+        let cnstrs_map: [usize; N] = array::from_fn(|i| {
+            if let RegCnstr::Input {
+                in_iidx,
+                in_fill,
+                regs,
+                clobber: false,
+            } = &cnstrs[i]
+                && let Some(j) = unique.iter().position(|other| matches!(
+                    other,
+                    RegCnstr::Input { in_iidx: other_iidx, in_fill: other_fill, regs: other_regs, clobber: false }
+                    if other_iidx == in_iidx && other_regs == regs
+                        && (other_fill == in_fill || *in_fill == RegCnstrFill::Undefined || *other_fill == RegCnstrFill::Undefined)
+                ))
+            {
+                // As soon as we encounter a non-undefined reg fill, we need to use the "stronger"
+                // fill from then on.
+                if *in_fill != RegCnstrFill::Undefined {
+                    let RegCnstr::Input { in_fill: fill, .. } = &mut unique[j] else {
+                        unreachable!()
+                    };
+                    *fill = in_fill.clone();
+                }
+                j
+            } else {
+                unique.push(cnstrs[i].clone());
+                unique.len() - 1
+            }
+        });
+
+        // Merging might have turned an undefined fill into signed/zeroed, so we need to use that
+        // fill consistently wherever that register appears.
+        for (cnstr, &j) in cnstrs.iter_mut().zip(&cnstrs_map) {
+            if let RegCnstr::Input { in_fill, .. } = cnstr {
+                let RegCnstr::Input { in_fill: fill, .. } = &unique[j] else {
+                    unreachable!()
+                };
+                *in_fill = fill.clone();
+            }
+        }
+
+        let cnstrs = unique.as_slice();
         let mut allocs = [None; N];
 
         // If the (sole!) output can be the same as an input, we need to a different dance at some
@@ -1203,7 +1244,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         // If values are already allocated to a register, and we aren't going to use that register
         // for anything else, keep the register as-is.
-        let find_alloc = |allocs: &mut [Option<AB::Reg>; N], i, regs: &[AB::Reg], find_iidx| {
+        let find_alloc = |allocs: &mut [Option<AB::Reg>], i, regs: &[AB::Reg], find_iidx| {
             if let Some(reg) = self
                 .iter_reg_for(find_iidx)
                 .find(|reg| regs.contains(reg) && !allocs.contains(&Some(*reg)))
@@ -1341,7 +1382,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
-        Ok(allocs.map(|x| x.unwrap()))
+        Ok(cnstrs_map.map(|i| allocs[i].unwrap()))
     }
 
     /// Given a new [RStates], produce a [RegActions] which is a diff telling us how to get from
@@ -1778,9 +1819,9 @@ impl<Reg: Display> Display for VarLoc<Reg> {
 }
 
 /// A register constraint. Each constraint leads to a single register being returned. Note: in some
-/// situations (see the individual constraints), multiple constraints might return the same
-/// register.
-#[derive(Debug, PartialEq)]
+/// situations, multiple constraints might return the same register: such sharing may also involve
+/// different, though always compatible, register fills.
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum RegCnstr<'a, Reg: RegT> {
     /// This instruction clobbers `reg`.
     Clobber { reg: Reg },
@@ -3119,6 +3160,78 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn repeated_inputs() {
+        let m = str_to_mod::<TestReg>(
+            r#"
+          %0: i8 = arg [reg ("GPR0", undefined)]
+          %1: i8 = arg [reg ("GPR1", undefined)]
+          %2: i8 = add %0, %1
+        "#,
+        );
+        let TraceEnd::Test { block, args_vlocs } = &m.trace_end else {
+            panic!()
+        };
+        let val = InstIdx::from_raw_index(0);
+        let iidx = InstIdx::from_raw_index(2);
+        let fills = [
+            RegCnstrFill::Undefined,
+            RegCnstrFill::Signed,
+            RegCnstrFill::Zeroed,
+        ];
+        for a in &fills {
+            for b in &fills {
+                for c in &fills {
+                    for input_live in [false, true] {
+                        let mut ra = RegAlloc::<TestHirToAsm>::new(&m, block, args_vlocs, 0);
+                        let mut be = TestHirToAsm::new(&m);
+                        if input_live {
+                            ra.rstates.set_fill_iidxs(
+                                TestReg::GPR3,
+                                RegFill::Signed,
+                                smallvec![val],
+                            );
+                            ra.blackbox(iidx, val);
+                        }
+                        let required = [a, b, c];
+                        let exit_vars = [val];
+                        let cnstrs = array::from_fn::<_, 4, _>(|i| {
+                            if i == 3 {
+                                RegCnstr::KeepAlive { iidxs: &exit_vars }
+                            } else {
+                                RegCnstr::Input {
+                                    in_iidx: val,
+                                    in_fill: required[i].clone(),
+                                    regs: &GP_REGS,
+                                    clobber: false,
+                                }
+                            }
+                        });
+                        let allocs = ra.alloc_with_fills(&mut be, iidx, cnstrs).unwrap();
+                        let mut regs = allocs[..3].iter().map(|(reg, _)| *reg).collect::<Vec<_>>();
+                        regs.sort_by_key(|r| r.regidx().to_raw_index());
+                        regs.dedup();
+                        let incompatible = required.contains(&&RegCnstrFill::Signed)
+                            && required.contains(&&RegCnstrFill::Zeroed);
+                        assert_eq!(regs.len(), if incompatible { 2 } else { 1 });
+                        for i in 0..3 {
+                            let (reg, fill) = allocs[i];
+                            assert!(ra.rstates.iidxs(reg).contains(&val));
+                            if *required[i] != RegCnstrFill::Undefined {
+                                assert_eq!(
+                                    ra.rstates.fill(reg),
+                                    RegFill::from_regcnstrfill(required[i])
+                                );
+                            }
+                            assert_eq!(fill, ra.rstates.fill(reg));
+                        }
+                        assert!(!ra.vlocs_from_iidxs(&exit_vars)[0].is_empty());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn dont_lose_non_undefined_fills() {
         build_and_test(
             r#"
@@ -3130,8 +3243,7 @@ pub(crate) mod test {
           "#,
             |_| true,
             &["
-            shl %2 GPR1 GPR2 GPR3
-            copy_reg: src_reg=GPR1, src_fill=Zeroed, dst_reg=GPR2, dst_fill=Zeroed, dst_bitw=8
+            shl %2 GPR1 GPR1 GPR2
             load %1 ptr=GPR0 dst=GPR1 fill=Zeroed
           "],
         );
