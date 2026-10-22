@@ -1361,10 +1361,13 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         if let Some(i) = output_can_be_same_as_input
             && allocs[i].is_none()
         {
+            let RegCnstr::Output { regs, .. } = cnstrs[i] else {
+                unreachable!()
+            };
             // Are there any inputs which are not used after this instruction? If so, reuse
             // their register.
             for (j, in_cnstr) in cnstrs.iter().enumerate() {
-                if let RegCnstr::Input { regs, in_iidx, .. } = in_cnstr
+                if let RegCnstr::Input { in_iidx, .. } = in_cnstr
                     && !self.is_used[(*in_iidx).to_raw_index()]
                     && regs.contains(&allocs[j].unwrap())
                 {
@@ -1375,9 +1378,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
             // If we can't reuse an input register, find an empty register.
             if allocs[i].is_none() {
-                let RegCnstr::Output { regs, .. } = cnstrs[i] else {
-                    panic!()
-                };
                 allocs[i] = Some(self.find_force_empty_reg(iidx, &allocs, regs));
             }
         }
@@ -2659,15 +2659,24 @@ pub(crate) mod test {
             ra: &mut RegAlloc<Self>,
             _b: &Block,
             iidx: InstIdx,
-            Load { ptr, .. }: &Load,
+            Load { tyidx, ptr, .. }: &Load,
         ) -> Result<(), CompilationError> {
+            let (regs, out_fill) = if let Ty::Float | Ty::Double = self.m.ty(*tyidx) {
+                (&FP_REGS, RegCnstrFill::Undefined)
+            } else {
+                (
+                    &GP_REGS,
+                    RegCnstrFill::AnyOf(AnyOfFill::new().with_signed().with_zeroed()),
+                )
+            };
             let [(outr, fill), (ptrr, _)] = ra.alloc_with_fills(
                 self,
                 iidx,
                 [
                     RegCnstr::Output {
-                        out_fill: RegCnstrFill::AnyOf(AnyOfFill::new().with_signed().with_zeroed()),
-                        regs: &GP_REGS,
+                        out_fill,
+                        regs,
+                        // Permit sharing in general; the register sets must still be respected.
                         can_be_same_as_input: true,
                     },
                     RegCnstr::Input {
@@ -3229,6 +3238,24 @@ pub(crate) mod test {
                 }
             }
         }
+    }
+
+    #[test]
+    fn dont_reuse_input_registers_indiscriminately() {
+        // This test is for a bug where output registers could use an input constraint's register
+        // even when it was inappropriate to do so.
+        build_and_test(
+            "
+              %0: ptr = 0x1000
+              %1: double = load %0
+              blackbox %1
+              term []
+            ",
+            |line| line.starts_with("load "),
+            &["
+              load %1 ptr=GPR0 dst=FP0 fill=Undefined
+            "],
+        );
     }
 
     #[test]
