@@ -78,6 +78,7 @@ impl PassT for KnownBits {
             Inst::Or(x) => self.opt_or(opt, x),
             Inst::SExt(x) => self.opt_sext(opt, x),
             Inst::Shl(x) => self.opt_shl(opt, x),
+            Inst::UIToFP(x) => self.opt_uitofp(opt, x),
             Inst::Xor(x) => self.opt_xor(opt, x),
             Inst::ZExt(x) => self.opt_zext(opt, x),
             _ => OptOutcome::Rewritten(inst),
@@ -498,6 +499,31 @@ impl KnownBits {
             && let Some(res) = lhs_b.checked_shl(rhs_int)
         {
             self.set_pending(res.clone());
+        }
+        OptOutcome::Rewritten(inst.into())
+    }
+
+    fn opt_uitofp(&mut self, opt: &mut PassOpt, mut inst: UIToFP) -> OptOutcome {
+        inst.canonicalise(opt);
+        let UIToFP { val, .. } = inst;
+        if let Some(bits) = self.as_knownbits(opt, inst.val)
+            && opt.inst_bitw(opt, val) == bits.bitw()
+            && bits
+                .zeroes()
+                .checked_lshr(bits.bitw() - 1)
+                .unwrap()
+                .to_zero_ext_u8()
+                == Some(1)
+        {
+            // If, when cast to a signed integer, the sign bit remains unset we can emit `SIToFP`,
+            // which is typically much quicker to convert into a machine float.
+            return OptOutcome::Rewritten(
+                SIToFP {
+                    tyidx: inst.tyidx,
+                    val: inst.val,
+                }
+                .into(),
+            );
         }
         OptOutcome::Rewritten(inst.into())
     }
@@ -928,6 +954,45 @@ mod test {
           %5: i8 = 3
           %6: i8 = or %0, %5
           blackbox %6
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_uitofp() {
+        test_known_bits(
+            "
+          %0: i32 = arg [reg]
+          %1: i32 = 1
+          %2: i32 = lshr %0, %1
+          %3: float = uitofp %2
+          blackbox %3
+          term [%0]
+         ",
+            "
+          ...
+          %2: i32 = lshr %0, %1
+          %3: float = sitofp %2
+          blackbox %3
+          term [%0]
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i32 = arg [reg]
+          %1: i32 = 0xF0000000
+          %2: i32 = lshr %0, %1
+          %3: float = uitofp %2
+          blackbox %3
+          term [%0]
+         ",
+            "
+            ...
+          %2: i32 = lshr %0, %1
+          %3: float = uitofp %2
+          blackbox %3
+          term [%0]
         ",
         );
     }
