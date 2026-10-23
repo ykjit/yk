@@ -58,7 +58,7 @@ use crate::compile::{
     CompilationError,
     j2::{
         hir::{Block, BlockLikeT, Const, ConstKind, Inst, InstIdx, Mod},
-        hir_to_asm::HirToAsmBackend,
+        hir_to_asm::{BlockEntry, HirToAsmBackend},
     },
 };
 use index_type::{IndexType, typed_vec, vec::TypedVec};
@@ -165,8 +165,33 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         out
     }
 
-    /// After processing the main body of a trace, set the [VarLocs]s of the entry variables.
-    pub(super) fn set_args_vlocs_at_start(&mut self, be: &mut AB, args_vlocs: &[VarLocs<AB::Reg>]) {
+    /// After processing the main body of a trace, deal with the allocation of variables at the
+    /// beginning of a trace.
+    pub(super) fn alloc_at_start(
+        &mut self,
+        be: &mut AB,
+        args_vlocs: &[VarLocs<AB::Reg>],
+        bentry: BlockEntry<AB::Label>,
+    ) -> Result<Option<(AB::Label, Vec<VarLocs<AB::Reg>>)>, CompilationError> {
+        let entry = match &bentry {
+            BlockEntry::ControlPoint => {
+                let iidxs = (0..args_vlocs.len())
+                    .map(InstIdx::from_raw_index)
+                    .collect::<Vec<_>>();
+                let mut entry_vlocs = self.vlocs_from_iidxs(&iidxs);
+                // If an Arg is unused, we empty out its corresponding `VarLoc`s to ensure they
+                // don't clog up the register allocator.
+                for (iidx, vlocs) in iidxs.into_iter().zip(&mut entry_vlocs) {
+                    if !self.is_used(iidx) {
+                        *vlocs = VarLocs::new();
+                    }
+                }
+                let entry = (be.controlpoint_iter0_start(None), entry_vlocs);
+                Some(entry)
+            }
+            BlockEntry::UnpeeledLoop(_) | BlockEntry::Other => None,
+        };
+
         // In essence, this is a simple, special case of normal register allocation. First we work
         // out what the rstate after trace entry will be, diff that, and generate the appropriate
         // code.
@@ -220,6 +245,15 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 let bitw = self.b.inst_bitw(self.m, iidx);
                 be.spill(*reg, *fill, stack_off, bitw).unwrap();
             }
+        }
+
+        match bentry {
+            BlockEntry::ControlPoint => Ok(Some(entry.unwrap())),
+            BlockEntry::UnpeeledLoop(label) => Ok(Some((
+                be.controlpoint_iter0_start(Some(label)),
+                args_vlocs.to_vec(),
+            ))),
+            BlockEntry::Other => Ok(None),
         }
     }
 
