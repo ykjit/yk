@@ -66,6 +66,7 @@ use smallvec::{SmallVec, smallvec};
 use std::{
     array, assert_matches,
     fmt::{Debug, Display, Formatter},
+    mem,
 };
 use test_stubs::test_stubs;
 use vob::Vob;
@@ -79,11 +80,14 @@ pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
     istates: TypedVec<InstIdx, IState>,
     /// The state of each register.
     rstates: RStates<AB::Reg>,
-    /// For each instruction, has it yet been used?
-    is_used: Vob,
+    /// Pending stack operations. Eventually this should be "the stack state" in the same manner as
+    /// [Self::rstates].
+    stack_inputs: Vec<(InstIdx, u32)>,
     /// The offset of the current stack: this must be exactly equal to the end of the last byte
     /// used in the stack.
     stack_off: u32,
+    /// For each instruction, has it yet been used?
+    is_used: Vob,
 }
 
 impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
@@ -124,6 +128,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             args_vlocs,
             istates,
             rstates: RStates::new(),
+            stack_inputs: Vec::new(),
             is_used: Vob::from_elem(false, b.insts_len()),
             stack_off,
         }
@@ -173,6 +178,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         args_vlocs: &[VarLocs<AB::Reg>],
         bentry: BlockEntry<AB::Label>,
     ) -> Result<Option<(AB::Label, Vec<VarLocs<AB::Reg>>)>, CompilationError> {
+        self.emit_stack_inputs(be)?;
         let entry = match &bentry {
             BlockEntry::ControlPoint => {
                 let iidxs = (0..args_vlocs.len())
@@ -762,7 +768,10 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             RegCnstr::Output { out_fill, .. } | RegCnstr::Cast { out_fill, .. } =>
                 !matches!(out_fill, RegCnstrFill::AnyOf(_)),
             RegCnstr::Input { in_fill, .. } => !matches!(in_fill, RegCnstrFill::AnyOf(_)),
-            RegCnstr::Clobber { .. } | RegCnstr::Temp { .. } | RegCnstr::KeepAlive { .. } => true,
+            RegCnstr::Clobber { .. }
+            | RegCnstr::Temp { .. }
+            | RegCnstr::KeepAlive { .. }
+            | RegCnstr::StackInputs { .. } => true,
         }));
 
         Ok(self.alloc_with_fills(be, iidx, cnstrs)?.map(|(reg, _)| reg))
@@ -773,7 +782,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     ///
     /// The output [RegFill] for a given [RegCnstr] is defined as follows:
     ///
-    /// * [RegCnstr::Clobber], [RegCnstr::Temp], and [RegCnstr::KeepAlive] always return
+    /// * [RegCnstr::Clobber], [RegCnstr::Temp], [RegCnstr::KeepAlive], and
+    ///   [RegCnstr::StackInputs] always return
     ///   [RegFill::Undefined]
     /// * [RegCnstrFill::Undefined], [RegCnstrFill::Signed], and [RegCnstrFill::Zeroed] return
     ///   [RegFill::Undefined], [RegFill::Signed], and [RegFill::Zeroed] respectively.
@@ -789,6 +799,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         iidx: InstIdx,
         mut cnstrs: [RegCnstr<AB::Reg>; N],
     ) -> Result<[(AB::Reg, RegFill); N], CompilationError> {
+        self.emit_stack_inputs(be)?;
         assert!(!matches!(self.b.inst(iidx), Inst::Const(_)));
         // Let us call `self.rstate` rstate *n+1:in* (i.e. the input for instruction *iidx+1*). What
         // we need to do here is multi-fold:
@@ -813,7 +824,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     RegCnstr::Clobber { .. }
                     | RegCnstr::Input { .. }
                     | RegCnstr::Temp { .. }
-                    | RegCnstr::KeepAlive { .. } => false,
+                    | RegCnstr::KeepAlive { .. }
+                    | RegCnstr::StackInputs { .. } => false,
                 })
                 .count()
                 <= 1
@@ -827,7 +839,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             RegCnstr::Output { .. }
             | RegCnstr::Clobber { .. }
             | RegCnstr::Temp { .. }
-            | RegCnstr::KeepAlive { .. } => true,
+            | RegCnstr::KeepAlive { .. }
+            | RegCnstr::StackInputs { .. } => true,
         }));
 
         // Phase 1: Find registers for constraints. Note that multiple constraints may end up
@@ -945,7 +958,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         output_reg = Some(reg);
                     }
                 }
-                RegCnstr::KeepAlive { .. } => {
+                RegCnstr::KeepAlive { .. } | RegCnstr::StackInputs { .. } => {
                     rtn_fills[i] = RegFill::Undefined;
                 }
             }
@@ -978,7 +991,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 | RegCnstr::Output { .. }
                 | RegCnstr::Temp { .. } => ractions.clobbers.push(reg),
                 RegCnstr::Cast { .. } | RegCnstr::Input { clobber: false, .. } => (),
-                RegCnstr::KeepAlive { .. } => (),
+                RegCnstr::KeepAlive { .. } | RegCnstr::StackInputs { .. } => (),
             }
         }
         self.rstate_diff_to_action(be, &mut n_out, &mut ractions, true);
@@ -1029,7 +1042,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         )?;
                     }
                 }
-                RegCnstr::KeepAlive { .. } => (),
+                RegCnstr::KeepAlive { .. } | RegCnstr::StackInputs { .. } => (),
             }
         }
 
@@ -1090,7 +1103,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         smallvec![*in_iidx],
                     );
                 }
-                RegCnstr::KeepAlive { .. } => (),
+                RegCnstr::KeepAlive { .. } | RegCnstr::StackInputs { .. } => (),
             }
         }
 
@@ -1136,7 +1149,66 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
+        // Deal with stack inputs. We're currently very simple minded about these: they're
+        // effectively just a "todo" list rather than a detailed capture of the current state, so
+        // `self.sstate` must be empty at this point.
+        assert!(self.stack_inputs.is_empty());
+        for cnstr in &cnstrs {
+            if let RegCnstr::StackInputs {
+                start_off,
+                align,
+                args,
+            } = cnstr
+                && !args.is_empty()
+            {
+                assert!(align.is_power_of_two());
+                let args_size = args.iter().fold(0, |off, (sz, _)| off + *sz);
+                let bytes = start_off.checked_add(args_size).unwrap();
+                self.stack_off = (self.stack_off + bytes).next_multiple_of(*align);
+                let mut off = self.stack_off;
+                for (size, arg) in *args {
+                    let bytes = self.b.inst_bitw(self.m, *arg).div_ceil(8);
+                    assert!(bytes <= *size, "stack argument does not fit in its slot");
+                    self.is_used.set(arg.to_raw_index(), true);
+                    self.stack_inputs.push((*arg, off));
+                    off -= size;
+                }
+            }
+        }
+
         Ok(array::from_fn(|i| (allocs[i], rtn_fills[i])))
+    }
+
+    /// Emit stores for pending stack inputs in `self.sstates`.
+    fn emit_stack_inputs(&mut self, be: &mut AB) -> Result<(), CompilationError> {
+        // In a sense this is a simplified version of `alloc_with_fills`.
+        for (arg, off) in mem::take(&mut self.stack_inputs).into_iter().rev() {
+            // This is a sort-of cut-down version of find_force_empty_reg: that function
+            // (currently) expects to be run _at_ an instruction and also does general stack spills
+            // in a way that isn't quite right for us.
+            let reg = be
+                .iter_possible_regs(self.b, arg)
+                .find(|reg| self.rstates.iidxs(*reg).contains(&arg))
+                .or_else(|| {
+                    be.iter_possible_regs(self.b, arg)
+                        .find(|reg| self.rstates.iidxs(*reg).is_empty())
+                })
+                .unwrap_or_else(|| be.iter_possible_regs(self.b, arg).nth(0).unwrap());
+            let fill = if self.rstates.iidxs(reg).contains(&arg) {
+                self.rstates.fill(reg)
+            } else {
+                RegFill::Undefined
+            };
+            let mut before = self.rstates.clone();
+            before.set_fill_iidxs(reg, fill, smallvec![arg]);
+            let mut actions = RegActions::new();
+            self.rstate_diff_to_action(be, &mut before, &mut actions, true);
+            self.toposort_distinct_copies(&mut actions)?;
+            self.asm_ractions(be, &actions)?;
+            self.rstates = before;
+            be.spill(reg, fill, off, self.b.inst_bitw(self.m, arg))?;
+        }
+        Ok(())
     }
 
     /// For [Inst::Const] instructions only, allocate registers. This function should only be
@@ -1150,6 +1222,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         be: &mut AB,
         iidx: InstIdx,
     ) -> Result<(), CompilationError> {
+        self.emit_stack_inputs(be)?;
         assert_matches!(self.b.inst(iidx), Inst::Const(_));
         // Constants should never be spilled.
         assert_eq!(self.istates[iidx], IState::None);
@@ -1272,7 +1345,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         allocs[i] = Some(regs[0]);
                     }
                 }
-                RegCnstr::Temp { .. } | RegCnstr::KeepAlive { .. } => (),
+                RegCnstr::Temp { .. }
+                | RegCnstr::KeepAlive { .. }
+                | RegCnstr::StackInputs { .. } => (),
             }
         }
 
@@ -1318,7 +1393,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 RegCnstr::Output { regs, .. } => {
                     find_alloc(&mut allocs, i, regs, iidx);
                 }
-                RegCnstr::Temp { .. } | RegCnstr::KeepAlive { .. } => (),
+                RegCnstr::Temp { .. }
+                | RegCnstr::KeepAlive { .. }
+                | RegCnstr::StackInputs { .. } => (),
             }
         }
 
@@ -1387,7 +1464,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     can_be_same_as_input: true,
                     ..
                 } => (), // Dealt with a little below.
-                RegCnstr::KeepAlive { .. } => allocs[i] = Some(AB::Reg::undefined()),
+                RegCnstr::KeepAlive { .. } | RegCnstr::StackInputs { .. } => {
+                    allocs[i] = Some(AB::Reg::undefined())
+                }
             }
         }
 
@@ -1895,6 +1974,16 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
         in_iidx: InstIdx,
         out_fill: RegCnstrFill,
         regs: &'a [Reg],
+    },
+    /// Put the inputs in `args` onto the stack by the beginning of the current instruction. The
+    /// `args` will be laid out on the stack at
+    /// `(current_stack_off+start_off+sum(args.iter().map(|x| x.0).aligned_up_to(align)`. Each
+    /// entry is a pair `(width, InstIdx)` where `width` is the space on the stack assigned to the
+    /// value (where `width` must be `>=` the instruction's `bitw.div_ceil(8)`).
+    StackInputs {
+        start_off: u32,
+        align: u32,
+        args: &'a [(u32, InstIdx)],
     },
     /// A temporary register drawn from `regs` that the instruction will clobber.
     Temp { regs: &'a [Reg] },
@@ -2587,6 +2676,38 @@ pub(crate) mod test {
             )?;
             self.ra_log
                 .push(format!("alloc %{iidx:?} {lhsr:?} {rhsr:?}"));
+            Ok(())
+        }
+
+        fn i_call(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            Call { tgt, args, .. }: &Call,
+        ) -> Result<(), CompilationError> {
+            let args = args
+                .iter()
+                .map(|arg| (8, *arg))
+                .collect::<SmallVec<[_; 4]>>();
+            ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *tgt,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::StackInputs {
+                        start_off: 8,
+                        align: 16,
+                        args: &args,
+                    },
+                ],
+            )?;
+            self.ra_log.push(format!("call %{iidx:?}"));
             Ok(())
         }
 
@@ -3632,5 +3753,27 @@ pub(crate) mod test {
         assert_eq!(allocs[0].0, TestReg::GPR0);
         assert_eq!(allocs[0].0, allocs[1].0);
         assert!(be.ra_log.is_empty());
+    }
+
+    #[test]
+    fn stack_inputs() {
+        build_and_test(
+            r#"
+            extern f(i1, i64)
+
+            %0: ptr = arg [reg("GPR3", undefined)]
+            %1: i1 = arg [stack (8)]
+            %2: i64 = arg [stack (16)]
+            call f %0(%1, %2)
+          "#,
+            |_| true,
+            &[r#"
+            call %3
+            spill {{i64}} Undefined stack_off=24 bitw=64
+            spill {{i1}} Undefined stack_off=32 bitw=1
+            unspill stack_off=8 {{i1}} Undefined bitw=1
+            unspill stack_off=16 {{i64}} Undefined bitw=64
+          "#],
+        );
     }
 }
