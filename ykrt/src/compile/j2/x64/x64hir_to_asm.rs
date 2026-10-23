@@ -3079,10 +3079,15 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         // Phase 1: Deal with inputs.
         let mut fp_args_off = 0;
         let mut gp_args_iter = GP_ARG_OFFS.iter();
+        let mut stack_args = Vec::new(); // In general we don't expect many of these.
         for arg in args {
             let arg_ty = b.inst_ty(self.m, *arg);
             match arg_ty {
                 Ty::Double | Ty::Float => {
+                    if fp_args_off == 8 {
+                        stack_args.push((8, *arg));
+                        continue;
+                    }
                     debug_assert_matches!(fp_cnstrs[fp_args_off], RegCnstr::Clobber { .. });
                     fp_cnstrs[fp_args_off] = RegCnstr::Input {
                         in_iidx: *arg,
@@ -3098,7 +3103,10 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                         Ty::Double | Ty::Float | Ty::Func(_) | Ty::Void => unreachable!(),
                         Ty::Int(_) | Ty::Ptr(_) => RegCnstrFill::Zeroed,
                     };
-                    let gp_off = gp_args_iter.next().unwrap();
+                    let Some(gp_off) = gp_args_iter.next() else {
+                        stack_args.push((8, *arg));
+                        continue;
+                    };
                     debug_assert_matches!(gp_cnstrs[*gp_off], RegCnstr::Clobber { .. });
                     gp_cnstrs[*gp_off] = RegCnstr::Input {
                         in_iidx: *arg,
@@ -3225,33 +3233,46 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }
 
         // Phase 3: allocate registers and generate code.
+        let stack_cnstr = RegCnstr::StackInputs {
+            start_off: 8,
+            align: 16,
+            args: &stack_args,
+        };
+        let callr = if let Some(tgt_cnstr) = tgt_cnstr {
+            let [.., callr, _]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len() + 2] = ra.alloc(
+                self,
+                iidx,
+                concat_arrays!(gp_cnstrs, fp_cnstrs, [tgt_cnstr, stack_cnstr]),
+            )?;
+            callr
+        } else {
+            let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len() + 1] = ra.alloc(
+                self,
+                iidx,
+                concat_arrays!(gp_cnstrs, fp_cnstrs, [stack_cnstr]),
+            )?;
+            Reg::RAX
+        };
+
+        let base_off = ra.stack_off();
+        if !stack_args.is_empty() {
+            // If there are stack arguments we need to point RSP at their base. However, we can't
+            // be quite sure where RSP is at this point we store it just above the function's stack
+            // arguments where we can reload it later.
+            let rsp_off = base_off - u32::try_from(stack_args.len()).unwrap() * 8;
+            self.asm.push_inst(IcedInst::with2(
+                Code::Mov_r64_rm64,
+                IcedReg::RSP,
+                MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(rsp_off)),
+            ));
+        }
+
         if let Some(fn_addr) = fn_addr {
-            assert!(tgt_cnstr.is_none());
-            let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len()] =
-                ra.alloc(self, iidx, concat_arrays!(gp_cnstrs, fp_cnstrs))?;
             self.asm.push_reloc(
                 IcedInst::with_branch(Code::Call_rel32_64, 0),
                 RelocKind::NearCallWithAddr(fn_addr),
             );
         } else {
-            assert!(fn_addr.is_none());
-            let callr = if let Some(tgt_cnstr) = tgt_cnstr {
-                assert_matches!(
-                    tgt_cnstr,
-                    RegCnstr::Input { .. } | RegCnstr::InputOutput { .. }
-                );
-                let [.., callr]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len() + 1] = ra.alloc(
-                    self,
-                    iidx,
-                    concat_arrays!(gp_cnstrs, fp_cnstrs, [tgt_cnstr]),
-                )?;
-                callr
-            } else {
-                assert!(tgt_cnstr.is_none());
-                let [..]: [_; GP_CLOBBERS.len() + ALL_XMM_REGS.len()] =
-                    ra.alloc(self, iidx, concat_arrays!(gp_cnstrs, fp_cnstrs))?;
-                Reg::RAX
-            };
             self.asm
                 .push_inst(IcedInst::with1(Code::Call_rm64, callr.to_reg64()));
         }
@@ -3260,6 +3281,20 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 Code::Mov_r32_imm32,
                 IcedReg::EAX,
                 u32::try_from(fp_args_off).unwrap(),
+            ));
+        }
+
+        if !stack_args.is_empty() {
+            let rsp_off = base_off - u32::try_from(stack_args.len()).unwrap() * 8;
+            self.asm.push_inst(IcedInst::with2(
+                Code::Lea_r64_m,
+                IcedReg::RSP,
+                MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(base_off)),
+            ));
+            self.asm.push_inst(IcedInst::with2(
+                Code::Mov_rm64_r64,
+                MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(rsp_off)),
+                IcedReg::RSP,
             ));
         }
         Ok(())
@@ -7656,6 +7691,71 @@ mod test {
               ; %3: double = fadd %0, %2
               addsd xmm15, xmm0
               ; term [%3, %1]
+            "#],
+        );
+
+        // Extra args on the stack
+        codegen_and_test(
+            r#"
+              extern f(i8, i8, i8, i8, i8, i8, i8)
+
+              %0: i8 = arg [reg ("r15", zeroed)]
+              %1: ptr = arg [reg ("r14", zeroed)]
+              call f %1(%0, %0, %0, %0, %0, %0, %0)
+              term [%0, %1]
+            "#,
+            &[r#"
+              ...
+              ; %0: i8 = arg [Reg("r15", Zeroed)]
+              ; %1: ptr = arg [Reg("r14", Zeroed)]
+              mov rax, r14
+              mov rcx, r15
+              mov rdx, r15
+              mov rsi, r15
+              mov rdi, r15
+              mov r8, r15
+              mov r9, r15
+              mov [rbp-0x10], r15b
+              ; call %1(%0, %0, %0, %0, %0, %0, %0)
+              mov [rbp-8], rsp
+              lea rsp, [rbp-0x10]
+              call rax
+              mov rsp, [rbp-8]
+              ; term [%0, %1]
+            "#],
+        );
+
+        codegen_and_test(
+            r#"
+              extern f(float, float, float, float, float, float, float, float, float)
+
+              %0: float = arg [reg ("xmm15", undefined)]
+              %1: ptr = arg [reg ("r15", zeroed)]
+              call f %1(%0, %0, %0, %0, %0, %0, %0, %0, %0)
+              term [%0, %1]
+            "#,
+            &[r#"
+              ...
+              ; %0: float = arg [Reg("xmm15", Undefined)]
+              ; %1: ptr = arg [Reg("r15", Zeroed)]
+              movss [rbp-4], xmm15
+              mov rax, r15
+              movaps xmm0, xmm15
+              movaps xmm1, xmm15
+              movaps xmm2, xmm15
+              movaps xmm3, xmm15
+              movaps xmm4, xmm15
+              movaps xmm5, xmm15
+              movaps xmm6, xmm15
+              movaps xmm7, xmm15
+              movss [rbp-0x20], xmm0
+              ; call %1(%0, %0, %0, %0, %0, %0, %0, %0, %0)
+              mov [rbp-0x18], rsp
+              lea rsp, [rbp-0x20]
+              call rax
+              mov rsp, [rbp-0x18]
+              movss xmm15, [rbp-4]
+              ; term [%0, %1]
             "#],
         );
     }

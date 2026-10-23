@@ -1306,38 +1306,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             }
         }
 
-        // We deal with [Arg] instructions specially: they're best thought of as
-        // pseudo-instructions in the sense that they define variables but don't directly
-        // generate code themselves.
-        let inter_trace_entry = match bentry {
-            BlockEntry::ControlPoint => {
-                let iidxs = (0..args_vlocs.len())
-                    .map(InstIdx::from_raw_index)
-                    .collect::<Vec<_>>();
-                let mut entry_vlocs = ra.vlocs_from_iidxs(&iidxs);
-                // If an Arg is unused, we empty out its corresponding `VarLoc`s to ensure they
-                // don't clog up the register allocator.
-                for (iidx, vlocs) in iidxs.into_iter().zip(&mut entry_vlocs) {
-                    if !ra.is_used(iidx) {
-                        *vlocs = VarLocs::new();
-                    }
-                }
-                let entry = (self.be.controlpoint_iter0_start(None), entry_vlocs);
-                ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
-                Some(entry)
-            }
-            BlockEntry::UnpeeledLoop(label) => {
-                ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
-                Some((
-                    self.be.controlpoint_iter0_start(Some(label)),
-                    args_vlocs.to_vec(),
-                ))
-            }
-            BlockEntry::Other => {
-                ra.set_args_vlocs_at_start(&mut self.be, args_vlocs);
-                None
-            }
-        };
+        let inter_trace_entry = ra.alloc_at_start(&mut self.be, args_vlocs, bentry)?;
         if self.log {
             for (iidx, _inst) in insts_iter {
                 let pp_vlocs = args_vlocs[iidx.to_raw_index()]
@@ -1358,7 +1327,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
 /// What kind of entry to a [Block] is needed?
 #[derive(Clone, Copy)]
-enum BlockEntry<Label> {
+pub(super) enum BlockEntry<Label> {
     ControlPoint,
     UnpeeledLoop(Label),
     Other,
