@@ -696,15 +696,18 @@ impl<'a> X64HirToAsm<'a> {
             panic!()
         };
 
-        // The following predicates can't be expressed directly, but if we swap LHS and RHS, we can
-        // do so.
-        let (pred, lhs, rhs) = match pred {
-            FPred::Ugt => (FPred::Ult, rhs, lhs),
-            FPred::Uge => (FPred::Ule, rhs, lhs),
-            FPred::Olt => (FPred::Ogt, rhs, lhs),
-            FPred::Ole => (FPred::Oge, rhs, lhs),
-            _ => (*pred, lhs, rhs),
+        let (expect, pred, lhs, rhs) = match pred {
+            // The following predicates can't be expressed directly, but if we swap LHS and RHS, we
+            // can do so.
+            FPred::Ugt => (*expect, FPred::Ult, rhs, lhs),
+            FPred::Uge => (*expect, FPred::Ule, rhs, lhs),
+            FPred::Olt => (*expect, FPred::Ogt, rhs, lhs),
+            FPred::Ole => (*expect, FPred::Oge, rhs, lhs),
+            // Une is the complement of Oeq.
+            FPred::Une => (!*expect, FPred::Oeq, lhs, rhs),
+            _ => (*expect, *pred, lhs, rhs),
         };
+
         let c = match pred {
             FPred::Oeq => Code::Je_rel32_64, // Needs careful handling: see later.
             FPred::One => Code::Jne_rel32_64,
@@ -715,14 +718,10 @@ impl<'a> X64HirToAsm<'a> {
             FPred::Ult => Code::Jb_rel32_64,
             FPred::Ule => Code::Jbe_rel32_64,
             FPred::Uno => Code::Jp_rel32_64,
-            FPred::False | FPred::Une | FPred::True => return Ok(None),
+            FPred::False | FPred::True => return Ok(None),
             _ => unreachable!(),
         };
-        let c = if *expect {
-            c.negate_condition_code()
-        } else {
-            c
-        };
+        let c = if expect { c.negate_condition_code() } else { c };
 
         let [lhsr, rhsr, _] = ra.alloc(
             self,
@@ -745,7 +744,7 @@ impl<'a> X64HirToAsm<'a> {
         )?;
 
         let label = self.asm.mk_label();
-        let skip_label = if pred == FPred::Oeq && !*expect {
+        let skip_label = if pred == FPred::Oeq && !expect {
             let x = self.asm.mk_label();
             self.asm.attach_label(x);
             x
@@ -9378,7 +9377,7 @@ mod test {
             "#],
         );
 
-        // Floating point `oeq` and guards
+        // Floating point `oeq`/`une` and guards
         codegen_and_test(
             "
               %0: float = arg [reg]
@@ -9397,6 +9396,28 @@ mod test {
               jp l2
               je l1
               ; l2
+              ; blackbox %0
+              ; term [%0, %1, %2]
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: float = arg [reg]
+              %1: float = arg [reg]
+              %2: ptr = arg [reg]
+              %3: i1 = fcmp une %0, %1
+              guard false, %3, []
+              blackbox %0
+              term [%0, %1, %2]
+            ",
+            &["
+              ...
+              ; %3: i1 = fcmp une %0, %1
+              ; guard false, %3, []
+              ucomiss xmm0, xmm1
+              jp l1
+              jne l1
               ; blackbox %0
               ; term [%0, %1, %2]
             "],
