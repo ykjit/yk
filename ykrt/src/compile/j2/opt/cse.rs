@@ -192,6 +192,24 @@ mod test {
           blackbox %2
         ",
         );
+
+        test_cse(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = urem %0, %1
+          %3: i8 = urem %0, %1
+          blackbox %2
+          blackbox %3
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = urem %0, %1
+          blackbox %2
+          blackbox %2
+        ",
+        );
     }
 
     #[test]
@@ -303,6 +321,33 @@ mod test {
           %10: i1 = icmp eq %4, %9
           guard true, %10, []
           blackbox %4
+        ",
+        );
+
+        // Check when equivalence changes instruction class (`and` to `load` here).
+        test_cse(
+            "
+          %0: ptr = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = load %0
+          %3: i8 = load %0
+          %4: i8 = and %1, %3
+          %5: i1 = icmp eq %2, %4
+          guard true, %5, []
+          %7: i8 = and %3, %3
+          blackbox %7
+        ",
+            "
+          %0: ptr = arg
+          %1: i8 = arg
+          %2: i8 = load %0
+          %3: i8 = load %0
+          %4: i8 = and %1, %3
+          %5: i1 = icmp eq %2, %4
+          %6: i1 = 1
+          guard true, %5, []
+          %8: i8 = and %3, %3
+          blackbox %8
         ",
         );
     }
