@@ -1712,6 +1712,24 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
+            "frameaddress" => {
+                let [level]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
+                let hir::Inst::Const(hir::Const {
+                    kind: hir::ConstKind::Int(level),
+                    ..
+                }) = self.opt.inst(level)
+                else {
+                    // LLVM requires a constant value for frameaddress as do we.
+                    unreachable!();
+                };
+                if level.to_zero_ext_u64() != Some(0) {
+                    return Err(CompilationError::General(
+                        "llvm.frameaddress only supported for level 0".into(),
+                    ));
+                }
+                self.push_inst_and_link_local(iid, hir::FrameAddress)
+                    .map(|_| ())
+            }
             "fshl" => {
                 let [lhs, rhs, shift]: [hir::InstIdx; 3] = jargs.into_vec().try_into().unwrap();
                 let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;

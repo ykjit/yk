@@ -1057,6 +1057,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_fptosi(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::FrameAddress(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_frameaddress(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::Freeze(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_freeze(&mut ra, iidx, x)?;
@@ -1768,6 +1773,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &FPToSI,
+    ) -> Result<(), CompilationError>;
+
+    fn i_frameaddress(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &FrameAddress,
     ) -> Result<(), CompilationError>;
 
     fn i_freeze(

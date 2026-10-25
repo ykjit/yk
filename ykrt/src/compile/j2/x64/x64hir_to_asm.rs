@@ -4121,6 +4121,31 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_frameaddress(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        _b: &Block,
+        iidx: InstIdx,
+        FrameAddress: &FrameAddress,
+    ) -> Result<(), CompilationError> {
+        let [outr] = ra.alloc(
+            self,
+            iidx,
+            [RegCnstr::Output {
+                out_fill: RegCnstrFill::Zeroed,
+                regs: &NORMAL_GP_REGS,
+                can_be_same_as_input: true,
+            }],
+        )?;
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_rm64,
+            outr.to_reg64(),
+            IcedReg::RBP,
+        ));
+
+        Ok(())
+    }
+
     fn i_freeze(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -8887,6 +8912,43 @@ mod test {
     }
 
     #[test]
+    fn cg_frameaddress() {
+        codegen_and_test(
+            "
+              %0: i8 = arg[reg]
+              %1: ptr = frameaddress
+              blackbox %1
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %1: ptr = frameaddress
+              mov r.64._, rbp
+              ; blackbox %1
+              ...
+            "#],
+        );
+    }
+
+    #[test]
+    fn cg_freeze() {
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = freeze %0
+              blackbox %1
+              term [%1]
+            ",
+            &[r#"
+              ...
+              ; %1: i8 = freeze %0
+              ; blackbox %1
+              ; term [%1]
+            "#],
+        );
+    }
+
+    #[test]
     fn cg_guard() {
         // The standard cases
         codegen_and_test(
@@ -13347,24 +13409,6 @@ mod test {
               ...
               ; %2: i64 = zext %0
               ; blackbox %2
-              ; term [%1]
-            "#],
-        );
-    }
-
-    #[test]
-    fn cg_freeze() {
-        codegen_and_test(
-            "
-              %0: i8 = arg [reg]
-              %1: i8 = freeze %0
-              blackbox %1
-              term [%1]
-            ",
-            &[r#"
-              ...
-              ; %1: i8 = freeze %0
-              ; blackbox %1
               ; term [%1]
             "#],
         );
