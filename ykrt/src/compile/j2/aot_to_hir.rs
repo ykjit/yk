@@ -1636,69 +1636,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let parts = name.split(".").collect::<Vec<&str>>();
         assert_eq!(parts[0], "llvm");
         match parts[1] {
-            "sadd" | "smul" | "uadd" | "usub" | "ssub"
-                if parts[2] == "with" && parts[3] == "overflow" =>
-            {
-                let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
-                let tyidx = self.opt.inst(lhs).tyidx(&*self.opt);
-                assert_eq!(tyidx, self.opt.inst(rhs).tyidx(&*self.opt));
-                let rtn_tyidx = self.opt.push_ty(hir::Ty::Int(64))?;
-                let inst: hir::Inst = match parts[1] {
-                    "sadd" => hir::SAddOverflow {
-                        tyidx: rtn_tyidx,
-                        lhs,
-                        rhs,
-                    }
-                    .into(),
-                    "smul" => hir::SMulOverflow {
-                        tyidx: rtn_tyidx,
-                        lhs,
-                        rhs,
-                    }
-                    .into(),
-                    "uadd" => hir::UAddOverflow {
-                        tyidx: rtn_tyidx,
-                        lhs,
-                        rhs,
-                    }
-                    .into(),
-                    "usub" => hir::USubOverflow {
-                        tyidx: rtn_tyidx,
-                        lhs,
-                        rhs,
-                    }
-                    .into(),
-                    "ssub" => hir::SSubOverflow {
-                        tyidx: rtn_tyidx,
-                        lhs,
-                        rhs,
-                    }
-                    .into(),
-                    _ => unreachable!(),
-                };
-                let call_iidx = self.push_inst_and_link_local(iid, inst)?;
-                let res_iidx = self.opt.feed(
-                    hir::ExtractVal {
-                        val: call_iidx,
-                        off: 0,
-                        tyidx,
-                    }
-                    .into(),
-                )?;
-                let i1_tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
-                let overflow_iidx = self.opt.feed(
-                    hir::ExtractVal {
-                        val: call_iidx,
-                        off: 32,
-                        tyidx: i1_tyidx,
-                    }
-                    .into(),
-                )?;
-                let call_iidx = self.opt.equiv_iidx(call_iidx);
-                self.call_extractvals
-                    .insert(call_iidx, vec![res_iidx, overflow_iidx]);
-                Ok(())
-            }
             "abs" => {
                 let [src, int_min_poison]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let int_min_poison = if let hir::Inst::Const(hir::Const {
@@ -1852,6 +1789,69 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 self.opt.feed_void(hinst.into()).map(|_| ())
             }
             "prefetch" => Ok(()),
+            "sadd" | "smul" | "uadd" | "usub" | "ssub"
+                if parts[2] == "with" && parts[3] == "overflow" =>
+            {
+                let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
+                let tyidx = self.opt.inst(lhs).tyidx(&*self.opt);
+                assert_eq!(tyidx, self.opt.inst(rhs).tyidx(&*self.opt));
+                let rtn_tyidx = self.opt.push_ty(hir::Ty::Int(64))?;
+                let inst: hir::Inst = match parts[1] {
+                    "sadd" => hir::SAddOverflow {
+                        tyidx: rtn_tyidx,
+                        lhs,
+                        rhs,
+                    }
+                    .into(),
+                    "smul" => hir::SMulOverflow {
+                        tyidx: rtn_tyidx,
+                        lhs,
+                        rhs,
+                    }
+                    .into(),
+                    "uadd" => hir::UAddOverflow {
+                        tyidx: rtn_tyidx,
+                        lhs,
+                        rhs,
+                    }
+                    .into(),
+                    "usub" => hir::USubOverflow {
+                        tyidx: rtn_tyidx,
+                        lhs,
+                        rhs,
+                    }
+                    .into(),
+                    "ssub" => hir::SSubOverflow {
+                        tyidx: rtn_tyidx,
+                        lhs,
+                        rhs,
+                    }
+                    .into(),
+                    _ => unreachable!(),
+                };
+                let call_iidx = self.push_inst_and_link_local(iid, inst)?;
+                let res_iidx = self.opt.feed(
+                    hir::ExtractVal {
+                        val: call_iidx,
+                        off: 0,
+                        tyidx,
+                    }
+                    .into(),
+                )?;
+                let i1_tyidx = self.opt.push_ty(hir::Ty::Int(1))?;
+                let overflow_iidx = self.opt.feed(
+                    hir::ExtractVal {
+                        val: call_iidx,
+                        off: 32,
+                        tyidx: i1_tyidx,
+                    }
+                    .into(),
+                )?;
+                let call_iidx = self.opt.equiv_iidx(call_iidx);
+                self.call_extractvals
+                    .insert(call_iidx, vec![res_iidx, overflow_iidx]);
+                Ok(())
+            }
             "smax" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
