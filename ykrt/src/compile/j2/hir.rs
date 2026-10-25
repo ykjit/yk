@@ -874,6 +874,7 @@ pub(super) enum Inst {
     FPExt,
     FSub,
     FPToSI,
+    FrameAddress,
     Freeze,
     Fshl,
     Guard,
@@ -2864,6 +2865,48 @@ impl InstT for FPToSI {
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
         self.tyidx
+    }
+}
+
+/// Get the current frame's address with the same semantics as `llvm.frameaddress(0)`.
+#[derive(Clone, Debug)]
+pub(super) struct FrameAddress;
+
+impl InstT for FrameAddress {
+    fn assert_well_formed(&self, _m: &dyn ModLikeT, _b: &dyn BlockLikeT, _iidx: InstIdx) {}
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, _opt: &mut T) {}
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, other: &Inst) -> bool {
+        // Since we only implement `llvm.frameaddress(0)`, every instance of `frameaddress` in a
+        // trace will, by definition, return the same value.
+        matches!(other, Inst::FrameAddress(_))
+    }
+
+    fn read_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn write_effects(&self) -> Effects {
+        Effects::none()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::none(b)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut _iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        "frameaddress".to_owned()
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_ptr0()
     }
 }
 
@@ -6446,6 +6489,17 @@ mod test {
     }
 
     #[test]
+    #[should_panic(expected = "%1: inconsistent return / operand types")]
+    fn freeze_must_return_same_type() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i8 = arg [reg]
+          %1: i32 = freeze %0
+        ",
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "%1: inconsistent return / val types")]
     fn fneg_type_consistency() {
         str_to_mod::<DummyReg>(
@@ -7287,17 +7341,6 @@ mod test {
             "
           %0: ptr = arg [reg]
           %1: i64 = zext %0
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "%1: inconsistent return / operand types")]
-    fn freeze_must_return_same_type() {
-        str_to_mod::<DummyReg>(
-            "
-          %0: i8 = arg [reg]
-          %1: i32 = freeze %0
         ",
         );
     }

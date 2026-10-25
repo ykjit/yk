@@ -137,6 +137,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "FPTOSI" "LOCAL" {
       Ok(AstInst::FPToSI { local: $1?.span(), ty: $3?, val: $6?.span() })
     }
+  | "LOCAL" ":" Ty "=" "FRAMEADDRESS" {
+      Ok(AstInst::FrameAddress { local: $1?.span(), ty: $3? })
+    }
   | "LOCAL" ":" Ty "=" "FREEZE" "LOCAL" {
       Ok(AstInst::Freeze { local: $1?.span(), ty: $3?, val: $6?.span() })
     }

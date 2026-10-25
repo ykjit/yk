@@ -546,6 +546,15 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let val = self.p_local(val);
                     self.insts.push(FPToSI { tyidx, val }.into());
                 }
+                AstInst::FrameAddress { local, ty } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    if !matches!(&self.tys[tyidx], Ty::Ptr(0)) {
+                        self.err_span(local, "frameaddress must return a pointer");
+                    }
+
+                    self.insts.push(FrameAddress.into());
+                }
                 AstInst::Freeze { local, ty, val } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -1526,6 +1535,10 @@ enum AstInst {
         local: Span,
         ty: AstTy,
         val: Span,
+    },
+    FrameAddress {
+        local: Span,
+        ty: AstTy,
     },
     Freeze {
         local: Span,
