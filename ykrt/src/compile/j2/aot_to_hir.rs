@@ -1668,6 +1668,20 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
+            "ctlz" => {
+                // We only run on modern architectures where we don't have to worry about `ctlz 0`
+                // being undefined, so we ignore `is_zero_poison`: we always give it a defined
+                // value.
+                let [src, _is_zero_poison]: [hir::InstIdx; 2] =
+                    jargs.into_vec().try_into().unwrap();
+                let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
+                let fty = self.opt.func_ty(ftyidx);
+                let hinst = hir::CtLz {
+                    tyidx: fty.rtn_tyidx,
+                    val: src,
+                };
+                self.push_inst_and_link_local(iid, hinst).map(|_| ())
+            }
             "ctpop" => {
                 let [src]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
                 let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;

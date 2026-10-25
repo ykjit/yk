@@ -981,6 +981,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_copysign(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::CtLz(x) => {
+                    if ra.is_used(iidx) {
+                        self.be.i_ctlz(&mut ra, b, iidx, x)?;
+                    }
+                }
                 Inst::CtPop(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_ctpop(&mut ra, b, iidx, x)?;
@@ -1653,6 +1658,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &CopySign,
+    ) -> Result<(), CompilationError>;
+
+    fn i_ctlz(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &CtLz,
     ) -> Result<(), CompilationError>;
 
     fn i_ctpop(
