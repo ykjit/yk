@@ -5524,7 +5524,7 @@ impl InstT for URem {
     }
 
     fn cse_eq(&self, opt: &dyn EquivIIdxT, other: &Inst) -> bool {
-        if let Inst::SRem(SRem { tyidx, lhs, rhs }) = other
+        if let Inst::URem(URem { tyidx, lhs, rhs }) = other
             && self.tyidx == *tyidx
             && opt.equiv_iidx(self.lhs) == *lhs
             && opt.equiv_iidx(self.rhs) == *rhs

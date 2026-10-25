@@ -192,6 +192,24 @@ mod test {
           blackbox %2
         ",
         );
+
+        test_cse(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = urem %0, %1
+          %3: i8 = urem %0, %1
+          blackbox %2
+          blackbox %3
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = urem %0, %1
+          blackbox %2
+          blackbox %2
+        ",
+        );
     }
 
     #[test]
