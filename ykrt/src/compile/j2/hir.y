@@ -92,6 +92,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "COPYSIGN" "LOCAL" "," "LOCAL" {
       Ok(AstInst::CopySign { local: $1?.span(), ty: $3?, lhs: $6?.span(), rhs: $8?.span() })
     }
+  | "LOCAL" ":" Ty "=" "CTLZ" "LOCAL" {
+      Ok(AstInst::CtLz { local: $1?.span(), ty: $3?, val: $6?.span() })
+    }
   | "LOCAL" ":" Ty "=" "CTPOP" "LOCAL" {
       Ok(AstInst::CtPop { local: $1?.span(), ty: $3?, val: $6?.span() })
     }

@@ -368,6 +368,12 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                     let rhs = self.p_local(rhs);
                     self.insts.push(CopySign { tyidx, lhs, rhs }.into());
                 }
+                AstInst::CtLz { local, ty, val } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let val = self.p_local(val);
+                    self.insts.push(CtLz { tyidx, val }.into());
+                }
                 AstInst::CtPop { local, ty, val } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -1443,6 +1449,11 @@ enum AstInst {
         ty: AstTy,
         lhs: Span,
         rhs: Span,
+    },
+    CtLz {
+        local: Span,
+        ty: AstTy,
+        val: Span,
     },
     CtPop {
         local: Span,

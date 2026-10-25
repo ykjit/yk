@@ -3443,6 +3443,40 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_ctlz(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        CtLz { tyidx: _, val }: &CtLz,
+    ) -> Result<(), CompilationError> {
+        let bitw = b.inst_bitw(self.m, iidx);
+        let [inr, outr] = ra.alloc(
+            self,
+            iidx,
+            [
+                RegCnstr::Input {
+                    in_iidx: *val,
+                    in_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                },
+                RegCnstr::Output {
+                    out_fill: RegCnstrFill::Zeroed,
+                    regs: &NORMAL_GP_REGS,
+                    can_be_same_as_input: true,
+                },
+            ],
+        )?;
+
+        self.asm.push_inst(match bitw {
+            32 => IcedInst::with2(Code::Lzcnt_r32_rm32, outr.to_reg32(), inr.to_reg32()),
+            64 => IcedInst::with2(Code::Lzcnt_r64_rm64, outr.to_reg64(), inr.to_reg64()),
+            x => todo!("{x}"),
+        });
+        Ok(())
+    }
+
     fn i_ctpop(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -8151,6 +8185,39 @@ mod test {
               ; %3: i16 = fshl %0, %1, %2
               shld r.16.x, r.16.y, cl
               ...
+            "],
+        );
+    }
+
+    #[test]
+    fn cg_ctlz() {
+        // i32
+        codegen_and_test(
+            "
+              %0: i32 = arg [reg]
+              %1: i32 = ctlz %0
+              term [%1]
+            ",
+            &["
+              ...
+              ; %1: i32 = ctlz %0
+              lzcnt r.32._, r.32.x
+              ; term [%1]
+            "],
+        );
+
+        // i64
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = ctlz %0
+              term [%1]
+            ",
+            &["
+              ...
+              ; %1: i64 = ctlz %0
+              lzcnt r.64._, r.64.x
+              ; term [%1]
             "],
         );
     }
