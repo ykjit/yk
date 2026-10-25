@@ -1874,6 +1874,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
+            "threadlocal" if parts[2] == "address" => {
+                let [ptr]: [hir::InstIdx; 1] = jargs.into_vec().try_into().unwrap();
+                self.frames.last_mut().unwrap().set_local(iid, ptr);
+                Ok(())
+            }
             "umax" => {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let ftyidx = self.p_ty(self.am.type_(func_tyidx))?;
