@@ -1172,7 +1172,7 @@ impl InstT for Arg {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
@@ -1354,7 +1354,7 @@ impl InstT for BlackBox {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
@@ -2110,7 +2110,7 @@ impl InstT for ExtractVal {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
@@ -3061,7 +3061,7 @@ impl InstT for Guard {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
@@ -3640,7 +3640,7 @@ impl InstT for Load {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
@@ -3784,7 +3784,7 @@ impl InstT for MemCpy {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
@@ -3866,7 +3866,7 @@ impl InstT for MemSet {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
@@ -4902,7 +4902,7 @@ impl InstT for Store {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
@@ -5037,7 +5037,7 @@ impl InstT for Term {
     }
 
     fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
-        panic!();
+        false
     }
 
     fn read_effects(&self) -> Effects {
