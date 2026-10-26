@@ -54,7 +54,6 @@ use crate::{
         jitc_yk::arbbitint::ArbBitInt,
     },
     mt::TraceId,
-    varlocs,
 };
 use array_concat::concat_arrays;
 use iced_x86::{Code, Instruction as IcedInst, MemoryOperand, Register as IcedReg};
@@ -1628,42 +1627,38 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         reg_fill: RegFill,
     ) -> VarLocs<Self::Reg> {
         use yksmp::Location as L;
-        assert_eq!(smp_locs.len(), 1, "Multi-locations not yet supported");
-        match &smp_locs[0] {
-            L::Register(dwarf_reg, _sz, extras) => {
-                let mut vlocs = VarLocs::new();
-                vlocs.push(VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill));
-                for x in extras {
-                    if *x >= 0 {
-                        vlocs.push(VarLoc::Reg(
-                            Reg::from_dwarf_reg(x.cast_unsigned()),
-                            reg_fill,
-                        ));
-                    } else {
-                        vlocs.push(VarLoc::Stack(u32::from(x.unsigned_abs())));
+        // This loop flattens `VarLocs` which are hidden because of `Register` "extras". The
+        // initial `with_capacity` call is a non-strict subset what we'll need, but in _most_ cases
+        // there is a 1:1 mapping, so it's not a bad guess as to the necessary capacity.
+        let mut varlocs = VarLocs::with_capacity(smp_locs.len());
+        for loc in smp_locs {
+            match loc {
+                L::Register(dwarf_reg, _sz, extras) => {
+                    varlocs.push(VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill));
+                    for x in extras {
+                        if *x >= 0 {
+                            varlocs.push(VarLoc::Reg(
+                                Reg::from_dwarf_reg(x.cast_unsigned()),
+                                reg_fill,
+                            ));
+                        } else {
+                            varlocs.push(VarLoc::Stack(-i32::from(*x)));
+                        }
                     }
                 }
-                vlocs
-            }
-            L::Direct(6, off, _sz) => {
-                assert!(*off <= 0);
-                varlocs![VarLoc::StackOff(off.unsigned_abs())]
-            }
-            L::I32(val) => varlocs![VarLoc::Const(ConstKind::Int(ArbBitInt::from_u64(
-                64,
-                i64::from(*val).cast_unsigned()
-            )))],
-            L::U64(val) => {
-                varlocs![VarLoc::Const(ConstKind::Int(ArbBitInt::from_u64(64, *val)))]
-            }
-            L::Indirect(6, off, _sz) => {
-                assert!(*off <= 0);
-                varlocs![VarLoc::Stack(off.unsigned_abs())]
-            }
-            x => {
-                todo!("{:?}", x);
+                L::Direct(6, off, _sz) => varlocs.push(VarLoc::StackOff(-*off)),
+                L::I32(val) => varlocs.push(VarLoc::Const(ConstKind::Int(ArbBitInt::from_u64(
+                    64,
+                    i64::from(*val).cast_unsigned(),
+                )))),
+                L::U64(val) => {
+                    varlocs.push(VarLoc::Const(ConstKind::Int(ArbBitInt::from_u64(64, *val))))
+                }
+                L::Indirect(6, off, _sz) => varlocs.push(VarLoc::Stack(-*off)),
+                x => todo!("{:?}", x),
             }
         }
+        varlocs
     }
 
     fn tmp_reg_from_vlocs(vlocs: &[VarLocs<Self::Reg>]) -> Self::Reg {
@@ -1955,7 +1950,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
-    fn move_stackoff(&mut self, reg: Self::Reg, stack_off: u32) -> Result<(), CompilationError> {
+    fn move_stackoff(&mut self, reg: Self::Reg, stack_off: i32) -> Result<(), CompilationError> {
         self.asm.push_inst(IcedInst::with2(
             Code::Lea_r64_m,
             reg.to_reg64(),
@@ -2072,7 +2067,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         &mut self,
         reg: Reg,
         in_fill: RegFill,
-        stack_off: u32,
+        stack_off: i32,
         bitw: u32,
     ) -> Result<(), CompilationError> {
         let mop = MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(stack_off));
@@ -2123,7 +2118,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
     fn unspill(
         &mut self,
-        stack_off: u32,
+        stack_off: i32,
         reg: Self::Reg,
         out_fill: RegFill,
         bitw: u32,
@@ -2179,8 +2174,8 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     fn move_stack_val_at_term(
         &mut self,
         bitw: u32,
-        src_stack_off: u32,
-        dst_stack_off: u32,
+        src_stack_off: i32,
+        dst_stack_off: i32,
         tmpr: Self::Reg,
     ) {
         match bitw {
@@ -2465,7 +2460,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             IcedReg::RBP,
         ));
         for (reg, fill, stack_off, bitw) in deopt_spills.iter().rev() {
-            self.spill(*reg, *fill, *stack_off, *bitw)?;
+            self.spill(*reg, *fill, (*stack_off).try_into().unwrap(), *bitw)?;
         }
 
         // 2: The patachable JMP. Initially the pointer stored at this address will be

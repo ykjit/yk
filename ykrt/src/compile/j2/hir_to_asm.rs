@@ -716,7 +716,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                                 let bitw = gblock.inst_bitw(self.m, *term_iidx);
                                 let off = ra.spill_space_for(&self.be, bitw);
                                 deopt_spills.push((*reg, *fill, off, bitw));
-                                VarLoc::Stack(off)
+                                VarLoc::Stack(off.try_into().unwrap())
                             }
                         })
                         .to_owned();
@@ -1473,7 +1473,7 @@ pub(super) trait HirToAsmBackend {
     ) -> Result<(), CompilationError>;
 
     /// Move the [super::regalloc::VarLoc::StackOff] address `stack_off` into `reg`.
-    fn move_stackoff(&mut self, reg: Self::Reg, stack_off: u32) -> Result<(), CompilationError>;
+    fn move_stackoff(&mut self, reg: Self::Reg, stack_off: i32) -> Result<(), CompilationError>;
 
     /// Adjust `dst_bitw` bits of `reg` from `src_fill` to `dst_fill`.
     fn arrange_fill(&mut self, reg: Self::Reg, src_fill: RegFill, dst_bitw: u32, dst_fill: RegFill);
@@ -1505,14 +1505,14 @@ pub(super) trait HirToAsmBackend {
         &mut self,
         reg: Self::Reg,
         in_fill: RegFill,
-        stack_off: u32,
+        stack_off: i32,
         bitw: u32,
     ) -> Result<(), CompilationError>;
 
     /// Unspill `bitw` bits from `stack_off` to `reg` with a fill of `out_fill`.
     fn unspill(
         &mut self,
-        stack_off: u32,
+        stack_off: i32,
         reg: Self::Reg,
         out_fill: RegFill,
         bitw: u32,
@@ -1523,8 +1523,8 @@ pub(super) trait HirToAsmBackend {
     fn move_stack_val_at_term(
         &mut self,
         bitw: u32,
-        src_stack_off: u32,
-        dst_stack_off: u32,
+        src_stack_off: i32,
+        dst_stack_off: i32,
         tmp_reg: Self::Reg,
     );
 
@@ -2371,7 +2371,7 @@ mod test {
             &mut self,
             reg: Self::Reg,
             in_fill: RegFill,
-            stack_off: u32,
+            stack_off: i32,
             bitw: u32,
         ) -> Result<(), CompilationError> {
             self.log.push(format!(
