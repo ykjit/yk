@@ -82,7 +82,7 @@ pub(super) struct RegAlloc<'a, AB: HirToAsmBackend + ?Sized> {
     rstates: RStates<AB::Reg>,
     /// Pending stack operations. Eventually this should be "the stack state" in the same manner as
     /// [Self::rstates].
-    stack_inputs: Vec<(InstIdx, u32)>,
+    stack_inputs: Vec<(InstIdx, i32)>,
     /// The offset of the current stack: this must be exactly equal to the end of the last byte
     /// used in the stack.
     stack_off: u32,
@@ -109,6 +109,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             for vloc in vlocs.iter() {
                 match vloc {
                     VarLoc::Stack(stack_off) => {
+                        // This assert (and the one below) will need to be relaxed when we support
+                        // multiple stack locations.
                         assert_eq!(istates[iidx], IState::None);
                         istates[iidx] = IState::Stack(*stack_off);
                     }
@@ -433,8 +435,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     IState::None => {
                         let off = be.align_spill(self.stack_off, bitw);
                         self.stack_off = off;
-                        self.istates[iidx] = IState::Stack(off);
-                        off
+                        self.istates[iidx] = IState::Stack(off.try_into().unwrap());
+                        off.try_into().unwrap()
                     }
                     IState::StackOff(_) => unreachable!(),
                 };
@@ -486,7 +488,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     .set_fill_iidxs(reg, RegFill::Undefined, smallvec![*iidx]);
             } else {
                 self.stack_off = be.align_spill(self.stack_off, self.b.inst_bitw(self.m, *iidx));
-                self.istates[*iidx] = IState::Stack(self.stack_off);
+                self.istates[*iidx] = IState::Stack(self.stack_off.try_into().unwrap());
             }
         }
         self.vlocs_from_iidxs(self.b.term_vars())
@@ -646,8 +648,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     let stack_off = be.align_spill(self.stack_off, max_bitw);
                     self.stack_off = stack_off;
                     assert_eq!(self.istates[unspill_iidx], IState::None);
-                    self.istates[unspill_iidx] = IState::Stack(stack_off);
-                    stack_off
+                    self.istates[unspill_iidx] = IState::Stack(stack_off.try_into().unwrap());
+                    stack_off.try_into().unwrap()
                 }
                 IState::Stack(stack_off) => stack_off,
                 IState::StackOff(_) => unreachable!(),
@@ -690,7 +692,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     let bitw = self.b.inst_bitw(self.m, *iidx);
                     let stack_off = be.align_spill(self.stack_off, bitw);
                     self.stack_off = stack_off;
-                    self.istates[*iidx] = IState::Stack(stack_off);
+                    self.istates[*iidx] = IState::Stack(stack_off.try_into().unwrap());
                 }
             }
         }
@@ -738,7 +740,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
     /// Note: just because something is stored on the stack doesn't mean that it isn't also
     /// available in a register! This function is quite literal in how it interprets "is `iidx`
     /// stored on the stack?"
-    pub(super) fn is_on_stack(&self, iidx: InstIdx) -> Option<u32> {
+    pub(super) fn is_on_stack(&self, iidx: InstIdx) -> Option<i32> {
         if let IState::Stack(off) = self.istates[iidx] {
             Some(off)
         } else {
@@ -1141,7 +1143,8 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         if !found && !matches!(self.b.inst(*ka_iidx), Inst::Const(_)) {
                             let ka_bitw = self.b.inst_bitw(self.m, *ka_iidx);
                             self.stack_off = be.align_spill(self.stack_off, ka_bitw);
-                            self.istates[*ka_iidx] = IState::Stack(self.stack_off);
+                            self.istates[*ka_iidx] =
+                                IState::Stack(self.stack_off.try_into().unwrap());
                         }
                     }
                     self.is_used.set((*ka_iidx).to_raw_index(), true);
@@ -1170,7 +1173,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     let bytes = self.b.inst_bitw(self.m, *arg).div_ceil(8);
                     assert!(bytes <= *size, "stack argument does not fit in its slot");
                     self.is_used.set(arg.to_raw_index(), true);
-                    self.stack_inputs.push((*arg, off));
+                    self.stack_inputs.push((*arg, off.try_into().unwrap()));
                     off -= size;
                 }
             }
@@ -1654,10 +1657,10 @@ enum IState {
     None,
     /// The variable's value will be stored on the stack at `off` bytes from the base pointer.
     /// See [VarLoc::Stack] for more details.
-    Stack(u32),
+    Stack(i32),
     /// The variable's value is a pointer into the stack. See [VarLoc::StackOff] for more
     /// details.
-    StackOff(u32),
+    StackOff(i32),
 }
 
 #[derive(Clone, Debug)]
@@ -1901,14 +1904,18 @@ impl<Reg: RegT> FromIterator<VarLoc<Reg>> for VarLocs<Reg> {
 /// more than one place so [VarLocs] should be used for such cases.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum VarLoc<Reg> {
-    /// The variable's value is stored on the stack at `off` bytes from the base pointer. Whether
-    /// `off` is "above" or "below" the base pointer is system dependent.
-    Stack(u32),
+    /// The variable's value is stored on the stack at `off` bytes from the frame pointer. Whether
+    /// `off` is "above" or "below" the frame pointer is system dependent. On currently supported
+    /// platforms:
+    ///
+    /// * x64: positive offsets are below RBP and negative offsets are (incoming) arguments on the
+    ///   stack.
+    Stack(i32),
     /// The variable's value is a pointer into the stack. This is an optimisation (what LLVM
     /// stackmaps call a `Direct`) that allows us to turn a seemingly arbitrary value into a
-    /// semi-constant. The pointer is `off` bytes from the base pointer. Whether `off` is "above"
-    /// or "below" the base pointer is system dependent.
-    StackOff(u32),
+    /// semi-constant. The pointer is `off` bytes from the base pointer. See [Self::Stack]
+    /// for the semantics of the `i32`.
+    StackOff(i32),
     /// The variable's value is stored in a register with the given fill.
     Reg(Reg, RegFill),
     /// The variable's value is a constant.
@@ -2578,7 +2585,7 @@ pub(crate) mod test {
             &mut self,
             reg: Self::Reg,
             in_fill: RegFill,
-            stack_off: u32,
+            stack_off: i32,
             bitw: u32,
         ) -> Result<(), CompilationError> {
             self.ra_log.push(format!(
@@ -2589,7 +2596,7 @@ pub(crate) mod test {
 
         fn unspill(
             &mut self,
-            stack_off: u32,
+            stack_off: i32,
             reg: Self::Reg,
             out_fill: RegFill,
             bitw: u32,
@@ -2603,8 +2610,8 @@ pub(crate) mod test {
         fn move_stack_val_at_term(
             &mut self,
             bitw: u32,
-            src_stack_off: u32,
-            dst_stack_off: u32,
+            src_stack_off: i32,
+            dst_stack_off: i32,
             tmp_reg: Self::Reg,
         ) {
             self.ra_log.push(format!(

@@ -184,13 +184,13 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             }
             VarLoc::Stack(off) => unsafe {
                 std::ptr::copy_nonoverlapping(
-                    faddr.byte_sub(usize::try_from(*off).unwrap()),
+                    faddr.byte_offset(-isize::try_from(*off).unwrap()),
                     promotions.as_mut_ptr(),
                     promotions_len,
                 );
             },
             VarLoc::StackOff(off) => unsafe {
-                let addr = faddr.byte_sub(usize::try_from(*off).unwrap()) as u64;
+                let addr = faddr.byte_offset(-isize::try_from(*off).unwrap()) as u64;
                 promotions = addr.to_ne_bytes();
             },
             _ => unreachable!(),
@@ -254,6 +254,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             &mut fp_regs,
             faddr,
             faddr,
+            faddr,
         );
         deoptlen += 8;
         rsp = unsafe { rsp.sub(8) };
@@ -265,7 +266,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     let mut deopt_vars_off = guard.deopt_frames[0].pc_statepoint.lives.len();
 
     // Deal with all the remaining frames: we create each of these from scratch.
-    for frame in guard.deopt_frames.iter().skip(1) {
+    for (frame_idx, frame) in guard.deopt_frames.iter().enumerate().skip(1) {
         let (smap, prologue) = aot_smaps.get(frame.pc_statepoint.smapidx);
 
         // How much room does this frame need?
@@ -318,6 +319,9 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             &mut gp_regs,
             &mut fp_regs,
             faddr,
+            // The first frame after the control point frame has incoming arguments from the
+            // control point frame.
+            if frame_idx == 1 { prev_faddr } else { rbp },
             rbp,
         );
         deopt_vars_off += frame.pc_statepoint.lives.len();
@@ -370,15 +374,24 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     unsafe { __yk_j2_replace_stack(fdst, stkptr.byte_add(stklen).byte_sub(deoptlen), deoptlen) };
 }
 
-/// Reconstruct the stack for a frame, reading from the control point frame `cpfaddr` and writing
-/// to `toaddr`. Note: these two addresses can be the same.
+/// Reconstruct a frame, reading from the control point frame `srcaddr` and writing to `tgtaddr`.
+/// `stargsaddr` is the address that arguments passed on the stack should be written to.
 fn reconstruct(
     varlocs: &[DeoptVar<Reg>],
     gp_regs: &mut [u64; DeoptGpReg::COUNT],
     fp_regs: &mut [u64; DeoptFpReg::COUNT],
     srcaddr: *const u8,
+    stargsaddr: *mut u8,
     tgtaddr: *mut u8,
 ) {
+    let stack_off_to_addr = |off: i32| {
+        // See [crate::compile::j2::regalloc::VarLoc::Stack] for the semantics of `off`.
+        if off < 0 {
+            unsafe { stargsaddr.byte_offset(-isize::try_from(off).unwrap()) }
+        } else {
+            unsafe { tgtaddr.byte_offset(-isize::try_from(off).unwrap()) }
+        }
+    };
     for DeoptVar {
         bitw,
         deopt_fromvlocs,
@@ -394,7 +407,7 @@ fn reconstruct(
             33..=64 => {
                 let v = match fromvloc {
                     VarLoc::Stack(off) => unsafe {
-                        (srcaddr.byte_sub(usize::try_from(*off).unwrap()) as *const u64).read()
+                        (srcaddr.byte_offset(-isize::try_from(*off).unwrap()) as *const u64).read()
                     },
                     VarLoc::StackOff(_) => todo!(),
                     VarLoc::Reg(_, _) => todo!(),
@@ -409,7 +422,7 @@ fn reconstruct(
                 for vloc in tovlocs.iter() {
                     match vloc {
                         VarLoc::Stack(off) => unsafe {
-                            (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u64).write(v);
+                            (stack_off_to_addr(*off) as *mut u64).write(v);
                         },
                         VarLoc::StackOff(_) => (),
                         VarLoc::Reg(reg, fill) => {
@@ -428,7 +441,7 @@ fn reconstruct(
             17..=32 => {
                 let v = match fromvloc {
                     VarLoc::Stack(off) => unsafe {
-                        (srcaddr.byte_sub(usize::try_from(*off).unwrap()) as *const u32).read()
+                        (srcaddr.byte_offset(-isize::try_from(*off).unwrap()) as *const u32).read()
                     },
                     VarLoc::StackOff(_) => todo!(),
                     VarLoc::Reg(_, _) => todo!(),
@@ -443,7 +456,7 @@ fn reconstruct(
                 for vloc in tovlocs.iter() {
                     match vloc {
                         VarLoc::Stack(off) => unsafe {
-                            (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u32).write(v);
+                            (stack_off_to_addr(*off) as *mut u32).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
                         VarLoc::Reg(reg, fill) => {
@@ -462,7 +475,7 @@ fn reconstruct(
             9..=16 => {
                 let v = match fromvloc {
                     VarLoc::Stack(off) => unsafe {
-                        (srcaddr.byte_sub(usize::try_from(*off).unwrap()) as *const u16).read()
+                        (srcaddr.byte_offset(-isize::try_from(*off).unwrap()) as *const u16).read()
                     },
                     VarLoc::StackOff(_) => todo!(),
                     VarLoc::Reg(_, _) => todo!(),
@@ -477,7 +490,7 @@ fn reconstruct(
                         VarLoc::Stack(off) => unsafe {
                             // FIXME: We don't know if we're overwriting a value deopt
                             // needs to later read!
-                            (tgtaddr.byte_sub(usize::try_from(*off).unwrap()) as *mut u16).write(v);
+                            (stack_off_to_addr(*off) as *mut u16).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
                         VarLoc::Reg(reg, fill) => {
@@ -492,7 +505,7 @@ fn reconstruct(
             1..=8 => {
                 let v = match fromvloc {
                     VarLoc::Stack(off) => unsafe {
-                        srcaddr.byte_sub(usize::try_from(*off).unwrap()).read()
+                        srcaddr.byte_offset(-isize::try_from(*off).unwrap()).read()
                     },
                     VarLoc::StackOff(_) => todo!(),
                     VarLoc::Reg(_, _) => todo!(),
@@ -507,7 +520,7 @@ fn reconstruct(
                         VarLoc::Stack(off) => unsafe {
                             // FIXME: We don't know if we're overwriting a value deopt
                             // needs to later read!
-                            tgtaddr.byte_sub(usize::try_from(*off).unwrap()).write(v);
+                            stack_off_to_addr(*off).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
                         VarLoc::Reg(reg, fill) => {

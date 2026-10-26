@@ -1232,13 +1232,13 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                 AstVLoc::Stack(span) => VarLoc::Stack(
                     self.lexer
                         .span_str(span)
-                        .parse::<u32>()
+                        .parse::<i32>()
                         .unwrap_or_else(|e| self.err_span(span, &e.to_string())),
                 ),
                 AstVLoc::StackOff(span) => {
                     let s = self.lexer.span_str(span);
                     let stack_off = s
-                        .parse::<u32>()
+                        .parse::<i32>()
                         .unwrap_or_else(|e| self.err_span(span, &format!("Invalid StackOff: {e}")));
                     VarLoc::StackOff(stack_off)
                 }
@@ -1287,14 +1287,14 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                 AstVLoc::Stack(span) => {
                     let s = self.lexer.span_str(span);
                     let stack_off = s
-                        .parse::<u32>()
+                        .parse::<i32>()
                         .unwrap_or_else(|e| self.err_span(span, &format!("Invalid Stack: {e}")));
                     VarLoc::Stack(stack_off)
                 }
                 AstVLoc::StackOff(span) => {
                     let s = self.lexer.span_str(span);
                     let stack_off = s
-                        .parse::<u32>()
+                        .parse::<i32>()
                         .unwrap_or_else(|e| self.err_span(span, &format!("Invalid StackOff: {e}")));
                     VarLoc::StackOff(stack_off)
                 }
