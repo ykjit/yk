@@ -13,7 +13,7 @@
 ;         *%0_0 = 0i8, volatile
 ;         *%0_0 = 0i8
 ;         *%0_0 = 0i8
-;         unimplemented <<  store i16 0, ptr %0, align 1>>
+;         *%0_0 = 0i16
 ;         ret
 ;     }
 ;     ...

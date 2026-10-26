@@ -35,9 +35,8 @@
 ;         %{{_}}: ?ty<<4 x i1>> = unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer, ...
 ;         br bb{{_}}
 ;     bb{{_}}:
-;         %{{_}}: i32 = load %0_0
+;         %{{_}}: i32 = unimplemented <<  %{{_}} = load atomic i32, ptr %{{_}} acquire, align 4, ...
 ;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4 <note: addrspace>>>
-;         %{{_}}: i32 = load %0_0
 ;         br ...
 ;         ...
 ;       %{{_}}: float = unimplemented <<  %{{_}} = phi nsz float...
@@ -45,7 +44,6 @@
 ;     bb{{_}}:
 ;       unimplemented <<  store atomic i32 0, ptr %0 release, align 4, ...
 ;       unimplemented <<  store i32 0, ptr addrspace(10) %5, align 4 <note: addrspace>>>
-;       unimplemented <<  store i32 0, ptr %0, align 2>>
 ;       ret
 ;     }
 ;     ...
@@ -136,8 +134,6 @@ loads:
   %load_atom = load atomic i32, ptr %ptr acquire, align 4
   ; loads from exotic address spaces
   %load_aspace = load i32, ptr addrspace(10) %asptr
-  ; potentially misaligned loads
-  %load_misalign = load i32, ptr %ptr, align 2
   ; stackmap stops loads from being optimised out.
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0)
   br label %phi_setup1
@@ -160,7 +156,5 @@ stores:
   store atomic i32 0, ptr %ptr release, align 4
   ; stores into exotic address spaces
   store i32 0, ptr addrspace(10) %asptr
-  ; potentially misaligned stores
-  store i32 0, ptr %ptr, align 2
   ret void
 }
