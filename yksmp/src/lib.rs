@@ -107,10 +107,8 @@ pub enum Location {
 pub struct PrologueInfo {
     /// Describes whether or not the function uses a base pointer.
     pub hasfp: bool,
-    /// A list of callee-saved registers, saved as (register, index) pairs, where:
-    /// * register: the original register where a value was stored
-    /// * index: the spill index (can be turned into an offset by multiplying with the register
-    ///   size)
+    /// A list of `(callee-saved-register, offset)` pairs where `offset` is a signed byte offset
+    /// relative to the frame pointer.
     pub csrs: Vec<(u16, i32)>,
 }
 
