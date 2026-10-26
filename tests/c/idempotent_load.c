@@ -1,21 +1,29 @@
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
-//   env-var: YKD_LOG_IR=hir
+//   env-var: YKD_LOG_IR=aot,hir
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
 //     4: 97 97
 //     yk-tracing: stop-tracing
+//     --- Begin aot ---
+//     ...
+//     %{{11_1}}: i8 = call idempotent __yk_idempotent_load_uint8_t(%{{_}})
+//     ...
+//     %{{17_2}}: i32 = zext %{{11_1}}, i32
+//     ...
+//     %{{_}}: i32 = call fprintf(%{{_}}, @.str.1, %{{_}}, %{{17_2}}, %{{_}})
+//     ...
+//     --- End aot ---
 //     --- Begin hir ---
 //     ...
-//     %{{6}}: i8 = call %{{_}}(%{{_}}) ; @__yk_idempotent_load_uint8_t
+//     %{{13}}: i32 = load %1
+//     %{{14}}: i32 = zext %{{5}}
+//     %{{15}}: i32 = 97
 //     ...
-//     %{{16}}: i32 = zext %{{6}}
-//     %{{17}}: i32 = 97
-//     ...
-//     %20: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{_}}, %{{16}}, %{{17}}) ; @fprintf
+//     %{{_}}: i32 = call %{{_}}(%{{_}}, %{{_}}, %{{13}}, %{{14}}, %{{15}}) ; @fprintf
 //     ...
 //     --- End hir ---
 //     3: 97 97
