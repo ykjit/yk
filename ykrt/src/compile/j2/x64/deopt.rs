@@ -297,26 +297,16 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             gp_regs[DeoptGpReg::RBP.idx()] = prev_faddr as u64;
         }
 
-        // Now we write any callee-saved registers onto the new stack. Note, that if we have
-        // pushed RBP above (which includes adjusting RBP) we need to temporarily re-adjust our
-        // pointer. This is because the CSR index calculates from the bottom of the frame, not
-        // from RBP. For example, a typical prologue looks like this:
-        //   push rbp
-        //   mov rbp, rsp
-        //   push rbx     # this has index -2
-        //   push r14     # this has index -3
-        for (dwarf_reg, idx) in &prologue.csrs {
-            assert!(*idx < 0);
-            let mut off = usize::try_from(idx.abs()).unwrap() * 8;
-            if prologue.hasfp {
-                off -= 8;
-            }
+        // Restore callee-saved registers.
+        for (dwarf_reg, off) in &prologue.csrs {
             let reg = Reg::from_dwarf_reg(*dwarf_reg);
             if reg.is_gp() {
                 let deoptreg = DeoptGpReg::try_from(reg).unwrap();
                 let v = gp_regs[deoptreg.idx()];
                 unsafe {
-                    (rbp as *mut u64).byte_sub(off).write(v);
+                    (rbp as *mut u64)
+                        .byte_offset(isize::try_from(*off).unwrap())
+                        .write(v);
                 }
             } else {
                 todo!();
