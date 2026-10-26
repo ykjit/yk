@@ -1302,6 +1302,25 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             for _ in 0..self.am.type_(fty.ret_ty()).bytew() {
                 let _ = self.promotions_iter.next().unwrap();
             }
+
+            if func.name().starts_with("__yk_idempotent_load") {
+                // yk_idempotent_load can become a normal load inside a trace even if its arguments
+                // weren't promoted.
+                assert_eq!(jargs.len(), 1);
+                let tyidx = self.p_ty(self.am.type_(fty.ret_ty()))?;
+                self.push_inst_and_link_local(
+                    iid,
+                    hir::Load {
+                        tyidx,
+                        ptr: jargs[0],
+                        is_volatile: false,
+                    },
+                )?;
+                match self.outline_until(bid)? {
+                    OutliningKind::SuccessorFound => return Ok(CallProcessedKind::Outlined),
+                    OutliningKind::DidNotFindSuccessor => unreachable!(),
+                }
+            }
         }
 
         if !func.is_declaration()
