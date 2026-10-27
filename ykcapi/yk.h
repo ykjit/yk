@@ -62,6 +62,8 @@ void yk_mt_sidetrace_threshold_set(YkMT *, YkHotThreshold);
 // tracing the code and (2) not in JIT compiled code. During trace
 // optimisation, calls to this function will be fully optimised away.
 bool yk_is_interpreting();
+#define yk_is_interpreting() \
+    ((bool)__builtin_expect((yk_is_interpreting)(), 1))
 
 // Create a new `YkLocation`.
 //
