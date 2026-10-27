@@ -678,7 +678,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             Ty::Func(_func_ty) => todo!(),
             Ty::Struct(_struct_ty) => todo!(),
             Ty::Float(_float_ty) => todo!(),
-            Ty::Unimplemented(_) => todo!(),
+            Ty::Unimplemented(x) => {
+                Err(CompilationError::General(format!("Unimplemented type {x}")))
+            }
         }
     }
 
@@ -852,10 +854,16 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 hir::Ty::Func(Box::new(fty))
             }
-            Ty::Struct(_ty) => todo!(),
+            Ty::Struct(ty) => {
+                return Err(CompilationError::General(format!(
+                    "Struct type {ty:?} not yet supported"
+                )));
+            }
             Ty::Float(FloatTy::Double) => hir::Ty::Double,
             Ty::Float(FloatTy::Float) => hir::Ty::Float,
-            Ty::Unimplemented(_) => todo!(),
+            Ty::Unimplemented(x) => {
+                return Err(CompilationError::General(format!("Unimplemented type {x}")));
+            }
         };
         self.opt.push_ty(tyidx)
     }
@@ -1935,7 +1943,9 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 };
                 self.push_inst_and_link_local(iid, hinst).map(|_| ())
             }
-            n => todo!("{name} ('{n}')"),
+            n => Err(CompilationError::General(format!(
+                "Unsupported LLVM intrinsic {n}"
+            ))),
         }
     }
 
