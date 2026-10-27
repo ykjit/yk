@@ -5460,8 +5460,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         let bitw = b.inst_bitw(self.m, *lhs);
         assert_eq!(bitw, b.inst_bitw(self.m, *rhs));
         let in_fill = match bitw {
-            32 | 64 => RegCnstrFill::Undefined,
+            8 | 16 | 32 | 64 => RegCnstrFill::Undefined,
             x => todo!("{x}"),
+        };
+        let out_fill = if bitw < 32 {
+            RegCnstrFill::Undefined
+        } else {
+            RegCnstrFill::Zeroed
         };
         if let Some(0) = self.sign_ext_op_for_imm32(b, *lhs) {
             let [rhsr] = ra.alloc(
@@ -5470,20 +5475,16 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *rhs,
                     in_fill,
-                    out_fill: RegCnstrFill::Zeroed,
+                    out_fill,
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
 
-            match bitw {
-                64 => self
-                    .asm
-                    .push_inst(IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64())),
-                32 => self
-                    .asm
-                    .push_inst(IcedInst::with1(Code::Neg_rm32, rhsr.to_reg32())),
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with1(Code::Neg_rm32, rhsr.to_reg32()),
+                64 => IcedInst::with1(Code::Neg_rm64, rhsr.to_reg64()),
                 x => todo!("{x}"),
-            }
+            });
         } else if let Some(imm) = self.sign_ext_op_for_imm32(b, *rhs) {
             let [lhsr] = ra.alloc(
                 self,
@@ -5491,22 +5492,16 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 [RegCnstr::InputOutput {
                     in_iidx: *lhs,
                     in_fill,
-                    out_fill: RegCnstrFill::Zeroed,
+                    out_fill,
                     regs: &NORMAL_GP_REGS,
                 }],
             )?;
 
-            match bitw {
-                64 => {
-                    self.asm
-                        .push_inst(IcedInst::with2(Code::Sub_rm64_imm32, lhsr.to_reg64(), imm))
-                }
-                32 => {
-                    self.asm
-                        .push_inst(IcedInst::with2(Code::Sub_rm32_imm32, lhsr.to_reg32(), imm))
-                }
+            self.asm.push_inst(match bitw {
+                1..=32 => IcedInst::with2(Code::Sub_rm32_imm32, lhsr.to_reg32(), imm),
+                64 => IcedInst::with2(Code::Sub_rm64_imm32, lhsr.to_reg64(), imm),
                 x => todo!("{x}"),
-            }
+            });
         } else {
             self.i_binop(
                 ra,
@@ -5522,11 +5517,13 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                     }
                 },
                 |bitw, lhsr, rhsr| match bitw {
-                    32 => IcedInst::with2(Code::Sub_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                    1..=32 => IcedInst::with2(Code::Sub_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
                     64 => IcedInst::with2(Code::Sub_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
                     x => todo!("{x}"),
                 },
                 |bitw, lhsr, rhsmemop| match bitw {
+                    8 => IcedInst::with2(Code::Sub_r8_rm8, lhsr.to_reg8(), rhsmemop),
+                    16 => IcedInst::with2(Code::Sub_r16_rm16, lhsr.to_reg16(), rhsmemop),
                     32 => IcedInst::with2(Code::Sub_r32_rm32, lhsr.to_reg32(), rhsmemop),
                     64 => IcedInst::with2(Code::Sub_r64_rm64, lhsr.to_reg64(), rhsmemop),
                     x => todo!("{x}"),
@@ -12832,6 +12829,86 @@ mod test {
 
     #[test]
     fn cg_sub() {
+        // i8
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
+              %2: i8 = sub %0, %1
+              term [%0, %2]
+            ",
+            &["
+              ...
+              ; %2: i8 = sub %0, %1
+              sub r.32.x, r.32.y
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 0
+              %2: i8 = sub %1, %0
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i8 = sub %1, %0
+              neg r.32._
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 32
+              %2: i8 = sub %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i8 = sub %0, %1
+              sub r.32.x, 0x20
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = 0xFF
+              %2: i8 = sub %0, %1
+              term [%2]
+            ",
+            &["
+              ...
+              ; %2: i8 = sub %0, %1
+              sub r.32.x, 0xFFFFFFFF
+              ...
+            "],
+        );
+
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: ptr = arg [reg]
+              %2: i8 = load %1
+              %3: i8 = sub %0, %2
+              term [%3, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: i8 = arg [Reg("r.64.x", Undefined)]
+              ; %1: ptr = arg [Reg("r.64.y", Undefined)]
+              ; %2: i8 = load %1
+              ; %3: i8 = sub %0, %2
+              sub r.8.x, [r.64.y]
+              ; term [%3, %1]
+            "#],
+        );
+
         // i32
         codegen_and_test(
             "
