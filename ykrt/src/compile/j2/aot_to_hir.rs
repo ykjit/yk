@@ -54,9 +54,6 @@ use std::{
     },
 };
 
-/// The symbol name of the global variable pointers array.
-const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
-
 /// When tracing, how many times can a given function appear in the frame stack before we stop
 /// inlining it?
 const RECURSE_THRESHOLD: usize = 5;

@@ -9,7 +9,10 @@ mod int_signs;
 
 pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
     let ir_slice = yk_ir_section().unwrap();
-    aot_ir::deserialise_module(ir_slice).unwrap()
+    let mut modu = aot_ir::deserialise_module(ir_slice).unwrap();
+    modu.eval_globaldecls();
+    modu.eval_constexprs();
+    modu
 });
 
 pub(crate) fn yk_ir_section() -> Result<&'static [u8], Box<dyn Error>> {
