@@ -3,6 +3,7 @@
 
 #include <setjmp.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
 
@@ -165,10 +166,15 @@ int yk_pthread_create(
 __attribute__((noreturn))
 void yk_longjmp(jmp_buf env, int val);
 
+// Set the process-wide shadow stack size (in bytes) for future pthreads.
+void yk_set_default_shadowstack_size(size_t size);
+
+// Call `closure` for each running thread's shadowstack. It is guaranteed that
+// the shadowstack passed to `closure` on each call is valid for the duration
+// of `closure`. `closure` must therefore not start additional threads / kill
+// threads (etc).
 void yk_foreach_shadowstack(void (*closure)(void* shadow_start, void* shadow_end));
 
 void yk_thread_shadowstack_bounds(void **start, void **end);
-
-void yk_init(void);
 
 #endif
