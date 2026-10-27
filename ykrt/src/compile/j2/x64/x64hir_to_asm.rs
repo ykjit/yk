@@ -1634,13 +1634,25 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         for loc in smp_locs {
             match loc {
                 L::Register(dwarf_reg, _sz, extras) => {
-                    varlocs.push(VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill));
+                    // Dwarf register 6 is RBP which can appear e.g. because of
+                    // __builtin_frame_address(0). We can't use RBP directly as it doesn't appear in
+                    // NORMAL_GP_REGS but fortunately we can translate it to StackOff(0) which has the
+                    // same semantic effect.
+                    if *dwarf_reg == 6 {
+                        varlocs.push(VarLoc::StackOff(0));
+                    } else {
+                        varlocs.push(VarLoc::Reg(Reg::from_dwarf_reg(*dwarf_reg), reg_fill));
+                    }
                     for x in extras {
                         if *x >= 0 {
-                            varlocs.push(VarLoc::Reg(
-                                Reg::from_dwarf_reg(x.cast_unsigned()),
-                                reg_fill,
-                            ));
+                            if *x == 6 {
+                                varlocs.push(VarLoc::StackOff(0));
+                            } else {
+                                varlocs.push(VarLoc::Reg(
+                                    Reg::from_dwarf_reg(x.cast_unsigned()),
+                                    reg_fill,
+                                ));
+                            }
                         } else {
                             varlocs.push(VarLoc::Stack(-i32::from(*x)));
                         }
