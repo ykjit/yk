@@ -52,7 +52,7 @@ const FORMAT_VERSION: u32 = 0;
 const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 
 /// The symbol name of the global variable pointers array.
-pub(crate) const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
+const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
 /// A struct identifying a line in a source file.
 #[derive(Debug)]
@@ -2402,6 +2402,16 @@ impl GlobalDecl {
     // necessarily constant though (global variables can be mutable).
     pub(crate) fn constval(&self) -> &ConstVal {
         self.eval.as_ref().unwrap()
+    }
+
+    /// Return the resolved address of the global.
+    ///
+    /// # Panics
+    ///
+    /// If `self` is a thread local.
+    pub(crate) fn addr(&self) -> usize {
+        assert!(!self.is_threadlocal);
+        usize::from_ne_bytes(self.constval().bytes().try_into().unwrap())
     }
 }
 

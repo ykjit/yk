@@ -84,13 +84,6 @@ pub(super) struct AotToHir<'a, Reg: RegT> {
     /// Iff debugstrs output is requested, we have to create part of this in [AotToHir::new],
     /// storing it here with `Some(...)`. Otherwise this will be `None`.
     debug_strs_joined: Option<String>,
-    /// The virtual address of the global variable pointer array.
-    ///
-    /// This is an array added to the LLVM AOT module by ykllvm containing a pointer to each global
-    /// variable in the AOT module. The indices of the elements correspond with
-    /// [aot_ir::GlobalDeclIdx]s. Note: this array is not available during testing, since tests are
-    /// not built with ykllvm.
-    globals: &'static [*const ()],
     opt: Box<dyn OptT>,
     /// Initially set to `None` until we find the locations for this trace's arguments.
     frames: Vec<Frame>,
@@ -119,12 +112,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     where
         I: Iterator<Item = &'a str> + Clone,
     {
-        let globals = {
-            let ptr = j2.dlsym(GLOBAL_PTR_ARRAY_SYM, false).unwrap().0 as *const *const ();
-            assert!(!ptr.is_null());
-            unsafe { std::slice::from_raw_parts(ptr, am.global_decls_len()) }
-        };
-
         let opt = if mt.opt_level() == 0 {
             Box::new(NoOpt::new()) as Box<dyn OptT>
         } else {
@@ -149,7 +136,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             promotions_iter,
             debug_strs_iter,
             debug_strs_joined,
-            globals,
             opt,
             frames: Vec::new(),
             addr_name_map: should_log_any_ir().then_some(FxHashMap::default()),
@@ -966,7 +952,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     (addr.addr(), self.opt.feed(hir::ThreadLocal(addr).into()))
                 } else {
                     let tyidx = self.opt.push_ty(hir::Ty::Ptr(0))?;
-                    let addr = self.globals[usize::from(*gidx)].addr();
+                    let addr = gl.addr();
                     (addr, self.const_to_iidx(tyidx, hir::ConstKind::Ptr(addr)))
                 };
                 self.addr_name_map
