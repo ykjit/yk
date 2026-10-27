@@ -1,58 +1,51 @@
-// ## -O0 doesn't make a constant expression.
-// ignore-if: true
+// Compiler:
+//   env-var: YKB_EXTRA_CC_FLAGS=-O2
 // Run-time:
-//   env-var: YKD_LOG_IR=hir
+//   env-var: YKD_LOG_IR=aot
 //   env-var: YKD_LOG=4
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
+//     yk-tracing: start-tracing
+//     100
+//     yk-tracing: stop-tracing
+//     --- Begin aot ---
 //     ...
-//     --- Begin hir ---
+//     %{{_}}: i32 = call first(const_gep(@.str.1+3))...
 //     ...
-//     @.str = ...
-//     ...
-//     define void @__yk_compiled_trace_0(...
-//       ...
-//       ...store i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.str, i64 0, i64 0)...
-//       ...
-//     --- End hir ---
-//     2:97
-//     yk-execution: enter-jit-code
-//     1:97
-//     ...
+//     --- End aot ---
+//     100
+//     yk-execution: enter-jit-code {"trid": "0"}
+//     100
+//     100
+//     yk-execution: deoptimise {"trid": "0", "gidx": "{{_}}"}
+//     exit
 
-// Check that global variables inside constant expressions are handled.
-// FIXME: needs porting to Yk IR once we find out how to get a constexpr gep.
+// Constant expressions can refer to private globals with no dynamic symbol.
+// Resolve their addresses through the compiler-emitted global pointer array.
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-const volatile int global_int = 6;
-
-__attribute__((noinline)) char foo(char *str) {
+__attribute__((noinline)) int first(const char *str) {
   NOOPT_VAL(str);
-  // At optimisation levels >O0 this makes a constant GEP expression.
   return str[0];
 }
 
-int main(int argc, char **argv) {
+int main(void) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
-
-  int res = 0, i = 3;
+  int i = 4;
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    res = foo("abc");
-    assert(res == 97);
-    fprintf(stderr, "%d:%d\n", i, res);
+    fprintf(stderr, "%d\n", first(&"abcd"[3]));
     i--;
   }
-
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
-  return (EXIT_SUCCESS);
+  fprintf(stderr, "exit\n");
+  return EXIT_SUCCESS;
 }

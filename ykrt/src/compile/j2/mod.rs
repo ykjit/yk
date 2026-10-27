@@ -307,6 +307,9 @@ fn dladdr(addr: usize) -> Option<String> {
     let mut dlinfo = MaybeUninit::<libc::Dl_info>::uninit();
     if unsafe { libc::dladdr(addr as *const _, dlinfo.as_mut_ptr()) } != 0 {
         let dlinfo = unsafe { dlinfo.assume_init() };
+        if dlinfo.dli_sname.is_null() {
+            return None;
+        }
         unsafe { CStr::from_ptr(dlinfo.dli_sname) }
             .to_str()
             .ok()

@@ -51,6 +51,9 @@ const FORMAT_VERSION: u32 = 0;
 
 const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 
+/// The symbol name of the global variable pointers array.
+const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
+
 /// A struct identifying a line in a source file.
 #[derive(Debug)]
 #[deku_derive(DekuRead)]
@@ -150,8 +153,16 @@ impl Module {
     }
 
     pub(crate) fn eval_globaldecls(&mut self) {
-        for g in &mut self.global_decls {
-            g.eval();
+        let globals =
+            ykaddr::addr::symbol_to_ptr(GLOBAL_PTR_ARRAY_SYM).unwrap() as *const *const c_void;
+        for (i, g) in self.global_decls.iter_mut().enumerate() {
+            if !g.is_threadlocal {
+                let ptr = unsafe { *globals.add(i) };
+                g.eval = Some(ConstVal {
+                    tyidx: g.tyidx,
+                    bytes: Vec::from((ptr as usize).to_ne_bytes()),
+                });
+            }
         }
     }
 
@@ -293,23 +304,6 @@ impl std::fmt::Display for Module {
 pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
     let ((_, _), mut modu) = Module::from_bytes((data, 0))?;
     modu.create_func_cache();
-    // Evaluate constants that couldn't be resolved during serialisation:
-    //
-    // - Addresses of global variables aren't known until the process has been loaded.
-    // - Constant expressions can depend on the addresses of global variables.
-    //
-    // We currently eagerly evaluate them all at AOT load time. In theory we could do this lazily,
-    // as the trace compiler uses them. However, this would require synchronisation, as multiple
-    // trace compilers running in threads could request the same constant simultaneously.
-    //
-    // In the future it may be worth investigating if we can have the yk bytecode section loaded by
-    // the loader (instead of reading it out of the on-disk ELF binary, as we do now). I *think*
-    // this would mean that the addresses of globals could be expressed by a symbol resolved by the
-    // loader. As for constant expressions, can a symbol be expressed as an offset of another?
-    //
-    // Note also that this mechanism assumes that symbols are not unloaded/replaced with dl_*().
-    modu.eval_globaldecls();
-    modu.eval_constexprs();
     Ok(modu)
 }
 
@@ -2401,24 +2395,6 @@ impl GlobalDecl {
         self.tyidx
     }
 
-    // Resolves a `GlobalDecl`'s address and updates it in-place.
-    pub(crate) fn eval(&mut self) {
-        // FIXME: this duplicates J2's dlsym() machinery. Should J2 consult the AOT IR instead of
-        // maintaining its own dlsym() cache?
-        let cn = CString::new(&*self.name).unwrap();
-        let ptr =
-            unsafe { libc::dlsym(std::ptr::null_mut(), cn.as_c_str().as_ptr()) } as *const c_void;
-        if ptr.is_null() {
-            // Failed to find an address for this. Leave it unevaluated. This can happen for
-            // certain special globals.
-            return;
-        }
-        self.eval = Some(ConstVal {
-            tyidx: self.tyidx,
-            bytes: Vec::from((ptr as usize).to_ne_bytes()),
-        });
-    }
-
     // Returns the constant value of the global.
     //
     // Note: globals variables in LLVM are modelled as constant pointers to their storage. Such a
@@ -2426,6 +2402,16 @@ impl GlobalDecl {
     // necessarily constant though (global variables can be mutable).
     pub(crate) fn constval(&self) -> &ConstVal {
         self.eval.as_ref().unwrap()
+    }
+
+    /// Return the resolved address of the global.
+    ///
+    /// # Panics
+    ///
+    /// If `self` is a thread local.
+    pub(crate) fn addr(&self) -> usize {
+        assert!(!self.is_threadlocal);
+        usize::from_ne_bytes(self.constval().bytes().try_into().unwrap())
     }
 }
 
