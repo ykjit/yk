@@ -62,7 +62,7 @@ void yk_mt_sidetrace_threshold_set(YkMT *, YkHotThreshold);
 // Returns `true` if yk is running in the "pure" interpreter i.e. (1) without
 // tracing the code and (2) not in JIT compiled code. During trace
 // optimisation, calls to this function will be fully optimised away.
-bool yk_is_interpreting();
+bool yk_is_interpreting(void);
 #define yk_is_interpreting() \
     ((bool)__builtin_expect((yk_is_interpreting)(), 1))
 
