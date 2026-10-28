@@ -20,7 +20,7 @@
 // a simple (if moderately wasteful) mechanism is for every bytecode or AST
 // node to have its own `Location` (even for bytecodes or nodes that can't be
 // control points).
-typedef struct {
+typedef struct YkLocation {
   uintptr_t state;
 } YkLocation;
 
