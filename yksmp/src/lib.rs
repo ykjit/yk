@@ -10,7 +10,6 @@
 compile_error!("The stackmap parser currently only supports x64.");
 
 use smallvec::SmallVec;
-use std::error;
 
 struct Function {
     /// The address in the binary where this function is located.
@@ -123,22 +122,33 @@ pub struct SMEntry {
 pub struct StackMapParser<'a> {
     data: &'a [u8],
     offset: usize,
+    prologues: Vec<PrologueInfo>,
+    records: Vec<(Record, usize)>,
 }
 
 impl StackMapParser<'_> {
     /// Parse LLVM stackmaps and return them as a list of `SMEntry`s, each of which describes a
     /// single function, i.e. it's prologue and all records contained in it.
     pub fn parse(data: &[u8]) -> (Vec<PrologueInfo>, Vec<(Record, usize)>) {
-        let mut smp = StackMapParser { data, offset: 0 };
-        smp.read().unwrap()
+        let mut smp = StackMapParser {
+            data,
+            offset: 0,
+            prologues: Vec::new(),
+            records: Vec::new(),
+        };
+        // The linker can put multiple stackmap sections one after the other.
+        while smp.offset < data.len() {
+            smp.read();
+            smp.align_8();
+        }
+        (smp.prologues, smp.records)
     }
 
     /// Parse LLVM's stackmap format.
-    #[allow(clippy::type_complexity)]
-    fn read(&mut self) -> Result<(Vec<PrologueInfo>, Vec<(Record, usize)>), Box<dyn error::Error>> {
+    fn read(&mut self) {
         // Read version number.
         if self.read_u8() != 3 {
-            return Err("Only stackmap format version 3 is supported.".into());
+            panic!("Only stackmap format version 3 is supported.");
         }
 
         // Reserved
@@ -158,11 +168,13 @@ impl StackMapParser<'_> {
             u64::from(num_recs)
         );
 
-        // Since records ids are used for indexing we need to prepare the vector first so we can
-        // insert records at their right index.
-        let totalsize: u64 = funcs.iter().map(|f| f.record_count).sum();
-        let mut all_records = Vec::new();
-        all_records.resize_with(usize::try_from(totalsize).unwrap(), || (Record::empty(), 0));
+        self.records.reserve(
+            usize::try_from(num_recs)
+                .unwrap()
+                .saturating_sub(self.records.len()),
+        );
+
+        let prologue_base = self.prologues.len();
 
         // Parse and collect records.
         for (i, f) in funcs.iter().enumerate() {
@@ -176,14 +188,17 @@ impl StackMapParser<'_> {
                 assert_ne!(f.stack_size, u64::MAX);
                 r.size = f.stack_size;
                 let idx = usize::try_from(r.id).unwrap();
-                all_records[idx] = (r, i);
+                // IDs are assigned before partitioning, so a table can contain
+                // IDs larger than its own record count.
+                if idx >= self.records.len() {
+                    self.records.resize_with(idx + 1, || (Record::empty(), 0));
+                }
+                self.records[idx] = (r, prologue_base + i);
             }
         }
 
         // Read prologue info.
-        let prologue_info = self.read_prologue(num_funcs);
-
-        Ok((prologue_info, all_records))
+        self.read_prologue(num_funcs);
     }
 
     fn read_functions(&mut self, num: u32) -> Vec<Function> {
@@ -295,8 +310,7 @@ impl StackMapParser<'_> {
         }
     }
 
-    fn read_prologue(&mut self, num_funcs: u32) -> Vec<PrologueInfo> {
-        let mut pis = Vec::new();
+    fn read_prologue(&mut self, num_funcs: u32) {
         for _ in 0..num_funcs {
             let hasfptr = self.read_u8();
             assert!(hasfptr == 0 || hasfptr == 1);
@@ -314,9 +328,8 @@ impl StackMapParser<'_> {
                 hasfp: hasfptr != 0,
                 csrs: v,
             };
-            pis.push(pi);
+            self.prologues.push(pi);
         }
-        pis
     }
 
     fn align_8(&mut self) {
@@ -357,5 +370,61 @@ impl StackMapParser<'_> {
         let d = u64::from_ne_bytes(self.data[self.offset..self.offset + 8].try_into().unwrap());
         self.offset += 8;
         d
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn concatenated_stackmaps() {
+        // This test, in essence, emulates a few tricky edge-cases of an x64 stackmap section.
+
+        fn mk_smap(data: &mut Vec<u8>, id: u64, addr: u64, value: u64) {
+            data.resize(data.len().next_multiple_of(8), 0);
+            data.extend([3, 0, 0, 0]);
+            for count in [1u32, 1, 1] {
+                data.extend(count.to_ne_bytes());
+            }
+            for field in [addr, 16, 1, value, id] {
+                data.extend(field.to_ne_bytes());
+            }
+            data.extend(4u32.to_ne_bytes()); // Offset within function.
+            data.extend(0u16.to_ne_bytes());
+            data.extend(1u16.to_ne_bytes()); // One live value.
+            data.extend([1, 5, 0]); // One location: constant-pool index.
+            for field in [8u16, 0, 0, 0] {
+                data.extend(field.to_ne_bytes());
+            }
+            data.extend(0u32.to_ne_bytes()); // Index zero in this table's pool.
+            data.resize(data.len().next_multiple_of(8), 0);
+            data.extend([0; 4]); // No live-outs.
+            data.resize(data.len().next_multiple_of(8), 0);
+            data.extend([1, 0]); // Has frame pointer, padding.
+            data.extend(1u32.to_ne_bytes()); // One saved register.
+            data.extend(3u16.to_ne_bytes());
+            data.extend(0u16.to_ne_bytes());
+            data.extend((-8i32).to_ne_bytes());
+        }
+
+        let mut data = Vec::new();
+        // Emulate concatenated stackmaps
+        mk_smap(&mut data, 1, 100, 555);
+        mk_smap(&mut data, 0, 200, 777);
+        let (prologues, records) = StackMapParser::parse(&data);
+        assert_eq!(prologues.len(), 2);
+        assert_eq!(records.len(), 2);
+        for (idx, addr, value, prologue) in [(0, 204, 777, 1), (1, 104, 555, 0)] {
+            let (record, pidx) = &records[idx];
+            assert_eq!(record.id, idx as u64);
+            assert_eq!(record.offset, addr);
+            assert_eq!(record.size, 16);
+            assert_eq!(record.live_vals[0][0], Location::U64(value));
+            assert_eq!(*pidx, prologue);
+            assert!(prologues[*pidx].hasfp);
+            assert_eq!(prologues[*pidx].csrs, [(3, -8)]);
+        }
     }
 }
