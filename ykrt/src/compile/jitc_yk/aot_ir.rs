@@ -40,7 +40,7 @@ use std::{
     fs,
     io::{BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::Ordering},
 };
 use typed_index_collections::{TiSlice, TiVec};
 
@@ -392,6 +392,16 @@ index!(PathIdx);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ArgIdx(usize);
 index!(ArgIdx);
+
+/// Convert a ykllvm ordering to a Rust [Ordering].
+fn map_to_atomic_ordering(value: u8) -> Result<Ordering, DekuError> {
+    match value {
+        0 => Ok(Ordering::Relaxed),
+        1 => Ok(Ordering::Acquire),
+        2 => Ok(Ordering::SeqCst),
+        x => todo!("{x}"),
+    }
+}
 
 /// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
 /// avoid type inference errors, so it's easier to have a single helper function rather than inline
@@ -1107,6 +1117,13 @@ pub(crate) enum Inst {
         val: Operand,
         statepoint: Statepoint,
     },
+    #[deku(id = "25")]
+    AtomicLoad {
+        ptr: Operand,
+        tyidx: TyIdx,
+        #[deku(map = "map_to_atomic_ordering")]
+        ordering: Ordering,
+    },
     #[deku(id = "255")]
     Unimplemented {
         tyidx: TyIdx,
@@ -1139,6 +1156,7 @@ impl Inst {
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Ty> {
         match self {
             Self::Alloca { .. } => Some(&Ty::Ptr),
+            Self::AtomicLoad { tyidx, .. } => Some(m.type_(*tyidx)),
             Self::BinaryOp { lhs, .. } => Some(lhs.type_(m)),
             Self::Br { .. } => None,
             Self::Call { callee, .. } => {
@@ -1293,6 +1311,15 @@ impl fmt::Display for DisplayableInst<'_> {
                 count,
                 align
             ),
+            Inst::AtomicLoad { ptr, ordering, .. } => {
+                let ordering = match ordering {
+                    Ordering::Relaxed => "relaxed",
+                    Ordering::Acquire => "acquire",
+                    Ordering::SeqCst => "seq_cst",
+                    _ => unreachable!(),
+                };
+                write!(f, "atomicload {ordering} {}", ptr.display(self.m))
+            }
             Inst::BinaryOp { lhs, binop, rhs } => {
                 write!(
                     f,

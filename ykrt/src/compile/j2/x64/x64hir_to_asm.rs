@@ -2926,6 +2926,26 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(())
     }
 
+    fn i_atomicload(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &AtomicLoad,
+    ) -> Result<(), CompilationError> {
+        // x64's normal load is equivalent to SeqCst i.e. is safe for any ordering.
+        self.i_load(
+            ra,
+            b,
+            iidx,
+            &Load {
+                tyidx: inst.tyidx,
+                ptr: inst.ptr,
+                is_volatile: false,
+            },
+        )
+    }
+
     fn i_bitcast(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -7383,6 +7403,26 @@ mod test {
               sar r.64.x, cl
               ...
             "],
+        );
+    }
+
+    #[test]
+    fn cg_atomicload() {
+        // These are all the same as `load` so we minimally check that an `atomicload` looks sane.
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i8 = atomicload acquire %0
+              blackbox %1
+              term [%0]
+            ",
+            &[r#"
+              ...
+              ; %1: i8 = atomicload acquire %0
+              movzx r.32._, byte [r.64._]
+              ; blackbox %1
+              ; term [%0]
+            "#],
         );
     }
 
