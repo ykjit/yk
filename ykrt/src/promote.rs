@@ -4,7 +4,7 @@
 //! right method in this module to call.
 
 use crate::mt::MTThread;
-use std::ffi::{c_int, c_longlong, c_uint, c_ushort, c_void};
+use std::ffi::{c_int, c_longlong, c_uchar, c_uint, c_ushort, c_void};
 
 /// Promote a `c_int` during trace recording.
 #[unsafe(no_mangle)]
@@ -19,14 +19,14 @@ pub extern "C" fn __yk_promote_c_int(val: c_int) -> c_int {
     val
 }
 
-/// Promote a `c_uint` during trace recording.
+/// Promote a `c_uchar` during trace recording.
 #[unsafe(no_mangle)]
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-pub extern "C" fn __yk_promote_c_unsigned_short(val: c_ushort) -> c_ushort {
+pub extern "C" fn __yk_promote_c_unsigned_char(val: c_uchar) -> c_uchar {
     if MTThread::is_tracing() {
         MTThread::with_borrow_mut(|mtt| {
             // We ignore the return value as we can't really cancel tracing from this function.
-            mtt.promote_u16(val);
+            mtt.promote_i8(val.cast_signed());
         });
     }
     val
@@ -40,6 +40,19 @@ pub extern "C" fn __yk_promote_c_unsigned_int(val: c_uint) -> c_uint {
         MTThread::with_borrow_mut(|mtt| {
             // We ignore the return value as we can't really cancel tracing from this function.
             mtt.promote_u32(val);
+        });
+    }
+    val
+}
+
+/// Promote a `c_ushort` during trace recording.
+#[unsafe(no_mangle)]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+pub extern "C" fn __yk_promote_c_unsigned_short(val: c_ushort) -> c_ushort {
+    if MTThread::is_tracing() {
+        MTThread::with_borrow_mut(|mtt| {
+            // We ignore the return value as we can't really cancel tracing from this function.
+            mtt.promote_u16(val);
         });
     }
     val
