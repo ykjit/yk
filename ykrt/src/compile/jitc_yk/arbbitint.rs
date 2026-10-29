@@ -151,6 +151,7 @@ impl ArbBitInt {
     }
 
     /// zero extend the underlying value and, if it is representable as an `u16`, return it.
+    #[cfg(test)]
     pub(crate) fn to_zero_ext_u16(&self) -> Option<u16> {
         u16::try_from(self.val.truncate_to(self.bitw)).ok()
     }

@@ -197,20 +197,61 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         }
     };
 
-    // We write to the buffer backwards, starting at `stkptr + stklen`. Eventually the contents of
-    // this buffer (viewed from low to high address) will be:
+    // Deopt is a bit messy because the JIT runs in a frame which is a concatenation of the control
+    // point frame + additional JIT frame space (which this function is currently running in!).
+    // Deopt needs to (1) read and write from the control point frame (2) reconstruct a stack of
+    // frames representing the deoptimised functions.
     //
-    //   ..., , FP regs, GP regs, deopt_frames[n], ..., deopt_frames[1]
+    // We use [BUF] as an intermediate buffer. At a high level `BUF` is (in order from low to high
+    // addresses):
     //
-    // where:
-    //   * The initial "..." represents the bytes we won't write to in this deopt function.
-    //   * `deopt_frames[0]` is special: it's the control point frame and we both read and write to
-    //     it directly. Thus our buffer doesn't contain `deopt_frames[0]`: it ends at
-    //     `deopt_frames[1]`.
-    //   * "FP regs" and "GP regs" are the values we eventually want stuffed back into the CPU's
-    //     registers: they'll be read by the `replace_stack` function.
+    //  1. deopt values read from the current stack (which is a mixture of the control point frame
+    //     and additional JIT frame usage)
+    //  2. FP regs
+    //  3. GP regs
+    //  4. deopt_frames[n]
+    //  ...
+    //  4+n-1: deopt_frames[1]
+    //
+    // Note: `deopt_frames[0]` is the control point frame. We first read out values we'll need from
+    // that (to part 1 of `BUF`) then go about filling in everything else.
+
     let (stkptr, stklen) =
         BUF.with(|(ptr, sz)| (ptr.load(Ordering::Relaxed), sz.load(Ordering::Relaxed)));
+
+    for (i, dvar) in guard.deopt_vars.iter().enumerate() {
+        let v = if dvar.deopt_tovlocs.is_empty() {
+            0
+        } else {
+            // A value might be stored in multiple places (registers, stack, etc): we just need to
+            // read it from one, so arbitrarily pick the first `from_vloc`.
+            let fromvloc = dvar.deopt_fromvlocs.iter().next().unwrap();
+            match fromvloc {
+                VarLoc::Stack(off) => {
+                    let addr = unsafe { faddr.byte_offset(-isize::try_from(*off).unwrap()) };
+                    match dvar.bitw {
+                        1..=8 => u64::from(unsafe { addr.read() }),
+                        9..=16 => u64::from(unsafe { addr.cast::<u16>().read() }),
+                        17..=32 => u64::from(unsafe { addr.cast::<u32>().read() }),
+                        33..=64 => unsafe { addr.cast::<u64>().read() },
+                        x => todo!("{x}"),
+                    }
+                }
+                VarLoc::StackOff(_) => todo!(),
+                VarLoc::Reg(_, _) => todo!(),
+                VarLoc::Const(kind) => match kind {
+                    ConstKind::Double(x) => x.to_bits(),
+                    ConstKind::Float(_) => todo!(),
+                    ConstKind::Int(x) => x.to_zero_ext_u64().unwrap(),
+                    ConstKind::Ptr(x) => u64::try_from(*x).unwrap(),
+                },
+            }
+        };
+        unsafe { stkptr.byte_add(i * 8).cast::<u64>().write(v) };
+    }
+    let stack_vals =
+        unsafe { std::slice::from_raw_parts(stkptr.cast::<u64>(), guard.deopt_vars.len()) };
+
     let mut rbp = unsafe { stkptr.byte_add(stklen) };
     let mut rsp = rbp;
 
@@ -250,9 +291,9 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         }
         reconstruct(
             &guard.deopt_vars[0..frame.pc_statepoint.lives.len()],
+            &stack_vals[0..frame.pc_statepoint.lives.len()],
             &mut gp_regs,
             &mut fp_regs,
-            faddr,
             faddr,
             faddr,
         );
@@ -272,16 +313,10 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         // How much room does this frame need?
         let flen = 8 + usize::try_from(smap.size).unwrap();
 
-        // Do we have enough space left to write this frame to the buffer? The more obvious
-        // comparison here might seem to be `if rbp - flen < stkptr` but in the case where our
-        // buffer is too small `rbp - flen` would create an out-of-bounds pointer and land us in
-        // undefined behaviour.
-        assert!(rbp > stkptr);
-        if flen > unsafe { rbp.byte_offset_from_unsigned(stkptr) } {
+        if flen > stklen - deoptlen {
             todo!();
         }
         deoptlen += flen;
-
         if prologue.hasfp {
             rsp = unsafe { rsp.byte_sub(8) };
             rbp = rsp;
@@ -316,9 +351,9 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
 
         reconstruct(
             &guard.deopt_vars[deopt_vars_off..deopt_vars_off + frame.pc_statepoint.lives.len()],
+            &stack_vals[deopt_vars_off..deopt_vars_off + frame.pc_statepoint.lives.len()],
             &mut gp_regs,
             &mut fp_regs,
-            faddr,
             // The first frame after the control point frame has incoming arguments from the
             // control point frame.
             if frame_idx == 1 { prev_faddr } else { rbp },
@@ -374,13 +409,12 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     unsafe { __yk_j2_replace_stack(fdst, stkptr.byte_add(stklen).byte_sub(deoptlen), deoptlen) };
 }
 
-/// Reconstruct a frame, reading from the control point frame `srcaddr` and writing to `tgtaddr`.
-/// `stargsaddr` is the address that arguments passed on the stack should be written to.
+/// Reconstruct a frame from previously read values, writing to `tgtaddr`.
 fn reconstruct(
     varlocs: &[DeoptVar<Reg>],
+    stack_vals: &[u64],
     gp_regs: &mut [u64; DeoptGpReg::COUNT],
     fp_regs: &mut [u64; DeoptFpReg::COUNT],
-    srcaddr: *const u8,
     stargsaddr: *mut u8,
     tgtaddr: *mut u8,
 ) {
@@ -392,32 +426,22 @@ fn reconstruct(
             unsafe { tgtaddr.byte_offset(-isize::try_from(off).unwrap()) }
         }
     };
-    for DeoptVar {
-        bitw,
-        deopt_fromvlocs,
-        deopt_tovlocs: tovlocs,
-        ..
-    } in varlocs.iter().filter(|x| !x.deopt_tovlocs.is_empty())
+    assert_eq!(varlocs.len(), stack_vals.len());
+    for (
+        DeoptVar {
+            bitw,
+            deopt_tovlocs: tovlocs,
+            ..
+        },
+        &value,
+    ) in varlocs
+        .iter()
+        .zip(stack_vals)
+        .filter(|(x, _)| !x.deopt_tovlocs.is_empty())
     {
-        let fromvlocs = deopt_fromvlocs;
-        // FIXME: For now, we only deal with 1 fromvloc.
-        assert_eq!(fromvlocs.len(), 1, "{fromvlocs:?}");
-        let fromvloc = fromvlocs.iter().next().unwrap();
         match bitw {
             33..=64 => {
-                let v = match fromvloc {
-                    VarLoc::Stack(off) => unsafe {
-                        (srcaddr.byte_offset(-isize::try_from(*off).unwrap()) as *const u64).read()
-                    },
-                    VarLoc::StackOff(_) => todo!(),
-                    VarLoc::Reg(_, _) => todo!(),
-                    VarLoc::Const(kind) => match kind {
-                        ConstKind::Double(x) => x.to_bits(),
-                        ConstKind::Float(_) => todo!(),
-                        ConstKind::Int(x) => x.to_zero_ext_u64().unwrap(),
-                        ConstKind::Ptr(x) => u64::try_from(*x).unwrap(),
-                    },
-                };
+                let v = value;
 
                 for vloc in tovlocs.iter() {
                     match vloc {
@@ -439,19 +463,7 @@ fn reconstruct(
                 }
             }
             17..=32 => {
-                let v = match fromvloc {
-                    VarLoc::Stack(off) => unsafe {
-                        (srcaddr.byte_offset(-isize::try_from(*off).unwrap()) as *const u32).read()
-                    },
-                    VarLoc::StackOff(_) => todo!(),
-                    VarLoc::Reg(_, _) => todo!(),
-                    VarLoc::Const(kind) => match kind {
-                        ConstKind::Double(_) => unreachable!(),
-                        ConstKind::Float(_) => unreachable!(),
-                        ConstKind::Int(x) => x.to_zero_ext_u32().unwrap(),
-                        ConstKind::Ptr(_) => unreachable!(),
-                    },
-                };
+                let v = value as u32;
 
                 for vloc in tovlocs.iter() {
                     match vloc {
@@ -473,23 +485,11 @@ fn reconstruct(
                 }
             }
             9..=16 => {
-                let v = match fromvloc {
-                    VarLoc::Stack(off) => unsafe {
-                        (srcaddr.byte_offset(-isize::try_from(*off).unwrap()) as *const u16).read()
-                    },
-                    VarLoc::StackOff(_) => todo!(),
-                    VarLoc::Reg(_, _) => todo!(),
-                    VarLoc::Const(ConstKind::Double(_)) => unreachable!(),
-                    VarLoc::Const(ConstKind::Float(_)) => unreachable!(),
-                    VarLoc::Const(ConstKind::Int(x)) => x.to_zero_ext_u16().unwrap(),
-                    VarLoc::Const(ConstKind::Ptr(_)) => unreachable!(),
-                };
+                let v = value as u16;
 
                 for vloc in tovlocs.iter() {
                     match vloc {
                         VarLoc::Stack(off) => unsafe {
-                            // FIXME: We don't know if we're overwriting a value deopt
-                            // needs to later read!
                             (stack_off_to_addr(*off) as *mut u16).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
@@ -503,23 +503,11 @@ fn reconstruct(
                 }
             }
             1..=8 => {
-                let v = match fromvloc {
-                    VarLoc::Stack(off) => unsafe {
-                        srcaddr.byte_offset(-isize::try_from(*off).unwrap()).read()
-                    },
-                    VarLoc::StackOff(_) => todo!(),
-                    VarLoc::Reg(_, _) => todo!(),
-                    VarLoc::Const(ConstKind::Double(_)) => unreachable!(),
-                    VarLoc::Const(ConstKind::Float(_)) => unreachable!(),
-                    VarLoc::Const(ConstKind::Int(x)) => x.to_zero_ext_u8().unwrap(),
-                    VarLoc::Const(ConstKind::Ptr(_)) => unreachable!(),
-                };
+                let v = value as u8;
 
                 for vloc in tovlocs.iter() {
                     match vloc {
                         VarLoc::Stack(off) => unsafe {
-                            // FIXME: We don't know if we're overwriting a value deopt
-                            // needs to later read!
                             stack_off_to_addr(*off).write(v);
                         },
                         VarLoc::StackOff(_) => todo!(),
