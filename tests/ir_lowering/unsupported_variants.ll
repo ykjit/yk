@@ -35,8 +35,7 @@
 ;         %{{_}}: ?ty<<4 x i1>> = unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer, ...
 ;         br bb{{_}}
 ;     bb{{_}}:
-;         %{{_}}: i32 = unimplemented <<  %{{_}} = load atomic i32, ptr %{{_}} acquire, align 4, ...
-;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4 <note: addrspace>>>
+;         %{{_}}: i32 = unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4, !yk-swt-bb-purpose !{{_}} <note: addrspace>>>
 ;         br ...
 ;         ...
 ;       %{{_}}: float = unimplemented <<  %{{_}} = phi nsz float...
@@ -129,9 +128,6 @@ icmps:
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, <4 x i1> %icmp_vec);
   br label %loads
 loads:
-  ; atomic loads
-  ; note: atomic load must have explicit non-zero alignment
-  %load_atom = load atomic i32, ptr %ptr acquire, align 4
   ; loads from exotic address spaces
   %load_aspace = load i32, ptr addrspace(10) %asptr
   ; stackmap stops loads from being optimised out.

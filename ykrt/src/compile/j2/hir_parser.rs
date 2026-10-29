@@ -40,7 +40,9 @@ use index_type::{IndexType, vec::TypedVec};
 use lrlex::{DefaultLexerTypes, LRNonStreamingLexer, lrlex_mod};
 use lrpar::{NonStreamingLexer, Span, lrpar_mod};
 use smallvec::SmallVec;
-use std::{collections::HashMap, ffi::CString, marker::PhantomData, sync::LazyLock};
+use std::{
+    collections::HashMap, ffi::CString, marker::PhantomData, sync::LazyLock, sync::atomic::Ordering,
+};
 
 lrlex_mod!("compile/j2/hir.l");
 lrpar_mod!("compile/j2/hir.y");
@@ -228,6 +230,24 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         vlocs,
                     ));
                     self.insts.push(Arg { tyidx }.into());
+                }
+                AstInst::AtomicLoad {
+                    local,
+                    ty,
+                    ptr,
+                    ordering,
+                } => {
+                    self.p_def_local(local);
+                    let tyidx = self.p_ty(ty);
+                    let ptr = self.p_local(ptr);
+                    self.insts.push(
+                        AtomicLoad {
+                            tyidx,
+                            ptr,
+                            ordering,
+                        }
+                        .into(),
+                    );
                 }
                 AstInst::BitCast { local, ty, val } => {
                     self.p_def_local(local);
@@ -1426,6 +1446,12 @@ enum AstInst {
         local: Span,
         ty: AstTy,
         vlocs: Vec<AstVLoc>,
+    },
+    AtomicLoad {
+        local: Span,
+        ty: AstTy,
+        ptr: Span,
+        ordering: Ordering,
     },
     BitCast {
         local: Span,

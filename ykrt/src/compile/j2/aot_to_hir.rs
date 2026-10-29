@@ -1026,6 +1026,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             match inst {
                 Inst::Nop => todo!(),
                 Inst::Alloca { .. } => todo!(),
+                Inst::AtomicLoad { .. } => self.p_atomicload(pc.clone(), inst)?,
                 Inst::BinaryOp { .. } => self.p_binop(pc.clone(), inst)?,
                 Inst::Br { .. } => (),
                 Inst::Call { .. } => match self.p_call(pc.clone(), bid, inst)? {
@@ -1085,6 +1086,33 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 BBlockInstIdx::new(usize::from(pc.iidx()) + 1),
             ));
         }
+    }
+
+    fn p_atomicload(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::AtomicLoad {
+            ptr,
+            tyidx,
+            ordering,
+        } = inst
+        else {
+            panic!()
+        };
+        let ptr = self.p_operand(ptr)?;
+        let tyidx = self.p_ty(self.am.type_(*tyidx))?;
+        let ordering = match ordering {
+            Ordering::Relaxed | Ordering::Acquire => *ordering,
+            Ordering::SeqCst => todo!(),
+            _ => unreachable!(),
+        };
+        self.push_inst_and_link_local(
+            iid,
+            hir::AtomicLoad {
+                tyidx,
+                ptr,
+                ordering,
+            },
+        )
+        .map(|_| ())
     }
 
     fn p_binop(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {

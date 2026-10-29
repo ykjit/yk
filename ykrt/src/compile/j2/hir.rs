@@ -190,7 +190,7 @@ use std::{
     fmt::{Display, Formatter},
     mem,
     ops::{Bound, RangeBounds},
-    sync::Arc,
+    sync::{Arc, atomic::Ordering},
 };
 use strum::{EnumCount, EnumDiscriminants};
 use vob::Vob;
@@ -852,6 +852,7 @@ pub(super) enum Inst {
     And,
     Arg,
     AShr,
+    AtomicLoad,
     BitCast,
     #[cfg(test)]
     BlackBox,
@@ -1267,6 +1268,72 @@ impl InstT for AShr {
             self.lhs.to_raw_index(),
             self.rhs.to_raw_index()
         )
+    }
+
+    fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
+        self.tyidx
+    }
+}
+
+// Atomic loads
+#[derive(Clone, Debug)]
+pub(super) struct AtomicLoad {
+    pub tyidx: TyIdx,
+    pub ptr: InstIdx,
+    pub ordering: Ordering,
+}
+
+impl InstT for AtomicLoad {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_matches!(
+            m.ty(b.inst(self.ptr).tyidx(m)),
+            &Ty::Ptr(_),
+            "%{iidx:?}: ptr is not a pointer"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.ptr = opt.equiv_iidx(self.ptr);
+    }
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        false
+    }
+
+    fn read_effects(&self) -> Effects {
+        // OPT: `volatile` is an overapproximation of atomicity.
+        Effects::none().add_volatile().add_heap()
+    }
+
+    fn write_effects(&self) -> Effects {
+        match self.ordering {
+            Ordering::Relaxed => Effects::none(),
+            Ordering::Acquire => {
+                // OPT: `heap` is an overapproximation for `acquire`.
+                Effects::none().add_heap()
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::one(b, self.ptr)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.ptr = iidx_map(self.ptr);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        let ordering = match self.ordering {
+            Ordering::Relaxed => "relaxed",
+            Ordering::Acquire => "acquire",
+            _ => todo!(),
+        };
+        format!("atomicload {ordering} %{}", self.ptr.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
@@ -6205,6 +6272,17 @@ mod test {
           %0: i8 = arg [reg]
           %1: i8 = arg [reg]
           %2: i16 = ashr %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: ptr is not a pointer")]
+    fn atomicload_must_take_pointer() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          %1: i8 = atomicload acquire %0
         ",
         );
     }

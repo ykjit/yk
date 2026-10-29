@@ -83,6 +83,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ARG" "[" VLocList "]" {
       Ok(AstInst::Arg { local: $1?.span(), ty: $3?, vlocs: $7? })
     }
+  | "LOCAL" ":" Ty "=" "ATOMICLOAD" Ordering "LOCAL" {
+      Ok(AstInst::AtomicLoad { local: $1?.span(), ty: $3?, ordering: $6?, ptr: $7?.span() })
+    }
   | "LOCAL" ":" Ty "=" "BITCAST" "LOCAL" {
       Ok(AstInst::BitCast{ local: $1?.span(), ty: $3?, val: $6?.span() })
     }
@@ -335,6 +338,11 @@ IPred -> Result<IPred, Box<dyn Error>>:
   | "SLE" { Ok(IPred::Sle) }
   ;
 
+Ordering -> Result<Ordering, Box<dyn Error>>:
+    "ACQUIRE" { Ok(Ordering::Acquire) }
+  | "RELAXED" { Ok(Ordering::Relaxed) }
+  ;
+
 Ty -> Result<AstTy, Box<dyn Error>>:
     "INT_TY" { Ok(AstTy::Int($1?.span())) }
   | "FLOAT_TY" { Ok(AstTy::Float) }
@@ -368,7 +376,7 @@ Unmatched -> ():
 %%
 
 use crate::compile::j2::{hir::IPred, hir_parser::*, regalloc::RegFill};
-use std::error::Error;
+use std::{error::Error, sync::atomic::Ordering};
 
 fn flattenr<T>(lhs: Result<Vec<T>, Box<dyn Error>>, rhs: Result<T, Box<dyn Error>>)
   -> Result<Vec<T>, Box<dyn Error>>
