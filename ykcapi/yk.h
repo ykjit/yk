@@ -146,9 +146,11 @@ __attribute__((yk_idempotent)) uint64_t __yk_idempotent_load_uint64_t(const void
 uint64_t __yk_promote_code_id(uint64_t);
 
 // Inform yk that a code ID is not at the moment, and will never in the future,
-// be in use. yk can use this information to reoptimise traces, free machine
-// code, etc. Calling this only has any effect if `yk_promote_code_id` has
-// already seen the code ID passed here.
+// be in use: yk uses this to free up memory (etc).
+//
+// This must be called at most once for a given code ID. Note: it is
+// safe to call this for a code ID even if `yk_promote_code_id` has not been
+// called with that code ID.
 void yk_retire_code_id(YkMT *, uint64_t);
 
 /// Associate a UTF-8 compatible string to the next instruction to be traced.

@@ -14,19 +14,27 @@
 //     yk-tracing: stop-tracing
 //     2
 //     yk-execution: enter-jit-code {"trid": "0"}
+//     yk-execution: deoptimise {"trid": "0", "gidx": "3"}
+//     yk-tracing: start-side-tracing
 //     2
+//     yk-tracing: stop-tracing
 //     2
+//     yk-execution: enter-jit-code {"trid": "0"}
 //     2
+//     yk-execution: deoptimise {"trid": "2", "gidx": "0"}
+//     yk-tracing: start-side-tracing
 //     retired 2
-//     yk-execution: deoptimise {"trid": "0", "gidx": "1"}
+//     yk-tracing: stop-tracing
+//     3
+//     yk-execution: enter-jit-code {"trid": "0"}
+//     yk-execution: deoptimise {"trid": "0", "gidx": "3"}
 //     yk-tracing: start-side-tracing
 //     3
 //     yk-tracing: stop-tracing
 //     3
 //     yk-execution: enter-jit-code {"trid": "0"}
 //     3
-//     3
-//     yk-execution: deoptimise {"trid": "2", "gidx": "0"}
+//     yk-execution: deoptimise {"trid": "4", "gidx": "0"}
 //     yk-tracing: start-side-tracing
 
 
@@ -37,10 +45,12 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((yk_outline)) static void retire(YkMT *mt, int i) {
-  if (i == 7) {
-    yk_retire_code_id(mt, 2);
-    fputs("retired 2\n", stderr);
+__attribute__((noinline)) static void run(YkMT *mt, YkLocation *loc,
+                                          uint64_t *values, int start, int end) {
+  for (int i = start; i < end; i++) {
+    yk_mt_control_point(mt, loc);
+    uint64_t id = yk_promote_code_id(values[i]);
+    fprintf(stderr, "%" PRIu64 "\n", id);
   }
 }
 
@@ -51,12 +61,10 @@ int main(void) {
   YkLocation loc = yk_location_new();
   uint64_t values[] = {1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3};
   NOOPT_VAL(values);
-  for (int i = 0; i < 12; i++) {
-    yk_mt_control_point(mt, &loc);
-    uint64_t id = yk_promote_code_id(values[i]);
-    fprintf(stderr, "%" PRIu64 "\n", id);
-    retire(mt, i);
-  }
+  run(mt, &loc, values, 0, 8);
+  yk_retire_code_id(mt, 2);
+  fputs("retired 2\n", stderr);
+  run(mt, &loc, values, 8, 12);
   yk_location_drop(loc);
   yk_mt_shutdown(mt);
 }

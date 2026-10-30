@@ -172,3 +172,12 @@ impl ExeCodeBuf {
         .unwrap()
     }
 }
+
+impl Drop for ExeCodeBuf {
+    fn drop(&mut self) {
+        if unsafe { munmap(self.buf.0.cast::<c_void>(), self.len) } != 0 {
+            // If `munmap` fails, something has gone very wrong.
+            panic!();
+        }
+    }
+}

@@ -415,7 +415,8 @@ impl MT {
             .push(self, Job::new(Box::new(main), coupler_tid, failure));
     }
 
-    /// Inform yk that `cid` has been retired. Only side traces are disconnected.
+    /// Inform yk that `cid` is not at the moment, and will never in the future, be in use. yk can
+    /// use this information to reoptimise traces, free machine code, etc.
     pub fn retire_code_id(self: &Arc<Self>, cid: CodeId) {
         let mut lk = self.code_retirement.lock();
         lk.retire_code_id(self, cid);
@@ -1741,19 +1742,35 @@ struct CodeRetirement {
 
 impl CodeRetirement {
     fn retire_code_id(&mut self, mt: &Arc<MT>, cid: CodeId) {
-        if self.retired_code_ids.insert(cid)
-            && let Some(cases) = self.cases.get(&cid)
-        {
-            for &trid in cases {
-                if !self.retired_trace_ids.insert(trid) {
-                    continue;
-                }
-                for (parent_id, gid) in self.incoming.get(&trid).into_iter().flatten() {
-                    let parent = mt.compiled_trace(*parent_id);
-                    parent.set_guard_to_deopt(*gid, trid);
+        if !self.retired_code_ids.insert(cid) {
+            panic!();
+        }
+        let Some(retired) = self.cases.remove(&cid) else {
+            return;
+        };
+        self.retired_trace_ids.extend(retired.iter().copied());
+        for &trid in &retired {
+            for (parent_id, gid) in self.incoming.get(&trid).into_iter().flatten() {
+                if !self.retired_trace_ids.contains(parent_id) {
+                    mt.compiled_trace(*parent_id).set_guard_to_deopt(*gid, trid);
                 }
             }
         }
+        // Remove the trace from the global `compiled_traces`: this implicitly drops the trace,
+        // freeing backing memory.
+        let mut compiled = mt.compiled_traces.lock();
+        for trid in retired {
+            compiled.remove(&trid);
+            self.incoming.remove(&trid);
+            for cases in self.cases.values_mut() {
+                cases.remove(&trid);
+            }
+        }
+        self.incoming.retain(|_, parents| {
+            parents.retain(|(parent, _)| !self.retired_trace_ids.contains(parent));
+            !parents.is_empty()
+        });
+        self.cases.retain(|_, cases| !cases.is_empty());
     }
 
     fn register_side_trace(
