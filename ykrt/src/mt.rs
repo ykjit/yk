@@ -311,7 +311,9 @@ impl MT {
                     };
                     (coupler_tid, Box::new(failure))
                 }
-                TraceStart::Guard { parent_ctr, gid } => {
+                TraceStart::Guard {
+                    parent_ctr, gid, ..
+                } => {
                     let parent_ctr = Arc::clone(parent_ctr);
                     let gid = *gid;
                     let failure = move || parent_ctr.guard(gid).trace_or_compile_failed(&mt);
@@ -349,7 +351,9 @@ impl MT {
                             drop(hl);
                             mt.job_queue.notify_success(ctrid);
                         }
-                        TraceStart::Guard { parent_ctr, gid } => {
+                        TraceStart::Guard {
+                            parent_ctr, gid, ..
+                        } => {
                             if ctr
                                 .code_ids()
                                 .iter()
@@ -401,7 +405,9 @@ impl MT {
                             }
                             mt.job_queue.notify_failure(&mt, ctrid);
                         }
-                        TraceStart::Guard { parent_ctr, gid } => {
+                        TraceStart::Guard {
+                            parent_ctr, gid, ..
+                        } => {
                             parent_ctr.guard(gid).trace_or_compile_failed(&mt);
                         }
                     }
@@ -546,7 +552,7 @@ impl MT {
             } => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because
                 // `StartSideTracing` will have put a `Some` in the `Rc`.
-                let (thread_tracer, promotions, debug_strs) =
+                let (hl, thread_tracer, promotions, debug_strs) =
                     MTThread::with_borrow_mut(|mtt| match mtt.pop_tstate() {
                         MTThreadState::Tracing {
                             mt: _,
@@ -560,7 +566,7 @@ impl MT {
                             gtrace: _,
                         } => {
                             assert!(Arc::ptr_eq(&hl, &parent_ctr.hl().upgrade().unwrap()));
-                            (thread_tracer, promotions, debug_strs)
+                            (hl, thread_tracer, promotions, debug_strs)
                         }
                         _ => unreachable!(),
                     });
@@ -579,7 +585,11 @@ impl MT {
                             None => TraceEnd::Return,
                         };
                         self.queue_compile_job(Trace {
-                            trace_start: TraceStart::Guard { parent_ctr, gid },
+                            trace_start: TraceStart::Guard {
+                                hl,
+                                parent_ctr,
+                                gid,
+                            },
                             trace_end,
                             ctrid: trid,
                             ta_iter: ta_iter.peekable(),

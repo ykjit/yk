@@ -242,16 +242,30 @@ impl Compiler for J2 {
                 (Arc::clone(hl), aot_to_hir::BuildKind::Loop)
             }
             (TraceStart::Guard { .. }, TraceEnd::Loop) => unreachable!(),
-            (TraceStart::Guard { parent_ctr, gid }, TraceEnd::Coupler(coupler_tid)) => (
-                parent_ctr.hl().upgrade().unwrap(),
+            (
+                TraceStart::Guard {
+                    hl,
+                    parent_ctr,
+                    gid,
+                },
+                TraceEnd::Coupler(coupler_tid),
+            ) => (
+                Arc::clone(hl),
                 aot_to_hir::BuildKind::Side {
                     src_ctr: Arc::clone(parent_ctr),
                     src_gid: *gid,
                     tgt_ctr: Some(mt.compiled_trace(*coupler_tid)),
                 },
             ),
-            (TraceStart::Guard { parent_ctr, gid }, TraceEnd::Return) => (
-                parent_ctr.hl().upgrade().unwrap(),
+            (
+                TraceStart::Guard {
+                    hl,
+                    parent_ctr,
+                    gid,
+                },
+                TraceEnd::Return,
+            ) => (
+                Arc::clone(hl),
                 aot_to_hir::BuildKind::Side {
                     src_ctr: Arc::clone(parent_ctr),
                     src_gid: *gid,
