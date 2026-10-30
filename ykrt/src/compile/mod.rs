@@ -106,6 +106,7 @@ pub(crate) enum TraceStart {
     ControlPoint { hl: Arc<Mutex<HotLocation>> },
     /// This trace started at guard [TraceStart::Guard::gid] in [TraceStart::Guard::parent_ctr].
     Guard {
+        hl: Arc<Mutex<HotLocation>>,
         parent_ctr: Arc<dyn CompiledTrace>,
         gid: GuardId,
     },
