@@ -188,6 +188,7 @@ use std::{
     cmp::min,
     ffi::c_void,
     fmt::{Display, Formatter},
+    hash::{Hash, Hasher},
     mem,
     ops::{Bound, RangeBounds},
     sync::{Arc, atomic::Ordering},
@@ -1692,6 +1693,80 @@ pub(super) enum ConstKind {
     Int(ArbBitInt),
     Ptr(usize),
 }
+
+/// A wrapper around [Const]s that allows them to be hashed for deduplication purposes. This struct
+/// is conservative as per the top-level module documentation: it treats floating point numbers as
+/// bit patterns even under `Eq`. That means, for example, that it will not identify `+0.0` and
+/// `-0.0` as equivalent. This struct should therefore be used with caution: it is not a simple
+/// replacement for [Const] and should be used only when deduplication is not required to guarantee
+/// uniqueness.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(super) struct HashableConst {
+    tyidx: TyIdx,
+    kind: HashableConstKind,
+}
+
+impl HashableConst {
+    pub(super) fn new(c: Const) -> Self {
+        Self {
+            tyidx: c.tyidx,
+            kind: HashableConstKind::from(c.kind),
+        }
+    }
+}
+
+/// A hashable [ConstKind]. This comes with the same warning as [HashableConst]: it treats floating
+/// point numbers as bit patterns even under `Eq`. That means, for example, that it will not
+/// identify `+0.0` and `-0.0` as equivalent. This struct should therefore be used with caution: it
+/// is not a simple replacment for [Const] and should be used only when deduplication is not
+/// required to guarantee uniqueness.
+#[derive(Clone, Debug)]
+pub(super) enum HashableConstKind {
+    Double(f64),
+    Float(f32),
+    Int(ArbBitInt),
+    Ptr(usize),
+}
+
+impl From<ConstKind> for HashableConstKind {
+    fn from(c: ConstKind) -> HashableConstKind {
+        match c {
+            ConstKind::Double(x) => HashableConstKind::Double(x),
+            ConstKind::Float(x) => HashableConstKind::Float(x),
+            ConstKind::Int(x) => HashableConstKind::Int(x),
+            ConstKind::Ptr(x) => HashableConstKind::Ptr(x),
+        }
+    }
+}
+
+impl Hash for HashableConstKind {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match &self {
+            HashableConstKind::Double(x) => x.to_bits().hash(state),
+            HashableConstKind::Float(x) => x.to_bits().hash(state),
+            HashableConstKind::Int(x) => x.hash(state),
+            HashableConstKind::Ptr(x) => x.hash(state),
+        }
+    }
+}
+
+impl PartialEq for HashableConstKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self, &other) {
+            (HashableConstKind::Double(x), HashableConstKind::Double(y)) => {
+                x.to_bits() == y.to_bits()
+            }
+            (HashableConstKind::Float(x), HashableConstKind::Float(y)) => {
+                x.to_bits() == y.to_bits()
+            }
+            (HashableConstKind::Int(x), HashableConstKind::Int(y)) => x == y,
+            (HashableConstKind::Ptr(x), HashableConstKind::Ptr(y)) => x == y,
+            (_, _) => false,
+        }
+    }
+}
+
+impl Eq for HashableConstKind {}
 
 /// Copies the sign from `lhs` to `rhs` with the same semantics as LLVM's `copysign`.
 #[derive(Clone, Debug)]
@@ -5943,7 +6018,7 @@ mod test {
     };
     use strum::{Display, EnumCount};
 
-    #[derive(Copy, Clone, Debug, Display, EnumCount, PartialEq)]
+    #[derive(Copy, Clone, Debug, Display, Eq, EnumCount, Hash, PartialEq)]
     enum DummyReg {
         R0,
     }

@@ -27,11 +27,12 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     pub trid: TraceId,
     pub hl: Weak<Mutex<HotLocation>>,
     codebuf: ExeCodeBuf,
-    pub guards: TypedVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
+    pub guards: TypedVec<CompiledGuardIdx, J2CompiledGuard>,
     pub trace_start: J2TraceStart<Reg>,
     code_ids: Vec<CodeId>,
     /// The name used for this trace as linker symbol.
     symbol_name: String,
+    vlocs: TypedVec<TraceVarLocsIdx, VarLocs<Reg>>,
 }
 
 impl<Reg: RegT> J2CompiledTrace<Reg> {
@@ -40,9 +41,10 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         m: &Mod<Reg>,
         hl: Weak<Mutex<HotLocation>>,
         codebuf: ExeCodeBuf,
-        mut guards: TypedVec<CompiledGuardIdx, J2CompiledGuard<Reg>>,
+        mut guards: TypedVec<CompiledGuardIdx, J2CompiledGuard>,
         trace_start: J2TraceStart<Reg>,
         code_ids: Vec<CodeId>,
+        vlocs: TypedVec<TraceVarLocsIdx, VarLocs<Reg>>,
     ) -> Self {
         // Extract source trace ID for guard traces.
         let src_ctr = match &m.trace_start {
@@ -82,6 +84,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
             guards,
             trace_start,
             symbol_name,
+            vlocs,
         }
     }
 
@@ -127,7 +130,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
         self.guards[gidx].bid()
     }
 
-    pub(super) fn guard(&self, gidx: CompiledGuardIdx) -> &J2CompiledGuard<Reg> {
+    pub(super) fn guard(&self, gidx: CompiledGuardIdx) -> &J2CompiledGuard {
         &self.guards[gidx]
     }
 
@@ -168,6 +171,15 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
             }
             J2TraceStart::Guard { .. } => unreachable!(),
         }
+    }
+
+    /// Get the [VarLocs] at `idx` in this trace.
+    ///
+    /// # Panics
+    ///
+    /// If `idx` is out of bounds.
+    pub(super) fn vlocs(&self, idx: TraceVarLocsIdx) -> &VarLocs<Reg> {
+        self.vlocs.get(idx).unwrap()
     }
 }
 
@@ -269,7 +281,7 @@ pub(super) enum J2TraceStart<Reg: RegT> {
 }
 
 #[derive(Debug)]
-pub(super) struct J2CompiledGuard<Reg: RegT> {
+pub(super) struct J2CompiledGuard {
     // Generic yk stuff that probably should be stored in a struct at the `compile/mod.rs` level.
     guard: Guard,
 
@@ -292,7 +304,7 @@ pub(super) struct J2CompiledGuard<Reg: RegT> {
     ///     |
     ///  deopt_frames[0] variables
     /// ```
-    pub deopt_vars: Vec<DeoptVar<Reg>>,
+    pub deopt_vars: Vec<DeoptVar>,
     /// All of the instruction offsets in the associated machine code which will need to be patched
     /// when a sidetrace is compiled. Stored in order of guards in the trace.
     patch_offs: SmallVec<[u32; 2]>,
@@ -318,12 +330,16 @@ pub(super) enum GuardKind {
     Switch(Switch),
 }
 
-impl<Reg: RegT> J2CompiledGuard<Reg> {
+/// The offset of a [VarLocs] within [J2CompiledTrace::vlocs].
+#[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]
+pub(super) struct TraceVarLocsIdx(u16);
+
+impl J2CompiledGuard {
     pub(super) fn new(
         kind: GuardKind,
         bid: aot_ir::BBlockId,
         deopt_frames: SmallVec<[DeoptFrame; 2]>,
-        deopt_vars: Vec<DeoptVar<Reg>>,
+        deopt_vars: Vec<DeoptVar>,
         patch_offs: SmallVec<[u32; 2]>,
         extra_stack_len: u32,
     ) -> Self {
@@ -362,18 +378,24 @@ impl PartialEq for DeoptFrame {
 }
 
 /// Variable locations at the end of a guard body.
+///
+/// Since traces often have huge numbers of `DeoptVar`s, we optimise their storage: they don't
+/// store [VarLocs] directly, but indirect into [J2CompiledTrace::vlocs]. Because guards tend to
+/// vary only slightly from their predecessor, this allows us to share (fairly bulky) [VarLocs]
+/// amongst many `DeoptVar`s. This is a significant win (more than halving memory) and worth the
+/// indirection.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct DeoptVar<Reg: RegT> {
+pub(super) struct DeoptVar {
     pub bitw: u32,
     /// The variable locations relevant to deopt. None of these will be [VarLoc::Reg] only: they
     /// will contain at least one `Const`, `Stack`, or `StackOff`. This may contain "unnecessary"
     /// spills (but they're necessary for deopt)
-    pub deopt_fromvlocs: VarLocs<Reg>,
+    pub deopt_fromvlocs: TraceVarLocsIdx,
     /// Where deopt needs to put variables so that AOT execution can resume.
-    pub deopt_tovlocs: VarLocs<Reg>,
+    pub deopt_tovlocs: TraceVarLocsIdx,
     /// The variable locations relevant to a sidetrace. Unlike [Self::deopt_fromvlocs] this can be
     /// a single [VarLoc::Reg] (and will not contain any spills only necessary for deopt).
-    pub sidetrace_fromvlocs: VarLocs<Reg>,
+    pub sidetrace_fromvlocs: TraceVarLocsIdx,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, IndexType, Ord, PartialEq, PartialOrd)]

@@ -174,8 +174,8 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         let var = &guard.deopt_vars[*var_off];
         promotions_len = usize::try_from(var.bitw.div_ceil(8).next_power_of_two()).unwrap();
         assert!(promotions_len <= 8);
-        assert_eq!(var.deopt_fromvlocs.len(), 1);
-        match var.deopt_fromvlocs.iter().next().unwrap() {
+        assert_eq!(ctr.vlocs(var.deopt_fromvlocs).len(), 1);
+        match ctr.vlocs(var.deopt_fromvlocs).iter().next().unwrap() {
             VarLoc::Const(ConstKind::Int(x)) => {
                 promotions = x.to_zero_ext_u64().unwrap().to_ne_bytes();
             }
@@ -220,12 +220,12 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         BUF.with(|(ptr, sz)| (ptr.load(Ordering::Relaxed), sz.load(Ordering::Relaxed)));
 
     for (i, dvar) in guard.deopt_vars.iter().enumerate() {
-        let v = if dvar.deopt_tovlocs.is_empty() {
+        let v = if ctr.vlocs(dvar.deopt_tovlocs).is_empty() {
             0
         } else {
             // A value might be stored in multiple places (registers, stack, etc): we just need to
             // read it from one, so arbitrarily pick the first `from_vloc`.
-            let fromvloc = dvar.deopt_fromvlocs.iter().next().unwrap();
+            let fromvloc = ctr.vlocs(dvar.deopt_fromvlocs).iter().next().unwrap();
             match fromvloc {
                 VarLoc::Stack(off) => {
                     let addr = unsafe { faddr.byte_offset(-isize::try_from(*off).unwrap()) };
@@ -290,6 +290,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
             gp_regs[DeoptGpReg::RBP.idx()] = prev_faddr as u64;
         }
         reconstruct(
+            &ctr,
             &guard.deopt_vars[0..frame.pc_statepoint.lives.len()],
             &stack_vals[0..frame.pc_statepoint.lives.len()],
             &mut gp_regs,
@@ -350,6 +351,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         }
 
         reconstruct(
+            &ctr,
             &guard.deopt_vars[deopt_vars_off..deopt_vars_off + frame.pc_statepoint.lives.len()],
             &stack_vals[deopt_vars_off..deopt_vars_off + frame.pc_statepoint.lives.len()],
             &mut gp_regs,
@@ -411,7 +413,8 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
 
 /// Reconstruct a frame from previously read values, writing to `tgtaddr`.
 fn reconstruct(
-    varlocs: &[DeoptVar<Reg>],
+    ctr: &J2CompiledTrace<Reg>,
+    varlocs: &[DeoptVar],
     stack_vals: &[u64],
     gp_regs: &mut [u64; DeoptGpReg::COUNT],
     fp_regs: &mut [u64; DeoptFpReg::COUNT],
@@ -434,11 +437,12 @@ fn reconstruct(
             ..
         },
         &value,
-    ) in varlocs
-        .iter()
-        .zip(stack_vals)
-        .filter(|(x, _)| !x.deopt_tovlocs.is_empty())
+    ) in varlocs.iter().zip(stack_vals)
     {
+        let tovlocs = ctr.vlocs(*tovlocs);
+        if tovlocs.is_empty() {
+            continue;
+        }
         match bitw {
             33..=64 => {
                 let v = value;

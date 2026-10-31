@@ -66,6 +66,7 @@ use smallvec::{SmallVec, smallvec};
 use std::{
     array, assert_matches,
     fmt::{Debug, Display, Formatter},
+    hash::Hash,
     mem,
 };
 use test_stubs::test_stubs;
@@ -1748,7 +1749,9 @@ impl Default for RState {
 ///   * Every register can be converted into a `RegIdx`. Registers must be numbered `0..n` where
 ///     `n` is the maximum number of registers in the system. As this suggests, the allocator needs
 ///     to consider registers as (sensible!) indexes.
-pub(super) trait RegT: Clone + Copy + Debug + Display + PartialEq + Send + Sync {
+pub(super) trait RegT:
+    Clone + Copy + Debug + Display + Eq + Hash + PartialEq + Send + Sync
+{
     /// A register's index. Every register must be convertible to/from this type.
     type RegIdx: Debug + IndexType;
     /// How many registers are available in this system?
@@ -1858,6 +1861,10 @@ impl<Reg: RegT> VarLocs<Reg> {
 
     pub(super) fn len(&self) -> usize {
         self.raw.len()
+    }
+
+    pub(super) fn into_iter(self) -> impl IntoIterator<Item = VarLoc<Reg>> {
+        self.raw.into_iter()
     }
 
     pub(super) fn iter(&self) -> impl Iterator<Item = &VarLoc<Reg>> {
@@ -2097,7 +2104,7 @@ impl AnyOfFill {
 ///
 /// For example, if a 16 bit value is stored in a 64 bit value, we may know for sure that the upper
 /// 48 bits are set to zero, or they sign extend the 16 bit value --- or we may have no idea!
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum RegFill {
     /// We do not know what the fill bits are set to / we do not care what the fill bits are set
     /// to.
@@ -2242,10 +2249,7 @@ pub(crate) mod test {
     use super::*;
     use crate::{
         compile::j2::{
-            compiled_trace::{CompiledGuardIdx, DeoptVar},
-            hir::Mod,
-            hir::*,
-            hir_parser::str_to_mod,
+            compiled_trace::CompiledGuardIdx, hir::Mod, hir::*, hir_parser::str_to_mod,
             hir_to_asm::*,
         },
         location::{HotLocation, HotLocationKind},
@@ -2337,7 +2341,7 @@ pub(crate) mod test {
         assert_ne!(y, z);
     }
 
-    #[derive(Copy, Clone, Debug, Display, EnumCount, FromRepr, PartialEq)]
+    #[derive(Copy, Clone, Debug, Display, EnumCount, Eq, FromRepr, Hash, PartialEq)]
     #[repr(u8)]
     pub(crate) enum TestReg {
         GPR0,
@@ -2646,11 +2650,11 @@ pub(crate) mod test {
             Ok(TestLabelIdx::from_raw_index(0))
         }
 
-        fn guard_completed(
+        fn guard_completed<'b>(
             &mut self,
             _start_label: Self::Label,
             _stack_off: u32,
-            _deopt_vars: &[DeoptVar<Self::Reg>],
+            _deopt_vlocs: impl Iterator<Item = (&'b VarLocs<Self::Reg>, &'b VarLocs<Self::Reg>)>,
         ) {
         }
 
