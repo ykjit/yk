@@ -11,7 +11,7 @@ use index_type::IndexType;
 use std::marker::PhantomData;
 use strum::{EnumCount, FromRepr};
 
-#[derive(Clone, Copy, Debug, EnumCount, FromRepr, PartialEq)]
+#[derive(Clone, Copy, Debug, EnumCount, Eq, FromRepr, Hash, PartialEq)]
 // If the `repr` changes from `u8`, the `as` in the `Reg::regidx()` function will also need
 // updating.
 #[repr(u8)]

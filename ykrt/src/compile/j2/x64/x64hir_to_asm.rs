@@ -39,7 +39,7 @@ use crate::{
         CompilationError, Statepoint,
         j2::{
             codebuf::{CodeBufInProgress, ExeCodeBuf},
-            compiled_trace::{CompiledGuardIdx, DeoptVar, J2CompiledTrace, J2TraceStart},
+            compiled_trace::{CompiledGuardIdx, J2CompiledTrace, J2TraceStart},
             effects::Effects,
             hir::*,
             hir_to_asm::HirToAsmBackend,
@@ -2494,11 +2494,11 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         Ok(patch_label)
     }
 
-    fn guard_completed(
+    fn guard_completed<'a>(
         &mut self,
         start_label: Self::Label,
         extra_stack_len: u32,
-        _deopt_vars: &[DeoptVar<Self::Reg>],
+        _deopt_vlocs: impl Iterator<Item = (&'a VarLocs<Self::Reg>, &'a VarLocs<Self::Reg>)>,
     ) {
         self.asm.push_inst(IcedInst::with2(
             Code::Sub_rm64_imm32,

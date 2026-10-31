@@ -796,14 +796,13 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             {
                 let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
                 // See if we can find a preceding local which aliases the one we're looking at.
-                if let Some(x) = entry_vars
-                    .iter()
-                    .zip(&entry_types)
-                    .position(|(vlocs, ty)| *ty == tyidx && vlocs == sidetrace_fromvlocs)
-                {
+                if let Some(x) = entry_vars.iter().zip(&entry_types).position(|(vlocs, ty)| {
+                    *ty == tyidx && vlocs == src_ctr.vlocs(*sidetrace_fromvlocs)
+                }) {
                     locals.insert(iid.clone(), hir::InstIdx::from_raw_index(x));
                     continue;
                 }
+                let sidetrace_fromvlocs = src_ctr.vlocs(*sidetrace_fromvlocs);
                 let iidx = if sidetrace_fromvlocs
                     .iter()
                     .any(|vloc| matches!(vloc, VarLoc::Const(_)))
@@ -814,7 +813,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     self.opt.feed_arg(hir::Arg { tyidx }.into())?
                 };
                 locals.insert(iid.clone(), iidx);
-                entry_vars.push(sidetrace_fromvlocs.clone());
+                entry_vars.push(sidetrace_fromvlocs.to_owned());
                 entry_types.push(tyidx);
             }
             self.frames.push(Frame {

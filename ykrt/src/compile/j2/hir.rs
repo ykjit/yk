@@ -1695,10 +1695,10 @@ pub(super) enum ConstKind {
 }
 
 /// A wrapper around [Const]s that allows them to be hashed for deduplication purposes. This struct
-/// is conservative as per [super::super::hir]'s documentation: it treats floating point numbers as
+/// is conservative as per the top-level module documentation: it treats floating point numbers as
 /// bit patterns even under `Eq`. That means, for example, that it will not identify `+0.0` and
 /// `-0.0` as equivalent. This struct should therefore be used with caution: it is not a simple
-/// replacment for [Const] and should be used only when deduplication is not required to guarantee
+/// replacement for [Const] and should be used only when deduplication is not required to guarantee
 /// uniqueness.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) struct HashableConst {
@@ -6018,7 +6018,7 @@ mod test {
     };
     use strum::{Display, EnumCount};
 
-    #[derive(Copy, Clone, Debug, Display, EnumCount, PartialEq)]
+    #[derive(Copy, Clone, Debug, Display, Eq, EnumCount, Hash, PartialEq)]
     enum DummyReg {
         R0,
     }

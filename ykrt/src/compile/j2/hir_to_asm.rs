@@ -112,7 +112,7 @@ use crate::{
             codebuf::ExeCodeBuf,
             compiled_trace::{
                 CompiledGuardIdx, DeoptFrame, DeoptVar, GuardKind, J2CompiledGuard,
-                J2CompiledTrace, J2TraceStart,
+                J2CompiledTrace, J2TraceStart, TraceVarLocsIdx,
             },
             effects::Effects,
             hir::*,
@@ -129,7 +129,7 @@ use index_type::{IndexType, vec::TypedVec};
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
-use std::{ffi::c_void, mem, sync::Arc};
+use std::{collections::hash_map::Entry, ffi::c_void, mem, sync::Arc};
 use test_stubs::test_stubs;
 use vob::Vob;
 
@@ -375,6 +375,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
 
         // Convert [GuardBody]s into [J2CompiledGuard]s.
         let mut labels_iter = labels_off.into_iter();
+        let mut vlocs_builder = TraceVarLocsBuilder::new();
         let guards = gbodies
             .into_iter()
             .map(
@@ -386,7 +387,19 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                      deopt_vars,
                      extra_stack_len,
                  }| {
-                    J2CompiledGuard::new(
+                    let deopt_vars = deopt_vars
+                        .into_iter()
+                        .map(|y| {
+                            Ok(DeoptVar {
+                                bitw: y.bitw,
+                                deopt_fromvlocs: vlocs_builder.insert(y.deopt_fromvlocs)?,
+                                deopt_tovlocs: vlocs_builder.insert(y.deopt_tovlocs)?,
+                                sidetrace_fromvlocs: vlocs_builder.insert(y.sidetrace_fromvlocs)?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, CompilationError>>()?;
+
+                    Ok(J2CompiledGuard::new(
                         kind,
                         bid,
                         deopt_frames,
@@ -395,10 +408,10 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                             .map(|_| u32::try_from(labels_iter.next().unwrap()).unwrap())
                             .collect::<SmallVec<[_; 2]>>(),
                         extra_stack_len,
-                    )
+                    ))
                 },
             )
-            .collect::<TypedVec<_, _>>();
+            .collect::<Result<TypedVec<_, _>, CompilationError>>()?;
 
         if self.log {
             let ds = if let Some(x) = &self.hl.lock().debug_str {
@@ -425,6 +438,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             guards,
             trace_start,
             code_ids,
+            vlocs_builder.build(),
         )))
     }
 
@@ -726,7 +740,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     let tovlocs = smap_loc.clone();
                     let bitw = gblock.inst_bitw(self.m, *term_iidx);
                     max_bitw = max_bitw.max(bitw);
-                    deopt_vars.push(DeoptVar {
+                    deopt_vars.push(IntermediateDeoptVar {
                         bitw,
                         sidetrace_fromvlocs: sidetrace_fromvlocs.clone(),
                         deopt_fromvlocs: varlocs![deopt_fromvloc],
@@ -822,7 +836,9 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 self.be.guard_completed(
                     gexit.label.clone(),
                     gbodies[gidx].extra_stack_len,
-                    &deopt_vars,
+                    deopt_vars
+                        .iter()
+                        .map(|x| (&x.deopt_fromvlocs, &x.deopt_tovlocs)),
                 );
             } else {
                 // FIXME: As a hack to ensure that probably (see the `assert` in the true branch
@@ -830,8 +846,13 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 // guard body thinks it needs. We don't want to increase this too much, or else
                 // multiple coupler traces could cause us to run out of stack.
                 let extra_stack_len = extra_stack_len + 128;
-                self.be
-                    .guard_completed(gexit.label.clone(), extra_stack_len, &deopt_vars);
+                self.be.guard_completed(
+                    gexit.label.clone(),
+                    extra_stack_len,
+                    deopt_vars
+                        .iter()
+                        .map(|x| (&x.deopt_fromvlocs, &x.deopt_tovlocs)),
+                );
                 gbodies.push(GuardBody {
                     kind: gextra.kind.clone(),
                     patch_labels: smallvec![patch_label],
@@ -1355,9 +1376,21 @@ struct GeneratedBlock<AB: HirToAsmBackend> {
     inter_trace_entry: Option<(AB::Label, Vec<VarLocs<AB::Reg>>)>,
 }
 
+/// An intermediate [DeoptVar] before [VarLocs] have been deduplicated by [TraceVarLocsBuilder].
+#[derive(Debug)]
+struct IntermediateDeoptVar<Reg: RegT> {
+    bitw: u32,
+    deopt_fromvlocs: VarLocs<Reg>,
+    deopt_tovlocs: VarLocs<Reg>,
+    sidetrace_fromvlocs: VarLocs<Reg>,
+}
+
 /// Are the `deopt_fromvlocs` vars in `cnd` compatible with those in `with`? Note: this
 /// relationship is not necessarily symmetric.
-fn deopt_vars_compatible<Reg: RegT>(cnd: &[DeoptVar<Reg>], with: &[DeoptVar<Reg>]) -> bool {
+fn deopt_vars_compatible<Reg: RegT>(
+    cnd: &[IntermediateDeoptVar<Reg>],
+    with: &[IntermediateDeoptVar<Reg>],
+) -> bool {
     if cnd.len() != with.len() {
         return false;
     }
@@ -1597,12 +1630,12 @@ pub(super) trait HirToAsmBackend {
     ) -> Result<Self::Label, CompilationError>;
 
     /// The current guard has been completed. `start_label` should be set to the beginning of the
-    /// guard body.
-    fn guard_completed(
+    /// guard body. `deopt_vlocs` is an iterator of pairs `(from_vlocs, to_vlocs)`.
+    fn guard_completed<'a>(
         &mut self,
         start_label: Self::Label,
         extra_stack_len: u32,
-        deopt_vars: &[DeoptVar<Self::Reg>],
+        deopt_vlocs: impl Iterator<Item = (&'a VarLocs<Self::Reg>, &'a VarLocs<Self::Reg>)>,
     );
 
     // Functions for each HIR instruction.
@@ -2097,8 +2130,120 @@ struct GuardBody<AB: HirToAsmBackend + ?Sized> {
     patch_labels: SmallVec<[AB::Label; 2]>,
     bid: aot_ir::BBlockId,
     deopt_frames: SmallVec<[DeoptFrame; 2]>,
-    deopt_vars: Vec<DeoptVar<AB::Reg>>,
+    deopt_vars: Vec<IntermediateDeoptVar<AB::Reg>>,
     extra_stack_len: u32,
+}
+
+/// A custom implementation of an indexed hashset for [VarLocs]. We are able to use a couple of
+/// properties of [VarLocs] to make this more efficient than the general case. Because this is
+/// called a lot -- and [VarLocs] can take up huge amounts of memory -- this extra machinery is
+/// worth it.
+struct TraceVarLocsBuilder<Reg: RegT> {
+    /// The sequence of deduplicated [VarLocs] we're building and will eventually return to the
+    /// user. It always contains at least one entry, and that first entry is always the empty
+    /// [VarLocs].
+    store: TypedVec<TraceVarLocsIdx, VarLocs<Reg>>,
+    /// This map is used to speed up searching for duplicates in [Self::store]. Note: this doesn't
+    /// contain the empty `HashableVarLocs`.
+    map: FxHashMap<HashableVarLocs<Reg>, TraceVarLocsIdx>,
+}
+
+impl<Reg: RegT> TraceVarLocsBuilder<Reg> {
+    fn new() -> Self {
+        let mut store = TypedVec::new();
+        store.push(VarLocs::new());
+        Self {
+            store,
+            map: FxHashMap::default(),
+        }
+    }
+
+    /// Return the [TraceVarLocsIdx] for `vlocs`. Note: this is not a monotonically increasing
+    /// number!
+    fn insert(&mut self, vlocs: VarLocs<Reg>) -> Result<TraceVarLocsIdx, CompilationError> {
+        if vlocs.is_empty() {
+            // Avoid hashmap lookups on the simple, common, case.
+            return Ok(TraceVarLocsIdx::from_raw_index(0));
+        }
+
+        // We expect to get a cache hit in the majority of cases, so we deliberately don't do
+        // `vlocs.clone`: if there is no hit, we recover the `VarLocs` from the `HashableVarLocs`.
+        // This is a bit awkward but faster.
+        match self.map.entry(HashableVarLocs::new(vlocs)) {
+            Entry::Occupied(entry) => Ok(*entry.get()),
+            Entry::Vacant(entry) => {
+                let vlocs = entry.key().raw.iter().cloned().map(VarLoc::from).collect();
+                let idx = self
+                    .store
+                    .try_push(vlocs)
+                    .map_err(|_| CompilationError::LimitExceeded("Too many `VarLoc`s".into()))?;
+                entry.insert(idx);
+                Ok(idx)
+            }
+        }
+    }
+
+    fn build(mut self) -> TypedVec<TraceVarLocsIdx, VarLocs<Reg>> {
+        self.store.shrink_to_fit();
+        self.store
+    }
+}
+
+/// Hashable [VarLocs]. Because of floating point numbers, [VarLocs] are not hashable in the normal
+/// sense: we can only do a conservative job that sometimes misses what naively seem like "equal" floating
+/// point numbers. That means this struct is only safe in situations where you can accept this.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct HashableVarLocs<Reg> {
+    raw: SmallVec<[HashableVarLoc<Reg>; 1]>,
+}
+
+impl<Reg: RegT> HashableVarLocs<Reg> {
+    fn new(x: VarLocs<Reg>) -> Self {
+        // OPT: VarLocs are nominally sets, but we currently compare them in-order, so miss that
+        // `varlocs![a, b]` should be `== varlocs![b, a]`.
+        HashableVarLocs {
+            raw: SmallVec::from_iter(
+                x.into_iter()
+                    .into_iter()
+                    .map(|vloc| HashableVarLoc::new(vloc)),
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(super) enum HashableVarLoc<Reg> {
+    Stack(i32),
+    StackOff(i32),
+    Reg(Reg, RegFill),
+    Const(HashableConstKind),
+}
+
+impl<Reg: RegT> HashableVarLoc<Reg> {
+    fn new(x: VarLoc<Reg>) -> Self {
+        match x {
+            VarLoc::Stack(x) => HashableVarLoc::Stack(x),
+            VarLoc::StackOff(x) => HashableVarLoc::StackOff(x),
+            VarLoc::Reg(reg, fill) => HashableVarLoc::Reg(reg, fill),
+            VarLoc::Const(x) => HashableVarLoc::Const(HashableConstKind::from(x)),
+        }
+    }
+}
+
+impl<Reg: RegT> From<HashableVarLoc<Reg>> for VarLoc<Reg> {
+    fn from(loc: HashableVarLoc<Reg>) -> Self {
+        match loc {
+            HashableVarLoc::Stack(x) => Self::Stack(x),
+            HashableVarLoc::StackOff(x) => Self::StackOff(x),
+            HashableVarLoc::Reg(reg, fill) => Self::Reg(reg, fill),
+            HashableVarLoc::Const(c) => Self::Const(match c {
+                HashableConstKind::Double(x) => ConstKind::Double(x),
+                HashableConstKind::Float(x) => ConstKind::Float(x),
+                HashableConstKind::Int(x) => ConstKind::Int(x),
+                HashableConstKind::Ptr(x) => ConstKind::Ptr(x),
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2106,7 +2251,7 @@ mod test {
     use super::*;
     use crate::{
         compile::j2::{
-            compiled_trace::{CompiledGuardIdx, DeoptVar},
+            compiled_trace::CompiledGuardIdx,
             hir::Mod,
             hir_parser::str_to_mod,
             opt::fullopt::test::str_to_peel_mod,
@@ -2126,7 +2271,7 @@ mod test {
 
     #[test]
     fn deopt_vars_compatibility() {
-        let x = vec![DeoptVar {
+        let x = vec![IntermediateDeoptVar {
             bitw: 64,
             sidetrace_fromvlocs: VarLocs::new(),
             deopt_fromvlocs: varlocs![
@@ -2135,7 +2280,7 @@ mod test {
             ],
             deopt_tovlocs: VarLocs::new(),
         }];
-        let y = vec![DeoptVar {
+        let y = vec![IntermediateDeoptVar {
             bitw: 64,
             sidetrace_fromvlocs: VarLocs::new(),
             deopt_fromvlocs: varlocs![
@@ -2144,7 +2289,7 @@ mod test {
             ],
             deopt_tovlocs: VarLocs::new(),
         }];
-        let z = vec![DeoptVar {
+        let z = vec![IntermediateDeoptVar {
             bitw: 64,
             sidetrace_fromvlocs: VarLocs::new(),
             deopt_fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Zeroed)],
@@ -2158,7 +2303,7 @@ mod test {
         assert!(deopt_vars_compatible(&x, &z));
         assert!(deopt_vars_compatible(&z, &x));
 
-        let sgn = vec![DeoptVar {
+        let sgn = vec![IntermediateDeoptVar {
             bitw: 64,
             sidetrace_fromvlocs: VarLocs::new(),
             deopt_fromvlocs: varlocs![VarLoc::Stack(8), VarLoc::Reg(TestReg::R0, RegFill::Signed)],
@@ -2168,7 +2313,7 @@ mod test {
         assert!(!deopt_vars_compatible(&sgn, &z));
     }
 
-    #[derive(Copy, Clone, Debug, Display, EnumCount, FromRepr, PartialEq)]
+    #[derive(Copy, Clone, Debug, Display, EnumCount, Eq, FromRepr, Hash, PartialEq)]
     #[repr(u8)]
     enum TestReg {
         R0,
@@ -2429,25 +2574,24 @@ mod test {
             Ok(TestLabelIdx::from_raw_index(0))
         }
 
-        fn guard_completed(
+        fn guard_completed<'b>(
             &mut self,
             _start_label: Self::Label,
             _stack_off: u32,
-            deopt_vars: &[DeoptVar<Self::Reg>],
+            deopt_vlocs: impl Iterator<Item = (&'b VarLocs<Self::Reg>, &'b VarLocs<Self::Reg>)>,
         ) {
+            let deopt_vlocs = deopt_vlocs.collect::<Vec<_>>();
             self.log.push(format!(
                 "guard_completed:\n{}",
-                deopt_vars
+                deopt_vlocs
                     .iter()
                     .map(|x| format!(
                         "  fromvlocs=[{}]\n  tovlocs=[{}]",
-                        x.deopt_fromvlocs
-                            .iter()
+                        x.0.iter()
                             .map(|x| format!("{x:?}"))
                             .collect::<Vec<_>>()
                             .join(", "),
-                        x.deopt_tovlocs
-                            .iter()
+                        x.1.iter()
                             .map(|x| format!("{x:?}"))
                             .collect::<Vec<_>>()
                             .join(", ")
