@@ -132,11 +132,7 @@ use crate::compile::{
 use index_type::{IndexType, typed_vec, vec::TypedVec};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-use std::{
-    assert_matches,
-    hash::{Hash, Hasher},
-    mem,
-};
+use std::{assert_matches, mem};
 use vob::Vob;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -267,7 +263,7 @@ impl FullOpt {
         }
 
         if let Inst::Const(x) = &inst
-            && let Some(x) = self.inner.consts_map.get(&HashableConst(x.to_owned()))
+            && let Some(x) = self.inner.consts_map.get(&HashableConst::new(x.to_owned()))
         {
             return Ok(Some(*x));
         }
@@ -335,7 +331,7 @@ impl FullOpt {
             let iidx = self.inner.insts.len();
             self.inner
                 .consts_map
-                .insert(HashableConst(x.to_owned()), iidx);
+                .insert(HashableConst::new(x.to_owned()), iidx);
         }
         let iidx = self.inner.insts.push(InstEquiv {
             inst,
@@ -454,7 +450,7 @@ impl OptT for FullOpt {
                     });
                     self.inner
                         .consts_map
-                        .insert(HashableConst(x.to_owned()), peel_iidx);
+                        .insert(HashableConst::new(x.to_owned()), peel_iidx);
                 }
                 _ => {
                     let tyidx = entry.inst(*entry_iidx).tyidx(&*self);
@@ -629,39 +625,6 @@ impl OptInternal {
     }
 }
 
-/// A wrapper around [Const]s that allows them to be hashed for deduplication purposes. This struct
-/// is conservative as per [super::super::hir]'s documentation: it treats floating point numbers as
-/// bit patterns. That means, for example, that it will not identify `+0.0` and `-0.0` as
-/// equivalent. This struct should therefore be used with caution!
-struct HashableConst(Const);
-
-impl Hash for HashableConst {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.tyidx.hash(state);
-        match &self.0.kind {
-            ConstKind::Double(x) => x.to_bits().hash(state),
-            ConstKind::Float(x) => x.to_bits().hash(state),
-            ConstKind::Int(x) => x.hash(state),
-            ConstKind::Ptr(x) => x.hash(state),
-        }
-    }
-}
-
-impl PartialEq for HashableConst {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.tyidx == other.0.tyidx
-            && match (&self.0.kind, &other.0.kind) {
-                (ConstKind::Double(x), ConstKind::Double(y)) => x.to_bits() == y.to_bits(),
-                (ConstKind::Float(x), ConstKind::Float(y)) => x.to_bits() == y.to_bits(),
-                (ConstKind::Int(x), ConstKind::Int(y)) => x == y,
-                (ConstKind::Ptr(x), ConstKind::Ptr(y)) => x == y,
-                (_, _) => false,
-            }
-    }
-}
-
-impl Eq for HashableConst {}
-
 /// What an optimisation has managed to make of a given input [Inst].
 #[derive(Debug)]
 pub enum OptOutcome {
@@ -768,7 +731,7 @@ impl PassOpt<'_> {
             if let Some(x) = self
                 .optinternal
                 .consts_map
-                .get(&HashableConst(c.to_owned()))
+                .get(&HashableConst::new(c.to_owned()))
             {
                 return *x;
             }
@@ -776,9 +739,9 @@ impl PassOpt<'_> {
                 // Do a linear search through the preinsts for a match. This is potentially quite
                 // slow, though in practise there tend to be zero pre_insts so we don't even hit
                 // this branch.
-                let ch = HashableConst(c.to_owned());
+                let ch = HashableConst::new(c.to_owned());
                 if let Some(x) = self.inner.pre_insts.iter().position(|x| match x {
-                    Inst::Const(c) => HashableConst(c.to_owned()) == ch,
+                    Inst::Const(c) => HashableConst::new(c.to_owned()) == ch,
                     _ => false,
                 }) {
                     return InstIdx::from_raw_index(self.optinternal.insts.len_usize() + x);
@@ -1123,7 +1086,9 @@ pub(in crate::compile::j2) mod test {
                         let iidx =
                             feed_test(opt, inst, feed_f, inst_committed_f, equiv_committed_f);
                         if let Inst::Const(c) = opt.inst(iidx) {
-                            opt.inner.consts_map.insert(HashableConst(c.clone()), iidx);
+                            opt.inner
+                                .consts_map
+                                .insert(HashableConst::new(c.clone()), iidx);
                         }
                         Ok(iidx)
                     })
@@ -1135,7 +1100,7 @@ pub(in crate::compile::j2) mod test {
                     if let Inst::Const(c) = &inst {
                         fopt.inner
                             .consts_map
-                            .insert(HashableConst(c.clone()), fopt.inner.insts.len());
+                            .insert(HashableConst::new(c.clone()), fopt.inner.insts.len());
                     }
                     let iidx = fopt.inner.insts.push(InstEquiv {
                         inst,

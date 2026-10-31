@@ -188,6 +188,7 @@ use std::{
     cmp::min,
     ffi::c_void,
     fmt::{Display, Formatter},
+    hash::{Hash, Hasher},
     mem,
     ops::{Bound, RangeBounds},
     sync::{Arc, atomic::Ordering},
@@ -1692,6 +1693,45 @@ pub(super) enum ConstKind {
     Int(ArbBitInt),
     Ptr(usize),
 }
+
+/// A wrapper around [Const]s that allows them to be hashed for deduplication purposes. This struct
+/// is conservative as per [super::super::hir]'s documentation: it treats floating point numbers as
+/// bit patterns. That means, for example, that it will not identify `+0.0` and `-0.0` as
+/// equivalent. This struct should therefore be used with caution!
+pub(super) struct HashableConst(Const);
+
+impl HashableConst {
+    pub(super) fn new(c: Const) -> Self {
+        Self(c)
+    }
+}
+
+impl Hash for HashableConst {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.tyidx.hash(state);
+        match &self.0.kind {
+            ConstKind::Double(x) => x.to_bits().hash(state),
+            ConstKind::Float(x) => x.to_bits().hash(state),
+            ConstKind::Int(x) => x.hash(state),
+            ConstKind::Ptr(x) => x.hash(state),
+        }
+    }
+}
+
+impl PartialEq for HashableConst {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.tyidx == other.0.tyidx
+            && match (&self.0.kind, &other.0.kind) {
+                (ConstKind::Double(x), ConstKind::Double(y)) => x.to_bits() == y.to_bits(),
+                (ConstKind::Float(x), ConstKind::Float(y)) => x.to_bits() == y.to_bits(),
+                (ConstKind::Int(x), ConstKind::Int(y)) => x == y,
+                (ConstKind::Ptr(x), ConstKind::Ptr(y)) => x == y,
+                (_, _) => false,
+            }
+    }
+}
+
+impl Eq for HashableConst {}
 
 /// Copies the sign from `lhs` to `rhs` with the same semantics as LLVM's `copysign`.
 #[derive(Clone, Debug)]
