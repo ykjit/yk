@@ -1696,42 +1696,77 @@ pub(super) enum ConstKind {
 
 /// A wrapper around [Const]s that allows them to be hashed for deduplication purposes. This struct
 /// is conservative as per [super::super::hir]'s documentation: it treats floating point numbers as
-/// bit patterns. That means, for example, that it will not identify `+0.0` and `-0.0` as
-/// equivalent. This struct should therefore be used with caution!
-pub(super) struct HashableConst(Const);
+/// bit patterns even under `Eq`. That means, for example, that it will not identify `+0.0` and
+/// `-0.0` as equivalent. This struct should therefore be used with caution: it is not a simple
+/// replacment for [Const] and should be used only when deduplication is not required to guarantee
+/// uniqueness.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(super) struct HashableConst {
+    tyidx: TyIdx,
+    kind: HashableConstKind,
+}
 
 impl HashableConst {
     pub(super) fn new(c: Const) -> Self {
-        Self(c)
-    }
-}
-
-impl Hash for HashableConst {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.tyidx.hash(state);
-        match &self.0.kind {
-            ConstKind::Double(x) => x.to_bits().hash(state),
-            ConstKind::Float(x) => x.to_bits().hash(state),
-            ConstKind::Int(x) => x.hash(state),
-            ConstKind::Ptr(x) => x.hash(state),
+        Self {
+            tyidx: c.tyidx,
+            kind: HashableConstKind::from(c.kind),
         }
     }
 }
 
-impl PartialEq for HashableConst {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.tyidx == other.0.tyidx
-            && match (&self.0.kind, &other.0.kind) {
-                (ConstKind::Double(x), ConstKind::Double(y)) => x.to_bits() == y.to_bits(),
-                (ConstKind::Float(x), ConstKind::Float(y)) => x.to_bits() == y.to_bits(),
-                (ConstKind::Int(x), ConstKind::Int(y)) => x == y,
-                (ConstKind::Ptr(x), ConstKind::Ptr(y)) => x == y,
-                (_, _) => false,
-            }
+/// A hashable [ConstKind]. This comes with the same warning as [HashableConst]: it treats floating
+/// point numbers as bit patterns even under `Eq`. That means, for example, that it will not
+/// identify `+0.0` and `-0.0` as equivalent. This struct should therefore be used with caution: it
+/// is not a simple replacment for [Const] and should be used only when deduplication is not
+/// required to guarantee uniqueness.
+#[derive(Clone, Debug)]
+pub(super) enum HashableConstKind {
+    Double(f64),
+    Float(f32),
+    Int(ArbBitInt),
+    Ptr(usize),
+}
+
+impl From<ConstKind> for HashableConstKind {
+    fn from(c: ConstKind) -> HashableConstKind {
+        match c {
+            ConstKind::Double(x) => HashableConstKind::Double(x),
+            ConstKind::Float(x) => HashableConstKind::Float(x),
+            ConstKind::Int(x) => HashableConstKind::Int(x),
+            ConstKind::Ptr(x) => HashableConstKind::Ptr(x),
+        }
     }
 }
 
-impl Eq for HashableConst {}
+impl Hash for HashableConstKind {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match &self {
+            HashableConstKind::Double(x) => x.to_bits().hash(state),
+            HashableConstKind::Float(x) => x.to_bits().hash(state),
+            HashableConstKind::Int(x) => x.hash(state),
+            HashableConstKind::Ptr(x) => x.hash(state),
+        }
+    }
+}
+
+impl PartialEq for HashableConstKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self, &other) {
+            (HashableConstKind::Double(x), HashableConstKind::Double(y)) => {
+                x.to_bits() == y.to_bits()
+            }
+            (HashableConstKind::Float(x), HashableConstKind::Float(y)) => {
+                x.to_bits() == y.to_bits()
+            }
+            (HashableConstKind::Int(x), HashableConstKind::Int(y)) => x == y,
+            (HashableConstKind::Ptr(x), HashableConstKind::Ptr(y)) => x == y,
+            (_, _) => false,
+        }
+    }
+}
+
+impl Eq for HashableConstKind {}
 
 /// Copies the sign from `lhs` to `rhs` with the same semantics as LLVM's `copysign`.
 #[derive(Clone, Debug)]
