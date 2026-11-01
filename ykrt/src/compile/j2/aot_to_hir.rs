@@ -785,7 +785,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 FxHashMap::with_capacity_and_hasher(pc_statepoint.lives.len(), Default::default());
             for (
                 iid,
-                DeoptVar {
+                &DeoptVar {
                     sidetrace_fromvlocs,
                     ..
                 },
@@ -797,12 +797,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let tyidx = self.p_ty(self.am.inst(&iid).def_type(self.am).unwrap())?;
                 // See if we can find a preceding local which aliases the one we're looking at.
                 if let Some(x) = entry_vars.iter().zip(&entry_types).position(|(vlocs, ty)| {
-                    *ty == tyidx && vlocs == src_ctr.vlocs(*sidetrace_fromvlocs)
+                    *ty == tyidx && vlocs == src_ctr.vlocs(sidetrace_fromvlocs)
                 }) {
                     locals.insert(iid.clone(), hir::InstIdx::from_raw_index(x));
                     continue;
                 }
-                let sidetrace_fromvlocs = src_ctr.vlocs(*sidetrace_fromvlocs);
+                let sidetrace_fromvlocs = src_ctr.vlocs(sidetrace_fromvlocs);
                 let iidx = if sidetrace_fromvlocs
                     .iter()
                     .any(|vloc| matches!(vloc, VarLoc::Const(_)))
