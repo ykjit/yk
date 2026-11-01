@@ -385,6 +385,7 @@ impl PartialEq for DeoptFrame {
 /// amongst many `DeoptVar`s. This is a significant win (more than halving memory) and worth the
 /// indirection.
 #[derive(Clone, Debug, PartialEq)]
+#[repr(C, packed)]
 pub(super) struct DeoptVar {
     pub bitw: u32,
     /// The variable locations relevant to deopt. None of these will be [VarLoc::Reg] only: they

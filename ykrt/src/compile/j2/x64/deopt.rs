@@ -431,7 +431,7 @@ fn reconstruct(
     };
     assert_eq!(varlocs.len(), stack_vals.len());
     for (
-        DeoptVar {
+        &DeoptVar {
             bitw,
             deopt_tovlocs: tovlocs,
             ..
@@ -439,7 +439,7 @@ fn reconstruct(
         &value,
     ) in varlocs.iter().zip(stack_vals)
     {
-        let tovlocs = ctr.vlocs(*tovlocs);
+        let tovlocs = ctr.vlocs(tovlocs);
         if tovlocs.is_empty() {
             continue;
         }
