@@ -1750,7 +1750,7 @@ impl Default for RState {
 ///     `n` is the maximum number of registers in the system. As this suggests, the allocator needs
 ///     to consider registers as (sensible!) indexes.
 pub(super) trait RegT:
-    Clone + Copy + Debug + Display + Eq + Hash + PartialEq + Send + Sync
+    Clone + Copy + Debug + Display + Eq + Hash + Ord + PartialEq + PartialOrd + Send + Sync
 {
     /// A register's index. Every register must be convertible to/from this type.
     type RegIdx: Debug + IndexType;
@@ -2104,7 +2104,7 @@ impl AnyOfFill {
 ///
 /// For example, if a 16 bit value is stored in a 64 bit value, we may know for sure that the upper
 /// 48 bits are set to zero, or they sign extend the 16 bit value --- or we may have no idea!
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(super) enum RegFill {
     /// We do not know what the fill bits are set to / we do not care what the fill bits are set
     /// to.
@@ -2341,7 +2341,9 @@ pub(crate) mod test {
         assert_ne!(y, z);
     }
 
-    #[derive(Copy, Clone, Debug, Display, EnumCount, Eq, FromRepr, Hash, PartialEq)]
+    #[derive(
+        Copy, Clone, Debug, Display, EnumCount, Eq, FromRepr, Hash, Ord, PartialEq, PartialOrd,
+    )]
     #[repr(u8)]
     pub(crate) enum TestReg {
         GPR0,

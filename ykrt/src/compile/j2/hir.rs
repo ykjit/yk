@@ -6018,7 +6018,7 @@ mod test {
     };
     use strum::{Display, EnumCount};
 
-    #[derive(Copy, Clone, Debug, Display, Eq, EnumCount, Hash, PartialEq)]
+    #[derive(Copy, Clone, Debug, Display, Eq, EnumCount, Hash, Ord, PartialEq, PartialOrd)]
     enum DummyReg {
         R0,
     }

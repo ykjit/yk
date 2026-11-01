@@ -2138,6 +2138,12 @@ struct GuardBody<AB: HirToAsmBackend + ?Sized> {
 /// properties of [VarLocs] to make this more efficient than the general case. Because this is
 /// called a lot -- and [VarLocs] can take up huge amounts of memory -- this extra machinery is
 /// worth it.
+///
+/// Note: [VarLocs] are sets and this struct can and does reorder [VarLocs]. You might
+/// `insert(varlocs![a, b])` and find that when you look it up later you get back `varlocs![b, a]`.
+/// This is by definition correct, but can be surprising. This struct chooses an ordering of
+/// elements based on what is typically cheaper (e.g. registers are first), although this is
+/// neither guaranteed nor stable.
 struct TraceVarLocsBuilder<Reg: RegT> {
     /// The sequence of deduplicated [VarLocs] we're building and will eventually return to the
     /// user. It always contains at least one entry, and that first entry is always the empty
@@ -2199,15 +2205,15 @@ struct HashableVarLocs<Reg> {
 
 impl<Reg: RegT> HashableVarLocs<Reg> {
     fn new(x: VarLocs<Reg>) -> Self {
-        // OPT: VarLocs are nominally sets, but we currently compare them in-order, so miss that
-        // `varlocs![a, b]` should be `== varlocs![b, a]`.
-        HashableVarLocs {
-            raw: SmallVec::from_iter(
-                x.into_iter()
-                    .into_iter()
-                    .map(|vloc| HashableVarLoc::new(vloc)),
-            ),
+        let mut raw = SmallVec::from_iter(
+            x.into_iter()
+                .into_iter()
+                .map(|vloc| HashableVarLoc::new(vloc)),
+        );
+        if raw.len() > 1 {
+            raw.sort_unstable();
         }
+        HashableVarLocs { raw }
     }
 }
 
@@ -2243,6 +2249,49 @@ impl<Reg: RegT> From<HashableVarLoc<Reg>> for VarLoc<Reg> {
                 HashableConstKind::Ptr(x) => ConstKind::Ptr(x),
             }),
         }
+    }
+}
+
+impl<Reg: RegT> Ord for HashableVarLoc<Reg> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // All we're looking to do here is canonicalise `VarLoc`s such that we notice most
+        // equivalent sets.
+        use {HashableConstKind as C, HashableVarLoc::*};
+
+        // The ordering in here is deliberate: it means that `VarLocs` end up with the cheapest
+        // things (registers, consts, `StackOff`s) at the start and the most expensive things
+        // (`Stack`s) at the end.
+        let rank = |loc: &Self| match loc {
+            Reg(_, _) => 0,
+            Const(C::Double(_)) => 1,
+            Const(C::Float(_)) => 2,
+            Const(C::Int(_)) => 3,
+            Const(C::Ptr(_)) => 4,
+            StackOff(_) => 5,
+            Stack(_) => 6,
+        };
+
+        rank(self)
+            .cmp(&rank(other))
+            .then_with(|| match (self, other) {
+                (Stack(a), Stack(b)) | (StackOff(a), StackOff(b)) => a.cmp(b),
+                (Reg(a, af), Reg(b, bf)) => a.cmp(b).then_with(|| af.cmp(bf)),
+                (Const(C::Double(a)), Const(C::Double(b))) => a.total_cmp(b),
+                (Const(C::Float(a)), Const(C::Float(b))) => a.total_cmp(b),
+                (Const(C::Int(a)), Const(C::Int(b))) => a.bitw().cmp(&b.bitw()).then_with(|| {
+                    a.to_zero_ext_u64()
+                        .unwrap()
+                        .cmp(&b.to_zero_ext_u64().unwrap())
+                }),
+                (Const(C::Ptr(a)), Const(C::Ptr(b))) => a.cmp(b),
+                _ => unreachable!(),
+            })
+    }
+}
+
+impl<Reg: RegT> PartialOrd for HashableVarLoc<Reg> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -2313,7 +2362,9 @@ mod test {
         assert!(!deopt_vars_compatible(&sgn, &z));
     }
 
-    #[derive(Copy, Clone, Debug, Display, EnumCount, Eq, FromRepr, Hash, PartialEq)]
+    #[derive(
+        Copy, Clone, Debug, Display, EnumCount, Eq, FromRepr, Hash, Ord, PartialEq, PartialOrd,
+    )]
     #[repr(u8)]
     enum TestReg {
         R0,
