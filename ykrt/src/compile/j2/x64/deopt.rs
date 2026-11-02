@@ -8,7 +8,7 @@ use crate::{
             compiled_trace::{CompiledGuardIdx, DeoptVar, GuardKind, J2CompiledTrace},
             hir::ConstKind,
             regalloc::{RegFill, VarLoc},
-            x64::x64regalloc::Reg,
+            x64::{SIZE_CONTROL_POINT_SAVE_AREA, x64regalloc::Reg},
         },
     },
     log::Verbosity,
@@ -160,10 +160,14 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
         )
     });
 
-    let mut callee_saved_regs = [0u64; 5];
-    mt.deopt(callee_saved_regs.as_mut_ptr() as *mut c_void);
-
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+    // Fish the callee saved registers out from the frame.
+    let (entry_smap, entry_prologue) = aot_smaps.get(crate::StackMapIdx::from_raw_index(0));
+    assert!(entry_prologue.hasfp);
+    let saved_off = usize::try_from(entry_smap.size - 8).unwrap()
+        + usize::try_from(SIZE_CONTROL_POINT_SAVE_AREA).unwrap();
+    let callee_saved_regs = unsafe { faddr.byte_sub(saved_off).cast::<[u64; 5]>().read() };
+    mt.deopt();
 
     // OPT: We don't want to pay the price for a malloc for GuardKind::Promote, because that's the
     // rare case. So we allocate stack space: if we're actually tracing and need to seed the

@@ -89,15 +89,13 @@ pub extern "C" fn __ykrt_control_point(
         "ret",
         // Slow path: proceed with full control point logic
         ".slow_path:",
-        // Push the callee-save registers to the stack. This is required so that traces can read
-        // live variables from them.
+        // Store the return pointer and callee saved registers. This needs to match
+        // SIZE_CONTROL_POINT_SAVE_AREA.
         "push rbx",
         "push r12",
         "push r13",
         "push r14",
         "push r15",
-        // Pass a pointer to the pushed callee-saved registers.
-        "mov r8, rsp",
         // Pass interpreter frame's base pointer via 4th argument register.
         "mov rcx, rbp",
         // Do the call
@@ -120,15 +118,12 @@ pub extern "C" fn __ykrt_control_point_real(
     smapidx: StackMapIdx,
     // Frame address of caller.
     frameaddr: *mut c_void,
-    // A pointer to the full set of callee saved registers on the stack. How many of these, and how
-    // they are laid out, is a platform specific issue.
-    callee_saved_regs: *mut c_void,
 ) {
     let mt = unsafe { &*mt };
     let loc = unsafe { &*loc };
     if !loc.is_null() {
         let arc = unsafe { Arc::from_raw(mt) };
-        arc.control_point(loc, frameaddr, callee_saved_regs, smapidx);
+        arc.control_point(loc, frameaddr, smapidx);
         forget(arc);
     }
 }
