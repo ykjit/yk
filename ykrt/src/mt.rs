@@ -436,7 +436,6 @@ impl MT {
         self: &Arc<Self>,
         loc: &Location,
         frameaddr: *mut c_void,
-        callee_saved_regs: *mut c_void,
         smapidx: StackMapIdx,
     ) {
         match self.transition_control_point(loc, frameaddr) {
@@ -489,10 +488,6 @@ impl MT {
                     mtt.push_tstate(MTThreadState::Executing {
                         mt: Arc::clone(self),
                         trid: ctr.ctrid(),
-                        #[cfg(target_arch = "x86_64")]
-                        callee_saved_regs: unsafe {
-                            std::ptr::read(callee_saved_regs.cast::<[u64; 5]>())
-                        },
                     });
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
@@ -1124,20 +1119,8 @@ impl MT {
 
     /// Inform this `MT` instance that `deopt` has occurred: this updates the stack of
     /// [MTThreadState]s.
-    pub(crate) fn deopt(self: &Arc<Self>, dst_callee_saved_regs: *mut c_void) {
-        let st = MTThread::with_borrow_mut(|mtt| {
-            for tstate in mtt.tstate.iter().rev() {
-                if let MTThreadState::Executing {
-                    callee_saved_regs: src_callee_saved_regs,
-                    ..
-                } = tstate
-                {
-                    copy_callee_saved_regs(src_callee_saved_regs, dst_callee_saved_regs);
-                    break;
-                }
-            }
-            mtt.pop_tstate()
-        });
+    pub(crate) fn deopt(self: &Arc<Self>) {
+        let st = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
         if let MTThreadState::Tracing { ref hl, trid, .. } = st {
             // We recursed into an interpreter loop that started tracing then `return`ed back to a
             // JIT frame. We can compile such a location as a `Return` trace.
@@ -1299,12 +1282,6 @@ enum MTThreadState {
         /// The ID of the executing [CompiledTrace]).
         trid: TraceId,
         mt: Arc<MT>,
-        // The callee saved registers. The types of these is platform dependent. In general one
-        // would aim to record them inline without forcing an allocation, but depending on the
-        // platform that might or might be the best solution (if there are too many callee saved
-        // registers, it might enlarge the overall enum so much an allocation is cheaper).
-        #[cfg(target_arch = "x86_64")]
-        callee_saved_regs: [u64; 5],
     },
 }
 
@@ -1408,20 +1385,10 @@ impl MTThread {
         THREAD_MTTHREAD.with_borrow_mut(|mtt| f(mtt))
     }
 
+    /// The function to call in the return trace trampoline.
     #[unsafe(no_mangle)]
-    pub(crate) fn trace_returned(dst_callee_saved_regs: *mut c_void) {
+    pub(crate) extern "C" fn trace_returned() {
         THREAD_MTTHREAD.with_borrow_mut(|mtt| {
-            for tstate in mtt.tstate.iter().rev() {
-                if let MTThreadState::Executing {
-                    callee_saved_regs: src_callee_saved_regs,
-                    ..
-                } = tstate
-                {
-                    copy_callee_saved_regs(src_callee_saved_regs, dst_callee_saved_regs);
-                    break;
-                }
-            }
-
             match mtt.peek_mut_tstate() {
                 MTThreadState::Executing { mt, trid, .. } => {
                     yklog!(
@@ -1811,21 +1778,6 @@ impl TraceId {
 impl std::fmt::Display for TraceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-fn copy_callee_saved_regs(src_callee_saved_regs: &[u64; 5], dst_callee_saved_regs: *mut c_void) {
-    assert_ne!(
-        src_callee_saved_regs.as_ptr() as *const _,
-        dst_callee_saved_regs as *const _
-    );
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            src_callee_saved_regs.as_ptr(),
-            dst_callee_saved_regs.cast::<u64>(),
-            5,
-        );
     }
 }
 

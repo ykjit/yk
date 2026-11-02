@@ -45,6 +45,7 @@ use crate::{
                 AnyOfFill, RegAlloc, RegCnstr, RegCnstrFill, RegFill, RegT, VarLoc, VarLocs,
             },
             x64::{
+                SIZE_CONTROL_POINT_SAVE_AREA,
                 asm::{Asm, LabelIdx, RelocKind},
                 x64regalloc::{ALL_XMM_REGS, NORMAL_GP_REGS, PeelRegsBuilder, Reg},
             },
@@ -1616,6 +1617,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
     type Label = LabelIdx;
     type Reg = Reg;
     type PeelRegsBuilder = PeelRegsBuilder<Reg>;
+    const SIZE_CONTROL_POINT_SAVE_AREA: u32 = SIZE_CONTROL_POINT_SAVE_AREA;
 
     #[cfg(test)]
     type BuildTest = String;
@@ -2250,122 +2252,77 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         exit_statepoint: &'static Statepoint,
         ret_val: Option<InstIdx>,
     ) -> Result<(), CompilationError> {
-        self.asm.push_inst(Ok(IcedInst::with(Code::Retnq)));
         self.asm
-            .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RBP));
+            .push_inst(IcedInst::with1(Code::Jmp_rm64, IcedReg::R11));
+        self.asm.push_inst(IcedInst::with2(
+            Code::Mov_r64_imm64,
+            IcedReg::R11,
+            __yk_trace_return_trampoline as *const () as i64,
+        ));
 
-        let csrs: SmallVec<[Reg; 16]> = if cfg!(test) {
+        #[cfg(not(test))]
+        let (saved_base, prologue) = {
+            let smaps = crate::aotsmp::AOT_STACKMAPS.as_ref().unwrap();
+            // Match the allocator's existing assumption about the control-point frame.
+            let (smap, entry_prologue) = smaps.get(crate::StackMapIdx::from_raw_index(0));
+            assert!(entry_prologue.hasfp);
+            let (_, prologue) = smaps.get(exit_statepoint.smapidx);
+            (i64::try_from(smap.size - 8).unwrap(), prologue)
+        };
+        #[cfg(test)]
+        let (saved_base, prologue) = {
             assert_eq!(
                 exit_statepoint.smapidx,
                 crate::StackMapIdx::from_raw_index(0)
             );
-            smallvec::smallvec![Reg::RBX, Reg::R12, Reg::R13, Reg::R14, Reg::R15]
-        } else {
-            #[cfg(test)]
-            panic!();
-
-            #[cfg(not(test))]
-            {
-                let aot_smaps = crate::aotsmp::AOT_STACKMAPS.as_ref().unwrap();
-                let (_, prologue) = aot_smaps.get(exit_statepoint.smapidx);
-                prologue
-                    .csrs
-                    .iter()
-                    .map(|(x, _)| Reg::from_dwarf_reg(*x))
-                    .collect::<SmallVec<[Reg; 16]>>()
-            }
+            (
+                0i64,
+                &yksmp::PrologueInfo {
+                    hasfp: true,
+                    csrs: vec![],
+                },
+            )
         };
-
-        for reg in csrs.iter().rev() {
-            self.asm
-                .push_inst(IcedInst::with1(Code::Pop_r64, reg.to_reg64()));
-        }
-        self.asm.push_inst(IcedInst::with2(
-            Code::Lea_r64_m,
-            IcedReg::RSP,
-            MemoryOperand::with_base_displ(IcedReg::RBP, -i64::try_from(csrs.len() * 8).unwrap()),
-        ));
-
-        if ret_val.is_some() {
-            // trace_returned clobbers RAX so if we have `return X`, we need to push/pop that
-            // around the call to `trace_returned`.
+        for (i, reg) in [Reg::R15, Reg::R14, Reg::R13, Reg::R12, Reg::RBX]
+            .into_iter()
+            .enumerate()
+        {
+            let off = prologue
+                .csrs
+                .iter()
+                .find_map(|(dwarf, off)| {
+                    (Reg::from_dwarf_reg(*dwarf) == reg).then_some(i64::from(*off))
+                })
+                .unwrap_or(
+                    -saved_base - i64::from(SIZE_CONTROL_POINT_SAVE_AREA)
+                        + i64::try_from(i * 8).unwrap(),
+                );
             self.asm.push_inst(IcedInst::with2(
                 Code::Mov_r64_rm64,
-                IcedReg::RAX,
-                MemoryOperand::with_base_displ(IcedReg::RSP, 48 + 8),
+                reg.to_reg64(),
+                MemoryOperand::with_base_displ(IcedReg::RBP, off),
             ));
         }
 
-        // Restore the callee saved registers: this order must match that in
-        // `__ykrt_control_point`.
-        for (reg, off) in [
-            (Reg::RBX, 32),
-            (Reg::R12, 24),
-            (Reg::R13, 16),
-            (Reg::R14, 8),
-            (Reg::R15, 0),
-        ] {
-            if !csrs.contains(&reg) {
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Mov_r64_rm64,
-                    reg.to_reg64(),
-                    MemoryOperand::with_base_displ(IcedReg::RSP, off),
-                ));
-            }
-        }
-
-        // We can use any caller-saved register except RAX and RDI here.
-        let tempr = Reg::R11;
-        let callr = if let Some(ret_val) = ret_val {
+        if let Some(ret_val) = ret_val {
             match b.inst_ty(self.m, ret_val) {
-                Ty::Double => todo!(),
-                Ty::Float => todo!(),
-                Ty::Func(_) => todo!(),
+                Ty::Double | Ty::Float | Ty::Func(_) => todo!(),
                 Ty::Int(_) | Ty::Ptr(_) => {
-                    let bitw = b.inst_bitw(self.m, ret_val);
-                    assert!(bitw <= 64);
-                    let [callr, _] = ra.alloc(
+                    assert!(b.inst_bitw(self.m, ret_val) <= 64);
+                    ra.alloc(
                         self,
                         iidx,
-                        [
-                            RegCnstr::Temp { regs: &[tempr] },
-                            RegCnstr::Input {
-                                in_iidx: ret_val,
-                                in_fill: RegCnstrFill::Zeroed,
-                                regs: &[Reg::RAX],
-                                clobber: false,
-                            },
-                        ],
+                        [RegCnstr::InputOutput {
+                            in_iidx: ret_val,
+                            in_fill: RegCnstrFill::Zeroed,
+                            out_fill: RegCnstrFill::Zeroed,
+                            regs: &[Reg::RAX],
+                        }],
                     )?;
-                    callr
                 }
                 Ty::Void => unreachable!(),
             }
-        } else {
-            ra.alloc(self, iidx, [RegCnstr::Temp { regs: &[tempr] }])?[0]
-        };
-        self.asm
-            .push_inst(IcedInst::with1(Code::Call_rm64, callr.to_reg64()));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Mov_r64_imm64,
-            callr.to_reg64(),
-            // This cast is fine on x64, and this module will only be compiled on that platform.
-            MTThread::trace_returned as *const () as i64,
-        ));
-        self.asm.push_inst(IcedInst::with2(
-            Code::Lea_r64_m,
-            IcedReg::RDI,
-            MemoryOperand::with_base(IcedReg::RSP),
-        ));
-        self.asm
-            .push_inst(IcedInst::with2(Code::Sub_rm64_imm8, IcedReg::RSP, 48));
-        if ret_val.is_some() {
-            self.asm
-                .push_inst(IcedInst::with1(Code::Push_r64, IcedReg::RAX));
-            self.asm
-                .push_inst(IcedInst::with1(Code::Push_r64, IcedReg::RAX));
         }
-
         Ok(())
     }
 
@@ -5938,6 +5895,21 @@ enum OverflowArith {
     Sub,
 }
 
+/// The trampoline function called at the end of traces.
+#[unsafe(naked)]
+pub(crate) unsafe extern "C" fn __yk_trace_return_trampoline() {
+    std::arch::naked_asm!(
+        "sub rsp, 16",
+        "mov [rsp], rax",
+        "call {trace_returned}",
+        "mov rax, [rsp]",
+        "mov rsp, rbp",
+        "pop rbp",
+        "ret",
+        trace_returned = sym MTThread::trace_returned,
+    )
+}
+
 /// x64 tests. These use an unusual form of pattern matching. Instead of using concrete register
 /// names, one can refer to a class of registers e.g. `r.8` is all 8-bit registers. To match a
 /// register name but ignore its value uses `r.8._`: to match a register name use `r.8.x`.
@@ -6179,6 +6151,12 @@ mod test {
         let mut ra = RegAlloc::new(&m, block, args_vlocs, 0);
         be.star_return_end(&mut ra, block, term_iidx, &TEST_EXIT_STATEPOINT, ret_val)
             .unwrap();
+        ra.alloc_at_start(
+            &mut be,
+            args_vlocs,
+            crate::compile::j2::hir_to_asm::BlockEntry::Other,
+        )
+        .unwrap();
 
         let entry_label = be.entry_label;
         be.asm.attach_label(entry_label);
@@ -6708,44 +6686,38 @@ mod test {
     }
 
     #[test]
-    fn return_value_preserves_rax() {
+    fn return_trace_tail() {
+        // Returning a value
         codegen_and_test_return(
             r#"
-          %0: i32 = arg [reg]
+          %0: i32 = arg [reg("R11", undefined)]
           term [%0]
         "#,
             &["
-          ...
-          push rax
-          push rax
-          sub rsp, 0x30
-          lea rdi, [rsp]
-          mov r.64.call, {{_}}
-          call r.64.call
-          mov rax, [rsp+0x38]
-          ...
-          ret
+              ...
+              mov eax, r11d
+              mov rbx, [rbp-0x10]
+              mov r12, [rbp-0x18]
+              mov r13, [rbp-0x20]
+              mov r14, [rbp-0x28]
+              mov r15, [rbp-0x30]
+              mov r11, {{_}}
+              jmp r11
             "],
         );
-    }
 
-    #[test]
-    fn star_return_without_value_does_not_preserve_rax() {
+        // Not returning a value
         codegen_and_test_return(
             "term []",
             &["
-              ...
-              lea rdi, [rsp]
-              mov r.64.call, {{_}}
-              call r.64.call
-              lea rsp, [rbp-0x28]
-              pop rbx
-              pop r12
-              pop r13
-              pop r14
-              pop r15
-              pop rbp
-              ret
+              ; l0
+              mov rbx, [rbp-0x10]
+              mov r12, [rbp-0x18]
+              mov r13, [rbp-0x20]
+              mov r14, [rbp-0x28]
+              mov r15, [rbp-0x30]
+              mov r11, {{_}}
+              jmp r11
             "],
         );
     }

@@ -2494,6 +2494,7 @@ pub(crate) mod test {
         type Reg = TestReg;
         type PeelRegsBuilder = TestPeelRegsBuilder;
         type BuildTest = String;
+        const SIZE_CONTROL_POINT_SAVE_AREA: u32 = 8;
 
         fn build_test(self, _labels: &[Self::Label]) -> Self::BuildTest {
             self.ra_log.join("\n")

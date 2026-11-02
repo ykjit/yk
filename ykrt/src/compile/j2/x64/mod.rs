@@ -6,3 +6,5 @@ pub(super) mod x64hir_to_asm;
 mod x64regalloc;
 
 pub(super) use x64regalloc::Reg;
+
+const SIZE_CONTROL_POINT_SAVE_AREA: u32 = 48;
