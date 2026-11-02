@@ -31,8 +31,6 @@
 //! fairly hard to generate the most efficient possible code: this sometimes requires jumping
 //! through a number of hoops!
 
-#[cfg(not(test))]
-use crate::aotsmp::AOT_STACKMAPS;
 use crate::{
     MTThread,
     compile::{
@@ -2256,80 +2254,64 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         self.asm
             .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RBP));
 
-        #[cfg(test)]
-        {
-            let csrs = {
-                assert_eq!(
-                    exit_statepoint.smapidx,
-                    crate::StackMapIdx::from_raw_index(0)
-                );
-                [(3, -6), (12, -5), (13, -4), (14, -3), (15, -2)]
-            };
-            for (reg, _) in csrs.iter().rev() {
-                self.asm.push_inst(IcedInst::with1(
-                    Code::Pop_r64,
-                    Reg::from_dwarf_reg(*reg).to_reg64(),
-                ));
+        let csrs: SmallVec<[Reg; 16]> = if cfg!(test) {
+            assert_eq!(
+                exit_statepoint.smapidx,
+                crate::StackMapIdx::from_raw_index(0)
+            );
+            smallvec::smallvec![Reg::RBX, Reg::R12, Reg::R13, Reg::R14, Reg::R15]
+        } else {
+            #[cfg(test)]
+            panic!();
+
+            #[cfg(not(test))]
+            {
+                let aot_smaps = crate::aotsmp::AOT_STACKMAPS.as_ref().unwrap();
+                let (_, prologue) = aot_smaps.get(exit_statepoint.smapidx);
+                prologue
+                    .csrs
+                    .iter()
+                    .map(|(x, _)| Reg::from_dwarf_reg(*x))
+                    .collect::<SmallVec<[Reg; 16]>>()
             }
+        };
 
-            self.asm.push_inst(IcedInst::with2(
-                Code::Lea_r64_m,
-                IcedReg::RSP,
-                MemoryOperand::with_base_displ(
-                    IcedReg::RBP,
-                    -i64::try_from(csrs.len() * 8).unwrap(),
-                ),
-            ));
+        for reg in csrs.iter().rev() {
+            self.asm
+                .push_inst(IcedInst::with1(Code::Pop_r64, reg.to_reg64()));
         }
-
-        #[cfg(not(test))]
-        {
-            let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-            let (_, prologue) = aot_smaps.get(exit_statepoint.smapidx);
-            for (reg, _) in prologue.csrs.iter().rev() {
-                self.asm.push_inst(IcedInst::with1(
-                    Code::Pop_r64,
-                    Reg::from_dwarf_reg(*reg).to_reg64(),
-                ));
-            }
-
-            self.asm.push_inst(IcedInst::with2(
-                Code::Lea_r64_m,
-                IcedReg::RSP,
-                MemoryOperand::with_base_displ(
-                    IcedReg::RBP,
-                    -i64::try_from(prologue.csrs.len() * 8).unwrap(),
-                ),
-            ));
-        }
+        self.asm.push_inst(IcedInst::with2(
+            Code::Lea_r64_m,
+            IcedReg::RSP,
+            MemoryOperand::with_base_displ(IcedReg::RBP, -i64::try_from(csrs.len() * 8).unwrap()),
+        ));
 
         if ret_val.is_some() {
             // trace_returned clobbers RAX so if we have `return X`, we need to push/pop that
-            // around the call to `trace_returned`. We push/pop twice as a simple, visible hack of
-            // 16-byte alignment.
-            // OPT: We can probably MOV this to another register rather than to the stack.
-            self.asm
-                .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RAX));
-            self.asm
-                .push_inst(IcedInst::with1(Code::Pop_r64, IcedReg::RAX));
+            // around the call to `trace_returned`.
+            self.asm.push_inst(IcedInst::with2(
+                Code::Mov_r64_rm64,
+                IcedReg::RAX,
+                MemoryOperand::with_base_displ(IcedReg::RSP, 48 + 8),
+            ));
         }
 
-        self.asm
-            .push_inst(IcedInst::with2(Code::Add_rm64_imm8, IcedReg::RSP, 48));
         // Restore the callee saved registers: this order must match that in
         // `__ykrt_control_point`.
         for (reg, off) in [
-            (IcedReg::RBX, 32),
-            (IcedReg::R12, 24),
-            (IcedReg::R13, 16),
-            (IcedReg::R14, 8),
-            (IcedReg::R15, 0),
+            (Reg::RBX, 32),
+            (Reg::R12, 24),
+            (Reg::R13, 16),
+            (Reg::R14, 8),
+            (Reg::R15, 0),
         ] {
-            self.asm.push_inst(IcedInst::with2(
-                Code::Mov_r64_rm64,
-                reg,
-                MemoryOperand::with_base_displ(IcedReg::RSP, off),
-            ));
+            if !csrs.contains(&reg) {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r64_rm64,
+                    reg.to_reg64(),
+                    MemoryOperand::with_base_displ(IcedReg::RSP, off),
+                ));
+            }
         }
 
         // We can use any caller-saved register except RAX and RDI here.
@@ -6740,14 +6722,7 @@ mod test {
           lea rdi, [rsp]
           mov r.64.call, {{_}}
           call r.64.call
-          mov r15, [rsp]
-          mov r14, [rsp+8]
-          mov r13, [rsp+0x10]
-          mov r12, [rsp+0x18]
-          mov rbx, [rsp+0x20]
-          add rsp, 0x30
-          pop rax
-          pop rax
+          mov rax, [rsp+0x38]
           ...
           ret
             "],
@@ -6763,12 +6738,6 @@ mod test {
               lea rdi, [rsp]
               mov r.64.call, {{_}}
               call r.64.call
-              mov r15, [rsp]
-              mov r14, [rsp+8]
-              mov r13, [rsp+0x10]
-              mov r12, [rsp+0x18]
-              mov rbx, [rsp+0x20]
-              add rsp, 0x30
               lea rsp, [rbp-0x28]
               pop rbx
               pop r12
