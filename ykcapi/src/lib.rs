@@ -89,10 +89,8 @@ pub extern "C" fn __ykrt_control_point(
         "ret",
         // Slow path: proceed with full control point logic
         ".slow_path:",
-        "sub rsp, 8", // Alignment
         // Push the callee-save registers to the stack. This is required so that traces can read
         // live variables from them.
-        "push rbp",
         "push rbx",
         "push r12",
         "push r13",
@@ -104,14 +102,8 @@ pub extern "C" fn __ykrt_control_point(
         "mov rcx, rbp",
         // Do the call
         "call __ykrt_control_point_real",
-        // Restore callee-save registers.
-        "pop r15",
-        "pop r14",
-        "pop r13",
-        "pop r12",
-        "pop rbx",
-        "pop rbp",
-        "add rsp, 8", // Alignment.
+        // Restore RSP after the callee saved registers have been pushed.
+        "add rsp, 40",
         // NOTE! If the control point determined that a trace needs to be executed, then the return
         // address has been overwritten and this `ret` will jump to the trace's entry point!
         "ret",
