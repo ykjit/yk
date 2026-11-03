@@ -90,6 +90,15 @@ static __yk_thread_tracing_state: AtomicU8 = const { AtomicU8::new(IsTracing::No
 /// This optimisation avoids `__tls_get_addr` overhead when not tracing.
 static TRACING_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
 
+/// After `fork`, only one of yk's many threads will survive: the system is then in a completely
+/// unpredictable state (locks might be held etc. etc.). We tell users not to call yk at that
+/// point, but that can be quite hard for them to honour, so we protect a few key APIs when we
+/// realise that we're in the child process.
+static IS_FORKED_CHILD: AtomicBool = AtomicBool::new(false);
+unsafe extern "C" fn after_fork_in_child() {
+    IS_FORKED_CHILD.store(true, Ordering::Relaxed);
+}
+
 /// A meta-tracer. This is always passed around stored in an [Arc].
 ///
 /// When you are finished with this meta-tracer, it is best to explicitly call [MT::shutdown] to
@@ -139,9 +148,26 @@ impl std::fmt::Debug for MT {
 }
 
 impl MT {
-    // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
-    // are no guarantees as to whether they will share resources effectively or fairly.
+    /// Return this process's MT instance.
     pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+        static GLOBAL_MT: Mutex<Option<Arc<MT>>> = Mutex::new(None);
+
+        let mut mt = GLOBAL_MT.lock();
+        if let Some(mt) = &*mt {
+            return Ok(Arc::clone(mt));
+        }
+        let new_mt = Self::create()?;
+        if unsafe { libc::pthread_atfork(None, None, Some(after_fork_in_child)) } != 0 {
+            todo!();
+        }
+        *mt = Some(Arc::clone(&new_mt));
+        Ok(new_mt)
+    }
+
+    /// Create a new MT instance. For normal running, this must only be called by [MT::new]. Unit
+    /// tests in this file may call this method multiple times --- but they should know what the
+    /// consequences are!
+    fn create() -> Result<Arc<Self>, Box<dyn Error>> {
         load_aot_stackmaps();
         let opt_level = match env::var("YKD_OPT") {
             Ok(s) => s
@@ -186,6 +212,14 @@ impl MT {
         }))
     }
 
+    /// Returns `true` if this yk instance is running in a post-fork child process.
+    ///
+    /// This function is not intended for general use, but ykcapi does need access to it.
+    #[doc(hidden)]
+    pub fn is_forked_child() -> bool {
+        IS_FORKED_CHILD.load(Ordering::Relaxed)
+    }
+
     /// Put this meta-tracer into shutdown mode, panicking if any problems are discovered. This
     /// will perform actions such as printing summary statistics and checking whether any worker
     /// threads have caused an error. The best place to do this is likely to be on the main thread,
@@ -197,6 +231,9 @@ impl MT {
     /// Only the first call of this method performs meaningful actions: any subsequent calls will
     /// note the previous shutdown and immediately return.
     pub fn shutdown(&self) {
+        if Self::is_forked_child() {
+            return;
+        }
         if !self.shutdown.swap(true, Ordering::Relaxed) {
             self.stats.timing_state(TimingState::None);
             self.stats.output();
@@ -423,6 +460,9 @@ impl MT {
 
     /// Inform yk that `cid` has been retired. Only side traces are disconnected.
     pub fn retire_code_id(self: &Arc<Self>, cid: CodeId) {
+        if Self::is_forked_child() {
+            return;
+        }
         let mut lk = self.code_retirement.lock();
         lk.retire_code_id(self, cid);
     }
@@ -438,6 +478,9 @@ impl MT {
         frameaddr: *mut c_void,
         smapidx: StackMapIdx,
     ) {
+        if Self::is_forked_child() {
+            return;
+        }
         match self.transition_control_point(loc, frameaddr) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::AbortTracing => {
@@ -1884,9 +1927,17 @@ mod tests {
     }
 
     #[test]
+    fn mt_new_is_idempotent() {
+        // Check that MT::new() returns the same instance each time it is called.
+        let mt1 = MT::new().unwrap();
+        let mt2 = MT::new().unwrap();
+        assert!(Arc::ptr_eq(&mt1, &mt2));
+    }
+
+    #[test]
     fn basic_transitions() {
         let hot_thrsh = 5;
-        let mt = MT::new().unwrap();
+        let mt = MT::create().unwrap();
         mt.set_hot_threshold(hot_thrsh);
         mt.set_sidetrace_threshold(1);
         let loc = Location::new();
@@ -1942,7 +1993,7 @@ mod tests {
         // Aim for a situation where there's a lot of contention.
         let num_threads = u32::try_from(num_cpus::get() * 4).unwrap();
         let hot_thrsh = num_threads.saturating_mul(2500);
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(hot_thrsh);
         let loc = Arc::new(Location::new());
 
@@ -2026,7 +2077,7 @@ mod tests {
         // tracing is complete), the location must be marked as DontTrace.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -2079,7 +2130,7 @@ mod tests {
         // Test that a location can fail tracing multiple times before being successfully traced.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -2135,7 +2186,7 @@ mod tests {
         // Test that a location can fail tracing/compiling multiple times before we give up.
 
         let hot_thrsh = 5;
-        let mt = MT::new().unwrap();
+        let mt = MT::create().unwrap();
         mt.set_hot_threshold(hot_thrsh);
         let loc = Location::new();
         for i in 0..mt.hot_threshold() {
@@ -2173,7 +2224,7 @@ mod tests {
         // Once the first location is compiled, the second location can then be compiled.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new().unwrap();
+        let mt = MT::create().unwrap();
         mt.set_hot_threshold(THRESHOLD);
         let loc1 = Location::new();
         let loc2 = Location::new();
@@ -2219,7 +2270,7 @@ mod tests {
         // We need to set a high enough threshold that the threads are likely to meaningfully
         // interleave when interacting with the location.
         const THRESHOLD: HotThreshold = 100000;
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -2304,7 +2355,7 @@ mod tests {
         // tracing, it must ignore it.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc1 = Arc::new(Location::new());
         let loc2 = Location::new();
@@ -2338,7 +2389,7 @@ mod tests {
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
-        let mt = MT::new().unwrap();
+        let mt = MT::create().unwrap();
         let loc = Location::new();
         b.iter(|| {
             for _ in 0..100000 {
@@ -2349,7 +2400,7 @@ mod tests {
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         let loc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
@@ -2372,7 +2423,7 @@ mod tests {
     fn coupler_trace() {
         // Check that a trace that encounters a compiled Location turns into a Coupler trace.
 
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(0);
         let loc1 = Location::new();
         let loc2 = Location::new();
@@ -2394,7 +2445,7 @@ mod tests {
     fn unroll_trace() {
         // Check that a trace that unrolls in an inner loop creates an appropriate set of traces.
 
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(0);
         let loc1 = Location::new();
         let loc2 = Location::new();
@@ -2425,7 +2476,7 @@ mod tests {
         // we can do is abort the trace, and put the outer loop in a state where it can retry
         // tracing.
 
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(0);
         let loc_outer = Location::new();
         let loc_inner = Location::new();

@@ -32,10 +32,13 @@ typedef uint32_t YkHotThreshold;
 
 typedef struct YkMT YkMT;
 
-// Create a new `YkMT` instance. If this fails then:
-//   * If `err_msg` is `NULL`, this function will abort.
-//   * If `err_msg` is not `NULL`:
-//       1. A malloc()d string with an error message explaining the failure
+// Return this process's `YkMT` instance. There is only one of these per
+// process, so calling this repeatedly returns the same pointer.
+//
+// If a failure happens then:
+//   * if `err_msg` is `NULL`, this function will abort.
+//   * if `err_msg` is not `NULL`:
+//       1. a malloc()d string with an error message explaining the failure
 //          will be placed in `*err_msg`. It is the callers duty to free this
 //          string.
 //       2. `yk_mt_new` will return `NULL`.

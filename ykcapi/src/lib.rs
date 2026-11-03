@@ -170,6 +170,12 @@ pub extern "C" fn yk_location_null() -> Location {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn yk_location_drop(loc: Location) {
+    if MT::is_forked_child() {
+        // Dropping a location can cause thread-related behaviour: there's no point in trying to do
+        // anything here.
+        forget(loc);
+        return;
+    }
     drop(loc)
 }
 
