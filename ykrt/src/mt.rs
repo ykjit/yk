@@ -90,6 +90,15 @@ static __yk_thread_tracing_state: AtomicU8 = const { AtomicU8::new(IsTracing::No
 /// This optimisation avoids `__tls_get_addr` overhead when not tracing.
 static TRACING_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
 
+/// After `fork`, only one of yk's many threads will survive: the system is then in a completely
+/// unpredictable state (locks might be held etc. etc.). We tell users not to call yk at that
+/// point, but that can be quite hard for them to honour, so we protect a few key APIs when we
+/// realise that we're in the child process.
+static IS_FORKED_CHILD: AtomicBool = AtomicBool::new(false);
+unsafe extern "C" fn after_fork_in_child() {
+    IS_FORKED_CHILD.store(true, Ordering::Relaxed);
+}
+
 /// A meta-tracer. This is always passed around stored in an [Arc].
 ///
 /// When you are finished with this meta-tracer, it is best to explicitly call [MT::shutdown] to
@@ -148,6 +157,9 @@ impl MT {
             return Ok(Arc::clone(mt));
         }
         let new_mt = Self::create()?;
+        if unsafe { libc::pthread_atfork(None, None, Some(after_fork_in_child)) } != 0 {
+            todo!();
+        }
         *mt = Some(Arc::clone(&new_mt));
         Ok(new_mt)
     }
@@ -200,6 +212,14 @@ impl MT {
         }))
     }
 
+    /// Returns `true` if this yk instance is running in a post-fork child process.
+    ///
+    /// This function is not intended for general use, but ykcapi does need access to it.
+    #[doc(hidden)]
+    pub fn is_forked_child() -> bool {
+        IS_FORKED_CHILD.load(Ordering::Relaxed)
+    }
+
     /// Put this meta-tracer into shutdown mode, panicking if any problems are discovered. This
     /// will perform actions such as printing summary statistics and checking whether any worker
     /// threads have caused an error. The best place to do this is likely to be on the main thread,
@@ -211,6 +231,9 @@ impl MT {
     /// Only the first call of this method performs meaningful actions: any subsequent calls will
     /// note the previous shutdown and immediately return.
     pub fn shutdown(&self) {
+        if Self::is_forked_child() {
+            return;
+        }
         if !self.shutdown.swap(true, Ordering::Relaxed) {
             self.stats.timing_state(TimingState::None);
             self.stats.output();
@@ -437,6 +460,9 @@ impl MT {
 
     /// Inform yk that `cid` has been retired. Only side traces are disconnected.
     pub fn retire_code_id(self: &Arc<Self>, cid: CodeId) {
+        if Self::is_forked_child() {
+            return;
+        }
         let mut lk = self.code_retirement.lock();
         lk.retire_code_id(self, cid);
     }
@@ -452,6 +478,9 @@ impl MT {
         frameaddr: *mut c_void,
         smapidx: StackMapIdx,
     ) {
+        if Self::is_forked_child() {
+            return;
+        }
         match self.transition_control_point(loc, frameaddr) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::AbortTracing => {

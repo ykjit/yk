@@ -62,3 +62,11 @@ does its own symbol introspection, Yk may break it.
 
  - You cannot valgrind an interpreter that is using Intel PT for tracing ([more
    details](https://github.com/ykjit/yk/issues/177)).
+
+## `fork`
+
+After an interpreter calls `fork`, yk's multi-threaded setup is by definition
+broken (`fork` only carries one thread into the child process). In general,
+child processes must not call any yk functions, though `yk_mt_shutdown` and
+`yk_location_drop` are explicitly allowed. In general, child processes should
+call `exec` or `_exit` as soon as possible.
