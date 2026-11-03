@@ -139,9 +139,23 @@ impl std::fmt::Debug for MT {
 }
 
 impl MT {
-    // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
-    // are no guarantees as to whether they will share resources effectively or fairly.
+    /// Return this process's MT instance.
     pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+        static GLOBAL_MT: Mutex<Option<Arc<MT>>> = Mutex::new(None);
+
+        let mut mt = GLOBAL_MT.lock();
+        if let Some(mt) = &*mt {
+            return Ok(Arc::clone(mt));
+        }
+        let new_mt = Self::create()?;
+        *mt = Some(Arc::clone(&new_mt));
+        Ok(new_mt)
+    }
+
+    /// Create a new MT instance. For normal running, this must only be called by [MT::new]. Unit
+    /// tests in this file may call this method multiple times --- but they should know what the
+    /// consequences are!
+    fn create() -> Result<Arc<Self>, Box<dyn Error>> {
         load_aot_stackmaps();
         let opt_level = match env::var("YKD_OPT") {
             Ok(s) => s
@@ -1884,9 +1898,17 @@ mod tests {
     }
 
     #[test]
+    fn mt_new_is_idempotent() {
+        // Check that MT::new() returns the same instance each time it is called.
+        let mt1 = MT::new().unwrap();
+        let mt2 = MT::new().unwrap();
+        assert!(Arc::ptr_eq(&mt1, &mt2));
+    }
+
+    #[test]
     fn basic_transitions() {
         let hot_thrsh = 5;
-        let mt = MT::new().unwrap();
+        let mt = MT::create().unwrap();
         mt.set_hot_threshold(hot_thrsh);
         mt.set_sidetrace_threshold(1);
         let loc = Location::new();
@@ -1942,7 +1964,7 @@ mod tests {
         // Aim for a situation where there's a lot of contention.
         let num_threads = u32::try_from(num_cpus::get() * 4).unwrap();
         let hot_thrsh = num_threads.saturating_mul(2500);
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(hot_thrsh);
         let loc = Arc::new(Location::new());
 
@@ -2026,7 +2048,7 @@ mod tests {
         // tracing is complete), the location must be marked as DontTrace.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -2079,7 +2101,7 @@ mod tests {
         // Test that a location can fail tracing multiple times before being successfully traced.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -2135,7 +2157,7 @@ mod tests {
         // Test that a location can fail tracing/compiling multiple times before we give up.
 
         let hot_thrsh = 5;
-        let mt = MT::new().unwrap();
+        let mt = MT::create().unwrap();
         mt.set_hot_threshold(hot_thrsh);
         let loc = Location::new();
         for i in 0..mt.hot_threshold() {
@@ -2173,7 +2195,7 @@ mod tests {
         // Once the first location is compiled, the second location can then be compiled.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new().unwrap();
+        let mt = MT::create().unwrap();
         mt.set_hot_threshold(THRESHOLD);
         let loc1 = Location::new();
         let loc2 = Location::new();
@@ -2219,7 +2241,7 @@ mod tests {
         // We need to set a high enough threshold that the threads are likely to meaningfully
         // interleave when interacting with the location.
         const THRESHOLD: HotThreshold = 100000;
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -2304,7 +2326,7 @@ mod tests {
         // tracing, it must ignore it.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc1 = Arc::new(Location::new());
         let loc2 = Location::new();
@@ -2338,7 +2360,7 @@ mod tests {
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
-        let mt = MT::new().unwrap();
+        let mt = MT::create().unwrap();
         let loc = Location::new();
         b.iter(|| {
             for _ in 0..100000 {
@@ -2349,7 +2371,7 @@ mod tests {
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         let loc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
@@ -2372,7 +2394,7 @@ mod tests {
     fn coupler_trace() {
         // Check that a trace that encounters a compiled Location turns into a Coupler trace.
 
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(0);
         let loc1 = Location::new();
         let loc2 = Location::new();
@@ -2394,7 +2416,7 @@ mod tests {
     fn unroll_trace() {
         // Check that a trace that unrolls in an inner loop creates an appropriate set of traces.
 
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(0);
         let loc1 = Location::new();
         let loc2 = Location::new();
@@ -2425,7 +2447,7 @@ mod tests {
         // we can do is abort the trace, and put the outer loop in a state where it can retry
         // tracing.
 
-        let mt = Arc::new(MT::new().unwrap());
+        let mt = Arc::new(MT::create().unwrap());
         mt.set_hot_threshold(0);
         let loc_outer = Location::new();
         let loc_inner = Location::new();
