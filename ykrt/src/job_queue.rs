@@ -53,6 +53,8 @@ impl Job {
 }
 
 pub(crate) struct JobQueue {
+    #[cfg(feature = "yk_testing")]
+    serialise_compilation: bool,
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
     /// How many worker threads are waiting for work?
@@ -76,6 +78,10 @@ pub(crate) struct JobQueue {
 impl JobQueue {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
+            #[cfg(feature = "yk_testing")]
+            serialise_compilation: env::var("YKD_SERIALISE_COMPILATION")
+                .map(|x| x.as_str() == "1")
+                .unwrap_or(false),
             queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             failures: Mutex::new(Vec::new()),
             max_worker_threads: AtomicUsize::new(cmp::max(
@@ -150,7 +156,7 @@ impl JobQueue {
         }
 
         #[cfg(feature = "yk_testing")]
-        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
+        if self.serialise_compilation {
             // To ensure that we properly test that compilation can occur in another thread, we
             // spin up a new thread for each compilation. This is only acceptable because a)
             // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
@@ -243,7 +249,7 @@ impl JobQueue {
     /// `trid`, this function will try to have them run.
     pub(crate) fn notify_success(&self, trid: TraceId) {
         #[cfg(feature = "yk_testing")]
-        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
+        if self.serialise_compilation {
             return;
         }
         // Since waking worker threads up is quite disruptive for the system, only send a wake-up
