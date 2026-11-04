@@ -2191,15 +2191,27 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         tmpr: Self::Reg,
     ) {
         match bitw {
-            64 => {
+            1..=8 => {
                 self.asm.push_inst(IcedInst::with2(
-                    Code::Mov_rm64_r64,
+                    Code::Mov_rm8_r8,
                     MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(dst_stack_off)),
-                    tmpr.to_reg64(),
+                    tmpr.to_reg8(),
                 ));
                 self.asm.push_inst(IcedInst::with2(
-                    Code::Mov_r64_rm64,
-                    tmpr.to_reg64(),
+                    Code::Mov_r8_rm8,
+                    tmpr.to_reg8(),
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(src_stack_off)),
+                ));
+            }
+            16 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm16_r16,
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(dst_stack_off)),
+                    tmpr.to_reg16(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r16_rm16,
+                    tmpr.to_reg16(),
                     MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(src_stack_off)),
                 ));
             }
@@ -2212,6 +2224,18 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 self.asm.push_inst(IcedInst::with2(
                     Code::Mov_r32_rm32,
                     tmpr.to_reg32(),
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(src_stack_off)),
+                ));
+            }
+            64 => {
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm64_r64,
+                    MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(dst_stack_off)),
+                    tmpr.to_reg64(),
+                ));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_r64_rm64,
+                    tmpr.to_reg64(),
                     MemoryOperand::with_base_displ(IcedReg::RBP, -i64::from(src_stack_off)),
                 ));
             }
