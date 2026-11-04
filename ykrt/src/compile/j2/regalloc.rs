@@ -610,7 +610,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         new_unspills.push(RegUnspill {
                             iidxs: self.rstates.iidxs(rcopy.dst_reg).clone(),
                             reg: rcopy.dst_reg,
-                            fill: rcopy.src_fill,
+                            fill: rcopy.dst_fill,
                         });
                         false
                     }
@@ -3101,7 +3101,7 @@ pub(crate) mod test {
           copy_reg: src_reg=GPR1, src_fill=Undefined, dst_reg=GPR2, dst_fill=Zeroed, dst_bitw=8
           alloc %5 GPR1 GPR3
           alloc %4 GPR1 GPR2
-          unspill stack_off=8 GPR1 Undefined bitw=8
+          unspill stack_off=8 GPR1 Zeroed bitw=8
           copy_reg: src_reg=GPR1, src_fill=Undefined, dst_reg=GPR3, dst_fill=Zeroed, dst_bitw=8
           spill GPR3 Undefined stack_off=8 bitw=8
         "],
@@ -3499,7 +3499,7 @@ pub(crate) mod test {
             &["
           copy_reg: src_reg=GPR2, src_fill=Undefined, dst_reg=GPR1, dst_fill=Undefined, dst_bitw=64
           alloc %2 GPR1 GPR0
-          unspill stack_off=8 GPR0 Undefined bitw=64
+          unspill stack_off=8 GPR0 Zeroed bitw=64
           copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR2, dst_fill=Undefined, dst_bitw=64
           copy_reg: src_reg=GPR0, src_fill=Undefined, dst_reg=GPR1, dst_fill=Zeroed, dst_bitw=64
           spill GPR1 Undefined stack_off=8 bitw=64
