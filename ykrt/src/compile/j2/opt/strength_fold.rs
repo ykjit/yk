@@ -1609,6 +1609,15 @@ fn opt_sub(opt: &mut PassOpt, mut inst: Sub) -> OptOutcome {
         nsw,
     } = inst;
     assert!(!nuw && !nsw);
+
+    if lhs == rhs {
+        let bitw = opt.ty(tyidx).bitw();
+        return OptOutcome::Rewritten(Inst::Const(Const {
+            tyidx,
+            kind: ConstKind::Int(ArbBitInt::from_u64(bitw, 0)),
+        }));
+    }
+
     match (opt.as_constkind(lhs), opt.as_constkind(rhs)) {
         (Some(ConstKind::Int(lhs_c)), Some(ConstKind::Int(rhs_c))) => {
             // Constant fold `c1 - c2`.
@@ -5155,6 +5164,20 @@ mod test {
 
     #[test]
     fn opt_sub() {
+        // `x-x` folds to `0`.
+        test_sf(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = sub %0, %0
+          term [%1]
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 0
+          term [%1]
+        ",
+        );
+
         // Simple constant folding e.g `1 - 2`.
         test_sf(
             "
