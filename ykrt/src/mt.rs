@@ -993,32 +993,36 @@ impl MT {
                         return TransitionControlPoint::StopLoopTracing(*tracing_trid);
                     } else {
                         // ...and we have unrolled an inner loop.
-                        //
-                        // We have more than one option here (e.g. we could chop off the end of the
-                        // trace), but we aim to do the simplest thing: throw away the trace, reset
-                        // the outer loop, and start tracing the inner loop. There is, however, a
-                        // race here that we need to handle carefully.
 
                         assert!(!Arc::ptr_eq(&hl, tracing_hl));
-                        // We now have a potential race in the inner loop, so only if it's in the
-                        // Counting state do we restart tracing.
-                        if let HotLocationKind::Counting(_) = lk.kind {
-                            let unroll_tid = self.next_trace_id();
-                            lk.kind = HotLocationKind::Tracing(unroll_tid);
-                            drop(lk);
-                            let mut lk = tracing_hl.lock();
-                            lk.kind = HotLocationKind::Counting(self.hot_threshold());
-                            return TransitionControlPoint::StopUnrollTracing {
-                                inner_hl: hl,
-                                unroll_tid,
-                            };
-                        } else {
-                            // We raced with something: all we can do is throw away the trace, and
-                            // put the outer loop back in counting mode.
-                            drop(lk);
-                            let mut lk = tracing_hl.lock();
-                            lk.kind = HotLocationKind::Counting(self.hot_threshold());
-                            return TransitionControlPoint::AbortTracing;
+                        match &lk.kind {
+                            HotLocationKind::Compiled(_)
+                            | HotLocationKind::Compiling(_)
+                            | HotLocationKind::Tracing(_) => {
+                                // Reset the outer Location such that we'll trace it and (with
+                                // luck) couple to the inner Location we've just encountered.
+                                drop(lk);
+                                let mut lk = tracing_hl.lock();
+                                lk.kind = HotLocationKind::Counting(self.hot_threshold());
+                                return TransitionControlPoint::AbortTracing;
+                            }
+                            HotLocationKind::DontTrace => {
+                                // What we do here is a bit of a toss-up: it's not exactly a good
+                                // sign that a location is DontTrace, but there again, we might get
+                                // lucky given we started from a different place...
+                                return TransitionControlPoint::NoAction;
+                            }
+                            HotLocationKind::Counting(_) => {
+                                let unroll_tid = self.next_trace_id();
+                                lk.kind = HotLocationKind::Tracing(unroll_tid);
+                                drop(lk);
+                                let mut lk = tracing_hl.lock();
+                                lk.kind = HotLocationKind::Counting(self.hot_threshold());
+                                return TransitionControlPoint::StopUnrollTracing {
+                                    inner_hl: hl,
+                                    unroll_tid,
+                                };
+                            }
                         }
                     }
                 }
