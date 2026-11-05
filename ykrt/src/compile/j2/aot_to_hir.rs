@@ -982,6 +982,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     /// Returns `Some(statepoint)` if an early return was encountered: parent code should stop
     /// examining the trace at this point.
     fn p_blocks(&mut self) -> Result<TraceEndKind, CompilationError> {
+        let mut phi_values = Vec::new(); // Hoisted for performance reasons.
+
         loop {
             let (pc, bid, blk) = {
                 let mut pc = self.frames.last().unwrap().pc.clone().unwrap();
@@ -998,24 +1000,42 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         recorded_bid
                     };
                     blk = self.am.bblock(&cnd_bid);
-                    let mut iidx = 0;
-                    pc = InstId::new(cnd_bid.funcidx(), cnd_bid.bbidx(), BBlockInstIdx::new(iidx));
-                    self.frames.last_mut().unwrap().pc = Some(pc.clone());
-                    while iidx < blk.insts.len() {
-                        let inst = &blk.insts[BBlockInstIdx::new(iidx)];
-                        if let Inst::Phi { .. } = inst {
-                            self.p_phi(pc, bid.bbidx(), cnd_bid, inst)?;
-                            iidx += 1;
-                            pc = InstId::new(
-                                cnd_bid.funcidx(),
-                                cnd_bid.bbidx(),
-                                BBlockInstIdx::new(iidx),
-                            );
-                            self.frames.last_mut().unwrap().pc = Some(pc.clone());
+
+                    // Process all the incoming PHIs. Conceptually these happen in parallel, so we
+                    // can't update the frame's locals until all the PHIs are processed (otherwise
+                    // p_operand can pick up incorrect intermediate values).
+                    assert!(phi_values.is_empty());
+                    for inst in &blk.insts {
+                        if let Inst::Phi {
+                            incoming_bbs,
+                            incoming_vals,
+                            ..
+                        } = inst
+                        {
+                            let prev_bidx = bid.bbidx();
+                            let v = &incoming_vals
+                                [incoming_bbs.iter().position(|x| *x == prev_bidx).unwrap()];
+                            let op_iidx = self.p_operand(v)?;
+                            phi_values.push(op_iidx);
                         } else {
                             break;
                         }
                     }
+
+                    pc = InstId::new(
+                        cnd_bid.funcidx(),
+                        cnd_bid.bbidx(),
+                        BBlockInstIdx::new(phi_values.len()),
+                    );
+                    self.frames.last_mut().unwrap().pc = Some(pc.clone());
+
+                    // Actually update the locals.
+                    for (i, op_iidx) in phi_values.drain(..).enumerate() {
+                        let phi_iid =
+                            InstId::new(cnd_bid.funcidx(), cnd_bid.bbidx(), BBlockInstIdx::new(i));
+                        self.frames.last_mut().unwrap().set_local(phi_iid, op_iidx);
+                    }
+
                     bid = cnd_bid;
                 }
                 (pc, bid, blk)
@@ -2284,27 +2304,6 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         };
         let iidx = self.frames.last().unwrap().args[*arg_idx];
         self.frames.last_mut().unwrap().set_local(iid, iidx);
-        Ok(())
-    }
-
-    fn p_phi(
-        &mut self,
-        iid: InstId,
-        prev_bidx: BBlockIdx,
-        _bid: BBlockId,
-        inst: &Inst,
-    ) -> Result<(), CompilationError> {
-        let Inst::Phi {
-            tyidx: _,
-            incoming_bbs,
-            incoming_vals,
-        } = inst
-        else {
-            panic!()
-        };
-        let v = &incoming_vals[incoming_bbs.iter().position(|x| *x == prev_bidx).unwrap()];
-        let op = self.p_operand(v)?;
-        self.frames.last_mut().unwrap().set_local(iid, op);
         Ok(())
     }
 
