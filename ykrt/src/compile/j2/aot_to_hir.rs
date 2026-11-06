@@ -1443,64 +1443,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 FuncMemory::ReadWrite => hir::CallEffects::ReadWrite,
             };
 
-            // Build this call's HIR function type.
-            let Ty::Func(aot_fty) = self.am.type_(func.tyidx()) else {
-                panic!()
-            };
-            let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
-            let rtn_tyidx = match aot_rtn_ty {
-                Ty::Struct(struct_ty) => {
-                    // Every HIR instruction produces exactly one value living in a single
-                    // register, so a call can't return the struct type directly.
-                    // This is a hack: we give the call the type of its first field.
-                    let field_ty = self.am.type_(struct_ty.field_tyidxs()[0]);
-                    self.opt.push_ty(hir::Ty::Int(field_ty.bitw(self.am)))?
-                }
-                _ => self.p_ty(aot_rtn_ty)?,
-            };
-            let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
-            for arg_ty in aot_fty.arg_tyidxs() {
-                args_tyidxs.push(self.p_ty(self.am.type_(*arg_ty))?);
-            }
-            let fty = hir::FuncTy {
-                rtn_tyidx,
-                args_tyidxs,
-                has_varargs: aot_fty.is_vararg(),
-            };
-            let func_tyidx = self.opt.push_ty(hir::Ty::Func(Box::new(fty)))?;
-            let inst = hir::Call {
-                tgt: tgt_iidx,
-                func_tyidx,
-                args: jargs,
-                effects,
-            }
-            .into();
-            if *self.opt.ty(rtn_tyidx) == hir::Ty::Void {
-                self.opt.feed_void(inst)?;
-            } else {
-                // Emit ExtractVal instructions immediately after the call.
-                let call_iidx = self.push_inst_and_link_local(iid.clone(), inst)?;
-                if let Ty::Struct(struct_ty) = aot_rtn_ty {
-                    let offs = struct_ty.field_bit_offs();
-                    let field_tyidxs = struct_ty.field_tyidxs();
-                    let mut extractvals = Vec::with_capacity(field_tyidxs.len());
-                    for (off, field_tyidx) in offs.iter().zip(field_tyidxs.iter()) {
-                        let off = u32::try_from(*off).unwrap();
-                        let tyidx = self.p_ty(self.am.type_(*field_tyidx))?;
-                        extractvals.push(
-                            self.opt.feed(
-                                hir::ExtractVal {
-                                    val: call_iidx,
-                                    off,
-                                    tyidx,
-                                }
-                                .into(),
-                            )?,
-                        );
-                    }
-                    self.call_extractvals.insert(call_iidx, extractvals);
-                }
-            }
+            self.outlined_call(iid.clone(), func.tyidx(), tgt_iidx, jargs, effects)?;
             match self.outline_until(bid)? {
                 OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
                 OutliningKind::DidNotFindSuccessor => {
@@ -1568,21 +1511,13 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             }
         }
 
-        let ftyidx = self.p_ty(self.am.type_(*ftyidx))?;
-        let inst = hir::Call {
-            tgt: tgt_iidx,
-            func_tyidx: ftyidx,
-            args: jargs,
-            effects: hir::CallEffects::ReadWrite,
-        };
-        let hir::Ty::Func(deref!(hir::FuncTy { rtn_tyidx, .. })) = self.opt.ty(ftyidx) else {
-            panic!()
-        };
-        if *self.opt.ty(*rtn_tyidx) == hir::Ty::Void {
-            self.opt.feed_void(inst.into())?;
-        } else {
-            self.push_inst_and_link_local(iid.clone(), inst)?;
-        }
+        self.outlined_call(
+            iid.clone(),
+            *ftyidx,
+            tgt_iidx,
+            jargs,
+            hir::CallEffects::ReadWrite,
+        )?;
         match self.outline_until(bid)? {
             OutliningKind::SuccessorFound => Ok(CallProcessedKind::Outlined),
             OutliningKind::DidNotFindSuccessor => {
@@ -1601,6 +1536,71 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Ok(CallProcessedKind::Terminated)
             }
         }
+    }
+
+    fn outlined_call(
+        &mut self,
+        iid: InstId,
+        ftyidx: TyIdx,
+        tgt: hir::InstIdx,
+        args: SmallVec<[hir::InstIdx; 1]>,
+        effects: hir::CallEffects,
+    ) -> Result<(), CompilationError> {
+        // Build this call's HIR function type.
+        let Ty::Func(aot_fty) = self.am.type_(ftyidx) else {
+            panic!()
+        };
+        let aot_rtn_ty = self.am.type_(aot_fty.ret_ty());
+        let rtn_tyidx = match aot_rtn_ty {
+            Ty::Struct(struct_ty) => self
+                .opt
+                .push_ty(hir::Ty::Int(u32::try_from(struct_ty.bit_size()).unwrap()))?,
+            _ => self.p_ty(aot_rtn_ty)?,
+        };
+        let mut args_tyidxs = SmallVec::with_capacity(aot_fty.arg_tyidxs().len());
+        for arg_ty in aot_fty.arg_tyidxs() {
+            args_tyidxs.push(self.p_ty(self.am.type_(*arg_ty))?);
+        }
+        let fty = hir::FuncTy {
+            rtn_tyidx,
+            args_tyidxs,
+            has_varargs: aot_fty.is_vararg(),
+        };
+        let func_tyidx = self.opt.push_ty(hir::Ty::Func(Box::new(fty)))?;
+        let inst = hir::Call {
+            tgt,
+            func_tyidx,
+            args,
+            effects,
+        }
+        .into();
+        if *self.opt.ty(rtn_tyidx) == hir::Ty::Void {
+            self.opt.feed_void(inst)?;
+        } else {
+            // Emit ExtractVal instructions immediately after the call.
+            let call_iidx = self.push_inst_and_link_local(iid, inst)?;
+            if let Ty::Struct(struct_ty) = aot_rtn_ty {
+                let offs = struct_ty.field_bit_offs();
+                let field_tyidxs = struct_ty.field_tyidxs();
+                let mut extractvals = Vec::with_capacity(field_tyidxs.len());
+                for (off, field_tyidx) in offs.iter().zip(field_tyidxs.iter()) {
+                    let off = u32::try_from(*off).unwrap();
+                    let tyidx = self.p_ty(self.am.type_(*field_tyidx))?;
+                    extractvals.push(
+                        self.opt.feed(
+                            hir::ExtractVal {
+                                val: call_iidx,
+                                off,
+                                tyidx,
+                            }
+                            .into(),
+                        )?,
+                    );
+                }
+                self.call_extractvals.insert(call_iidx, extractvals);
+            }
+        }
+        Ok(())
     }
 
     /// Outline until the successor block to `bid` is encountered. Returns `Err` if irregular
@@ -2266,7 +2266,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         };
 
         match op.to_inst(self.am) {
-            Inst::Call { .. } | Inst::InsertValue { .. } => {
+            Inst::Call { .. } | Inst::IndirectCall { .. } | Inst::InsertValue { .. } => {
                 assert_eq!(indices.len(), 1);
                 let aot_iid = op.to_inst_id();
                 let val_iidx = self.frames.last().unwrap().get_local(&*self.opt, &aot_iid);
