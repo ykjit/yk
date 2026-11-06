@@ -110,13 +110,9 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             for vloc in vlocs.iter() {
                 match vloc {
                     VarLoc::Stack(stack_off) => {
-                        // This assert (and the one below) will need to be relaxed when we support
-                        // multiple stack locations.
-                        assert_eq!(istates[iidx], IState::None);
                         istates[iidx] = IState::Stack(*stack_off);
                     }
                     VarLoc::StackOff(stack_off) => {
-                        assert_eq!(istates[iidx], IState::None);
                         istates[iidx] = IState::StackOff(*stack_off);
                     }
                     VarLoc::Reg(_, _) => (),
