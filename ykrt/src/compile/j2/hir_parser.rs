@@ -249,6 +249,11 @@ impl<'lexer, 'input: 'lexer, Reg: RegT> HirParser<'lexer, 'input, Reg> {
                         .into(),
                     );
                 }
+                AstInst::AtomicStore { val, ptr, ordering } => {
+                    let val = self.p_local(val);
+                    let ptr = self.p_local(ptr);
+                    self.insts.push(AtomicStore { val, ptr, ordering }.into());
+                }
                 AstInst::BitCast { local, ty, val } => {
                     self.p_def_local(local);
                     let tyidx = self.p_ty(ty);
@@ -1450,6 +1455,11 @@ enum AstInst {
     AtomicLoad {
         local: Span,
         ty: AstTy,
+        ptr: Span,
+        ordering: Ordering,
+    },
+    AtomicStore {
+        val: Span,
         ptr: Span,
         ordering: Ordering,
     },
