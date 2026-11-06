@@ -987,6 +987,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                 Inst::AtomicLoad(x) => {
                     self.be.i_atomicload(&mut ra, b, iidx, x)?;
                 }
+                Inst::AtomicStore(x) => self.be.i_atomicstore(&mut ra, b, iidx, x)?,
                 Inst::BitCast(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_bitcast(&mut ra, b, iidx, x)?;
@@ -1682,6 +1683,14 @@ pub(super) trait HirToAsmBackend {
         b: &Block,
         iidx: InstIdx,
         inst: &AtomicLoad,
+    ) -> Result<(), CompilationError>;
+
+    fn i_atomicstore(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &AtomicStore,
     ) -> Result<(), CompilationError>;
 
     fn i_bitcast(

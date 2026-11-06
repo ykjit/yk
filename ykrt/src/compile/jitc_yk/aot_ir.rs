@@ -396,9 +396,15 @@ index!(ArgIdx);
 /// Convert a ykllvm ordering to a Rust [Ordering].
 fn map_to_atomic_ordering(value: u8) -> Result<Ordering, DekuError> {
     match value {
-        0 => Ok(Ordering::Relaxed),
-        1 => Ok(Ordering::Acquire),
-        2 => Ok(Ordering::SeqCst),
+        0 => {
+            // Rust has no "unordered" ordering, so strengthen it to "relaxed".
+            Ok(Ordering::Relaxed)
+        }
+        1 => Ok(Ordering::Relaxed),
+        2 => Ok(Ordering::Acquire),
+        3 => Ok(Ordering::Release),
+        4 => Ok(Ordering::AcqRel),
+        5 => Ok(Ordering::SeqCst),
         x => todo!("{x}"),
     }
 }
@@ -1124,6 +1130,13 @@ pub(crate) enum Inst {
         #[deku(map = "map_to_atomic_ordering")]
         ordering: Ordering,
     },
+    #[deku(id = "26")]
+    AtomicStore {
+        val: Operand,
+        tgt: Operand,
+        #[deku(map = "map_to_atomic_ordering")]
+        ordering: Ordering,
+    },
     #[deku(id = "255")]
     Unimplemented {
         tyidx: TyIdx,
@@ -1157,6 +1170,7 @@ impl Inst {
         match self {
             Self::Alloca { .. } => Some(&Ty::Ptr),
             Self::AtomicLoad { tyidx, .. } => Some(m.type_(*tyidx)),
+            Self::AtomicStore { .. } => None,
             Self::BinaryOp { lhs, .. } => Some(lhs.type_(m)),
             Self::Br { .. } => None,
             Self::Call { callee, .. } => {
@@ -1316,9 +1330,22 @@ impl fmt::Display for DisplayableInst<'_> {
                     Ordering::Relaxed => "relaxed",
                     Ordering::Acquire => "acquire",
                     Ordering::SeqCst => "seq_cst",
-                    _ => unreachable!(),
+                    x => todo!("{x:?}"),
                 };
                 write!(f, "atomicload {ordering} {}", ptr.display(self.m))
+            }
+            Inst::AtomicStore { val, tgt, ordering } => {
+                let ordering = match ordering {
+                    Ordering::Relaxed => "relaxed",
+                    Ordering::Release => "release",
+                    x => todo!("{x:?}"),
+                };
+                write!(
+                    f,
+                    "atomicstore {ordering} {}, {}",
+                    val.display(self.m),
+                    tgt.display(self.m)
+                )
             }
             Inst::BinaryOp { lhs, binop, rhs } => {
                 write!(

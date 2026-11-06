@@ -1046,6 +1046,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::Nop => todo!(),
                 Inst::Alloca { .. } => todo!(),
                 Inst::AtomicLoad { .. } => self.p_atomicload(pc.clone(), inst)?,
+                Inst::AtomicStore { .. } => self.p_atomicstore(inst)?,
                 Inst::BinaryOp { .. } => self.p_binop(pc.clone(), inst)?,
                 Inst::Br { .. } => (),
                 Inst::Call { .. } => match self.p_call(pc.clone(), bid, inst)? {
@@ -1120,8 +1121,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         let tyidx = self.p_ty(self.am.type_(*tyidx))?;
         let ordering = match ordering {
             Ordering::Relaxed | Ordering::Acquire => *ordering,
-            Ordering::SeqCst => todo!(),
-            _ => unreachable!(),
+            x => unreachable!("{x:?}"),
         };
         self.push_inst_and_link_local(
             iid,
@@ -1132,6 +1132,21 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             },
         )
         .map(|_| ())
+    }
+
+    fn p_atomicstore(&mut self, inst: &Inst) -> Result<(), CompilationError> {
+        let Inst::AtomicStore { val, tgt, ordering } = inst else {
+            panic!()
+        };
+        let val = self.p_operand(val)?;
+        let ptr = self.p_operand(tgt)?;
+        let ordering = match ordering {
+            Ordering::Relaxed | Ordering::Release => *ordering,
+            x => unreachable!("{x:?}"),
+        };
+        self.opt
+            .feed_void(hir::AtomicStore { val, ptr, ordering }.into())
+            .map(|_| ())
     }
 
     fn p_binop(&mut self, iid: InstId, inst: &Inst) -> Result<(), CompilationError> {

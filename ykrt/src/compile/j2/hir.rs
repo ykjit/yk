@@ -854,6 +854,7 @@ pub(super) enum Inst {
     Arg,
     AShr,
     AtomicLoad,
+    AtomicStore,
     BitCast,
     #[cfg(test)]
     BlackBox,
@@ -1332,13 +1333,82 @@ impl InstT for AtomicLoad {
         let ordering = match self.ordering {
             Ordering::Relaxed => "relaxed",
             Ordering::Acquire => "acquire",
-            _ => todo!(),
+            x => todo!("{x:?}"),
         };
         format!("atomicload {ordering} %{}", self.ptr.to_raw_index())
     }
 
     fn tyidx(&self, _m: &dyn ModLikeT) -> TyIdx {
         self.tyidx
+    }
+}
+
+/// Atomic stores with relaxed or release ordering.
+#[derive(Clone, Debug)]
+pub(super) struct AtomicStore {
+    pub val: InstIdx,
+    pub ptr: InstIdx,
+    pub ordering: Ordering,
+}
+
+impl InstT for AtomicStore {
+    fn assert_well_formed(&self, m: &dyn ModLikeT, b: &dyn BlockLikeT, iidx: InstIdx) {
+        assert_matches!(
+            m.ty(b.inst(self.ptr).tyidx(m)),
+            &Ty::Ptr(_),
+            "%{iidx:?}: ptr is not a pointer"
+        );
+    }
+
+    fn canonicalise<T: BlockLikeT + EquivIIdxT + ModLikeT>(&mut self, opt: &mut T) {
+        self.val = opt.equiv_iidx(self.val);
+        self.ptr = opt.equiv_iidx(self.ptr);
+    }
+
+    fn cse_eq(&self, _opt: &dyn EquivIIdxT, _other: &Inst) -> bool {
+        false
+    }
+
+    fn read_effects(&self) -> Effects {
+        match self.ordering {
+            Ordering::Relaxed => Effects::none(),
+            Ordering::Release => Effects::none().add_heap(),
+            x => todo!("{x:?}"),
+        }
+    }
+
+    fn write_effects(&self) -> Effects {
+        // OPT: `volatile` is an overapproximation of atomicity.
+        Effects::none().add_heap().add_volatile()
+    }
+
+    fn iter_iidxs<'a>(&'a self, b: &'a dyn BlockLikeT) -> IterIidxsIterator<'a> {
+        IterIidxsIterator::two(b, self.val, self.ptr)
+    }
+
+    fn rewrite_iidxs<F>(&mut self, _b: &mut dyn BlockLikeT, mut iidx_map: F)
+    where
+        F: FnMut(InstIdx) -> InstIdx,
+    {
+        self.val = iidx_map(self.val);
+        self.ptr = iidx_map(self.ptr);
+    }
+
+    fn to_string<M: ModLikeT, B: BlockLikeT>(&self, _m: &M, _b: &B) -> String {
+        let ordering = match self.ordering {
+            Ordering::Relaxed => "relaxed",
+            Ordering::Release => "release",
+            x => todo!("{x:?}"),
+        };
+        format!(
+            "atomicstore {ordering} %{}, %{}",
+            self.val.to_raw_index(),
+            self.ptr.to_raw_index()
+        )
+    }
+
+    fn tyidx(&self, m: &dyn ModLikeT) -> TyIdx {
+        m.tyidx_void()
     }
 }
 
@@ -6358,6 +6428,17 @@ mod test {
             "
           %0: i64 = arg [reg]
           %1: i8 = atomicload acquire %0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "%1: ptr is not a pointer")]
+    fn atomicstore_must_take_pointer() {
+        str_to_mod::<DummyReg>(
+            "
+          %0: i64 = arg [reg]
+          atomicstore relaxed %0, %0
         ",
         );
     }

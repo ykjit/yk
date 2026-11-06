@@ -41,8 +41,7 @@
 ;       %{{_}}: float = unimplemented <<  %{{_}} = phi nsz float...
 ;       br bb{{_}}
 ;     bb{{_}}:
-;       unimplemented <<  store atomic i32 0, ptr %0 release, align 4, ...
-;       unimplemented <<  store i32 0, ptr addrspace(10) %5, align 4 <note: addrspace>>>
+;       unimplemented <<  store i32 0, ptr addrspace(10) %5, align 4, !yk-swt-bb-purpose !{{_}} <note: addrspace>>>
 ;       ret
 ;     }
 ;     ...
@@ -147,9 +146,6 @@ phis:
   %phi_fastmath = phi nsz float [0.0, %phi_true], [0.0, %phi_false]
   br label %stores
 stores:
-  ; atomic store
-  ; note: atomic store must have explicit non-zero alignment
-  store atomic i32 0, ptr %ptr release, align 4
   ; stores into exotic address spaces
   store i32 0, ptr addrspace(10) %asptr
   ret void

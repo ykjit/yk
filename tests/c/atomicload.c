@@ -32,11 +32,6 @@
 
 static _Atomic int atint;
 
-// FIXME: we don't currently implement atomic stores.
-__attribute__((yk_outline)) static void update(int v) {
-  atomic_store_explicit(&atint, v, memory_order_release);
-}
-
 int main(void) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 1);
@@ -48,7 +43,7 @@ int main(void) {
     int x = atomic_load_explicit(&atint, memory_order_relaxed);
     int y = atomic_load_explicit(&atint, memory_order_acquire);
     fprintf(stderr, "%d: %d %d\n", i, x, y);
-    update(x + 1);
+    atomic_store_explicit(&atint, x + 1, memory_order_release);
     i--;
   }
   yk_location_drop(loc);

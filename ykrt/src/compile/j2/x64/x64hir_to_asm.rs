@@ -2909,6 +2909,30 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         )
     }
 
+    fn i_atomicstore(
+        &mut self,
+        ra: &mut RegAlloc<Self>,
+        b: &Block,
+        iidx: InstIdx,
+        inst: &AtomicStore,
+    ) -> Result<(), CompilationError> {
+        // We will need different instructions for some stronger orderings.
+        assert_matches!(
+            inst.ordering,
+            std::sync::atomic::Ordering::Relaxed | std::sync::atomic::Ordering::Release
+        );
+        self.i_store(
+            ra,
+            b,
+            iidx,
+            &Store {
+                val: inst.val,
+                ptr: inst.ptr,
+                is_volatile: true,
+            },
+        )
+    }
+
     fn i_bitcast(
         &mut self,
         ra: &mut RegAlloc<Self>,
@@ -7387,6 +7411,25 @@ mod test {
               movzx r.32._, byte [r.64._]
               ; blackbox %1
               ; term [%0]
+            "#],
+        );
+    }
+
+    #[test]
+    fn cg_atomicstore() {
+        // These are all same as `store` so we minimally check that an `atomicstore` looks sane.
+        codegen_and_test(
+            "
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              atomicstore release %1, %0
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; atomicstore release %1, %0
+              mov [r.64._], r.64._
+              ; term [%0, %1]
             "#],
         );
     }

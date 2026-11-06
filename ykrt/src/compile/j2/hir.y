@@ -86,6 +86,9 @@ Inst -> Result<AstInst, Box<dyn Error>>:
   | "LOCAL" ":" Ty "=" "ATOMICLOAD" Ordering "LOCAL" {
       Ok(AstInst::AtomicLoad { local: $1?.span(), ty: $3?, ordering: $6?, ptr: $7?.span() })
     }
+  | "ATOMICSTORE" Ordering "LOCAL" "," "LOCAL" {
+      Ok(AstInst::AtomicStore { ordering: $2?, val: $3?.span(), ptr: $5?.span() })
+    }
   | "LOCAL" ":" Ty "=" "BITCAST" "LOCAL" {
       Ok(AstInst::BitCast{ local: $1?.span(), ty: $3?, val: $6?.span() })
     }
@@ -341,6 +344,7 @@ IPred -> Result<IPred, Box<dyn Error>>:
 Ordering -> Result<Ordering, Box<dyn Error>>:
     "ACQUIRE" { Ok(Ordering::Acquire) }
   | "RELAXED" { Ok(Ordering::Relaxed) }
+  | "RELEASE" { Ok(Ordering::Release) }
   ;
 
 Ty -> Result<AstTy, Box<dyn Error>>:
