@@ -4445,7 +4445,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
 
             self.asm.push_inst(IcedInst::with1(c, outr.to_reg8()));
             self.asm.push_inst(match bitw {
-                32 => IcedInst::with2(Code::Cmp_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
+                1..=32 => IcedInst::with2(Code::Cmp_rm32_r32, lhsr.to_reg32(), rhsr.to_reg32()),
                 64 => IcedInst::with2(Code::Cmp_rm64_r64, lhsr.to_reg64(), rhsr.to_reg64()),
                 x => todo!("{x}"),
             });
@@ -9613,6 +9613,25 @@ mod test {
               ; term [%0]
               ...
             "#],
+        );
+
+        codegen_and_test(
+            "
+              %0: i8 = arg [reg]
+              %1: i8 = arg [reg]
+              %2: i1 = icmp eq %0, %1
+              blackbox %2
+              term [%0, %1]
+            ",
+            &["
+              ...
+              and r.32.x, 0xFF
+              and r.32.y, 0xFF
+              ; %2: i1 = icmp eq %0, %1
+              cmp r.32.x, r.32.y
+              sete r.8._
+              ...
+            "],
         );
 
         codegen_and_test(
