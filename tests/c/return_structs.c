@@ -1,4 +1,3 @@
-// ignore-if: test ${YK_ARCH} != "x86_64"
 // Compiler:
 //   env-var: YKB_EXTRA_CC_FLAGS=-O0
 // Run-time:
@@ -7,11 +6,13 @@
 //   env-var: YKD_LOG=4
 //   stderr:
 //     yk-tracing: start-tracing
+//     4:
 //     1
 //     999
 //     2
 //     77
 //     888
+//     77
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -27,14 +28,16 @@
 //     ...
 //     %{{14_5}}: i64 = extractvalue %{{13_1}}, [1]
 //     ...
+//     %{{18_2}}: {0: i64, 64: i64} = icall %...
+//     ...
 //     --- End aot ---
 //     --- Begin hir ---
 //     ...
-//     %{{call}}: i8 = call %{{_}}() ; @make_struct
+//     %{{call}}: i128 = call %{{_}}() ; @make_struct
 //     %{{s1_a}}: i8 = extractval %{{call}} [0]
 //     %{{s1_b}}: i64 = extractval %{{call}} [64]
 //     ...
-//     %{{call2}}: i64 = call %{{_}}() ; @make_struct2
+//     %{{call2}}: i128 = call %{{_}}() ; @make_struct2
 //     %{{s2_a}}: i64 = extractval %{{call2}} [0]
 //     %{{s2_bc}}: i64 = extractval %{{call2}} [64]
 //     ...
@@ -42,29 +45,38 @@
 //     ...
 //     %{{s2_c}}: i32 = load %{{_}}
 //     ...
+//     %{{50}}: ptr = load %5
+//     %{{51}}: i128 = call %{{50}}()
+//     %{{52}}: i64 = extractval %{{51}} [0]
+//     %{{53}}: i64 = extractval %{{51}} [64]
+//     ...
 //     --- End hir ---
+//     3:
 //     1
 //     999
 //     2
 //     77
 //     888
+//     77
 //     yk-execution: enter-jit-code {"trid": "0"}
+//     2:
 //     1
 //     999
 //     2
 //     77
 //     888
+//     77
+//     1:
 //     1
 //     999
 //     2
 //     77
 //     888
+//     77
 //     yk-execution: deoptimise ...
 //     exit
 
-// Test extractval non-inlined calls returning structs.
-// The expected AOT/HIR output below assumes the x64 sysvabi register-packing for
-// small struct returns - two 64-bit GP registers.
+// Check that `extractval`s are generated correctly for function return types.
 
 #include <assert.h>
 #include <stdint.h>
@@ -104,18 +116,22 @@ void interp(){
 
   int res = 9998;
   int i = 4;
+  struct S2 (*p)(void) = make_struct2;
   NOOPT_VAL(loc);
   NOOPT_VAL(res);
   NOOPT_VAL(i);
+  NOOPT_VAL(p);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     struct S s1 = make_struct();
+    fprintf(stderr, "%d:\n", i);
     fprintf(stderr, "%d\n", s1.a);
     fprintf(stderr, "%ld\n", s1.b);
     struct S2 s2 = make_struct2();
     fprintf(stderr, "%ld\n", s2.a);
     fprintf(stderr, "%d\n", s2.b);
     fprintf(stderr, "%u\n", s2.c);
+    fprintf(stderr, "%u\n", p().b);
     i--;
   }
   fprintf(stderr, "exit\n");
