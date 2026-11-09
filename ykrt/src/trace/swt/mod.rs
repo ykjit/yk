@@ -12,7 +12,7 @@ use std::{
 };
 
 /// Traces with more than this many items will be turned into [TraceRecorderError::TraceTooLong].
-static TRACE_TOO_LONG: usize = 15000;
+static TRACE_TOO_LONG: usize = 35000;
 
 // This is no_mangle because its name is relied upon by ykllvm (see `BasicBlockTracer.cpp`), and
 // it needs to survive linking.
