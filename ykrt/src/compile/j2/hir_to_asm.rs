@@ -2694,6 +2694,7 @@ mod test {
                         clobber: false,
                     },
                     RegCnstr::Output {
+                        out_iidx: iidx,
                         out_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         can_be_same_as_input: true,
@@ -2756,6 +2757,7 @@ mod test {
                         clobber: false,
                     },
                     RegCnstr::Output {
+                        out_iidx: iidx,
                         out_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         can_be_same_as_input: true,
@@ -2784,6 +2786,7 @@ mod test {
                         clobber: false,
                     },
                     RegCnstr::Output {
+                        out_iidx: iidx,
                         out_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         can_be_same_as_input: true,
