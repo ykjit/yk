@@ -812,24 +812,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         //
         // Notice the careful differentiation of "output" and "input" rstates!
 
-        // There must be at most 1 output register.
-        assert!(
-            cnstrs
-                .iter()
-                .filter(|x| match x {
-                    RegCnstr::InputOutput { .. }
-                    | RegCnstr::Output { .. }
-                    | RegCnstr::Cast { .. } => true,
-                    RegCnstr::Clobber { .. }
-                    | RegCnstr::Input { .. }
-                    | RegCnstr::Temp { .. }
-                    | RegCnstr::KeepAlive { .. }
-                    | RegCnstr::StackInputs { .. } => false,
-                })
-                .count()
-                <= 1
-        );
-
         // `AnyOf` (currently) only makes sense in `out_fill`s of non-`Cast`s.
         assert!(cnstrs.iter().all(|x| match x {
             RegCnstr::InputOutput { in_fill, .. } => !matches!(in_fill, RegCnstrFill::AnyOf(_)),
@@ -841,6 +823,34 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             | RegCnstr::KeepAlive { .. }
             | RegCnstr::StackInputs { .. } => true,
         }));
+
+        // Extract all output constraints. Note: we rely later on `out_cnstrs` having the same
+        // number of elements as `cnstrs`.
+        let out_cnstrs = cnstrs.each_ref().map(|cnstr| match cnstr {
+            RegCnstr::Output { out_iidx, .. } | RegCnstr::InputOutput { out_iidx, .. } => {
+                Some(*out_iidx)
+            }
+            RegCnstr::Cast { .. } => Some(iidx),
+            _ => None,
+        });
+        // A given out_iidx must only appear once.
+        for (i, out_iidx) in out_cnstrs.iter().enumerate() {
+            if let Some(out_iidx) = out_iidx {
+                assert!(!out_cnstrs[..i].contains(&Some(*out_iidx)));
+            }
+        }
+        if out_cnstrs.iter().flatten().count() > 1 {
+            // For now, we disallow casts and can_be_same_as_inputs when multiple outputs are
+            // specified.
+            assert!(!cnstrs.iter().any(|c| matches!(
+                c,
+                RegCnstr::Cast { .. }
+                    | RegCnstr::Output {
+                        can_be_same_as_input: true,
+                        ..
+                    }
+            )));
+        }
 
         // Phase 1: Find registers for constraints. Note that multiple constraints may end up
         // using the same register. This phase does not mutate `self`.
@@ -855,20 +865,15 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
         // 2.1: Update for the state immediately after the instruction has produced outputs and
         // work out what fill this constraint should have.
-        let mut output_reg = None; // Needed when outputs can end up in multiple registers.
         let mut rtn_fills = [RegFill::Undefined; N];
 
-        // If we process an `[Input]Output/Cast` before `Input`s we can cause a problem where the
-        // `Input`s needs override the `Output`s needs leading to an incorrect `n_out` state.
-        // Rather than burdening the caller with that, we extract the output constraint and deal
-        // with it last. Happily, that localises the fix to just this loop.
-        let output_i = cnstrs.iter().position(|c| {
-            matches!(
-                c,
-                RegCnstr::InputOutput { .. } | RegCnstr::Output { .. } | RegCnstr::Cast { .. }
-            )
-        });
-        for i in (0..N).filter(|i| Some(*i) != output_i).chain(output_i) {
+        // We need to process inputs before outputs so that when output constraints share a
+        // register with an input constraints, the value we retain is the output's value.
+        for i in (0..N)
+            .filter(|i| out_cnstrs[*i].is_none())
+            .chain((0..N).filter(|i| out_cnstrs[*i].is_some()))
+        {
+            let iidx = out_cnstrs[i].unwrap_or(iidx);
             let reg = allocs[i];
             let cnstr = &mut cnstrs[i];
             match cnstr {
@@ -920,7 +925,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     let out_fill = RegFill::from_regcnstrfill(out_fill);
                     n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
                     rtn_fills[i] = out_fill;
-                    output_reg = Some(reg);
                 }
                 RegCnstr::Cast {
                     in_iidx, out_fill, ..
@@ -934,7 +938,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         {
                             n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
                             rtn_fills[i] = out_fill;
-                            output_reg = Some(reg);
                         } else {
                             todo!()
                         }
@@ -947,14 +950,12 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                             n_out.iidxs_mut(reg).push(iidx);
                             n_out.set_fill(reg, out_fill);
                             rtn_fills[i] = out_fill;
-                            output_reg = Some(reg);
                         } else {
                             todo!()
                         }
                     } else {
                         n_out.set_fill_iidxs(reg, out_fill, smallvec![iidx]);
                         rtn_fills[i] = out_fill;
-                        output_reg = Some(reg);
                     }
                 }
                 RegCnstr::KeepAlive { .. } | RegCnstr::StackInputs { .. } => {
@@ -963,14 +964,18 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
             }
         }
 
-        // The output, if there is any, can only be in a single register. However, `n_out` might at
-        // this point require that value to be duplicated in multiple registers. Rather than be
-        // clever and do that duplication here, we simply nullify all of the duplicates, and rely
-        // on `rstate_diff_to_actions` to do the duplication for us.
-        if let Some(output_reg) = output_reg {
-            for (reg, rstate) in n_out.iter_mut() {
-                if reg != output_reg && rstate.iidxs.contains(&iidx) {
-                    rstate.iidxs.retain(|x| *x != iidx);
+        // Outputs, if there are any, are each in a single register. However, `n_out` might at this
+        // point require one or more of those values to be duplicated in multiple registers. Rather
+        // than be clever and do that duplication here, we simply nullify all of the duplicates,
+        // and rely on `rstate_diff_to_actions` to do the duplication for us.
+        for (i, output) in out_cnstrs.iter().enumerate() {
+            if let Some(out_iidx) = output {
+                let output_reg = allocs[i];
+                assert!((0..i).all(|j| out_cnstrs[j].is_none() || allocs[j] != output_reg));
+                for (reg, rstate) in n_out.iter_mut() {
+                    if reg != output_reg {
+                        rstate.iidxs.retain(|x| x != out_iidx);
+                    }
                 }
             }
         }
@@ -1009,10 +1014,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                 RegCnstr::Input { in_iidx, .. } => {
                     self.is_used.set((*in_iidx).to_raw_index(), true);
                 }
-                RegCnstr::InputOutput {
-                    in_iidx, out_fill, ..
-                }
-                | RegCnstr::Cast {
+                RegCnstr::Cast {
                     in_iidx, out_fill, ..
                 } => {
                     if let IState::Stack(stack_off) = self.istates[iidx] {
@@ -1026,13 +1028,28 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                     }
                     self.is_used.set((*in_iidx).to_raw_index(), true);
                 }
-                RegCnstr::Output {
+                RegCnstr::InputOutput {
+                    in_iidx,
+                    out_iidx,
                     out_fill,
-                    regs: _,
-                    can_be_same_as_input: _,
+                    ..
                 } => {
-                    if let IState::Stack(stack_off) = self.istates[iidx] {
-                        let out_bitw = self.b.inst_bitw(self.m, iidx);
+                    if let IState::Stack(stack_off) = self.istates[*out_iidx] {
+                        let out_bitw = self.b.inst_bitw(self.m, *out_iidx);
+                        be.spill(
+                            *reg,
+                            RegFill::from_regcnstrfill(out_fill),
+                            stack_off,
+                            out_bitw,
+                        )?;
+                    }
+                    self.is_used.set((*in_iidx).to_raw_index(), true);
+                }
+                RegCnstr::Output {
+                    out_iidx, out_fill, ..
+                } => {
+                    if let IState::Stack(stack_off) = self.istates[*out_iidx] {
+                        let out_bitw = self.b.inst_bitw(self.m, *out_iidx);
                         be.spill(
                             *reg,
                             RegFill::from_regcnstrfill(out_fill),
@@ -1107,7 +1124,7 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
         }
 
         for (_, rstate) in n_in.iter_mut() {
-            rstate.iidxs.retain(|x| *x != iidx);
+            rstate.iidxs.retain(|x| !out_cnstrs.contains(&Some(*x)));
             if rstate.iidxs.is_empty() {
                 rstate.fill = RegFill::Undefined;
             }
@@ -1255,9 +1272,6 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
 
     /// For each constraint in `cnstrs`, return the register it should end up in. Note: multiple
     /// constraints may end up being allocated to the same register.
-    ///
-    /// Note: `cnstrs` must contain at most one `Output`/`InputOutput`. Violating this will lead to
-    /// undefined behaviour.
     fn find_regs_for_constraints<const N: usize>(
         &self,
         be: &AB,
@@ -1381,17 +1395,26 @@ impl<'a, AB: HirToAsmBackend> RegAlloc<'a, AB> {
                         find_alloc(&mut allocs, i, regs, *in_iidx);
                     }
                 }
-                RegCnstr::InputOutput { regs, in_iidx, .. }
-                | RegCnstr::Cast { regs, in_iidx, .. } => {
-                    // In the worst case, it doesn't matter which way round we do this, but trying
-                    // to put the vale in the output register makes it clearer when reading the
-                    // generated assembly as to what's going on.
+                RegCnstr::Cast { regs, in_iidx, .. } => {
                     if !find_alloc(&mut allocs, i, regs, iidx) {
                         find_alloc(&mut allocs, i, regs, *in_iidx);
                     }
                 }
-                RegCnstr::Output { regs, .. } => {
-                    find_alloc(&mut allocs, i, regs, iidx);
+                RegCnstr::InputOutput {
+                    regs,
+                    in_iidx,
+                    out_iidx,
+                    ..
+                } => {
+                    // In the worst case, it doesn't matter which way round we do this, but trying
+                    // to put the value in the output register makes it clearer when reading the
+                    // generated assembly as to what's going on.
+                    if !find_alloc(&mut allocs, i, regs, *out_iidx) {
+                        find_alloc(&mut allocs, i, regs, *in_iidx);
+                    }
+                }
+                RegCnstr::Output { out_iidx, regs, .. } => {
+                    find_alloc(&mut allocs, i, regs, *out_iidx);
                 }
                 RegCnstr::Temp { .. }
                 | RegCnstr::KeepAlive { .. }
@@ -1958,19 +1981,21 @@ pub(super) enum RegCnstr<'a, Reg: RegT> {
         clobber: bool,
     },
     /// Make sure that `in_iidx` is loaded into a register drawn from `regs`, with its upper bits
-    /// matching fill `in_fill`; the result of the instruction will be in the same register with
+    /// matching fill `in_fill`; the value of `out_iidx` will be in the same register with
     /// its upper bits matching fill `out_fill`.
     InputOutput {
         in_iidx: InstIdx,
         in_fill: RegCnstrFill,
+        out_iidx: InstIdx,
         out_fill: RegCnstrFill,
         regs: &'a [Reg],
     },
-    /// The result of the instruction will be in a register drawn from `regs` with its upper bits
+    /// The value of `out_iidx` will be in a register drawn from `regs` with its upper bits
     /// matching fill `out_fill`. If `can_be_same_as_input` is true, then the allocator may
     /// optionally return a register that is also used for an input (in such a case, the input will
     /// implicitly be considered clobbered).
     Output {
+        out_iidx: InstIdx,
         out_fill: RegCnstrFill,
         regs: &'a [Reg],
         can_be_same_as_input: bool,
@@ -2673,6 +2698,7 @@ pub(crate) mod test {
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
                         in_fill: RegCnstrFill::Zeroed,
+                        out_iidx: iidx,
                         out_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                     },
@@ -2735,6 +2761,7 @@ pub(crate) mod test {
                     RegCnstr::InputOutput {
                         in_iidx: *lhs,
                         in_fill: RegCnstrFill::Zeroed,
+                        out_iidx: iidx,
                         out_fill: RegCnstrFill::Undefined,
                         regs: &FP_REGS,
                     },
@@ -2808,6 +2835,7 @@ pub(crate) mod test {
                         clobber: false,
                     },
                     RegCnstr::Output {
+                        out_iidx: iidx,
                         out_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         can_be_same_as_input: true,
@@ -2839,6 +2867,7 @@ pub(crate) mod test {
                 iidx,
                 [
                     RegCnstr::Output {
+                        out_iidx: iidx,
                         out_fill,
                         regs,
                         // Permit sharing in general; the register sets must still be respected.
@@ -2882,6 +2911,7 @@ pub(crate) mod test {
                         clobber: false,
                     },
                     RegCnstr::Output {
+                        out_iidx: iidx,
                         out_fill: RegCnstrFill::Undefined,
                         regs: &GP_REGS,
                         can_be_same_as_input: false,
@@ -3747,6 +3777,7 @@ pub(crate) mod test {
                 output,
                 [
                     RegCnstr::Output {
+                        out_iidx: output,
                         out_fill: RegCnstrFill::Zeroed,
                         regs: &GP_REGS,
                         can_be_same_as_input: true,
