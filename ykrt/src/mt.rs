@@ -38,14 +38,16 @@ use crate::{
 // Emit a log entry with hot location debug information if present and support is compiled in.
 macro_rules! yklog {
     ($logger:expr, $level:expr, $msg:expr, $opt_hl:expr) => {
-        #[cfg(feature = "ykd")]
-        if let Some(hl) = $opt_hl {
-            $logger.log_with_hl_debug($level, $msg, hl);
-        } else {
+        if $logger.is_enabled($level) {
+            #[cfg(feature = "ykd")]
+            if let Some(hl) = $opt_hl {
+                $logger.log_with_hl_debug($level, $msg, hl);
+            } else {
+                $logger.log($level, $msg);
+            }
+            #[cfg(not(feature = "ykd"))]
             $logger.log($level, $msg);
         }
-        #[cfg(not(feature = "ykd"))]
-        $logger.log($level, $msg);
     };
 }
 

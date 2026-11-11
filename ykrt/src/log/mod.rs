@@ -73,6 +73,12 @@ impl Log {
         }
     }
 
+    /// Is logging level `level` enabled?
+    #[inline(always)]
+    pub(crate) fn is_enabled(&self, level: Verbosity) -> bool {
+        level <= self.level
+    }
+
     #[cfg(feature = "ykd")]
     pub(crate) fn log_with_hl_debug<F>(&self, level: Verbosity, msg: F, hl: &Mutex<HotLocation>)
     where
@@ -96,7 +102,7 @@ impl Log {
     where
         F: FnOnce(&mut dyn fmt::Write) -> fmt::Result,
     {
-        if level <= self.level {
+        if self.is_enabled(level) {
             let prefix = match level {
                 Verbosity::Disabled => panic!(),
                 Verbosity::Error => "yk-error",
