@@ -15,8 +15,6 @@ use std::{
 };
 
 use parking_lot::Mutex;
-#[cfg(not(all(feature = "yk_testing", not(test))))]
-use parking_lot_core::SpinWait;
 
 use crate::{
     aotsmp::{AOT_STACKMAPS, StackMapIdx, load_aot_stackmaps},
@@ -853,17 +851,11 @@ impl MT {
                 let mut lk;
                 #[cfg(not(all(feature = "yk_testing", not(test))))]
                 {
-                    // Since this thread isn't tracing, it's not worth contending too much with
-                    // other threads: we'd rather fall back to the interpreter and try again later.
-                    let mut sw = SpinWait::new();
-                    loop {
-                        if let Some(x) = hl.try_lock() {
-                            lk = x;
-                            break;
-                        }
-                        if !sw.spin() {
-                            return TransitionControlPoint::NoAction;
-                        }
+                    // Since this thread isn't tracing, it's not worth contending with other
+                    // threads: we'd rather fall back to the interpreter and try again later.
+                    match hl.try_lock() {
+                        Some(x) => lk = x,
+                        None => return TransitionControlPoint::NoAction,
                     }
                 }
                 #[cfg(all(feature = "yk_testing", not(test)))]
