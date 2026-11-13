@@ -9,7 +9,7 @@ use std::{
     ffi::c_void,
     marker::PhantomData,
     sync::{
-        Arc, Weak,
+        Arc,
         atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering},
     },
 };
@@ -98,17 +98,6 @@ static IS_FORKED_CHILD: AtomicBool = AtomicBool::new(false);
 unsafe extern "C" fn after_fork_in_child() {
     IS_FORKED_CHILD.store(true, Ordering::Relaxed);
 }
-
-/// The control-point traces currently executing, across all threads. This must be kept upto date
-/// at all points so that we can unmap trace's backing memory.
-///
-/// This data-structure is chosen carefully: we want to make it as fast as possible to record the
-/// execution (and completion!) on a trace; and we only rarely need to enumerate all running
-/// threads. Thus each thread has a `Mutex<Vec<TraceId>>` which is a stack of executing
-/// control-point traces: we expect that `push` and `pop` to this are generally uncontended (and
-/// thus fast). When yk wants to free trace backing memory, it grabs the outer `Mutex` and then
-/// iterates over all inner `Mutex`es locking them.
-static EXECUTING_TRACES: Mutex<Vec<Weak<Mutex<Vec<TraceId>>>>> = Mutex::new(Vec::new());
 
 /// A meta-tracer. This is always passed around stored in an [Arc].
 ///
@@ -319,41 +308,6 @@ impl MT {
     /// If `trid` is not in the set of compiled traces.
     pub(crate) fn compiled_trace(self: &Arc<Self>, trid: TraceId) -> Arc<dyn CompiledTrace> {
         Arc::clone(&self.compiled_traces.lock()[&trid])
-    }
-
-    /// For each executing trace, run the function `f` with its `TraceId`. Note: this acquires the
-    /// lock on [EXECUTING_TRACES] preventing any other trace starting or completing execution! `f`
-    /// must not attempt to acquire the [EXECUTING_TRACE] lock; it should also execute as quickly
-    /// as possible to prevent other threads grinding to a halt.
-    #[cfg(test)]
-    fn for_each_executing_trace(&self, mut f: impl FnMut(TraceId)) {
-        // Grab the global lock.
-        let mut lk = EXECUTING_TRACES.lock();
-        // Garbage collect threads which have exited.
-        lk.retain(|x| x.strong_count() > 0);
-        // Collect all the live threads. We have to do this "collect a Vec" dance due to the
-        // lifetime requirements of `Mutex::lock()
-        //
-        // Note that a thread could have died between the `retain` above and the `filter_map`
-        // below: it just means that the `upgrade` will return `None` and be filtered out.
-        let live_threads = lk.iter().filter_map(Weak::upgrade).collect::<Vec<_>>();
-        // Grab all the threads' locks.
-        let thread_lks = live_threads
-            .iter()
-            .map(|thread| thread.lock())
-            .collect::<Vec<_>>();
-        // Finally we can fall `f`!
-        for thread_lk in &thread_lks {
-            for trid in thread_lk.iter() {
-                f(*trid);
-            }
-        }
-
-        // Strictly speaking, we could use Rust's default drop order, but doing it manually makes
-        // it less likely that in the future we shoot ourselves in the foot by letting threads
-        // deadlock with us on [EXECUTING_TRACES].
-        drop(thread_lks);
-        drop(lk);
     }
 
     /// Return the unique ID for the next trace.
@@ -572,14 +526,13 @@ impl MT {
                 if pinfo.hasfp {
                     rsp = unsafe { rsp.byte_add(REG64_SIZE) };
                 }
+                let trace_addr = ctr.entry();
                 MTThread::with_borrow_mut(|mtt| {
                     mtt.push_tstate(MTThreadState::Executing {
                         mt: Arc::clone(self),
-                        trid: ctr.ctrid(),
+                        ctr,
                     });
                 });
-                // Announce execution before reading an address or running any JIT code.
-                let trace_addr = ctr.entry();
                 self.stats.timing_state(TimingState::JitExecuting);
                 unsafe { __yk_exec_trace(frameaddr, rsp, trace_addr) };
             }
@@ -867,6 +820,7 @@ impl MT {
 
                 match lk.kind {
                     HotLocationKind::Compiled(ref ctr) => {
+                        ctr.inc_executing(&lk);
                         TransitionControlPoint::Execute(Arc::clone(ctr))
                     }
                     HotLocationKind::Compiling(_) => TransitionControlPoint::NoAction,
@@ -1339,8 +1293,8 @@ enum MTThreadState {
     /// This thread is recording a trace.
     Tracing(Box<MTThreadTracingState>),
     Executing {
-        /// The ID of the executing [CompiledTrace]).
-        trid: TraceId,
+        /// The executing trace.
+        ctr: Arc<dyn CompiledTrace>,
         mt: Arc<MT>,
     },
 }
@@ -1394,22 +1348,14 @@ pub struct MTThread {
     /// Where in the "interpreting/tracing/executing" is this thread? This `Vec` always has at
     /// least 1 element in it. It should not be access directly: use the `*_tstate` methods.
     tstate: Vec<MTThreadState>,
-    /// The stack of control-point traces this thread is currently executing: a reference to this
-    /// is stored in [EXECUTING_TRACES].
-    executing_traces: Arc<Mutex<Vec<TraceId>>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
 
 impl MTThread {
     fn new() -> Self {
-        let executing_traces = Arc::new(Mutex::new(Vec::new()));
-        EXECUTING_TRACES
-            .lock()
-            .push(Arc::downgrade(&executing_traces));
         MTThread {
             tstate: vec![MTThreadState::Interpreting],
-            executing_traces,
             _dont_send_or_sync_me: PhantomData,
         }
     }
@@ -1491,11 +1437,11 @@ impl MTThread {
     pub(crate) extern "C" fn trace_returned() {
         THREAD_MTTHREAD.with_borrow_mut(|mtt| {
             match mtt.peek_mut_tstate() {
-                MTThreadState::Executing { mt, trid, .. } => {
+                MTThreadState::Executing { mt, ctr, .. } => {
                     yklog!(
                         mt.log,
                         Verbosity::Execution,
-                        |log| write!(log, "return {{\"trid\": \"{}\"}}", trid.as_u64()),
+                        |log| write!(log, "return {{\"trid\": \"{}\"}}", ctr.ctrid().as_u64()),
                         None
                     );
                     mtt.pop_tstate();
@@ -1551,17 +1497,14 @@ impl MTThread {
     fn pop_tstate(&mut self) -> MTThreadState {
         debug_assert!(self.tstate.len() > 1);
         let state = self.tstate.pop().unwrap();
-        if let MTThreadState::Executing { .. } = &state {
-            self.executing_traces.lock().pop().unwrap();
+        if let MTThreadState::Executing { ctr, .. } = &state {
+            ctr.dec_executing();
         }
         state
     }
 
     /// Push `tstate` to the end of the stack of [MTThreadState]s.
     fn push_tstate(&mut self, tstate: MTThreadState) {
-        if let MTThreadState::Executing { trid, .. } = &tstate {
-            self.executing_traces.lock().push(*trid);
-        }
         self.tstate.push(tstate);
     }
 
@@ -1759,6 +1702,8 @@ impl From<u8> for IsTracing {
 enum TransitionControlPoint {
     NoAction,
     AbortTracing,
+    /// The [CompiledTrace] should be executed. Note: [CompiledTrace::inc_executing] will have been
+    /// called on the [CompiledTrace] while the relevant [HotLocation]'s lock was held.
     Execute(Arc<dyn CompiledTrace>),
     /// Start tracing: in a sense the `Arc<Mutex<HotLocation>>` could be seen as an optimisation
     /// because it can always be derived from the [Location] that was encountered. However, we also
@@ -1909,7 +1854,7 @@ mod tests {
         compile::{CompiledTraceTestingBasicTransitions, CompiledTraceTestingMinimal},
         trace::{AOTTraceIterator, TraceRecorderError},
     };
-    use std::{assert_matches, hint::black_box, ptr, sync::mpsc, thread};
+    use std::{assert_matches, hint::black_box, ptr, thread};
     use test::bench::Bencher;
 
     // We only implement enough of the equality function for the tests we have.
@@ -2455,50 +2400,6 @@ mod tests {
             TransitionControlPoint::NoAction
         );
         expect_stop_loop_tracing(&mt, &loc2);
-    }
-
-    #[test]
-    fn enumerate_executing_traces() {
-        const OUTER: TraceId = TraceId(0); // An outer trace that stays executing
-        const INNER: TraceId = TraceId(1); // An inner trace that gets popped
-        let mt = MT::create().unwrap();
-        let worker_mt = Arc::clone(&mt);
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let (resume_tx, resume_rx) = mpsc::channel();
-        let worker = thread::spawn(move || {
-            MTThread::with_borrow_mut(|mtt| {
-                for trid in [OUTER, INNER] {
-                    mtt.push_tstate(MTThreadState::Executing {
-                        mt: Arc::clone(&worker_mt),
-                        trid,
-                    });
-                }
-            });
-            ready_tx.send(()).unwrap();
-            resume_rx.recv().unwrap();
-            MTThread::with_borrow_mut(|mtt| {
-                mtt.pop_tstate();
-            });
-            ready_tx.send(()).unwrap();
-            resume_rx.recv().unwrap();
-        });
-        let active = || {
-            let mut trids = Vec::new();
-            mt.for_each_executing_trace(|trid| {
-                if [OUTER, INNER].contains(&trid) {
-                    trids.push(trid);
-                }
-            });
-            trids
-        };
-        ready_rx.recv().unwrap();
-        assert_matches!(active(), [OUTER, INNER] | [INNER, OUTER]);
-        resume_tx.send(()).unwrap();
-        ready_rx.recv().unwrap();
-        assert_eq!(active(), [OUTER]);
-        resume_tx.send(()).unwrap();
-        worker.join().unwrap();
-        assert!(active().is_empty());
     }
 
     #[bench]

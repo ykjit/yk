@@ -13,12 +13,15 @@ use crate::{
     mt::{CodeId, MT, TraceId},
 };
 use index_type::{IndexType, vec::TypedVec};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use smallvec::SmallVec;
 use std::{
     any::Any,
     ffi::c_void,
-    sync::{Arc, Weak},
+    sync::{
+        Arc, Weak,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
 #[derive(Debug)]
@@ -33,6 +36,7 @@ pub(super) struct J2CompiledTrace<Reg: RegT> {
     /// The name used for this trace as linker symbol.
     symbol_name: String,
     vlocs: TypedVec<TraceVarLocsIdx, VarLocs<Reg>>,
+    executing: AtomicU32,
 }
 
 impl<Reg: RegT> J2CompiledTrace<Reg> {
@@ -85,6 +89,7 @@ impl<Reg: RegT> J2CompiledTrace<Reg> {
             trace_start,
             symbol_name,
             vlocs,
+            executing: AtomicU32::new(0),
         }
     }
 
@@ -251,6 +256,20 @@ impl<Reg: RegT + 'static> CompiledTrace for J2CompiledTrace<Reg> {
 
     fn name(&self) -> String {
         self.symbol_name.clone()
+    }
+
+    fn is_executing<'a>(&'a self, _lk: &'a MutexGuard<'a, HotLocation>) -> bool {
+        debug_assert!(std::ptr::eq(MutexGuard::mutex(_lk), self.hl.as_ptr()));
+        self.executing.load(Ordering::Acquire) > 0
+    }
+
+    fn inc_executing<'a>(&'a self, _lk: &'a MutexGuard<'a, HotLocation>) {
+        debug_assert!(std::ptr::eq(MutexGuard::mutex(_lk), self.hl.as_ptr()));
+        self.executing.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn dec_executing(&self) {
+        self.executing.fetch_sub(1, Ordering::Release);
     }
 }
 
