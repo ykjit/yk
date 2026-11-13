@@ -32,7 +32,7 @@ use crate::{
     trace::AOTTraceIterator,
 };
 use libc::c_void;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use std::{
     error::Error,
     fmt,
@@ -159,6 +159,26 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
 
     /// Return a unique name for the trace that can be used for (e.g.) a symbol name.
     fn name(&self) -> String;
+
+    /// Return true if this trace is executing somewhere.
+    ///
+    /// # Safety
+    ///
+    /// `lk` must be the lock for this compiled trace's [HotLocation]. Failure to provide this
+    /// lock leads to undefined behaviour.
+    #[allow(unused)]
+    fn is_executing<'a>(&'a self, lk: &'a MutexGuard<'a, HotLocation>) -> bool;
+
+    /// Increment the live number of executions of this compiled trace.
+    ///
+    /// # Safety
+    ///
+    /// `lk` must be the lock for this compiled trace's [HotLocation]. Failure to provide this
+    /// lock leads to undefined behaviour.
+    fn inc_executing<'a>(&'a self, lk: &'a MutexGuard<'a, HotLocation>);
+
+    /// Decrement the number of live executions of this compiled trace.
+    fn dec_executing(&self);
 }
 
 #[cfg(test)]
@@ -219,6 +239,16 @@ mod compiled_trace_testing {
         fn set_guard_to_deopt(&self, _gid: GuardId, _tid: TraceId) {
             panic!()
         }
+
+        fn is_executing<'a>(&'a self, _lk: &'a MutexGuard<'a, HotLocation>) -> bool {
+            todo!();
+        }
+
+        fn inc_executing<'a>(&'a self, _lk: &'a MutexGuard<'a, HotLocation>) {}
+
+        fn dec_executing(&self) {
+            todo!();
+        }
     }
 
     /// A [CompiledTrace] implementation suitable only for testing basic transitions. The `hl` method will return a
@@ -278,6 +308,16 @@ mod compiled_trace_testing {
 
         fn set_guard_to_deopt(&self, _gid: GuardId, _tid: TraceId) {
             panic!()
+        }
+
+        fn is_executing<'a>(&'a self, _lk: &'a MutexGuard<'a, HotLocation>) -> bool {
+            todo!();
+        }
+
+        fn inc_executing<'a>(&'a self, _lk: &'a MutexGuard<'a, HotLocation>) {}
+
+        fn dec_executing(&self) {
+            todo!();
         }
     }
 }
