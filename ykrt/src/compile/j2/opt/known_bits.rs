@@ -214,6 +214,38 @@ impl KnownBits {
             {
                 return OptOutcome::Equiv(lhs);
             }
+
+            // This is a bit of a hack because we can't currently pass information backwards: in
+            // essence we special case OR/XOR.
+            for (op_iidx, mask_iidx, mask_b) in [(lhs, rhs, &rhs_b), (rhs, lhs, &lhs_b)] {
+                let (op_lhs, op_rhs) = match opt.inst(op_iidx) {
+                    Inst::Or(Or {
+                        lhs,
+                        rhs,
+                        disjoint: false,
+                        ..
+                    })
+                    | Inst::Xor(Xor { lhs, rhs, .. }) => {
+                        (opt.equiv_iidx(*lhs), opt.equiv_iidx(*rhs))
+                    }
+                    _ => continue,
+                };
+                for (keep, discard) in [(op_lhs, op_rhs), (op_rhs, op_lhs)] {
+                    if let Some(discard_b) = self.as_knownbits(opt, discard) {
+                        let masked = discard_b.bitand(mask_b);
+                        if masked.all_known() && masked.as_arbbitint().to_zero_ext_u8() == Some(0) {
+                            return OptOutcome::Rerun(
+                                And {
+                                    tyidx,
+                                    lhs: keep,
+                                    rhs: mask_iidx,
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
         }
         OptOutcome::Rewritten(inst.into())
     }
@@ -906,6 +938,77 @@ mod test {
           %4: i8 = 1
           %5: i8 = and %0, %4
           blackbox %5
+        ",
+        );
+
+        // or / xor masking
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = 1
+          %2: i8 = or %0, %1
+          %3: i8 = 254
+          %4: i8 = and %2, %3
+          blackbox %4
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = 1
+          %2: i8 = or %0, %1
+          %3: i8 = 254
+          %4: i8 = and %0, %3
+          blackbox %4
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = arg [reg]
+          %3: i8 = 7
+          %4: i8 = and %1, %3
+          %5: i8 = or %4, %0
+          %6: i8 = 248
+          %7: i8 = and %2, %6
+          %8: i8 = and %7, %5
+          blackbox %8
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = arg
+          %3: i8 = 7
+          %4: i8 = and %1, %3
+          %5: i8 = or %4, %0
+          %6: i8 = 248
+          %7: i8 = and %2, %6
+          %8: i8 = and %0, %7
+          blackbox %8
+        ",
+        );
+
+        test_known_bits(
+            "
+          %0: i8 = arg [reg]
+          %1: i8 = arg [reg]
+          %2: i8 = 7
+          %3: i8 = and %1, %2
+          %4: i8 = or %0, %3
+          %5: i8 = 252
+          %6: i8 = and %4, %5
+          blackbox %6
+        ",
+            "
+          %0: i8 = arg
+          %1: i8 = arg
+          %2: i8 = 7
+          %3: i8 = and %1, %2
+          %4: i8 = or %0, %3
+          %5: i8 = 252
+          %6: i8 = and %4, %5
+          blackbox %6
         ",
         );
     }
