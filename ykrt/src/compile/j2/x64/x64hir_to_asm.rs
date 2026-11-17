@@ -831,22 +831,17 @@ impl<'a> X64HirToAsm<'a> {
         }
         let (rmop, rhs) = if let Some(imm) = imm {
             let rmop = if matches!(bitw, 8 | 16 | 32 | 64)
-                && let Some((load_iidx, off)) = self.try_load_to_mem_op(ra, b, iidx, *lhs)
+                && self.try_load_to_mem_op(ra, b, iidx, *lhs).is_some()
+                && let Inst::Load(Load { ptr, .. }) = b.inst(*lhs)
             {
-                let [lhsr, _] = ra.alloc(
-                    self,
+                let (memop, _, _) = self.alloc_mem_op_with_reg(
+                    ra,
+                    b,
                     iidx,
-                    [
-                        RegCnstr::Input {
-                            in_iidx: load_iidx,
-                            in_fill: RegCnstrFill::Undefined,
-                            regs: &NORMAL_GP_REGS,
-                            clobber: false,
-                        },
-                        RegCnstr::KeepAlive { iidxs: exit_vars },
-                    ],
+                    *ptr,
+                    RegCnstr::KeepAlive { iidxs: exit_vars },
                 )?;
-                RegOrMemOp::MemOp(MemoryOperand::with_base_displ(lhsr.to_reg64(), off))
+                RegOrMemOp::MemOp(memop)
             } else if matches!(bitw, 8 | 16 | 32 | 64)
                 && !ra.is_in_reg(*lhs)
                 && let Some(off) = ra.is_on_stack(*lhs)
@@ -9800,12 +9795,11 @@ mod test {
             &[r#"
               ...
               ; %0: ptr = 0x1234
-              mov r15, 0x1234
               ; %1: i8 = load %0
               ; %2: i8 = 7
               ; %3: i1 = icmp sgt %1, %2
               ; guard true, %3, []
-              cmp byte [r15], 7
+              cmp byte [0x1234], 7
               jle l1
               ; term []
             "#],
