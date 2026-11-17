@@ -47,15 +47,15 @@
 //     --- End aot ---
 //     --- Begin hir ---
 //     ...
-//     %{{h_sadd}}: i64 = sadd_overflow %{{_}}, %{{_}}
+//     %{{h_sadd}}: i33 = sadd_overflow %{{_}}, %{{_}}
 //     ...
-//     %{{h_uadd}}: i64 = uadd_overflow %{{_}}, %{{_}}
+//     %{{h_uadd}}: i33 = uadd_overflow %{{_}}, %{{_}}
 //     ...
-//     %{{h_ssub}}: i64 = ssub_overflow %{{_}}, %{{_}}
+//     %{{h_ssub}}: i33 = ssub_overflow %{{_}}, %{{_}}
 //     ...
-//     %{{h_usub}}: i64 = usub_overflow %{{_}}, %{{_}}
+//     %{{h_usub}}: i33 = usub_overflow %{{_}}, %{{_}}
 //     ...
-//     %{{h_smul}}: i64 = smul_overflow %{{_}}, %{{_}}
+//     %{{h_smul}}: i33 = smul_overflow %{{_}}, %{{_}}
 //     ...
 //     --- End hir ---
 //     4: sadd full=0,2147483647

@@ -1893,13 +1893,14 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 self.opt.feed_void(hinst.into()).map(|_| ())
             }
             "prefetch" => Ok(()),
-            "sadd" | "smul" | "uadd" | "usub" | "ssub"
+            "sadd" | "smul" | "uadd" | "umul" | "usub" | "ssub"
                 if parts[2] == "with" && parts[3] == "overflow" =>
             {
                 let [lhs, rhs]: [hir::InstIdx; 2] = jargs.into_vec().try_into().unwrap();
                 let tyidx = self.opt.inst(lhs).tyidx(&*self.opt);
                 assert_eq!(tyidx, self.opt.inst(rhs).tyidx(&*self.opt));
-                let rtn_tyidx = self.opt.push_ty(hir::Ty::Int(64))?;
+                let bitw = self.opt.ty(tyidx).bitw();
+                let rtn_tyidx = self.opt.push_ty(hir::Ty::Int(bitw + 1))?;
                 let inst: hir::Inst = match parts[1] {
                     "sadd" => hir::SAddOverflow {
                         tyidx: rtn_tyidx,
@@ -1914,6 +1915,12 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                     }
                     .into(),
                     "uadd" => hir::UAddOverflow {
+                        tyidx: rtn_tyidx,
+                        lhs,
+                        rhs,
+                    }
+                    .into(),
+                    "umul" => hir::UMulOverflow {
                         tyidx: rtn_tyidx,
                         lhs,
                         rhs,
@@ -1946,7 +1953,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let overflow_iidx = self.opt.feed(
                     hir::ExtractVal {
                         val: call_iidx,
-                        off: 32,
+                        off: bitw,
                         tyidx: i1_tyidx,
                     }
                     .into(),

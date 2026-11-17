@@ -1321,6 +1321,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                         self.be.i_umin(&mut ra, b, iidx, x)?;
                     }
                 }
+                Inst::UMulOverflow(_) => (),
                 Inst::URem(x) => {
                     if ra.is_used(iidx) {
                         self.be.i_urem(&mut ra, b, iidx, x)?;
