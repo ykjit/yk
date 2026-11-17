@@ -43,6 +43,7 @@ impl PassT for StrengthFold {
             Inst::IntToPtr(x) => opt_inttoptr(opt, x),
             Inst::LShr(x) => opt_lshr(opt, x),
             Inst::MemCpy(x) => opt_memcpy(opt, x),
+            Inst::MemSet(x) => opt_memset(opt, x),
             Inst::Mul(x) => opt_mul(opt, x),
             Inst::Or(x) => opt_or(opt, x),
             Inst::PtrAdd(x) => opt_ptradd(opt, x),
@@ -992,6 +993,25 @@ fn opt_memcpy(opt: &mut PassOpt, mut inst: MemCpy) -> OptOutcome {
         false
     };
     if equiv {
+        return OptOutcome::NotNeeded;
+    }
+
+    OptOutcome::Rewritten(inst.into())
+}
+
+fn opt_memset(opt: &mut PassOpt, mut inst: MemSet) -> OptOutcome {
+    inst.canonicalise(opt);
+    let MemSet {
+        dst: _,
+        val: _,
+        len,
+        is_volatile: _,
+    } = inst;
+
+    if let Some(ConstKind::Int(len_c)) = opt.as_constkind(len)
+        && let Some(0) = len_c.to_zero_ext_u8()
+    {
+        // memset of zero bytes. This is safe to remove even for volatile `memset`s.
         return OptOutcome::NotNeeded;
     }
 
@@ -4327,6 +4347,24 @@ mod test {
           %0: ptr = 0x4321
           %1: ptr = 0x1234
           %2: i64 = 0
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_memset() {
+        // memset where len == 0 is eliminated.
+        test_sf(
+            "
+          %0: ptr = 0x4321
+          %1: i8 = 8
+          %2: i32 = 0
+          memset %0, %1, %2, false
+        ",
+            "
+          %0: ptr = 0x4321
+          %1: i8 = 8
+          %2: i32 = 0
         ",
         );
     }
