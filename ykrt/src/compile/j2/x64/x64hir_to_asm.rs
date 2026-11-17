@@ -4711,6 +4711,73 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             is_volatile: _,
         }: &MemSet,
     ) -> Result<(), CompilationError> {
+        if let Some(0) = self.zero_ext_op_for_imm8(b, *val)
+            && let Inst::Const(Const {
+                kind: ConstKind::Int(len),
+                ..
+            }) = b.inst(*len)
+            && let Some(mut len) = len.to_zero_ext_u32()
+        {
+            // Optimise memory zeroing of a constant length.
+            if len <= 128 {
+                let [dstr] = ra.alloc(
+                    self,
+                    iidx,
+                    [RegCnstr::Input {
+                        in_iidx: *dst,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &NORMAL_GP_REGS,
+                        clobber: false,
+                    }],
+                )?;
+                while len % 8 != 0 {
+                    len -= 1;
+                    self.asm.push_inst(IcedInst::with2(
+                        Code::Mov_rm8_imm8,
+                        MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
+                        0,
+                    ));
+                }
+                while len > 0 {
+                    assert!(len >= 8);
+                    len -= 8;
+                    self.asm.push_inst(IcedInst::with2(
+                        Code::Mov_rm64_imm32,
+                        MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
+                        0,
+                    ));
+                }
+                return Ok(());
+            } else if len % 8 == 0 {
+                let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::Input {
+                            in_iidx: *dst,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &[Reg::RDI],
+                            clobber: true,
+                        },
+                        RegCnstr::Clobber { reg: Reg::RAX },
+                        RegCnstr::Clobber { reg: Reg::RCX },
+                    ],
+                )?
+                else {
+                    panic!()
+                };
+                self.asm.push_inst(IcedInst::with_rep_stosq(64));
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Mov_rm32_imm32, IcedReg::ECX, len / 8));
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Xor_rm32_r32,
+                    IcedReg::EAX,
+                    IcedReg::EAX,
+                ));
+                return Ok(());
+            }
+        }
+
         let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
             self,
             iidx,
@@ -11053,6 +11120,46 @@ mod test {
               ; memset %0, %1, %2, true
               rep stosb
               ...
+            "],
+        );
+
+        // Constant length zeroing
+        codegen_and_test(
+            r#"
+              %0: ptr = arg [reg]
+              %1: i8 = 0
+              %2: i32 = 18
+              memset %0, %1, %2, false
+              term [%0]
+            "#,
+            &["
+              ...
+              ; %1: i8 = 0
+              ; %2: i32 = 18
+              ; memset %0, %1, %2, false
+              mov qword [r.64.x], 0
+              mov qword [r.64.x+8], 0
+              mov byte [r.64.x+0x10], 0
+              mov byte [r.64.x+0x11], 0
+              ; term [%0]
+            "],
+        );
+
+        codegen_and_test(
+            r#"
+              %0: ptr = arg [reg]
+              %1: i8 = 0
+              %2: i64 = 512
+              memset %0, %1, %2, true
+              term [%0]
+            "#,
+            &["
+              ...
+              ; memset %0, %1, %2, true
+              xor eax, eax
+              mov ecx, 0x40
+              rep stosq
+              ; term [%0]
             "],
         );
     }
