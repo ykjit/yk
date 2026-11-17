@@ -397,7 +397,7 @@ impl<'a> X64HirToAsm<'a> {
         Ok(())
     }
 
-    /// Generate code for the extractval of a `{sadd, smul, uadd, usub, ssub}_overflow`
+    /// Generate code for the extractval of a `{sadd, smul, uadd, umul, usub, ssub}_overflow`
     /// instruction's result or overflow flag. `arith` selects the operation; `set_code` is the
     /// x64 `set*` instruction (e.g. `seto`, `setb`) that reads its flags into a register.
     #[allow(clippy::too_many_arguments)]
@@ -429,7 +429,21 @@ impl<'a> X64HirToAsm<'a> {
             // the operand width, which is exactly `smul_overflow`'s flag.
             (OverflowArith::Mul, 32) => Code::Imul_r32_rm32,
             (OverflowArith::Mul, 64) => Code::Imul_r64_rm64,
+            (OverflowArith::UMul, 32) => Code::Mul_rm32,
+            (OverflowArith::UMul, 64) => Code::Mul_rm64,
             _ => todo!(),
+        };
+        let (lhs_regs, in_fill, clobber): (&[Reg], _, _) = match arith {
+            OverflowArith::UMul => (
+                &[Reg::RAX],
+                RegCnstrFill::Zeroed,
+                RegCnstr::Clobber { reg: Reg::RDX },
+            ),
+            _ => (
+                &NORMAL_GP_REGS,
+                RegCnstrFill::Undefined,
+                RegCnstr::KeepAlive { iidxs: &[] },
+            ),
         };
         let (res_iidx, flag_iidx) = match off {
             0 => (iidx, InstIdx::from_raw_index(iidx.to_raw_index() + 1)),
@@ -438,60 +452,56 @@ impl<'a> X64HirToAsm<'a> {
         };
         // Identify the liveness of both values of the overflow instruction and perform dead
         // code elimination here rather than at the {s,u}{add,mul,sub}_overflow instruction: when
-        // both are used, the sum's extractval defers to the flag's, so codegen isn't emitted
+        // both are used, the result's extractval defers to the flag's, so codegen isn't emitted
         // twice.
-        let sum_used = ra.is_used(res_iidx);
+        let result_used = ra.is_used(res_iidx);
         let flag_used = ra.is_used(flag_iidx);
-        match (off, sum_used, flag_used) {
+        let [lhsr, rhsr] = match (off, result_used, flag_used) {
             // Defer to the flag's extractval, which emits codegen for both.
-            (0, _, true) => Ok(()),
-            // Case 1: only the sum is used, the flag is dead. Just do the add/sub.
+            (0, _, true) => return Ok(()),
+            // Case 1: only the result is used, the flag is dead.
             (0, _, false) => {
-                let [lhsr, rhsr] = ra.alloc(
+                let [lhsr, rhsr, _] = ra.alloc(
                     self,
                     res_iidx,
                     [
                         RegCnstr::InputOutput {
                             in_iidx: lhs,
-                            in_fill: RegCnstrFill::Undefined,
+                            in_fill: in_fill.clone(),
                             out_iidx: iidx,
                             out_fill: RegCnstrFill::Zeroed,
-                            regs: &NORMAL_GP_REGS,
+                            regs: lhs_regs,
                         },
                         RegCnstr::Input {
                             in_iidx: rhs,
-                            in_fill: RegCnstrFill::Undefined,
+                            in_fill,
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
+                        clobber,
                     ],
                 )?;
-                self.asm.push_inst(match operand_bitw {
-                    32 => IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()),
-                    64 => IcedInst::with2(op_code, lhsr.to_reg64(), rhsr.to_reg64()),
-                    _ => todo!(),
-                });
-                Ok(())
+                [lhsr, rhsr]
             }
-            // Case 2: only the flag is used, the sum is dead. Do the add/sub purely to set the
-            // flag, discarding its result.
+            // Case 2: only the flag is used, the result is dead.
             (_, false, _) => {
-                let [lhsr, rhsr, i1_outr] = ra.alloc(
+                let [lhsr, rhsr, _, i1_outr] = ra.alloc(
                     self,
                     flag_iidx,
                     [
                         RegCnstr::Input {
                             in_iidx: lhs,
-                            in_fill: RegCnstrFill::Undefined,
-                            regs: &NORMAL_GP_REGS,
+                            in_fill: in_fill.clone(),
+                            regs: lhs_regs,
                             clobber: true,
                         },
                         RegCnstr::Input {
                             in_iidx: rhs,
-                            in_fill: RegCnstrFill::Undefined,
+                            in_fill,
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
+                        clobber,
                         RegCnstr::Output {
                             out_iidx: iidx,
                             out_fill: RegCnstrFill::Undefined,
@@ -502,32 +512,28 @@ impl<'a> X64HirToAsm<'a> {
                 )?;
                 self.asm
                     .push_inst(IcedInst::with1(set_code, i1_outr.to_reg8()));
-                self.asm.push_inst(match operand_bitw {
-                    32 => IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()),
-                    64 => IcedInst::with2(op_code, lhsr.to_reg64(), rhsr.to_reg64()),
-                    _ => todo!(),
-                });
-                Ok(())
+                [lhsr, rhsr]
             }
-            // Case 3: both the sum and the flag are used.
+            // Case 3: both the result and the flag are used.
             (_, true, _) => {
-                let [lhsr, rhsr, i1_outr] = ra.alloc(
+                let [lhsr, rhsr, _, i1_outr] = ra.alloc(
                     self,
                     iidx,
                     [
                         RegCnstr::InputOutput {
                             in_iidx: lhs,
-                            in_fill: RegCnstrFill::Undefined,
+                            in_fill: in_fill.clone(),
                             out_iidx: res_iidx,
                             out_fill: RegCnstrFill::Zeroed,
-                            regs: &NORMAL_GP_REGS,
+                            regs: lhs_regs,
                         },
                         RegCnstr::Input {
                             in_iidx: rhs,
-                            in_fill: RegCnstrFill::Undefined,
+                            in_fill,
                             regs: &NORMAL_GP_REGS,
                             clobber: false,
                         },
+                        clobber,
                         RegCnstr::Output {
                             out_iidx: flag_iidx,
                             out_fill: RegCnstrFill::Undefined,
@@ -538,14 +544,25 @@ impl<'a> X64HirToAsm<'a> {
                 )?;
                 self.asm
                     .push_inst(IcedInst::with1(set_code, i1_outr.to_reg8()));
-                self.asm.push_inst(match operand_bitw {
-                    32 => IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()),
-                    64 => IcedInst::with2(op_code, lhsr.to_reg64(), rhsr.to_reg64()),
-                    _ => todo!(),
-                });
-                Ok(())
+                [lhsr, rhsr]
             }
-        }
+        };
+        self.asm.push_inst(match arith {
+            OverflowArith::UMul => IcedInst::with1(
+                op_code,
+                match operand_bitw {
+                    32 => rhsr.to_reg32(),
+                    64 => rhsr.to_reg64(),
+                    _ => todo!(),
+                },
+            ),
+            _ => match operand_bitw {
+                32 => IcedInst::with2(op_code, lhsr.to_reg32(), rhsr.to_reg32()),
+                64 => IcedInst::with2(op_code, lhsr.to_reg64(), rhsr.to_reg64()),
+                _ => todo!(),
+            },
+        });
+        Ok(())
     }
 
     /// Generate code for fadd/fdiv/fmul/fsub: `double_code` is the instruction to generate for
@@ -3419,6 +3436,16 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 OverflowArith::Add,
                 Code::Setb_rm8,
             ),
+            Inst::UMulOverflow(UMulOverflow { lhs, rhs, .. }) => self.i_overflow(
+                ra,
+                iidx,
+                *off,
+                bitw,
+                *lhs,
+                *rhs,
+                OverflowArith::UMul,
+                Code::Setb_rm8,
+            ),
             Inst::USubOverflow(USubOverflow { lhs, rhs, .. }) => self.i_overflow(
                 ra,
                 iidx,
@@ -3439,9 +3466,7 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                 OverflowArith::Sub,
                 Code::Seto_rm8,
             ),
-            _ => panic!(
-                "extractval operand is not a call or {{sadd, smul, uadd, usub, ssub}}_overflow"
-            ),
+            _ => panic!("extractval operand is not a call or overflow instruction"),
         }
     }
 
@@ -6029,12 +6054,13 @@ enum RegOrMemOp {
     MemOp(MemoryOperand),
 }
 
-/// The arithmetic of a `{sadd, smul, uadd, usub, ssub}_overflow` instruction.
+/// The arithmetic of a `{sadd, smul, uadd, umul, usub, ssub}_overflow` instruction.
 #[derive(Clone, Copy, Debug)]
 enum OverflowArith {
     Add,
     Mul,
     Sub,
+    UMul,
 }
 
 /// The trampoline function called at the end of traces.
@@ -10280,34 +10306,38 @@ mod test {
     }
 
     #[test]
-    fn cg_usub_overflow() {
+    fn cg_umul_overflow_result_only() {
         codegen_and_test(
             "
               %0: i32 = arg [reg]
               %1: i32 = arg [reg]
-              %2: i64 = usub_overflow %0, %1
+              %2: i33 = umul_overflow %0, %1
               %3: i32 = extractval %2 [0]
               %4: i1 = extractval %2 [32]
               blackbox %3
-              blackbox %4
               term [%0, %1]
             ",
             &[r#"
               ...
-              ; %2: i64 = usub_overflow %0, %1
+              ; %2: i33 = umul_overflow %0, %1
               ; %3: i32 = extractval %2 [0]
+              mul r.32._
               ; %4: i1 = extractval %2 [32]
-              sub r.32.x, r.32.y
-              setb r.8._
+              ; blackbox %3
+              ; term [%0, %1]
               ...
             "#],
         );
+    }
 
+    #[test]
+    fn cg_umul_overflow() {
+        // Use the overflow and result
         codegen_and_test(
             "
               %0: i64 = arg [reg]
               %1: i64 = arg [reg]
-              %2: i65 = usub_overflow %0, %1
+              %2: i65 = umul_overflow %0, %1
               %3: i64 = extractval %2 [0]
               %4: i1 = extractval %2 [64]
               blackbox %3
@@ -10316,12 +10346,68 @@ mod test {
             ",
             &[r#"
               ...
-              ; %2: i65 = usub_overflow %0, %1
+              ; %0: i64 = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              mov rax, r.64.x
+              ; %2: i65 = umul_overflow %0, %1
               ; %3: i64 = extractval %2 [0]
               ; %4: i1 = extractval %2 [64]
-              sub r.64.x, r.64.y
-              setb r.8.flag
+              mul r.64.y
+              setb r.8._
+              ; blackbox %3
+              ; blackbox %4
+              ; term [%0, %1]
+            "#],
+        );
+
+        // Use only the result
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = umul_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %3
+              term [%0, %1]
+            ",
+            &[r#"
               ...
+              ; %0: i64 = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              mov rax, r.64.x
+              ; %2: i65 = umul_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              mul r.64.y
+              ; %4: i1 = extractval %2 [64]
+              ; blackbox %3
+              ; term [%0, %1]
+            "#],
+        );
+
+        // Use only overflow
+        codegen_and_test(
+            "
+              %0: i64 = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i65 = umul_overflow %0, %1
+              %3: i64 = extractval %2 [0]
+              %4: i1 = extractval %2 [64]
+              blackbox %4
+              term [%0, %1]
+            ",
+            &[r#"
+              ...
+              ; %0: i64 = arg [Reg("r.64.x", Undefined)]
+              ; %1: i64 = arg [Reg("r.64.y", Undefined)]
+              mov rax, r.64.x
+              ; %2: i65 = umul_overflow %0, %1
+              ; %3: i64 = extractval %2 [0]
+              ; %4: i1 = extractval %2 [64]
+              mul r.64.y
+              setb r.8._
+              ; blackbox %4
+              ; term [%0, %1]
             "#],
         );
     }
