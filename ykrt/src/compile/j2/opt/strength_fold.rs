@@ -785,6 +785,33 @@ fn opt_icmp(opt: &mut PassOpt, mut inst: ICmp) -> OptOutcome {
             tyidx,
             kind: ConstKind::Int(ArbBitInt::from_u64(1, 0)),
         }));
+    } else if pred.is_signed()
+        && let Inst::AShr(AShr {
+            tyidx,
+            lhs: val,
+            rhs: shift,
+            ..
+        }) = opt.inst(lhs)
+        && let Some(ConstKind::Int(c)) = opt.as_constkind(rhs)
+        && let Some(ConstKind::Int(shift)) = opt.as_constkind(*shift)
+        && let Some(shift) = shift.to_zero_ext_u32()
+        && let Some(lo) = c.checked_shl(shift)
+        && lo.checked_ashr(shift) == Some(c)
+    {
+        assert!(shift > 0);
+        let bound = match pred {
+            IPred::Sge | IPred::Slt => lo,
+            IPred::Sgt | IPred::Sle => {
+                lo.bitor(&ArbBitInt::all_bits_set(shift).zero_extend(lo.bitw()))
+            }
+            _ => unreachable!(),
+        };
+        inst.lhs = *val;
+        inst.rhs = opt.push_pre_inst(Inst::Const(Const {
+            tyidx: *tyidx,
+            kind: ConstKind::Int(bound),
+        }));
+        return OptOutcome::Rerun(inst.into());
     } else if let Some(ConstKind::Int(rhs_c)) = opt.as_constkind(rhs)
         && let Inst::ZExt(ZExt { val, .. }) = opt.inst(lhs).to_owned()
         && let src_tyidx = opt.inst(val).tyidx(opt)
@@ -4156,6 +4183,88 @@ mod test {
           blackbox %2
           %4: i1 = icmp eq %0, %1
           blackbox %4
+        ",
+        );
+
+        // (x >> c1) < c2 and friends
+
+        test_sf(
+            "
+           %0: i64 = arg [reg]
+           %1: i64 = 3
+           %2: i64 = ashr %0, %1
+           %3: i64 = 18
+           %4: i1 = icmp sgt %2, %3
+           blackbox %4
+        ",
+            "
+           %0: i64 = arg
+           %1: i64 = 3
+           %2: i64 = ashr %0, %1
+           %3: i64 = 18
+           %4: i64 = 151
+           %5: i1 = icmp sgt %0, %4
+           blackbox %5
+        ",
+        );
+
+        test_sf(
+            "
+           %0: i64 = arg [reg]
+           %1: i64 = 3
+           %2: i64 = ashr %0, %1
+           %3: i64 = 18
+           %4: i1 = icmp sge %2, %3
+           blackbox %4
+        ",
+            "
+           %0: i64 = arg
+           %1: i64 = 3
+           %2: i64 = ashr %0, %1
+           %3: i64 = 18
+           %4: i64 = 144
+           %5: i1 = icmp sge %0, %4
+           blackbox %5
+        ",
+        );
+
+        test_sf(
+            "
+           %0: i64 = arg [reg]
+           %1: i64 = 3
+           %2: i64 = ashr %0, %1
+           %3: i64 = -2
+           %4: i1 = icmp slt %2, %3
+           blackbox %4
+        ",
+            "
+           %0: i64 = arg
+           %1: i64 = 3
+           %2: i64 = ashr %0, %1
+           %3: i64 = 18446744073709551614
+           %4: i64 = 18446744073709551600
+           %5: i1 = icmp slt %0, %4
+           blackbox %5
+        ",
+        );
+
+        test_sf(
+            "
+           %0: i64 = arg [reg]
+           %1: i64 = 3
+           %2: i64 = ashr %0, %1
+           %3: i64 = -2
+           %4: i1 = icmp sle %2, %3
+           blackbox %4
+        ",
+            "
+           %0: i64 = arg
+           %1: i64 = 3
+           %2: i64 = ashr %0, %1
+           %3: i64 = 18446744073709551614
+           %4: i64 = 18446744073709551607
+           %5: i1 = icmp sle %0, %4
+           blackbox %5
         ",
         );
     }
