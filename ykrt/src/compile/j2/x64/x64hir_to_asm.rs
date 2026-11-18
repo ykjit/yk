@@ -4767,44 +4767,89 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
             is_volatile: _,
         }: &MemSet,
     ) -> Result<(), CompilationError> {
-        if let Some(0) = self.zero_ext_op_for_imm8(b, *val)
-            && let Inst::Const(Const {
-                kind: ConstKind::Int(len),
+        let len_inst = b.inst(*len);
+        // We first try to optimise memory zeroing.
+        if let Some(0) = self.zero_ext_op_for_imm8(b, *val) {
+            if let Inst::Const(Const {
+                kind: ConstKind::Int(len_c),
                 ..
-            }) = b.inst(*len)
-            && let Some(mut len) = len.to_zero_ext_u32()
-        {
-            // Optimise memory zeroing of a constant length.
-            if len <= 128 {
-                let [dstr] = ra.alloc(
-                    self,
-                    iidx,
-                    [RegCnstr::Input {
-                        in_iidx: *dst,
-                        in_fill: RegCnstrFill::Undefined,
-                        regs: &NORMAL_GP_REGS,
-                        clobber: false,
-                    }],
-                )?;
-                while len % 8 != 0 {
-                    len -= 1;
+            }) = &len_inst
+                && let Some(mut len) = len_c.to_zero_ext_u32()
+            {
+                // We're zeroing a constant length chunk of memory.
+                if len <= 128 {
+                    let [dstr] = ra.alloc(
+                        self,
+                        iidx,
+                        [RegCnstr::Input {
+                            in_iidx: *dst,
+                            in_fill: RegCnstrFill::Undefined,
+                            regs: &NORMAL_GP_REGS,
+                            clobber: false,
+                        }],
+                    )?;
+                    while len % 8 != 0 {
+                        len -= 1;
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Mov_rm8_imm8,
+                            MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
+                            0,
+                        ));
+                    }
+                    while len > 0 {
+                        assert!(len >= 8);
+                        len -= 8;
+                        self.asm.push_inst(IcedInst::with2(
+                            Code::Mov_rm64_imm32,
+                            MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
+                            0,
+                        ));
+                    }
+                    return Ok(());
+                } else if len % 8 == 0 {
+                    let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
+                        self,
+                        iidx,
+                        [
+                            RegCnstr::Input {
+                                in_iidx: *dst,
+                                in_fill: RegCnstrFill::Undefined,
+                                regs: &[Reg::RDI],
+                                clobber: true,
+                            },
+                            RegCnstr::Clobber { reg: Reg::RAX },
+                            RegCnstr::Clobber { reg: Reg::RCX },
+                        ],
+                    )?
+                    else {
+                        panic!()
+                    };
+                    self.asm.push_inst(IcedInst::with_rep_stosq(64));
                     self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_rm8_imm8,
-                        MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
-                        0,
+                        Code::Mov_rm32_imm32,
+                        IcedReg::ECX,
+                        len / 8,
                     ));
-                }
-                while len > 0 {
-                    assert!(len >= 8);
-                    len -= 8;
                     self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_rm64_imm32,
-                        MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
-                        0,
+                        Code::Xor_rm32_r32,
+                        IcedReg::EAX,
+                        IcedReg::EAX,
                     ));
+                    return Ok(());
                 }
-                return Ok(());
-            } else if len % 8 == 0 {
+            }
+
+            // If we're zeroing something that is clearly a multiple of eight we can use `STOSQ`.
+            //
+            // OPT: In an ideal world we'd forward this information from the optimiser -- which can
+            // determine this constraint in multiple ways -- but we don't currently have a way of
+            // doing that. In practice, between LLVM and j2's optimiser, we often see the pattern
+            // "bytes<<8", so this condition identifies that particular pattern explicitly.
+            if let Inst::Shl(Shl { rhs, .. }) = len_inst
+                && self
+                    .zero_ext_op_for_imm8(b, *rhs)
+                    .is_some_and(|shift| shift >= 3)
+            {
                 let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
                     self,
                     iidx,
@@ -4816,24 +4861,35 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
                             clobber: true,
                         },
                         RegCnstr::Clobber { reg: Reg::RAX },
-                        RegCnstr::Clobber { reg: Reg::RCX },
+                        RegCnstr::Input {
+                            in_iidx: *len,
+                            in_fill: if b.inst_bitw(self.m, *len) == 32 {
+                                RegCnstrFill::Zeroed
+                            } else {
+                                assert_eq!(b.inst_bitw(self.m, *len), 64);
+                                RegCnstrFill::Undefined
+                            },
+                            regs: &[Reg::RCX],
+                            clobber: true,
+                        },
                     ],
                 )?
                 else {
                     panic!()
                 };
                 self.asm.push_inst(IcedInst::with_rep_stosq(64));
-                self.asm
-                    .push_inst(IcedInst::with2(Code::Mov_rm32_imm32, IcedReg::ECX, len / 8));
                 self.asm.push_inst(IcedInst::with2(
                     Code::Xor_rm32_r32,
                     IcedReg::EAX,
                     IcedReg::EAX,
                 ));
+                self.asm
+                    .push_inst(IcedInst::with2(Code::Shr_rm64_imm8, IcedReg::RCX, 3));
                 return Ok(());
             }
         }
 
+        // Fall back to the generic case.
         let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
             self,
             iidx,
@@ -11306,6 +11362,27 @@ mod test {
               mov ecx, 0x40
               rep stosq
               ; term [%0]
+            "],
+        );
+
+        // Zeroing a dynamic multiple of 8
+        codegen_and_test(
+            r#"
+              %0: ptr = arg [reg]
+              %1: i64 = arg [reg]
+              %2: i64 = 3
+              %3: i64 = shl %1, %2
+              %4: i8 = 0
+              memset %0, %4, %3, true
+              term [%0, %1]
+            "#,
+            &["
+              ...
+              ; memset %0, %4, %3, true
+              shr rcx, 3
+              xor eax, eax
+              rep stosq
+              ; term [%0, %1]
             "],
         );
     }
