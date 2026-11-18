@@ -128,7 +128,7 @@ use crate::{
 use index_type::{IndexType, vec::TypedVec};
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
-use smallvec::{SmallVec, smallvec};
+use smallvec::{SmallVec, smallvec, smallvec_inline};
 use std::{collections::hash_map::Entry, ffi::c_void, mem, sync::Arc};
 use test_stubs::test_stubs;
 use vob::Vob;
@@ -2219,6 +2219,14 @@ struct HashableVarLocs<Reg> {
 
 impl<Reg: RegT> HashableVarLocs<Reg> {
     fn new(x: VarLocs<Reg>) -> Self {
+        // In most cases we only have a [VarLoc], in which case smallvec_inline can generate better
+        // code (given the fixed size).
+        if x.len() == 1 {
+            let loc = x.into_iter().into_iter().next().unwrap();
+            return Self {
+                raw: smallvec_inline![HashableVarLoc::new(loc)],
+            };
+        }
         let mut raw = SmallVec::from_iter(
             x.into_iter()
                 .into_iter()
