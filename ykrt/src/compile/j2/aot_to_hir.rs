@@ -523,6 +523,18 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
     ) -> Result<(), CompilationError> {
         self.frames.last_mut().unwrap().pc_statepoint = Some(guard_statepoint);
 
+        if let hir::Inst::Const(hir::Const {
+            kind: hir::ConstKind::Int(cond),
+            ..
+        }) = self.opt.inst(self.opt.equiv_iidx(cond_iidx))
+            && cond.to_zero_ext_u8() == Some(u8::from(expect_true))
+        {
+            // If the guard is trivially `true==true` (or `false==false`) it is obviously not
+            // needed. Removing it now saves us the bother of creating deopt vars, which the
+            // optimiser will just throw away anyway.
+            return Ok(());
+        }
+
         // If the condition variable is referenced in the guard's exit vars, we'll change it to
         // reference a const -- but we construct this as-needed.
         let mut cond_inverse_iidx = None;
