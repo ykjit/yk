@@ -5,6 +5,7 @@
 //   stderr:
 //     yk-tracing: start-tracing
 //     eq: 1
+//     narrow: {{v}}
 //     yk-tracing: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -12,11 +13,16 @@
 //     ...
 //     %{{_}}: i1 = eq %{{_}}, const_ptrtoint(@g)
 //     ...
+//     %{{_}}: i32 = zext const_ptrtoint(@g), i32
+//     ...
 //     --- End aot ---
 //     eq: 1
+//     narrow: {{v}}
 //     yk-execution: enter-jit-code {"trid": "0"}
 //     eq: 1
+//     narrow: {{v}}
 //     eq: 1
+//     narrow: {{v}}
 //     yk-execution: deoptimise {"trid": "0", "gidx": "0"}
 //     exit
 
@@ -43,6 +49,7 @@ int main(int argc, char **argv) {
     yk_mt_control_point(mt, &loc);
     long addr = (long)&g;
     fprintf(stderr, "eq: %d\n", addr == (long)&g);
+    fprintf(stderr, "narrow: %d\n", (uint16_t) (uintptr_t) &g);
     i--;
   }
   fprintf(stderr, "exit\n");

@@ -2235,12 +2235,17 @@ impl ConstExpr {
                 ..
             } => {
                 let intc = m.const_(val);
-                if m.type_(intc.tyidx(m)).bitw(m) != m.type_(self.tyidx).bitw(m) {
-                    todo!();
+                let src_bitw = m.type_(intc.tyidx(m)).bitw(m);
+                let dst_bitw = m.type_(self.tyidx).bitw(m);
+                let mut bytes = intc.constval(m).bytes().to_vec();
+                bytes.resize(usize::try_from(dst_bitw.div_ceil(8)).unwrap(), 0);
+                let min_bitw = src_bitw.min(dst_bitw);
+                if min_bitw % 8 != 0 {
+                    bytes[usize::try_from(min_bitw / 8).unwrap()] &= (1_u8 << (min_bitw % 8)) - 1;
                 }
                 ConstVal {
                     tyidx: self.tyidx,
-                    bytes: intc.constval(m).bytes().to_vec(),
+                    bytes,
                 }
             }
             _ => todo!(),
