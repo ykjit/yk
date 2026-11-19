@@ -4768,161 +4768,98 @@ impl HirToAsmBackend for X64HirToAsm<'_> {
         }: &MemSet,
     ) -> Result<(), CompilationError> {
         let len_inst = b.inst(*len);
-        // We first try to optimise memory zeroing.
-        if let Some(0) = self.zero_ext_op_for_imm8(b, *val) {
-            if let Inst::Const(Const {
+        // We first optimise memory zeroing of small constant values.
+        if let Some(0) = self.zero_ext_op_for_imm8(b, *val)
+            && let Inst::Const(Const {
                 kind: ConstKind::Int(len_c),
                 ..
             }) = &len_inst
-                && let Some(mut len) = len_c.to_zero_ext_u32()
-            {
-                // We're zeroing a constant length chunk of memory.
-                if len <= 128 {
-                    let [dstr] = ra.alloc(
-                        self,
-                        iidx,
-                        [RegCnstr::Input {
-                            in_iidx: *dst,
-                            in_fill: RegCnstrFill::Undefined,
-                            regs: &NORMAL_GP_REGS,
-                            clobber: false,
-                        }],
-                    )?;
-                    while len % 8 != 0 {
-                        len -= 1;
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Mov_rm8_imm8,
-                            MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
-                            0,
-                        ));
-                    }
-                    while len > 0 {
-                        assert!(len >= 8);
-                        len -= 8;
-                        self.asm.push_inst(IcedInst::with2(
-                            Code::Mov_rm64_imm32,
-                            MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
-                            0,
-                        ));
-                    }
-                    return Ok(());
-                } else if len % 8 == 0 {
-                    let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
-                        self,
-                        iidx,
-                        [
-                            RegCnstr::Input {
-                                in_iidx: *dst,
-                                in_fill: RegCnstrFill::Undefined,
-                                regs: &[Reg::RDI],
-                                clobber: true,
-                            },
-                            RegCnstr::Clobber { reg: Reg::RAX },
-                            RegCnstr::Clobber { reg: Reg::RCX },
-                        ],
-                    )?
-                    else {
-                        panic!()
-                    };
-                    self.asm.push_inst(IcedInst::with_rep_stosq(64));
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Mov_rm32_imm32,
-                        IcedReg::ECX,
-                        len / 8,
-                    ));
-                    self.asm.push_inst(IcedInst::with2(
-                        Code::Xor_rm32_r32,
-                        IcedReg::EAX,
-                        IcedReg::EAX,
-                    ));
-                    return Ok(());
-                }
-            }
-
-            // If we're zeroing something that is clearly a multiple of eight we can use `STOSQ`.
-            //
-            // OPT: In an ideal world we'd forward this information from the optimiser -- which can
-            // determine this constraint in multiple ways -- but we don't currently have a way of
-            // doing that. In practice, between LLVM and j2's optimiser, we often see the pattern
-            // "bytes<<8", so this condition identifies that particular pattern explicitly.
-            if let Inst::Shl(Shl { rhs, .. }) = len_inst
-                && self
-                    .zero_ext_op_for_imm8(b, *rhs)
-                    .is_some_and(|shift| shift >= 3)
-            {
-                let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
-                    self,
-                    iidx,
-                    [
-                        RegCnstr::Input {
-                            in_iidx: *dst,
-                            in_fill: RegCnstrFill::Undefined,
-                            regs: &[Reg::RDI],
-                            clobber: true,
-                        },
-                        RegCnstr::Clobber { reg: Reg::RAX },
-                        RegCnstr::Input {
-                            in_iidx: *len,
-                            in_fill: if b.inst_bitw(self.m, *len) == 32 {
-                                RegCnstrFill::Zeroed
-                            } else {
-                                assert_eq!(b.inst_bitw(self.m, *len), 64);
-                                RegCnstrFill::Undefined
-                            },
-                            regs: &[Reg::RCX],
-                            clobber: true,
-                        },
-                    ],
-                )?
-                else {
-                    panic!()
-                };
-                self.asm.push_inst(IcedInst::with_rep_stosq(64));
-                self.asm.push_inst(IcedInst::with2(
-                    Code::Xor_rm32_r32,
-                    IcedReg::EAX,
-                    IcedReg::EAX,
-                ));
-                self.asm
-                    .push_inst(IcedInst::with2(Code::Shr_rm64_imm8, IcedReg::RCX, 3));
-                return Ok(());
-            }
-        }
-
-        // Fall back to the generic case.
-        let [Reg::RDI, Reg::RAX, Reg::RCX] = ra.alloc(
-            self,
-            iidx,
-            [
-                RegCnstr::Input {
+            && let Some(mut len) = len_c.to_zero_ext_u32()
+            && len <= 128
+        {
+            let [dstr] = ra.alloc(
+                self,
+                iidx,
+                [RegCnstr::Input {
                     in_iidx: *dst,
                     in_fill: RegCnstrFill::Undefined,
-                    regs: &[Reg::RDI],
-                    clobber: true,
-                },
-                RegCnstr::Input {
-                    in_iidx: *val,
-                    in_fill: RegCnstrFill::Undefined,
-                    regs: &[Reg::RAX],
-                    clobber: true,
-                },
-                RegCnstr::Input {
-                    in_iidx: *len,
-                    in_fill: if b.inst_bitw(self.m, *len) == 32 {
-                        RegCnstrFill::Zeroed
-                    } else {
-                        assert_eq!(b.inst_bitw(self.m, *len), 64);
-                        RegCnstrFill::Undefined
+                    regs: &NORMAL_GP_REGS,
+                    clobber: false,
+                }],
+            )?;
+            while len % 8 != 0 {
+                len -= 1;
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm8_imm8,
+                    MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
+                    0,
+                ));
+            }
+            while len > 0 {
+                assert!(len >= 8);
+                len -= 8;
+                self.asm.push_inst(IcedInst::with2(
+                    Code::Mov_rm64_imm32,
+                    MemoryOperand::with_base_displ(dstr.to_reg64(), i64::from(len)),
+                    0,
+                ));
+            }
+            return Ok(());
+        }
+
+        // In general, it's not clear what a good fallback case is. A typical Linux `memset`
+        // implementation tends to be very fast, especially for big / oddly sized values, so use
+        // that, and accept the overhead of the call.
+        ra.alloc::<{ 9 + ALL_XMM_REGS.len() }>(
+            self,
+            iidx,
+            concat_arrays!(
+                [
+                    RegCnstr::Clobber { reg: Reg::RAX },
+                    RegCnstr::Clobber { reg: Reg::RCX },
+                    RegCnstr::Input {
+                        in_iidx: *dst,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &[Reg::RDI],
+                        clobber: true,
                     },
-                    regs: &[Reg::RCX],
-                    clobber: true,
-                },
-            ],
-        )?
-        else {
-            panic!()
-        };
-        self.asm.push_inst(IcedInst::with_rep_stosb(64));
+                    RegCnstr::Input {
+                        in_iidx: *val,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &[Reg::RSI],
+                        clobber: true,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *len,
+                        in_fill: RegCnstrFill::Zeroed,
+                        regs: &[Reg::RDX],
+                        clobber: true,
+                    },
+                    RegCnstr::Clobber { reg: Reg::R8 },
+                    RegCnstr::Clobber { reg: Reg::R9 },
+                    RegCnstr::Clobber { reg: Reg::R10 },
+                    RegCnstr::Clobber { reg: Reg::R11 },
+                ],
+                ALL_XMM_REGS.map(|reg| RegCnstr::Clobber { reg })
+            ),
+        )?;
+
+        let memset_addr = libc::memset as *const ();
+        if self.asm.is_near_callable(memset_addr as usize) {
+            self.asm.push_reloc(
+                IcedInst::with_branch(Code::Call_rel32_64, 0),
+                RelocKind::NearCallWithAddr(memset_addr as usize),
+            );
+        } else {
+            self.asm
+                .push_inst(IcedInst::with1(Code::Call_rm64, IcedReg::RAX));
+            self.asm.push_inst(IcedInst::with2(
+                Code::Mov_r64_imm64,
+                IcedReg::RAX,
+                memset_addr as i64,
+            ));
+        }
+
         Ok(())
     }
 
@@ -11289,42 +11226,6 @@ mod test {
 
     #[test]
     fn cg_memset() {
-        // i32
-        codegen_and_test(
-            r#"
-              %0: ptr = arg [reg ("rdi", undefined)]
-              %1: i8 = arg [reg ("rax", undefined)]
-              %2: i32 = arg [reg ("rcx", undefined)]
-              memset %0, %1, %2, true
-              term [%0, %1, %2]
-            "#,
-            &["
-              ...
-              mov ecx, ecx
-              ...
-              ; memset %0, %1, %2, true
-              rep stosb
-              ...
-            "],
-        );
-
-        // i64
-        codegen_and_test(
-            r#"
-              %0: ptr = arg [reg]
-              %1: i8 = arg [reg]
-              %2: i64 = arg [reg]
-              memset %0, %1, %2, true
-              term [%0, %1, %2]
-            "#,
-            &["
-              ...
-              ; memset %0, %1, %2, true
-              rep stosb
-              ...
-            "],
-        );
-
         // Constant length zeroing
         codegen_and_test(
             r#"
@@ -11347,43 +11248,40 @@ mod test {
             "],
         );
 
+        // Fallback to libc `memset`
         codegen_and_test(
             r#"
-              %0: ptr = arg [reg]
-              %1: i8 = 0
-              %2: i64 = 512
+              %0: ptr = arg [reg ("r8", undefined)]
+              %1: i8 = arg [reg ("r9", undefined)]
+              %2: i32 = arg [reg ("r10", undefined)]
               memset %0, %1, %2, true
-              term [%0]
+              term [%0, %1, %2]
             "#,
-            &["
+            &[
+                "
+              ...
+              mov rdi, r8
+              mov rsi, r9
+              ...
+              mov edx, r10d
               ...
               ; memset %0, %1, %2, true
-              xor eax, eax
-              mov ecx, 0x40
-              rep stosq
-              ; term [%0]
-            "],
-        );
-
-        // Zeroing a dynamic multiple of 8
-        codegen_and_test(
-            r#"
-              %0: ptr = arg [reg]
-              %1: i64 = arg [reg]
-              %2: i64 = 3
-              %3: i64 = shl %1, %2
-              %4: i8 = 0
-              memset %0, %4, %3, true
-              term [%0, %1]
-            "#,
-            &["
+              call 0x...
               ...
-              ; memset %0, %4, %3, true
-              shr rcx, 3
-              xor eax, eax
-              rep stosq
-              ; term [%0, %1]
-            "],
+            ",
+                "
+              ...
+              mov rdi, r8
+              mov rsi, r9
+              ...
+              mov edx, r10d
+              ...
+              ; memset %0, %1, %2, true
+              mov rax, 0x...
+              call rax
+              ...
+            ",
+            ],
         );
     }
 
