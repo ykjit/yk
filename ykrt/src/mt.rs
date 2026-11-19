@@ -1210,20 +1210,34 @@ impl MT {
     /// Deal with `longjmp` while tracing. Note: the caller _must_ have checked that the current
     /// thread is tracing before calling this function.
     fn longjmp_encountered(self: &Arc<Self>) {
+        // FIXME: How do we know that the longjmp hasn't jumped over many `MTThreadState`s?
+
         let MTThreadState::Tracing(state) = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate())
         else {
             panic!()
         };
         let MTThreadTracingState {
-            thread_tracer, hl, ..
+            thread_tracer,
+            hl,
+            gtrace,
+            trid,
+            ..
         } = *state;
         thread_tracer.stop().ok();
-        let mut lk = hl.lock();
-        lk.kind = match lk.tracecompilation_error(self) {
-            TraceFailed::KeepTrying => HotLocationKind::Counting(0),
-            TraceFailed::DontTrace => HotLocationKind::DontTrace,
-        };
-        drop(lk);
+        match gtrace {
+            Some((parent_ctr, gid)) => {
+                parent_ctr.guard(gid).trace_or_compile_failed(self);
+            }
+            None => {
+                let mut lk = hl.lock();
+                lk.kind = match lk.tracecompilation_error(self) {
+                    TraceFailed::KeepTrying => HotLocationKind::Counting(0),
+                    TraceFailed::DontTrace => HotLocationKind::DontTrace,
+                };
+                drop(lk);
+            }
+        }
+        self.job_queue.notify_failure(self, trid);
         MTThread::set_tracing(IsTracing::None);
         yklog!(
             self.log,
