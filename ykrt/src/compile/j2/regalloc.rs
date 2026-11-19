@@ -1913,7 +1913,7 @@ impl<Reg: RegT> PartialEq for VarLocs<Reg> {
             self.raw[0] == other.raw[0]
         } else {
             self.iter().all(|x| other.iter().any(|y| x == y))
-                && other.iter().all(|x| other.iter().any(|y| x == y))
+                && other.iter().all(|x| self.iter().any(|y| x == y))
         }
     }
 }
@@ -2360,6 +2360,10 @@ pub(crate) mod test {
         ];
         assert_ne!(x, z);
         assert_ne!(y, z);
+
+        let repeated = varlocs![VarLoc::Stack(8), VarLoc::Stack(8)];
+        assert_ne!(repeated, x);
+        assert_ne!(x, repeated);
     }
 
     #[derive(
