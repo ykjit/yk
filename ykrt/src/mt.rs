@@ -1171,6 +1171,7 @@ impl MT {
     pub(crate) fn deopt(self: &Arc<Self>) {
         let st = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
         if let MTThreadState::Tracing(ref state) = st {
+            MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
             let hl = &state.hl;
             let trid = state.trid;
             match state.gtrace {
@@ -1466,17 +1467,24 @@ impl MTThread {
                     );
                     mtt.pop_tstate();
                 }
-                MTThreadState::Tracing(state) => {
-                    let MTThreadTracingState { mt, trid, .. } = state.as_mut();
+                MTThreadState::Tracing(_) => {
                     // FIXME: We could consider stopping tracing at this point, as we've got an "early
                     // return" trace. It's mildly awkward to do that, so we just keep the state set to
                     // tracing and allow a normal control point call to deal with it.
+                    let tracing = mtt.pop_tstate();
+                    let MTThreadState::Executing { mt, ctr, .. } = mtt.pop_tstate() else {
+                        panic!()
+                    };
                     yklog!(
                         mt.log,
                         Verbosity::Execution,
-                        |log| write!(log, "return {{\"trid\": \"{}\"}}", trid.as_u64()),
+                        |log| write!(log, "return {{\"trid\": \"{}\"}}", ctr.ctrid().as_u64()),
                         None
                     );
+                    // FIXME: This is nasty: we need to pop the `Executing` state, but since we're
+                    // too lazy to stop tracing we have to put the tracing state back at the top
+                    // of the stack.
+                    mtt.push_tstate(tracing);
                 }
                 _ => todo!(),
             }
