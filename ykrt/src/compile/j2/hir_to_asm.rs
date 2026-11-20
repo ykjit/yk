@@ -1415,7 +1415,7 @@ fn deopt_vars_compatible<Reg: RegT>(
                                 || *reglhs_fill == RegFill::Undefined
                                 || *regrhs_fill == RegFill::Undefined)
                     }
-                    (VarLoc::Const(lhs), VarLoc::Const(rhs)) => lhs == rhs,
+                    (VarLoc::Const(lhs), VarLoc::Const(rhs)) => lhs.bit_eq(rhs),
                     _ => false,
                 })
     }
@@ -2382,6 +2382,28 @@ mod test {
         }];
         assert!(!deopt_vars_compatible(&z, &sgn));
         assert!(!deopt_vars_compatible(&sgn, &z));
+
+        let f1 = vec![IntermediateDeoptVar {
+            bitw: 64,
+            sidetrace_fromvlocs: VarLocs::new(),
+            deopt_fromvlocs: varlocs![
+                VarLoc::Const(ConstKind::Float(-0.0)),
+                VarLoc::Reg(TestReg::R0, RegFill::Zeroed)
+            ],
+            deopt_tovlocs: VarLocs::new(),
+        }];
+        let f2 = vec![IntermediateDeoptVar {
+            bitw: 64,
+            sidetrace_fromvlocs: VarLocs::new(),
+            deopt_fromvlocs: varlocs![
+                VarLoc::Const(ConstKind::Float(0.0)),
+                VarLoc::Reg(TestReg::R0, RegFill::Zeroed)
+            ],
+            deopt_tovlocs: VarLocs::new(),
+        }];
+        assert!(deopt_vars_compatible(&f1, &f1));
+        assert!(deopt_vars_compatible(&f2, &f2));
+        assert!(!deopt_vars_compatible(&f1, &f2));
     }
 
     #[derive(

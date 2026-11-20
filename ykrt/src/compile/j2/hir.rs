@@ -1768,7 +1768,7 @@ pub(super) enum ConstKind {
 
 impl ConstKind {
     /// Is `self` equal at the bit level to `other`?
-    fn bit_eq(&self, other: &ConstKind) -> bool {
+    pub(super) fn bit_eq(&self, other: &ConstKind) -> bool {
         match (&self, &other) {
             (ConstKind::Double(x), ConstKind::Double(y)) => x.to_bits() == y.to_bits(),
             (ConstKind::Float(x), ConstKind::Float(y)) => x.to_bits() == y.to_bits(),
