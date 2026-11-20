@@ -32,7 +32,6 @@ use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
 use index_type::IndexType;
 use std::{
-    borrow::Cow,
     collections::HashMap,
     error::Error,
     ffi::{CStr, CString, OsStr, c_void},
@@ -415,7 +414,7 @@ fn map_to_atomic_ordering(value: u8) -> Result<Ordering, DekuError> {
 fn map_to_stackmapidx(v: u64) -> Result<StackMapIdx, DekuError> {
     match usize::try_from(v).map(StackMapIdx::from_raw_index) {
         Ok(x) => Ok(x),
-        _ => Err(DekuError::Parse(Cow::Borrowed("Couldn't map StackMapIdx"))),
+        _ => Err(DekuError::Parse("Couldn't map StackMapIdx")),
     }
 }
 
@@ -428,7 +427,7 @@ fn map_to_string(v: Vec<u8>) -> Result<String, DekuError> {
     {
         return Ok(x);
     }
-    Err(DekuError::Parse(Cow::Borrowed("Couldn't map string")))
+    Err(DekuError::Parse("Couldn't map string"))
 }
 
 /// Convert the bytes of a null-terminated string into a PathBuf.
@@ -468,6 +467,7 @@ fn map_to_lineinfo(v: Vec<RawLineInfoRec>) -> Result<HashMap<InstId, LineInfoLoc
 /// A binary operator.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
 #[deku(id_type = "u8")]
 pub(crate) enum BinOp {
     /// The canonicalised form of `Add` in JIT IR is (Var, Var) or (Var, Const).
@@ -610,6 +610,7 @@ impl BBlockId {
 /// from there.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[repr(u8)]
 #[deku(id_type = "u8")]
 pub(crate) enum Predicate {
     /// "eq: yields true if the operands are equal, false otherwise. No sign
@@ -686,6 +687,7 @@ impl Display for Predicate {
 /// Predicates for use in numeric comparisons.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[repr(u8)]
 #[deku(id_type = "u8")]
 pub(crate) enum FloatPredicate {
     // FIXME: eventually remove False/True (always false/always true) predicates. LLVM has them,
@@ -743,6 +745,7 @@ impl Display for FloatPredicate {
 /// hierarchy here: https://llvm.org/doxygen/classllvm_1_1CastInst.html
 #[deku_derive(DekuRead)]
 #[derive(Debug, Clone, Copy)]
+#[repr(u8)]
 #[deku(id_type = "u8")]
 pub(crate) enum CastKind {
     SExt = 0,

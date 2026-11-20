@@ -13,7 +13,7 @@ unused_dependencies = "allow"
 array-concat = "0.5.5"
 byteorder = "1.4.3"
 enum_dispatch = "0.3.13"
-deku = { version = "0.18.1", features = ["std"] }
+deku = { version = "0.20.3", default-features = false, features = ["std"] }
 iced-x86 = { version = "1.21.0", features = ["encoder"] }
 indexmap = "2.2.6"
 index_type = "0.7.1"
