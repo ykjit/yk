@@ -1766,6 +1766,19 @@ pub(super) enum ConstKind {
     Ptr(usize),
 }
 
+impl ConstKind {
+    /// Is `self` equal at the bit level to `other`?
+    fn bit_eq(&self, other: &ConstKind) -> bool {
+        match (&self, &other) {
+            (ConstKind::Double(x), ConstKind::Double(y)) => x.to_bits() == y.to_bits(),
+            (ConstKind::Float(x), ConstKind::Float(y)) => x.to_bits() == y.to_bits(),
+            (ConstKind::Int(x), ConstKind::Int(y)) => x == y,
+            (ConstKind::Ptr(x), ConstKind::Ptr(y)) => x == y,
+            (_, _) => false,
+        }
+    }
+}
+
 /// A wrapper around [Const]s that allows them to be hashed for deduplication purposes. This struct
 /// is conservative as per the top-level module documentation: it treats floating point numbers as
 /// bit patterns even under `Eq`. That means, for example, that it will not identify `+0.0` and
@@ -1828,13 +1841,7 @@ impl Hash for HashableConstKind {
 
 impl PartialEq for HashableConstKind {
     fn eq(&self, other: &Self) -> bool {
-        match (&self.inner, &other.inner) {
-            (ConstKind::Double(x), ConstKind::Double(y)) => x.to_bits() == y.to_bits(),
-            (ConstKind::Float(x), ConstKind::Float(y)) => x.to_bits() == y.to_bits(),
-            (ConstKind::Int(x), ConstKind::Int(y)) => x == y,
-            (ConstKind::Ptr(x), ConstKind::Ptr(y)) => x == y,
-            (_, _) => false,
-        }
+        self.inner.bit_eq(&other.inner)
     }
 }
 
