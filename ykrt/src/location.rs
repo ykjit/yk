@@ -199,7 +199,7 @@ impl Location {
         match self.inner.compare_exchange(
             ((old as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
             (cl as usize) | STATE_HOT,
-            Ordering::Relaxed,
+            Ordering::Release,
             Ordering::Relaxed,
         ) {
             Ok(_) => Some(hl),
@@ -238,7 +238,7 @@ impl Location {
     /// If `self` has a [HotLocation] return a reference to the `Mutex` that directly wraps it, or
     /// `None` otherwise.
     pub(crate) fn hot_location(&self) -> Option<&Mutex<HotLocation>> {
-        let x = self.inner.load(Ordering::Relaxed);
+        let x = self.inner.load(Ordering::Acquire);
         if x & STATE_TAG_MASK == STATE_HOT {
             // `Arc::into_raw::<Mutex<T>>` returns `*mut Mutex<T>` so the address we're wrapping is
             // a pointer to the `Mutex` itself. By returning a `&` reference we ensure that the
@@ -252,7 +252,7 @@ impl Location {
     /// If `self` has a [HotLocation] return a clone of the [Arc] that wraps it, or `None`
     /// otherwise.
     pub(crate) fn hot_location_arc_clone(&self) -> Option<Arc<Mutex<HotLocation>>> {
-        let x = self.inner.load(Ordering::Relaxed);
+        let x = self.inner.load(Ordering::Acquire);
         if x & STATE_TAG_MASK == STATE_HOT {
             let raw = unsafe { Arc::from_raw((x & !STATE_TAG_MASK) as *mut _) };
             let cl = Arc::clone(&raw);
@@ -272,7 +272,7 @@ impl Default for Location {
 
 impl Drop for Location {
     fn drop(&mut self) {
-        let x = self.inner.load(Ordering::Relaxed);
+        let x = self.inner.load(Ordering::Acquire);
         if x & STATE_TAG_MASK == STATE_HOT {
             drop(unsafe { Arc::from_raw((x & !STATE_TAG_MASK) as *mut Mutex<HotLocation>) });
         }
