@@ -2264,12 +2264,7 @@ impl<Reg: RegT> From<HashableVarLoc<Reg>> for VarLoc<Reg> {
             HashableVarLoc::Stack(x) => Self::Stack(x),
             HashableVarLoc::StackOff(x) => Self::StackOff(x),
             HashableVarLoc::Reg(reg, fill) => Self::Reg(reg, fill),
-            HashableVarLoc::Const(c) => Self::Const(match c {
-                HashableConstKind::Double(x) => ConstKind::Double(x),
-                HashableConstKind::Float(x) => ConstKind::Float(x),
-                HashableConstKind::Int(x) => ConstKind::Int(x),
-                HashableConstKind::Ptr(x) => ConstKind::Ptr(x),
-            }),
+            HashableVarLoc::Const(c) => Self::Const(c.into()),
         }
     }
 }
@@ -2278,17 +2273,19 @@ impl<Reg: RegT> Ord for HashableVarLoc<Reg> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // All we're looking to do here is canonicalise `VarLoc`s such that we notice most
         // equivalent sets.
-        use {HashableConstKind as C, HashableVarLoc::*};
+        use {ConstKind as C, HashableVarLoc::*};
 
         // The ordering in here is deliberate: it means that `VarLocs` end up with the cheapest
         // things (registers, consts, `StackOff`s) at the start and the most expensive things
         // (`Stack`s) at the end.
         let rank = |loc: &Self| match loc {
             Reg(_, _) => 0,
-            Const(C::Double(_)) => 1,
-            Const(C::Float(_)) => 2,
-            Const(C::Int(_)) => 3,
-            Const(C::Ptr(_)) => 4,
+            Const(c) => match c.as_constkind() {
+                C::Double(_) => 1,
+                C::Float(_) => 2,
+                C::Int(_) => 3,
+                C::Ptr(_) => 4,
+            },
             StackOff(_) => 5,
             Stack(_) => 6,
         };
@@ -2298,14 +2295,17 @@ impl<Reg: RegT> Ord for HashableVarLoc<Reg> {
             .then_with(|| match (self, other) {
                 (Stack(a), Stack(b)) | (StackOff(a), StackOff(b)) => a.cmp(b),
                 (Reg(a, af), Reg(b, bf)) => a.cmp(b).then_with(|| af.cmp(bf)),
-                (Const(C::Double(a)), Const(C::Double(b))) => a.total_cmp(b),
-                (Const(C::Float(a)), Const(C::Float(b))) => a.total_cmp(b),
-                (Const(C::Int(a)), Const(C::Int(b))) => a.bitw().cmp(&b.bitw()).then_with(|| {
-                    a.to_zero_ext_u64()
-                        .unwrap()
-                        .cmp(&b.to_zero_ext_u64().unwrap())
-                }),
-                (Const(C::Ptr(a)), Const(C::Ptr(b))) => a.cmp(b),
+                (Const(a), Const(b)) => match (a.as_constkind(), b.as_constkind()) {
+                    (C::Double(a), C::Double(b)) => a.total_cmp(b),
+                    (C::Float(a), C::Float(b)) => a.total_cmp(b),
+                    (C::Int(a), C::Int(b)) => a.bitw().cmp(&b.bitw()).then_with(|| {
+                        a.to_zero_ext_u64()
+                            .unwrap()
+                            .cmp(&b.to_zero_ext_u64().unwrap())
+                    }),
+                    (C::Ptr(a), C::Ptr(b)) => a.cmp(b),
+                    _ => unreachable!(),
+                },
                 _ => unreachable!(),
             })
     }
