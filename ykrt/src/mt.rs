@@ -552,7 +552,7 @@ impl MT {
             }
             TransitionControlPoint::StopReturnTracing(trid) => {
                 let tstate = MTThread::with_borrow_mut(|mtt| mtt.pop_tstate());
-                self.stop_tracing(tstate, trid, TraceEnd::Loop);
+                self.stop_tracing(tstate, trid, TraceEnd::Return);
             }
             TransitionControlPoint::StopUnrollTracing {
                 inner_hl,
