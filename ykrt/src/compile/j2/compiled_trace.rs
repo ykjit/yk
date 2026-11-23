@@ -337,8 +337,13 @@ pub(super) struct J2CompiledGuard {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum GuardKind {
     Normal,
-    /// The promotion instruction and its value's offset in `deopt_vars`.
-    Promote(InstId, usize),
+    Promote {
+        iid: InstId,
+        /// The promoted value's offset in `deopt_vars`.
+        var_off: usize,
+        /// How many times have we specialised from this particular promotion call?
+        depth: usize,
+    },
     /// If this guard:
     ///
     ///   1. is the first guard in a trace,
