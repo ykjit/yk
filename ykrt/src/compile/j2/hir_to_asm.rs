@@ -691,6 +691,11 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             deopt_vars.clear();
             deopt_spills.clear();
             deopt_vlocs.clear();
+            // These vecs are resized often enough that doing it once outside the loop is a real
+            // payoff. The resize of `deopt_spills` is an overapproximation, but still is (just
+            // about) a measurable win.
+            deopt_spills.reserve(gextra.deopt_vars.len());
+            deopt_vars.reserve(gextra.deopt_vars.len());
             deopt_vlocs.resize(gblock.insts.len(), None);
             assert_eq!(gextra.deopt_vars.len(), gblock.term_vars().len());
             let mut deopt_term_iter = gblock.term_vars().iter().zip(&sidetrace_fromvlocs);
