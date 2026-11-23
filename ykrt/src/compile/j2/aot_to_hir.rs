@@ -212,62 +212,21 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let args_vlocs = self.p_start_side(&src_ctr, src_gidx)?;
                 match &src_ctr.guard(src_gidx).kind {
                     GuardKind::Normal => (),
-                    GuardKind::Promote(promote_iid, arg_off) => {
-                        // Promote guards start tracing after the `promote` instruction, so we need
-                        // to create an outcome that _looks_ like a `promote` executed, including
-                        // the guard.
-                        let promote_inst = self.am.inst(promote_iid);
-                        let ty = promote_inst.def_type(self.am).unwrap();
-                        let (Inst::Promote { val, .. } | Inst::PromoteCodeId { val, .. }) =
-                            promote_inst
+                    GuardKind::Promote(iid, _) => {
+                        // Side-tracing starts after the promotion. If only its result is live,
+                        // restore its input before replaying the instruction.
+                        let inst = self.am.inst(iid);
+                        let (Inst::Promote { val, .. } | Inst::PromoteCodeId { val, .. }) = inst
                         else {
-                            unreachable!();
+                            unreachable!()
                         };
                         let frame = self.frames.last_mut().unwrap();
-                        let val_iid = if frame.locals.contains_key(promote_iid) {
-                            promote_iid
-                        } else {
-                            // If we got here the output of `yk_promote` isn't used.
-                            let Operand::Local(input_iid) = val else {
-                                panic!()
-                            };
-                            input_iid
-                        };
-                        let val_iidx = frame.get_local(&*self.opt, val_iid);
-                        frame.set_local(promote_iid.clone(), val_iidx);
-                        if let Operand::Local(input_iid) = val {
-                            frame.set_local(input_iid.clone(), val_iidx);
+                        if let Operand::Local(input_iid) = val
+                            && let Some(&result) = frame.locals.get(iid)
+                        {
+                            frame.set_local(input_iid.clone(), result);
                         }
-                        let statepoint = frame.pc_statepoint.unwrap();
-                        let const_iidx = self.promotion_data_to_const(ty)?;
-                        let icmp = self.opt.feed(
-                            hir::ICmp {
-                                pred: hir::IPred::Eq,
-                                lhs: val_iidx,
-                                rhs: const_iidx,
-                                samesign: false,
-                            }
-                            .into(),
-                        )?;
-                        if let Inst::PromoteCodeId { .. } = promote_inst {
-                            let hir::Inst::Const(hir::Const {
-                                kind: hir::ConstKind::Int(c),
-                                ..
-                            }) = self.opt.inst(const_iidx)
-                            else {
-                                unreachable!()
-                            };
-                            let cid = CodeId::from_u64(c.to_zero_ext_u64().unwrap());
-                            self.code_ids.push(cid);
-                        }
-                        self.push_guard(
-                            GuardKind::Promote(promote_iid.clone(), *arg_off),
-                            src_ctr.bid(src_gidx),
-                            self.next_pc(promote_iid.to_owned()),
-                            true,
-                            icmp,
-                            statepoint,
-                        )?;
+                        self.p_promote(iid.clone(), prev_bid, inst)?;
                     }
                     GuardKind::Switch(hir::Switch {
                         iid,
