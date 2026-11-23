@@ -534,6 +534,13 @@ impl OptT for FullOpt {
 
     fn feed(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         assert_ne!(inst.tyidx(self), self.tyidx_void());
+        // Duplicated constants are common enough that it's a useful performance win to avoid
+        // pushing them through the optimisation passes.
+        if let Inst::Const(c) = &inst
+            && let Some(&iidx) = self.inner.consts_map.get(&HashableConst::new(c.clone()))
+        {
+            return Ok(iidx);
+        }
         self.feed_internal(PassOptInner::new(), inst)
             .map(|x| x.unwrap())
     }
