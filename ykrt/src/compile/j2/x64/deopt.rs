@@ -174,7 +174,7 @@ pub(super) extern "C" fn __yk_j2_deopt(faddr: *mut u8, trid: u64, gid: u32) -> !
     // trace's promotions, `mt.guard_failure` will make a heap allocation.
     let mut promotions = [0; 8];
     let mut promotions_len = 0;
-    if let GuardKind::Promote(_, var_off) = &guard.kind {
+    if let GuardKind::Promote { var_off, .. } = &guard.kind {
         let var = &guard.deopt_vars[*var_off];
         promotions_len = usize::try_from(var.bitw.div_ceil(8).next_power_of_two()).unwrap();
         assert!(promotions_len <= 8);

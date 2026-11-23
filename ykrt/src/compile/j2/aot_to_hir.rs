@@ -58,6 +58,10 @@ use std::{
 /// inlining it?
 const RECURSE_THRESHOLD: usize = 5;
 
+/// How many times (inc.) will we specialise traces for a `yk_promote` call before falling back on
+/// a non-specialised case?
+const MAX_PROMOTE_DEPTH: usize = 5;
+
 /// If 'log:aot` is specified, we only want to write that once: this bool will be set to `true`
 /// when it has been logged once.
 static AOT_HAS_BEEN_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -212,7 +216,11 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 let args_vlocs = self.p_start_side(&src_ctr, src_gidx)?;
                 match &src_ctr.guard(src_gidx).kind {
                     GuardKind::Normal => (),
-                    GuardKind::Promote(iid, _) => {
+                    GuardKind::Promote {
+                        iid,
+                        depth: chain_len,
+                        ..
+                    } => {
                         // Side-tracing starts after the promotion. If only its result is live,
                         // restore its input before replaying the instruction.
                         let inst = self.am.inst(iid);
@@ -226,7 +234,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                         {
                             frame.set_local(input_iid.clone(), result);
                         }
-                        self.p_promote(iid.clone(), prev_bid, inst)?;
+                        self.p_promote(iid.clone(), prev_bid, inst, chain_len + 1)?;
                     }
                     GuardKind::Switch(hir::Switch {
                         iid,
@@ -1045,7 +1053,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
                 Inst::LoadArg { .. } => self.p_loadarg(pc.clone(), inst)?,
                 Inst::Phi { .. } => unreachable!(),
                 Inst::Promote { .. } | Inst::PromoteCodeId { .. } => {
-                    self.p_promote(pc.clone(), bid, inst)?
+                    self.p_promote(pc.clone(), bid, inst, 1)?
                 }
                 Inst::PtrAdd { .. } => self.p_ptradd(pc.clone(), inst)?,
                 Inst::Ret { .. } => {
@@ -2305,6 +2313,7 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
         iid: InstId,
         bid: BBlockId,
         inst: &'static Inst,
+        chain_len: usize,
     ) -> Result<(), CompilationError> {
         let (Inst::Promote {
             tyidx,
@@ -2325,16 +2334,8 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             .last_mut()
             .unwrap()
             .set_local(iid.clone(), val_iidx);
-        let frame_off = self.frames[..self.frames.len() - 1]
-            .iter()
-            .map(|frame| frame.pc_statepoint.unwrap().lives.len())
-            .sum::<usize>();
-        let val_off = statepoint.lives.iter().position(|op| {
-            op.to_inst_id() == iid
-                || matches!(val, Operand::Local(input_iid) if op.to_inst_id() == *input_iid)
-        });
         let const_iidx = self.promotion_data_to_const(self.am.type_(*tyidx))?;
-        if let Inst::PromoteCodeId { .. } = inst {
+        let extend_chain = if let Inst::PromoteCodeId { .. } = inst {
             let hir::Inst::Const(hir::Const {
                 kind: hir::ConstKind::Int(c),
                 ..
@@ -2344,13 +2345,27 @@ impl<'a, Reg: RegT + 'static> AotToHir<'a, Reg> {
             };
             let cid = CodeId::from_u64(c.to_zero_ext_u64().unwrap());
             self.code_ids.push(cid);
-        }
-        let kind = match val_off {
-            Some(val_off) => GuardKind::Promote(iid.clone(), frame_off + val_off),
-            None => {
-                // Neither the input or output of `yk_promote` is used
-                GuardKind::Normal
+            true
+        } else {
+            chain_len < MAX_PROMOTE_DEPTH
+        };
+        let kind = if extend_chain
+            && let Some(val_off) = statepoint.lives.iter().position(|op| {
+                op.to_inst_id() == iid
+                    || matches!(val, Operand::Local(input_iid) if op.to_inst_id() == *input_iid)
+            }) {
+            let frame_off = self.frames[..self.frames.len() - 1]
+                .iter()
+                .map(|frame| frame.pc_statepoint.unwrap().lives.len())
+                .sum::<usize>();
+            GuardKind::Promote {
+                iid: iid.clone(),
+                var_off: frame_off + val_off,
+                depth: chain_len,
             }
+        } else {
+            // Stop specialising further.
+            GuardKind::Normal
         };
 
         let icmp = self.opt.feed(
