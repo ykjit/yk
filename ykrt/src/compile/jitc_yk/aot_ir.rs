@@ -180,9 +180,9 @@ impl Module {
 
     /// Return the AOT instruction for the given instruction id.
     pub(crate) fn inst(&self, instid: &InstId) -> &Inst {
-        let f = self.func(instid.funcidx);
-        let b = f.bblock(instid.bbidx);
-        &b.insts[instid.iidx]
+        let f = self.func(instid.funcidx());
+        let b = f.bblock(instid.bbidx());
+        &b.insts[instid.iidx()]
     }
 
     /// Return the block uniquely identified (in this module) by the specified [BBlockId].
@@ -534,30 +534,33 @@ impl Display for BinOp {
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstId {
     /// The index of the parent function.
-    funcidx: FuncIdx,
-    bbidx: BBlockIdx,
-    iidx: BBlockInstIdx,
+    #[deku(map = "usize::try_into")]
+    funcidx: u32,
+    #[deku(map = "usize::try_into")]
+    bbidx: u16,
+    #[deku(map = "usize::try_into")]
+    iidx: u16,
 }
 
 impl InstId {
     pub(crate) fn new(funcidx: FuncIdx, bbidx: BBlockIdx, iidx: BBlockInstIdx) -> Self {
         Self {
-            funcidx,
-            bbidx,
-            iidx,
+            funcidx: funcidx.0.try_into().unwrap(),
+            bbidx: bbidx.0.try_into().unwrap(),
+            iidx: iidx.0.try_into().unwrap(),
         }
     }
 
     pub(crate) fn funcidx(&self) -> FuncIdx {
-        self.funcidx
+        FuncIdx(usize::try_from(self.funcidx).unwrap())
     }
 
     pub(crate) fn bbidx(&self) -> BBlockIdx {
-        self.bbidx
+        BBlockIdx(usize::from(self.bbidx))
     }
 
     pub(crate) fn iidx(&self) -> BBlockInstIdx {
-        self.iidx
+        BBlockInstIdx(usize::from(self.iidx))
     }
 }
 
@@ -824,7 +827,7 @@ impl Operand {
     /// OPT: This is expensive.
     pub(crate) fn to_inst<'a>(&self, aotmod: &'a Module) -> &'a Inst {
         let Self::Local(iid) = self else { panic!() };
-        &aotmod.funcs[iid.funcidx].bblocks[iid.bbidx].insts[iid.iidx]
+        aotmod.inst(iid)
     }
 
     /// Returns the [Ty] of the operand.
