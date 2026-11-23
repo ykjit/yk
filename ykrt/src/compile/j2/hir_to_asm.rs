@@ -614,6 +614,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
         // Since we're creating temporary [Block]s, we can reuse several allocations across each
         // iteration.
         let mut ginsts: TypedVec<InstIdx, Inst> = TypedVec::new();
+        let mut main_block_map = TypedVec::<InstIdx, InstIdx>::new();
         let mut gterms: Vec<InstIdx> = Vec::new();
         let mut deopt_vars = Vec::new();
         let mut deopt_spills = Vec::new();
@@ -651,34 +652,24 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             };
 
             // Given an [InstIdx] `x` from the main `Block`, return its position in the guard's
-            // `Block`. Because we now from above how many `arg`s and `copy_in` instructions there
-            // are, this mapping is simple and because `exit_vars` and `copy_in` are ordered, can
-            // be done with a binary search.
-            let map = |x: InstIdx| {
-                if let Ok(i) = gexit.exit_vars.binary_search(&x) {
-                    InstIdx::from_raw_index(i)
-                } else if let Ok(i) = gexit.copy_in.binary_search(&x) {
-                    InstIdx::from_raw_index(gexit.exit_vars.len() + i)
-                } else {
-                    panic!()
-                }
-            };
+            // `Block`.
+            main_block_map.resize(gexit.block.insts.len(), InstIdx::MAX);
 
             // Push the `arg` instructions.
             for iidx in gexit.exit_vars.iter() {
                 let tyidx = gexit.block.inst(*iidx).tyidx(self.m);
-                gblock.insts.push(Arg { tyidx }.into());
+                main_block_map[*iidx] = gblock.insts.push(Arg { tyidx }.into());
             }
             // Push the `copy_in` instructions, rewriting their operands as we go.
             for iidx in gexit.copy_in.iter() {
                 let mut inst = gexit.block.inst(*iidx).clone();
-                inst.rewrite_iidxs(&mut gblock, map);
-                gblock.insts.push(inst);
+                inst.rewrite_iidxs(&mut gblock, |x| main_block_map[x]);
+                main_block_map[*iidx] = gblock.insts.push(inst);
             }
 
             // Finally, push the `term` instruction.
             gterms.clear();
-            gterms.extend(gextra.deopt_vars.iter().map(|x| map(*x)));
+            gterms.extend(gextra.deopt_vars.iter().map(|x| main_block_map[*x]));
             gblock.insts.push(Inst::Term(Term(gterms)));
 
             // At this point we have a complete, correct, `Block` representing the guard body. Now
