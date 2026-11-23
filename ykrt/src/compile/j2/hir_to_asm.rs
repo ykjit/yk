@@ -693,7 +693,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
             deopt_vlocs.clear();
             deopt_vlocs.resize(gblock.insts.len(), None);
             assert_eq!(gextra.deopt_vars.len(), gblock.term_vars().len());
-            let mut deopt_term_iter = gblock.term_vars().iter().zip(&sidetrace_fromvlocs);
+            let mut deopt_term_iter = gblock.term_vars().iter().zip(sidetrace_fromvlocs);
             for (frame_idx, frame) in gextra.deopt_frames.iter().enumerate() {
                 let frame_deopt_vars_off = deopt_vars.len();
                 // `max_bitw` is an optimisation that allows us to skip "is there a wider value?"
@@ -744,7 +744,7 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     max_bitw = max_bitw.max(bitw);
                     deopt_vars.push(IntermediateDeoptVar {
                         bitw,
-                        sidetrace_fromvlocs: sidetrace_fromvlocs.clone(),
+                        sidetrace_fromvlocs,
                         deopt_fromvlocs: varlocs![deopt_fromvloc],
                         deopt_tovlocs: tovlocs,
                     });
