@@ -1357,7 +1357,8 @@ impl<'a, AB: HirToAsmBackend> HirToAsm<'a, AB> {
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                self.log_inst(b, iidx, &format!(" [{pp_vlocs}]"));
+                let unused = if ra.is_used(iidx) { "" } else { " (unused)" };
+                self.log_inst(b, iidx, &format!(" [{pp_vlocs}]{unused}"));
             }
         }
 
@@ -2702,6 +2703,41 @@ mod test {
             ));
         }
 
+        fn i_add(
+            &mut self,
+            ra: &mut RegAlloc<Self>,
+            _b: &Block,
+            iidx: InstIdx,
+            Add { lhs, rhs, .. }: &Add,
+        ) -> Result<(), CompilationError> {
+            let [lhsr, rhsr, outr] = ra.alloc(
+                self,
+                iidx,
+                [
+                    RegCnstr::Input {
+                        in_iidx: *lhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Input {
+                        in_iidx: *rhs,
+                        in_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        clobber: false,
+                    },
+                    RegCnstr::Output {
+                        out_iidx: iidx,
+                        out_fill: RegCnstrFill::Undefined,
+                        regs: &GP_REGS,
+                        can_be_same_as_input: true,
+                    },
+                ],
+            )?;
+            self.log.push(format!("add: {outr:?}={lhsr:?} + {rhsr:?}"));
+            Ok(())
+        }
+
         fn i_dynptradd(
             &mut self,
             ra: &mut RegAlloc<Self>,
@@ -3288,16 +3324,18 @@ mod test {
             &[r#"
           controlpoint_loop_end
           ; term [%0, %2]
+          add: R1=R0 + R1
           ; %2: i8 = add %0, %1
           ; %1: i8 = arg [Reg("R1", Undefined)]
           ; %0: i8 = arg [Reg("R0", Undefined)]
           controlpoint_peel_start 1
           ; term [%0, %2]
+          add: R1=R0 + R1
           ; %2: i8 = add %0, %1
           iter0_entry
           ; %1: i8 = arg [Reg("R1", Undefined)]
           ; %0: i8 = arg [Reg("R0", Undefined)]
-          controlpoint_start 16
+          controlpoint_start 0
         "#],
         );
 

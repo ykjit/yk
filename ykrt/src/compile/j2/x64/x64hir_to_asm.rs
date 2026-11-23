@@ -846,7 +846,14 @@ impl<'a> X64HirToAsm<'a> {
                 && !ra.is_in_reg(*lhs)
                 && let Some(off) = ra.is_on_stack(*lhs)
             {
-                ra.alloc(self, iidx, [RegCnstr::KeepAlive { iidxs: exit_vars }])?;
+                ra.alloc(
+                    self,
+                    iidx,
+                    [
+                        RegCnstr::KeepAlive { iidxs: exit_vars },
+                        RegCnstr::KeepAlive { iidxs: &[*lhs] },
+                    ],
+                )?;
                 RegOrMemOp::MemOp(MemoryOperand::with_base_displ(
                     IcedReg::RBP,
                     -i64::from(off),
@@ -9517,6 +9524,22 @@ mod test {
               cmp r.32.x, 0x14
               jne l{{1}}
               ; term [%0]
+            "],
+        );
+
+        codegen_and_test(
+            "
+               %0: i32 = arg [stack(32)]
+               %1: i32 = 0
+               %2: i1 = icmp eq %0, %1
+               guard true, %2, []
+             ",
+            &["
+              ...
+              ; %0: i32 = arg [Stack(0x20)]
+              ...
+              cmp dword [rbp-0x20], 0
+              jne l{{1}}
             "],
         );
 
